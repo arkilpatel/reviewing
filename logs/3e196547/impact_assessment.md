@@ -1,12 +1,11 @@
 ### Impact Assessment
+**1. Technical Significance (70%):**
+The paper proposes AttnRL, a framework that improves the efficiency of Process-Supervised Reinforcement Learning (PSRL) for Large Language Models. DeepSeek-R1 has recently demonstrated the power of RL for reasoning, but PSRL methods are often computationally bottlenecked by Monte Carlo (MC) sampling. By introducing Attention-based Tree Branching (ATB) to select branching nodes, adaptive batch sampling, and a one-step off-policy training pipeline, AttnRL significantly reduces training costs and improves performance over on-policy methods like TreeRL. This is highly practically useful for the open-source community seeking to reproduce or improve upon RLVR (RL with Verifiable Rewards).
 
-**1. Technical Significance (70%):** 
-High. Process-Supervised RL (PSRL) theoretically provides much denser and better reward signals than Outcome-Supervised RL (like GRPO), but it has historically been crippled by immense computational costs (requiring extensive Monte Carlo rollouts and multi-stage generation). AttnRL tackles this bottleneck directly through three highly practical mechanisms: targeted branching via attention, dropping useless easy samples, and an overlapping one-step generation pipeline. These are highly utilitarian engineering and algorithmic improvements that make PSRL significantly more feasible for the open-source community to adopt and scale.
+**2. Scientific Significance (30%):**
+The paper leverages Forward Context Influence (FCI) based on attention scores to identify critical reasoning steps. This aligns with and builds upon recent interpretability findings (e.g., Bogdan et al. 2025) showing that certain attention heads focus on reasoning behaviors. The disruption experiments provide empirical evidence that masking attention at high-FCI steps degrades performance more than at high-entropy steps, offering a neat scientific insight into how reasoning models process information.
 
-**2. Scientific Significance (30%):** 
-Moderate to High. The paper successfully bridges interpretability and RL. The community has known that attention spikes correlate with important tokens, but using the Forward Context Influence (FCI) dynamically during training to guide the Monte Carlo search tree of a Reinforcement Learning algorithm is a scientifically elegant application of that knowledge. It provides a new methodology for identifying "reasoning steps" without requiring human annotation or a separate Process Reward Model.
-
-**3. The 3-Year Citation Projection:** 
-Given the explosive current interest in RLVR (Reinforcement Learning with Verifiable Rewards) following the release of DeepSeek-R1, papers that provide concrete, efficient ways to do process supervision without external PRMs are highly sought after. Because AttnRL directly improves upon the standard GRPO and TreeRL paradigms while significantly cutting training time, it is highly likely to be adopted or at least widely cited by researchers working on post-training reasoning models. Expect 50-100+ citations over the next 3 years.
+**3. The 3-Year Citation Projection:**
+Given the explosion of interest in scaling test-time compute and RL for LLMs following the o1/R1 models, efficient PSRL methods will be highly cited. The combination of interpretability (attention analysis) with RL efficiency makes this a strong candidate for adoption and follow-up work.
 
 **Impact Score: 8.0 / 10**

@@ -1,6 +1,11 @@
 ### Impact Assessment
-**1. Technical Significance (70%):** The paper provides a highly comprehensive benchmark for evaluating the robustness of Text-Attributed Graph (TAG) learning, encompassing GNNs, Robust GNNs (RGNNs), and GraphLLMs. The identification of the text-structure robustness trade-off is a valuable practical insight. Furthermore, the revelation that older similarity-based RGNNs like GNNGuard perform exceptionally well when paired with advanced text encoders (like RoBERTa) is a highly actionable finding for practitioners. The proposed `SFT-auto` framework offers a working solution to balance robustness, though its reliance on LLM inference makes it computationally heavy compared to pure GNNs. Overall, the benchmark and insights are highly useful and likely to be adopted by researchers working on graph security.
-**2. Scientific Significance (30%):** Scientifically, the paper clearly maps out the vulnerabilities of different model architectures (e.g., GraphLLMs are vulnerable to training poisoning but robust to evasion, while GNNs are the opposite). The detailed analysis of why similarity-based edge filtering works better with contextual embeddings (Section F) adds fundamental understanding to the field.
-**3. The 3-Year Citation Projection:** The paper is highly likely to become a standard reference for robustness in TAGs. As the community shifts towards GraphLLMs, understanding their vulnerabilities compared to traditional GNNs will be critical. The benchmark alone guarantees strong citations, and the insights on embedding choices will be widely cited.
+**1. Technical Significance (70%):** 
+The paper introduces a comprehensive robustness evaluation framework for Text-Attributed Graphs (TAGs), integrating classical GNNs, Robust GNNs (RGNNs), and GraphLLMs. By evaluating across 10 datasets and revealing the "text-structure robustness trade-off," it provides a valuable benchmark for the community. The introduction of SFT-auto as a practical defense mechanism further enhances its technical utility. This is highly likely to be adopted as a foundational benchmark for future research in TAG security.
 
-**Impact Score: 8.5 / 10**
+**2. Scientific Significance (30%):** 
+The scientific insight that models exhibit a fundamental trade-off between textual and structural robustness is an important conceptual contribution. Additionally, the finding that older, simple RGNNs (like GNNGuard) can achieve near-SOTA performance when paired with advanced text encoders fundamentally challenges recent assumptions that complex LLM-based graph structure refiners are strictly necessary.
+
+**3. The 3-Year Citation Projection:** 
+This paper is highly likely to receive significant citations. The benchmarking effort is extensive and timely, given the recent surge of interest in GraphLLMs. It establishes a unified threat model that future papers proposing robust GraphLLMs or RGNNs will need to compare against. 
+
+**Impact Score: 8.0 / 10**

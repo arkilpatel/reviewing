@@ -1,11 +1,12 @@
 ### Impact Assessment
+
 **1. Technical Significance (70%):**
-The technical utility of the proposed methods is very high. Existing Generalized Linear Bandit algorithms require solving complex optimization problems (e.g., maximum likelihood) at each step, which is computationally expensive, and they fail catastrophically if the link function is slightly misspecified. The proposed Stein's-method-based estimators replace this optimization with a simple closed-form average, speeding up execution by orders of magnitude (as shown in the experiments). Furthermore, they completely bypass the need to know the link function. This is a highly practical advance that could see adoption in real-world recommendation systems where the true response function is never exactly known.
+The technical utility of this work is severely bottlenecked by its requirement to know the exact probability density function $p(x)$ of the context vectors in order to compute the Stein score function $S(x)$. In almost all real-world contextual bandit applications (e.g., recommendation systems, clinical trials), the context distribution is unknown, highly complex, discrete, or categorical. The inability of this method to handle unknown or non-differentiable context distributions without losing its theoretical guarantees means it will likely not be adopted by practitioners. It trades the assumption of a known reward function for an equally (if not more) restrictive assumption of a known, differentiable context density. 
 
 **2. Scientific Significance (30%):**
-The paper bridges the gap between offline Single Index Models and online contextual bandits. It introduces a novel application of Stein's identity to the bandit literature, demonstrating how to decouple parameter estimation from function estimation. This provides a new theoretical blueprint for handling unknown nonlinearities in online learning, which will likely inspire future work relaxing structural assumptions in other bandit and RL settings.
+Scientifically, the paper establishes a neat connection between offline Stein's method for Single Index Models and online parameter estimation in bandits. This reframing is interesting and may inspire theoretical follow-up work on how to relax the known-density assumption.
 
 **3. The 3-Year Citation Projection:**
-This paper is likely to be highly cited (expecting 50+ citations in the next 3 years). It addresses a known vulnerability in a popular class of algorithms (GLBs), offers a mathematically elegant solution, and achieves both optimal regret bounds and empirical speedups. It will be referenced by theoretical papers extending the SIB framework and applied papers needing robust, fast contextual bandits.
+The paper will likely receive a modest number of citations from the theoretical bandit community as an early work on Single Index Bandits. However, it will not see widespread applied use. Furthermore, the catastrophic formatting failure (broken bibliography) will harm its immediate reception.
 
-**Impact Score: 8.0 / 10**
+**Impact Score: 5.0 / 10**

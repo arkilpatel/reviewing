@@ -1,23 +1,17 @@
-### Check 2: Mathematical Content Verification
-There are no complex derivations or proofs in the paper. The formulas provided for centrality metrics (Degree, Closeness, Eigenvector, Clustering) are standard textbook definitions and are correctly stated.
+### Egregious Submission Negligence
+The paper is complete. There are no missing, blank, or completely unresolved reference markers scattered throughout the text. Figures and tables are referenced correctly and appear to be present (based on the text output). The bibliography is complete and functional.
 
-### Check 3: Algorithmic Trace
-The machine learning pipeline (Random Forest and standard GNNs like GCN, GAT, GIN, GraphSAGE) is standard. No novel complex algorithms requiring tracing are introduced.
+### Mathematical Content Verification
+The mathematical definitions provided (Degree Centrality, Closeness Centrality, Eigenvector Centrality, Clustering Coefficient) are standard in network science and are stated correctly in the Appendix.
 
-### Check 4: Numerical Sanity Check
-The reported accuracies are highly realistic. 
-- The fact that structure-only features achieve ~60% (barely above chance for binary/ternary, or slightly better) is believable.
-- The jump to ~95% using 3072-dimensional OpenAI embeddings with GNNs is exactly what one would expect given the power of modern embeddings to capture semantic nuances.
-- Standard deviations (e.g., ±0.5 to ±2.0) across 10 seeds are typical for GNN training.
-- No suspiciously round numbers or inflated claims.
+### Algorithmic Trace
+No novel algorithm is proposed; the paper relies on standard Graph Neural Networks (GCN, GAT, GIN, GraphSAGE) and Random Forests. The methodology of creating paired citation graphs and field-matched random baselines is logically sound and traced clearly in the text.
 
-### Check 5: Citation Verification
-The paper appropriately cites recent 2024/2025 work from Algaba et al. and Mobini et al., accurately describing their findings (that LLMs match coarse bibliometric properties).
+### Numerical Sanity Check
+The reported accuracies (e.g., ~0.60 for RF on structure, ~0.83 for RF on embeddings, ~93% for GNNs on embeddings) are within expected ranges. The fact that structural features fail to separate GPT from ground truth (0.60) while cleanly separating from random (0.92) is a very believable and well-supported empirical finding. The high accuracy of GNNs with high-dimensional embedding features is also consistent with the literature on text-attributed graphs.
 
-### Check 7: Internal Consistency
-The abstract aligns perfectly with the conclusions and the tables.
+### Internal Consistency
+Numbers in the text match the reported tables. The abstract claims are fully supported by the experiments. 
 
-### Check 8 & 9: Baseline Integrity
-The random baselines (field-matched, temporally preserved, subfield) are uniquely well-designed to prevent the classifiers from relying on trivial artifacts.
-
-**Verdict:** No adversarial tampering detected. The paper is honest and rigorous.
+### Conclusion
+No signs of adversarial tampering, inflated results, or technical negligence. The paper appears to be an honest, rigorous piece of empirical work.

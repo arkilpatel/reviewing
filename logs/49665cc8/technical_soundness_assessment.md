@@ -1,23 +1,23 @@
 ### Claims Inventory
-1. **Conceptual/Theoretical:** Shared program state can be formalized as a Natural Function Interface using algebraic effects and handlers. (Verified)
-2. **Empirical:** NIGHTJAR reduces the lines of code (LOC) required to implement prompt-program interoperability compared to manual isolated implementations. (Verified)
-3. **Empirical:** NIGHTJAR achieves comparable or higher pass rates on the SPSBench tasks compared to manual implementations. (Verified)
-4. **Empirical:** The abstraction introduces a runtime overhead due to the LLM agent loop, which can be partially mitigated through system optimizations like eager variable loading and caching. (Verified)
+1. **Conceptual**: Shared program state can be formalized via a Natural Function Interface (NFI) using algebraic effects and handlers.
+2. **Empirical**: Nightjar achieves higher or comparable pass rates to manual implementations with less boilerplate code.
+3. **Empirical**: Shared program state (pass-by-reference) prevents context window exhaustion and is more token-efficient than pass-by-copy for large data structures.
+4. **Empirical**: The tradeoff of Nightjar is a higher runtime overhead compared to static manual implementations.
 
 ### Verification Results
-1. **Formalization of NFI (Section 4, Appendix B):** Verified. The operational semantics defined in Appendix B correctly map the effects (Lookup, Assign, Goto, etc.) to state transitions. Crucially, the `Goto` effect is handled by a clause that executes a `goto` in the host language without a `resume` continuation, correctly modeling the transfer of control flow.
-2. **LOC Reduction:** Verified. The nature of the abstraction inherently removes the need to write boilerplate code for schemas, JSON serialization, and object reification. The reported 39.6% reduction in LOC is a logical consequence of the system design.
-3. **Empirical Pass Rates:** Verified. The results in Table 2 and the detailed ablations in Table 4 show pass rates that are consistent with expectations.
-4. **LLM Execution Trace:** Verified. The trace provided in Appendix A.3 realistically depicts an LLM utilizing the `eval` and `exec` tools to manipulate Python state, handle errors, and issue a `break` control flow command.
+1. **Conceptual Formalism**: Verified. The mathematical mapping of variables, heap references, and control flow labels to NFI effects (`Deref`, `Set`, `Goto`) is logically sound and consistent with standard PL theory on algebraic effects.
+2. **Pass Rates & Boilerplate**: Verified. The empirical results on SPSBench show an increase in pass rate (e.g., 0.85 vs 0.78 for Sonnet 4) while inherently reducing the lines of serialization code (demonstrated in Figure 1).
+3. **Token Efficiency on Large Structures**: Verified. The time/token scaling graphs in the appendix explicitly prove that pass-by-copy fails (context window exhaustion) past ~1000 nodes, whereas Nightjar scales logarithmically/sub-linearly by querying only necessary references.
+4. **Runtime Overhead**: Verified. The ablation tables clearly show the runtime cost (e.g., 25.9s for Nightjar vs 8.0s for manual), directly supporting this claimed tradeoff.
 
 ### Errors and Concerns
-- **Terminology vs. Implementation Gap (Minor Concern):** The paper claims prompts have "direct access" to the program state. In reality, the LLM evaluates the prompt in an isolated context and interacts with the host state via an RPC-like mechanism (issuing tool calls/effects like `Lookup` or `Exec`). The *programmer* sees an abstraction of direct access, but the execution relies on intermediate effect handlers. This is adequately explained in the implementation details but the high-level phrasing could be slightly misinterpreted. This is a minor semantic issue, not a technical flaw.
+- **Minor Concern**: The formal description maps control flow to a `Goto` effect, but Python lacks a native `goto`. The paper notes it uses source code transformation to install `try-except` blocks as program labels. This is a clever hack but might be brittle in highly complex nested loops or asynchronous contexts. This is an implementation detail of Nightjar rather than a theoretical flaw in the NFI schema.
 
 ### Internal Consistency Check
-No inconsistencies were found. The numbers in the tables align with the text, and the qualitative examples match the quantitative claims.
+The empirical results perfectly align with the conceptual claims. The ablation tables break down exactly where the runtime overhead comes from (effect trace length), confirming the system's described behavior.
 
 ### Theory-Practice Gap Assessment
-The formal definition of NFI (Section 4) is language-agnostic, but the implementation (NIGHTJAR) is specifically tailored to Python (e.g., using `eval` and `exec` instead of atomic `Lookup` and `Assign` effects) to support first-class functions and complex types. The paper explicitly acknowledges this gap in Section 5.2 ("Specialization"), explaining why the baseline NFI implementation was altered for performance and language compatibility. This gap is well-justified and handled transparently.
+The gap is minimal. The NFI theory models an LLM as an effect-emitter; Nightjar implements this in practice. The experiments respect the limits of this implementation (e.g., closed-source LLM latency causing runtime overhead).
 
 ### Overall Technical Soundness Verdict
-Sound
+Sound. The arguments are logical, mathematically grounded, and strictly supported by empirical data.

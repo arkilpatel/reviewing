@@ -1,18 +1,17 @@
 ### Claimed Contributions
-1. A comprehensive evaluation framework for TAG robustness spanning GNNs, RGNNs, and GraphLLMs.
-2. Empirical insights: text-structure trade-off, revival of GNNGuard with advanced text encoders, and GraphLLM vulnerability to poisoning.
-3. `SFT-auto`, an LLM-based defense framework that detects and recovers from both textual and structural attacks.
+1. A comprehensive evaluation framework for robustness in TAGs covering GNNs, RGNNs, and GraphLLMs.
+2. Empirical insights including the text-structure robustness trade-off, the revitalization of simple RGNNs with advanced encoders, and the poisoning vulnerability of GraphLLMs.
+3. SFT-auto, a novel defense framework utilizing a multi-task training and detection-prediction pipeline.
 
 ### Prior Work Assessment
-- Benchmarks for graph robustness exist (e.g., GRB for GNNs), and some recent works (Guo et al. 2024, TrustGLM) have started evaluating GraphLLMs. The paper clearly delineates its delta: it is the first to unify all three paradigms (GNN, RGNN, GraphLLM) under a single comprehensive framework across many datasets and attack types (structural, textual, hybrid).
-- The insight regarding GNNGuard is novel in the context of TAGs. Previous evaluations of RGNNs largely ignored the impact of the text encoder.
-- `SFT-auto` combines standard LLM reasoning with graph context. While using LLMs for anomaly detection is not conceptually unprecedented, its specific application to balance the text-structure trade-off in TAGs is a solid, non-trivial contribution.
+- **Evaluation Framework:** Prior works (GRB, TrustGLM, etc.) evaluated GNNs or GraphLLMs in fragmented settings (either evasion or poisoning, limited attacks). This paper's delta is **Substantial** because it unifies these disparate paradigms under a single, large-scale (10 datasets, 4 domains) threat model.
+- **Empirical Insights:** The text-structure trade-off is a novel and valuable framing. While vulnerabilities of individual models were known, formally identifying this dichotomy across architectures is a **Substantial** new insight.
+- **SFT-auto:** Using LLMs for anomaly detection and adaptive prediction is an **Incremental to Moderate** methodological extension of standard instruction tuning, but its application to solve this specific trade-off is creative and effective.
 
 ### Novelty Verdict
-Substantial.
+Substantial. 
 
 ### Justification
-The paper does not introduce a fundamentally new mathematical paradigm, but its comprehensive benchmarking and the resulting insights (especially the text-structure trade-off and the role of text encoders in RGNNs) are highly valuable and distinctly advance the field's understanding. The `SFT-auto` framework is a creative and effective combination of LLM capabilities applied to a newly identified problem.
+While the individual components (GNNs, LLMs, adversarial attacks) are well-studied, the comprehensive synthesis and the resulting insights (particularly the trade-off and the role of text encoders in RGNNs) represent a significant conceptual advance for the field of robust graph learning. 
 
-### Missing References
-None apparent. The paper adequately cites recent and relevant works like TrustGLM, GraphEdit, and various RGNNs.
+**Novelty Score: 7.5 / 10**

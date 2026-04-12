@@ -1,36 +1,24 @@
 ### Claims-to-Experiments Mapping
-- Claim: Structural features fail to detect LLM graphs -> Supported by RF on graph properties (Tables 1, 4) and GNNs on graph properties (Tables 3, 6).
-- Claim: Embeddings succeed -> Supported by RF on embeddings (Tables 2, 5, 8) and GNNs on embeddings (Tables 3, 6, 10).
-- Claim: Driven by semantics, not dimensionality -> Supported by Random-vector control and PCA-k ablation (Figures 15, 16).
-- Claim: Generalizes across models -> Supported by cross-model experiment (Tables 9, 10).
+1. Structural properties alone cannot reliably distinguish LLM-generated reference lists from human ones -> Supported by RF on graph properties (Table 1).
+2. Random baselines can be easily distinguished from both LLM and human reference lists -> Supported by RF on graph properties (Table 1).
+3. Text embeddings significantly improve distinguishability -> Supported by RF on embeddings (Table 2).
+4. Graph Neural Networks leveraging both structure and embeddings achieve high distinguishability -> Supported by GNN experiments (Table 3).
+5. Results generalize across LLM models and embedding backbones -> Supported by robustness checks with Claude Sonnet 4.5 and SPECTER embeddings.
 
 ### Baseline Assessment
-Appropriate and rigorous. They evaluate:
-1. Ground truth (human).
-2. GPT-4o.
-3. Claude 3.5 Sonnet.
-4. Field-matched random baseline.
-5. Temporally-ordered random baseline.
-6. Subfield random baseline.
-This is an exhaustive set of control baselines to ensure the models aren't just learning trivial artifacts.
+Baselines are well-designed. The "field-matched random baseline" is an excellent choice, as it forces the classifier to learn non-trivial patterns rather than simply identifying out-of-domain citations. The authors also include a subfield baseline and a temporally constrained random baseline, which adds to the rigor.
 
 ### Dataset Assessment
-10,000 focal papers from SciSciNet (~275k references) is a large, representative dataset that avoids the small-N problem common in LLM evaluation.
+The dataset consists of 10,000 focal papers from SciSciNet, which is a substantial and appropriate size for this evaluation. The generation of reference lists using GPT-4o (and Claude 4.5) is documented and sounds robust. 
 
 ### Metric Assessment
-Accuracy and F1-score are standard and appropriate for balanced binary/ternary classification tasks.
+Accuracy and F1-score are used, which are standard for balanced binary classification tasks. 
 
 ### Statistical Rigor
-Excellent. Results are reported as means ± standard deviations over 10 random seeds. A saturation analysis (Wasserstein distance) is also provided.
+The authors report standard deviations across 10 independent runs with different random seeds (e.g., 0.8346 ± 0.0063). This is excellent practice and demonstrates high statistical rigor.
 
 ### Ablation Assessment
-The paper includes robust ablations: random-vector control, PCA dimensionality ablation, and evaluating isolated node semantic roles.
-
-### Missing Experiments
-None of significance. The pipeline is comprehensive.
-
-### Error Analysis Assessment
-The cross-model experiment and semantic role visualizations serve as good qualitative and analytical checks on the model's behavior.
+The paper isolates the impact of structure vs. semantics by comparing RF on structure, RF on embeddings, and GNNs on both. Additionally, they ablate the embedding model (OpenAI vs SPECTER) and the LLM generator (GPT-4o vs Claude Sonnet). They also include a control where semantic embeddings are replaced by random vectors of the same dimensionality, proving the performance gain is due to semantics, not just dimensionality. This is a very thorough ablation suite.
 
 ### Overall Experimental Rigor Verdict
-Rigorous. The paper is exceptionally well-designed empirically.
+Rigorous. The experimental design is very strong, featuring appropriate random baselines, robust statistical reporting, and comprehensive ablations.

@@ -1,32 +1,28 @@
-### Experimental Rigor Assessment
+### Claims-to-Experiments Mapping
+- **Claim**: SSIUU prevents the emergence of spurious unlearning neurons. Supported by influence variation analysis (Figure 5).
+- **Claim**: SSIUU improves unlearning robustness. Supported by Harmful and Benign attack experiments (Tables 1 and 2, Figure 2).
 
-**Claims-to-Experiments Mapping**
-- *Claim:* Unlearning methods hide rather than erase. *Support:* Influence variation analysis (Fig 3), Logit Lens (Fig 4).
-- *Claim:* SSIUU provides robust unlearning against retraining. *Support:* Attack experiments on FaithUn and TOFU (Tables 1, 2).
+### Baseline Assessment
+The authors select an appropriate and strong set of modern unlearning baselines, including GA, GD, DPO, NPO, RMU, and KLUE. However, because the proposed SSIUU method essentially adds a step-wise parameter change penalty to GD, it is crucial to isolate whether the robustness comes specifically from the *attribution-guided* nature of the penalty, or simply from the fact that SSIUU restricts parameter movement more than vanilla GD. An ablation baseline such as GD with standard L2 parameter regularization or early-stopped GD was not provided, weakening the claim that the attribution mechanism itself is responsible for the improvement.
 
-**Baseline Assessment**
-- **Appropriate and Strong:** The paper includes a highly comprehensive set of baselines covering gradient-based (GA, GD), preference-based (DPO, NPO), representation-based (RMU), and localization-based (KLUE) methods. 
-- **Fairness:** Baselines appear well-tuned, taking into consideration the retention properties.
+### Dataset Assessment
+The paper uses FaithUn and TOFU, which are appropriate for assessing real-world and synthetic knowledge unlearning, respectively. However, the use of FaithUn introduces a major inconsistency.
 
-**Dataset Assessment**
-- **Appropriate:** Uses FaithUn (real-world knowledge) and TOFU (synthetic knowledge) across Llama-3.2 (3B) and Qwen-2.5 (3B). Both are highly relevant and standard datasets for unlearning tasks.
+### Metric Assessment
+The metrics (Forgetting Score, Retention Score, Utility Score) are standard. However, the application of the Forgetting Score (FS) on FaithUn is highly problematic. The authors claim to use a Multiple Choice QA (MCQA) template with 3 options and state they stop at 0.33 accuracy to represent random guessing. Yet, the reported FS is 0.0. An accuracy of 0.0 on an MCQA task indicates perfect active suppression of the correct answer, which is a symptom of the very "shallow alignment" the authors criticize.
 
-**Metric Assessment**
-- **Completeness:** Uses Forgetting Score (FS), Retention Score (RS), and Utility Score (US) using standard NLP benchmarks (MMLU, GSM8K, etc.). 
-- Evaluates attack robustness using Harmful and Benign Retraining Attack Scores. This provides a robust and multi-faceted evaluation.
+### Statistical Rigor
+The authors report mean scores over three runs for the attack scenarios and conduct a learning rate search. However, variance or standard deviation is not reported in the main tables, which is critical given the inherent instability of adversarial retraining attacks.
 
-**Statistical Rigor**
-- The authors run each attack scenario three times and report the mean scores, which provides a measure of statistical robustness. Standard deviations could be added to Tables 1 and 2, but given the massive delta between SSIUU and baselines under attack, significance is clear.
+### Ablation Assessment
+No proper ablation isolates the core mechanism. We do not know if replacing the attribution-weighted penalty with a uniform parameter-change penalty would yield the same robustness.
 
-**Ablation Assessment**
-- The authors provide an ablation on the regularization weight $\lambda$ (Figure 7a) and the attack learning rates (Figure 7b/c).
-- *Gap:* The authors apply S SIUU exclusively on top of Gradient Difference (GD) as the backbone. An ablation applying S SIUU regularization on top of DPO or GA would have strongly isolated the contribution of the regularizer from the GD backbone, proving its generalizability.
+### Missing Experiments
+- **Simple Regularization Control**: A baseline applying standard weight decay or an L2 penalty on $(W_t - W_0)$ to the GD backbone, to verify if simply constraining the weights produces the same robustness.
+- **True Baseline Comparison**: Reporting the exact number of optimization steps taken by GD vs. SSIUU to ensure SSIUU isn't simply stopping earlier due to the regularization term.
 
-**Missing Experiments**
-- Evaluation of S SIUU on a non-GD backbone (e.g., S SIUU + DPO).
+### Error Analysis Assessment
+The paper includes a logit lens analysis (Figure 4) which is a strong qualitative addition to show the depth of the unlearning alignment. However, it does not analyze *why* the attack still partially succeeds on SSIUU.
 
-**Error Analysis Assessment**
-- Qualitative internal analysis via Logit Lens (Figure 4) and module/layer analysis (Figure 5) provide excellent diagnostic insight into why GD fails and SSIUU succeeds.
-
-**Overall Experimental Rigor Verdict**
-Mostly rigorous with minor gaps. Excellent evaluation setup, though it lacks cross-backbone ablation.
+### Overall Experimental Rigor Verdict
+Significant gaps. The internal contradiction regarding the FaithUn stopping criterion vs. the reported 0.0 accuracy fundamentally undermines trust in the primary dataset's results. The lack of proper ablations for the regularization mechanism leaves the causal mechanism unverified.

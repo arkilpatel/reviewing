@@ -1,20 +1,20 @@
-### Claimed Contributions
-1. Introduction of the Single Index Bandit (SIB) problem, relaxing the assumption of a known link function in Generalized Linear Bandits (GLBs).
-2. A novel, highly efficient parameter estimator based on Stein's method that does not require solving an MLE or knowing the reward function.
-3. ESTOR, an epoch-based algorithm achieving nearly optimal $\mathcal{\tilde{O}}(\sqrt{T})$ regret for monotonically increasing reward functions.
-4. GSTOR, extending the framework to arbitrary continuously differentiable reward functions using double-exploration and kernel regression.
-5. Extensions to high-dimensional sparse settings using $\ell_1$ regularization.
+### Novelty & Originality Assessment
 
-### Prior Work Assessment
-- **GLBs (Filippi et al., 2010; Li et al., 2017)**: Require exact knowledge of the link function to compute the MLE. The proposed SIB framework genuinely relaxes this restrictive assumption.
-- **Single Index Models (SIMs)**: Existing offline SIM estimators often require strong distributional assumptions (e.g., standard Gaussian) or are computationally heavy. The proposed Stein's-method-based estimator is computationally lightweight and operates under milder assumptions (finite second moment of the score function).
-- **Stein's Method in Bandits**: Has been used recently for low-rank matrix bandits, but its application to index models and contextual bandits to bypass unknown link functions is novel and non-obvious.
+**Claimed Contributions:**
+1. Introducing the Single Index Bandit (SIB) problem, extending Generalized Linear Bandits (GLBs) to settings with unknown reward functions.
+2. Proposing a novel estimator based on Stein's method that does not require estimating the unknown reward function or its gradient.
+3. Developing STOR and ESTOR algorithms for monotonically increasing reward functions, with ESTOR achieving $\tilde{O}_T(\sqrt{T})$ regret.
+4. Extending the method to sparse high-dimensional settings using $\ell_1$-regularization.
+5. Providing GSTOR for arbitrary differentiable reward functions under a Gaussian design.
 
-### Novelty Verdict
-Substantial.
+**Prior Work Assessment:**
+- The extension of Stein's method to parameter estimation in single index models is known in the offline statistical literature, but adapting it to the online, sequential decision-making setting of contextual bandits is non-trivial.
+- Due to the entirely broken bibliography, it is impossible to evaluate how the authors distinguish their technical contributions from the specific prior works they intended to cite. We must infer the delta based on general knowledge of GLBs (like GLM-UCB) and offline Single Index Models (SIMs).
 
-### Justification
-The paper identifies a very real limitation of current GLB algorithms (vulnerability to link function misspecification) and proposes a theoretically principled, computationally elegant solution. The use of Stein's identity to decouple parameter estimation from the unknown link function in an online setting is highly creative. The epoch-based schedule in ESTOR to achieve $O(\sqrt{T})$ regret without function recovery is a significant methodological insight.
+**Novelty Verdict:** Substantial.
+Despite the inability to trace exact citations, the use of Stein's method to bypass the need for an explicit regression oracle in agnostic GLBs is a clever and substantive methodological pivot. It conceptually reframes how one might handle unknown link functions in bandits.
 
-### Missing References
-The related work appropriately covers GLBs, SIMs, and contextual bandits with realizability. No major omissions identified.
+**Missing References:**
+The entire reference section is missing due to a LaTeX compilation failure. Every prior work the paper should have cited is technically missing.
+
+**Novelty Score:** 6.0 / 10.

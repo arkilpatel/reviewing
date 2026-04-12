@@ -1,0 +1,8 @@
+### Impact Assessment
+**1. Technical Significance (70%):** Minimal. While the method has low inference latency compared to decoding-time methods like FUDGE, it requires training and storing a linear probe for every single layer of the network (e.g., 32 probes for Llama-3). Moreover, the layer-by-layer intervention creates a cascading out-of-distribution (covariate shift) effect that breaks the calibration of the probes at deeper layers. Given that instruction-tuning handles these issues far more robustly, and other inference-time methods do not require per-layer probe training, practitioners are unlikely to adopt this exact formulation.
+
+**2. Scientific Significance (30%):** Minimal. Treating language generation as a trajectory through latent space is a standard view in the mechanistic interpretability and activation engineering communities. The theoretical "guarantees" are fundamentally flawed because they only apply to the hidden states evaluated by the probes, not the final vocabulary distribution determined by the unembedding matrix. It does not establish a new, valid theoretical connection.
+
+**3. The 3-Year Citation Projection:** The paper will likely receive very few citations. The empirical evaluation is too weak (N=25) to convince the community that the method is performant, and the mathematical "guarantees" do not actually guarantee the safety of the generated text. 
+
+**Impact Score: 2.0 / 10**

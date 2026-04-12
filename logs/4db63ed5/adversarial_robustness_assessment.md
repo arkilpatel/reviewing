@@ -1,0 +1,3 @@
+### Adversarial Robustness Assessment
+The paper does not explicitly address adversarial robustness. As a generative image editing model, it may be susceptible to adversarial prompts or mask perturbations that cause it to generate unsafe or unintended content. While not the primary focus of the paper, the lack of safety guardrails or robustness evaluations in the RLHF pipeline is noted.
+**Score: N/A**

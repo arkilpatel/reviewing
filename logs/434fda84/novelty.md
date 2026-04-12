@@ -1,19 +1,18 @@
-### Novelty & Originality Assessment
+### Claimed Contributions
+1. Identifying "shallow alignment" in unlearning, where models create "spurious unlearning neurons" that negatively suppress target knowledge rather than erasing the underlying positive representations.
+2. Demonstrating that unlearned models are highly vulnerable to retraining (both harmful and benign) due to these spurious neurons.
+3. Proposing SSIUU, an attribution-guided regularization method to prevent the growth of negative influence during unlearning, improving robustness.
 
-**Claimed Contributions**
-1. Uncovering that existing unlearning methods suffer from "shallow unlearning alignment" by generating "spurious unlearning neurons" that merely suppress target knowledge via negative attribution rather than erasing it.
-2. Formulating two practical attack scenarios (harmful private data retraining and benign instruction tuning) that easily recover hidden knowledge.
-3. Introducing SSIUU, an attribution-guided regularization method that suppresses the inflation of negative attribution during unlearning, leading to robust and faithful knowledge erasure.
+### Prior Work Assessment
+- **Retraining Vulnerability**: The concept that unlearning methods act more like masking/obfuscation and are vulnerable to retraining has been well-documented recently (e.g., Hu et al. 2024, "Unlearning or obfuscating?"; Deeb & Roger 2024). The paper cites these, so it does not falsely claim to be the first to discover unlearning fragility.
+- **Spurious Neurons / Attribution Analysis**: Analyzing this fragility specifically through the lens of positive vs. negative attribution variations to define "spurious unlearning neurons" provides a new mechanistic explanation for *how* the obfuscation occurs. This is a solid, albeit incremental, analytical step.
+- **SSIUU Method**: Using attribution scores as a regularizer during unlearning is moderately novel. However, because the actual implementation reduces to penalizing parameter changes weighted by gradients (Eq 14), it bears strong conceptual similarities to existing continual learning regularizers (like Elastic Weight Consolidation).
 
-**Prior Work Assessment**
-- *Unlearning Fragility:* Prior work (e.g., Deeb & Roger, 2024; Hu et al., 2024) has observed that unlearning is easily reversed via fine-tuning. The *delta* here is the mechanistic explanation: identifying the precise neuron-level dynamic (spurious negative attribution) that causes this fragility.
-- *Unlearning Methods:* Standard gradient and representation unlearning exist. The *delta* is the use of dynamic attribution tracking as a regularization penalty specifically targeting negative influence inflation. 
+### Novelty Verdict
+**Moderate**
 
-**Novelty Verdict**
-**Substantial.**
+### Justification
+The paper's conceptual framing of "spurious unlearning neurons" using attribution is a useful and insightful way to formalize the known problem of shallow unlearning alignment. However, the core idea that unlearning is fragile and operates via obfuscation is already established in very recent literature. The methodological novelty is hindered by the fact that the proposed SSIUU algorithm boils down to a gradient-weighted step-wise penalty on the parameters, rather than a truly novel neuron-level intervention.
 
-**Justification**
-While the fragility of unlearning to retraining attacks is a known phenomenon, the paper provides a fresh, mechanistic explanation for *why* it occurs ("spurious unlearning neurons"). Moving beyond mere observation to a targeted, attribution-based regularization technique is a highly original and non-obvious solution that bridges interpretability and alignment.
-
-**Missing References**
-None. The paper adequately covers recent 2024 and 2025 unlearning literature.
+### Missing References
+The paper adequately cites the most relevant concurrent work on unlearning robustness and obfuscation.

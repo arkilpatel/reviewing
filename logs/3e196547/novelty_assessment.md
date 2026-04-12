@@ -1,18 +1,20 @@
 ### Claimed Contributions
-1. **Attention-based Tree Branching (ATB):** A novel branching strategy for Monte Carlo sampling in PSRL, which uses the Forward Context Influence (FCI) scores derived from attention weights to select reasoning-critical steps as branching points, rather than using token entropy.
-2. **Adaptive Sampling Mechanism:** A method that filters out overly easy problems (using average FCI as a proxy) and dynamically allocates more tree expansions to harder problems, while also adaptively sizing the prompt batch to guarantee that the final training batch contains only non-zero advantage tokens.
-3. **One-Step Off-Policy Training:** An efficient training pipeline that interleaves the initial sampling of the next batch with the MC sampling of the current batch, effectively reducing the number of generation phases per training iteration from two to one.
+1. Analysis of attention scores to identify reasoning behaviors, leading to an Attention-based Tree Branching (ATB) method for PSRL.
+2. An adaptive sampling mechanism that filters easy problems and dynamically adjusts batch sizes to ensure non-zero advantage batches.
+3. A one-step off-policy training pipeline that halves the sampling cost per training iteration compared to standard PSRL.
 
 ### Prior Work Assessment
-- **TreeRL (Hou et al. 2025):** Introduces tree-based advantage estimation and MC branching for PSRL. However, it relies on simple entropy-based branching and uniform sampling across problems. AttnRL directly builds on TreeRL but replaces the naive heuristics with computationally grounded ones (attention).
-- **Massive Attention in LLMs (Bogdan et al. 2025, Jin et al. 2025):** These interpretability works showed that attention spikes correlate with contextual importance and specific reasoning behaviors (e.g., self-verification). AttnRL novelly applies this interpretability finding as an active heuristic for RL search tree expansion.
-- **Delta:** The delta is substantial. While tree-based PSRL is an existing paradigm, effectively steering the search tree using the model's internal attention mechanisms is a fresh, insightful approach that bridges interpretability and RL. The addition of the one-step off-policy training pipeline also provides a non-trivial engineering contribution that makes PSRL vastly more tractable.
+- **ATB vs. TreeRL/Entropy:** Prior work like TreeRL (Hou et al. 2025) uses heuristic or entropy-based branching for MC tree search in PSRL. The delta here is substantial: using internal attention activations (FCI) to guide RL exploration is a novel and clever intersection of mechanistic interpretability and RL.
+- **Adaptive Sampling vs. DAPO:** The paper explicitly compares its dynamic sampling to DAPO (Yu et al. 2025). The delta is moderate; dynamic batch sizing is a known RL trick, but applying it to filter out "easy" reasoning problems (which provide zero advantage) is a practical and useful adaptation.
+- **One-Step Off-Policy:** Off-policy RL and asynchronous RL (like AReaL or Asynchronous RLHF) are known. Applying a staggered sampling approach (initial sampling at m-1, MC at m) to PSRL is a moderate engineering novelty that yields significant wall-clock speedups.
 
 ### Novelty Verdict
-Substantial
+Substantial. The combination of attention-guided exploration with efficient PSRL systems engineering is a genuinely fresh approach to a very current problem.
 
 ### Justification
-The paper successfully merges insights from LLM interpretability (attention analysis) with the computational challenges of PSRL. Replacing entropy with FCI for branching is a principled, empirically validated improvement that clearly distinguishes itself from the uniform or entropy-driven approaches of prior work. The combination of ATB, difficulty-aware adaptive sampling, and the one-step pipeline constitutes a significant methodological and practical advance in RLVR.
+The use of Forward Context Influence (FCI) to guide Monte Carlo branching is the standout novel contribution. It moves beyond black-box statistical metrics (like entropy) and utilizes the model's own internal structural dependencies to explore reasoning paths.
 
 ### Missing References
-None apparent. The authors adequately cite very recent concurrent/pre-print works (e.g., TreeRL from 2025, DeepScaleR from 2025).
+None glaringly obvious; the paper cites very recent work (DeepSeek-R1, TreeRL, DAPO, etc. from early 2025).
+
+**Novelty Score: 7.5 / 10**

@@ -1,28 +1,21 @@
-### Claims-to-Experiments Mapping
-- **Efficiency claim**: Supported by Table 1 showing running times.
-- **Robustness to misspecification**: Supported by Figure 1 (cases 3 and 4) and Table 2 showing baselines degrading when misspecified.
-- **Real-world performance**: Supported by Table 3 on Forest Cover and Yahoo datasets.
+### Experimental Rigor & Evaluation Assessment
 
-### Baseline Assessment
-Baselines are appropriate (LinUCB, LinTS, UCB-GLM, GLM-TSL, DR Lasso). They are tested both under correctly specified conditions (where GLM methods should shine) and misspecified conditions, which is a very fair and informative comparison.
+**Claims-to-Experiments Mapping:**
+The experiments aim to show that STOR, ESTOR, and GSTOR perform efficiently across linear, Poisson, and polynomial link functions compared to GLB methods (LinUCB, UCB-GLM, etc.). The experiments support the claim that under misspecification, GLB methods fail while the proposed methods do not.
 
-### Dataset Assessment
-The paper uses 4 synthetic setups covering different link functions (linear, poisson, square, polynomial), which systematically tests the algorithms' robustness. It also includes 2 standard real-world datasets (Forest Cover, Yahoo News) for contextual bandits, which are appropriate and sufficiently challenging.
+**Baseline Assessment:**
+The baselines chosen (LinUCB, LinTS, UCB-GLM, GLM-TSL) are standard and appropriate for the claims being made. However, because the bibliography is missing, we cannot verify if the strongest or most recent variants were used. The misspecification stress-test is a good experimental design choice.
 
-### Metric Assessment
-Cumulative regret and total reward are the standard and appropriate metrics for this domain. Running time is also reported to support efficiency claims.
+**Dataset Assessment:**
+The authors use synthetic data, Forest Cover Type, and Yahoo News datasets. These are standard contextual bandit benchmarks. However, for the real datasets, they force a Gaussian fit on the context distribution to compute their score function, which heavily massages the data to fit their algorithm's strict requirements.
 
-### Statistical Rigor
-Results are averaged over 20 repetitions for synthetic data and 10 for real data. However, the paper **fails to report standard deviations or error bars** in the plots and tables. This makes it difficult to assess the statistical significance of the performance gaps, especially in the real-world datasets where differences might fall within the margin of error.
+**Statistical Rigor:**
+- **Variance reporting:** The paper reports "Average regrets over 20 repetitions" but does not report standard deviations, confidence intervals, or error bars in the plots or tables. This is a significant gap. Results from average runs without variance are difficult to fully trust.
+- **Significance:** No statistical significance tests are performed.
 
-### Ablation Assessment
-The "ablation" here is essentially the comparison between STOR (Explore-then-Commit) and ESTOR (Epoch-based), which effectively isolates the value of the epoch-based schedule in achieving better regret.
+**Missing Experiments:**
+An ablation or sensitivity analysis on the density approximation error is missing. Since the method completely relies on knowing $p(x)$, how does the regret degrade when $p(x)$ is misspecified or estimated with noise? This is critical for practical adoption.
 
-### Missing Experiments
-An experiment showing the sensitivity of the method to the misspecification of the context distribution $p(x)$ would be highly valuable, given that the theory assumes $p(x)$ is known exactly, while in practice it is approximated.
+**Overall Experimental Rigor Verdict:** Mostly rigorous with gaps. The lack of variance reporting and the lack of sensitivity analysis on the density estimation error weaken the empirical claims.
 
-### Error Analysis Assessment
-The paper analyzes the failure of baseline methods under misspecification, but lacks a detailed error analysis of its own methods (e.g., when does GSTOR fail? How sensitive is it to bandwidth selection?).
-
-### Overall Experimental Rigor Verdict
-Mostly rigorous with gaps. The experimental design is solid and effectively demonstrates the claims, but the lack of variance reporting (error bars) and sensitivity analysis regarding the context distribution approximation are notable gaps.
+**Exp Rigor Score:** 5.0 / 10.

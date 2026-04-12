@@ -1,22 +1,21 @@
-### Adversarial Robustness Assessment
+### Egregious Submission Negligence
+The paper does not exhibit egregious negligence. The bibliography is intact, equations are readable, and tables/figures match their citations in the text.
 
-**Check 1: General Tampering**
-- No evidence of manipulated text, deceptive formatting, or obvious falsifications. 
-- The authors openly report when baselines fail to converge (e.g., omitting NPO on the TOFU dataset with a clear footnote). This honesty reduces the likelihood of deceptive practices.
+### Mathematical Content Verification
+There is a fundamental mathematical contradiction between the paper's claims and its implementation.
+- **The Claim**: The authors state they "constrain the negative attribution values to remain at their original levels" (Section 5). 
+- **The Equation**: Equation 3 defines the regularization term as $\lambda \sum ||A_{\theta_{t-1}} - A_{\theta_t}||^2$. 
+- **The Error**: This penalizes the difference between the *current step* ($t$) and the *previous step* ($t-1$), which acts merely as a gradient penalty or smoothing term. It does not anchor the attribution to $A_{\theta_0}$, meaning the values can arbitrarily drift from their "original levels" over multiple steps. This invalidates the primary methodological claim.
+- **Substitution Error**: Equation 1 calculates attribution based on neuron activations ($h_{i,k} \times \frac{\partial P}{\partial h_{i,k}}$). Section 5 abruptly redefines attribution (Equation 12) to be based on model parameters ($\phi_{t,i} \times \frac{\partial P}{\partial \phi_{t,i}}$) for computational efficiency. Regularizing parameter updates is not equivalent to regularizing activation attributions; the implementation operates on entirely different mathematical entities than the conceptual framework analyzes.
 
-**Check 2: Mathematical Content Verification**
-- The attribution formula (Eq 1) aligns with standard gradient * activation attribution methods.
-- The regularization derivation (Eqs 6-14 in Appendix B) cleanly derives the gradient update. The authors explicitly state they are ignoring the second-order derivative (Hessian) by treating $g_{t,i}$ as a constant in Eq 13 to avoid Hessian-vector products. This is a standard and mathematically sound approximation for large models, accurately documented.
+### Algorithmic Trace
+Algorithm 1 correctly reflects the (flawed) moving-target penalty described above. Line 12 explicitly updates the anchor $A_{\phi_{t-1}, i} \leftarrow A_{\phi_t, i}$ at each step, confirming the step-wise penalty.
 
-**Check 3: Algorithmic Trace**
-- Algorithm 1 matches the mathematical derivations in the text. The logic is coherent and feasible.
+### Numerical Sanity Check
+A major contradiction exists in the reported accuracy. Section 6.1 claims the unlearning process is stopped early when the accuracy on the 3-option MCQA forget set reaches 0.33 (chance level). However, Table 1 and Figure 2 both show the baseline Forgetting Score (accuracy) for all methods as exactly 0.0 before the attack. Achieving 0.0 accuracy on a 3-choice question requires the model to actively avoid the correct answer 100% of the time, which is exactly the "spurious unlearning neuron" behavior the paper is attempting to mitigate.
 
-**Check 4: Numerical Sanity Check**
-- The reported accuracies are within plausible bounds for 3B parameter models (Llama-3.2, Qwen-2.5). The baseline Retain Scores (RS) and Utility Scores (US) align with realistic expectations.
-- The improvement under harmful attack (e.g., Llama-3.2 FaithUn p=0.1 accuracy from >68% in baselines to 14.81% for SSIUU) is large but mechanistically supported by the logit lens and attribution analysis showing genuine parameter erasure rather than suppression.
+### Internal Consistency
+As noted above, the empirical results (0.0 accuracy) directly contradict the stated experimental design (0.33 stopping threshold).
 
-**Check 5-9: Consistency and Baselines**
-- The paper consistently references standard baselines (GA, GD, DPO, RMU, KLUE).
-- Internal numbers in tables and figures match the text.
-
-**Verdict:** Clean. No evidence of adversarial tampering.
+### Overall Assessment
+The paper's claims are unsupported by its methodology. The mathematical objective does not align with the stated goal of anchoring negative attributions, the method regularizes parameters rather than the analyzed neurons, and the empirical results contradict the stated stopping conditions.

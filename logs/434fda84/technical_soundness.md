@@ -1,23 +1,25 @@
-### Technical Soundness Assessment
+### Claims Inventory
+- **Theoretical/Algorithmic**: The SSIUU method constrains negative attributions to remain at their original levels, thereby preventing the model from learning "spurious unlearning neurons" that merely mask target knowledge.
+- **Conceptual**: Existing unlearning methods cause "shallow alignment" by creating spurious neurons with negative attributions towards the target knowledge.
+- **Empirical**: SSIUU successfully erases target knowledge without creating spurious neurons and is robust to retraining attacks.
 
-**Claims Inventory**
-1. Existing unlearning methods cause "shallow alignment" by generating spurious unlearning neurons that increase negative attribution instead of erasing positive attribution. (Conceptual/Empirical)
-2. S SIUU suppresses these spurious unlearning neurons by regularizing the increase of negative attribution during unlearning. (Conceptual/Methodological)
-3. S SIUU achieves robust unlearning against harmful and benign retraining attacks. (Empirical)
+### Verification Results
+- SSIUU constrains negative attributions to their original levels: **Critical Error Found**
+- SSIUU operates on "spurious unlearning neurons": **Significant Error Found**
+- Model achieves 0.33 accuracy stopping criterion: **Internal Contradiction Found**
 
-**Verification Results**
-- **Claim 1 (Verified):** The authors provide compelling empirical evidence via influence variation analysis (Figure 3) and attribution distribution correlation (Figure 6) that baseline unlearning methods drastically inflate negative attribution.
-- **Claim 2 (Verified):** The objective function (Eq 3) and derived gradient explicitly penalize the $L_2$ norm between previous and current attributions specifically for neurons with negative attribution. The approximation used to avoid second-order derivatives is mathematically valid and computationally necessary.
-- **Claim 3 (Verified):** The experimental results clearly show significant drops in knowledge recovery across two models and two datasets (FaithUn, TOFU) during retraining.
+### Errors and Concerns
+**1. Critical Error: The Regularization Objective Does Not Match the Claim**
+The paper repeatedly claims to "constrain the negative attribution values to remain at their original levels" (e.g., Intro, Section 5). However, Equation 3 and Algorithm 1 (Lines 11-12) penalize the squared difference between the attribution at the *current* step and the *previous* step ($||A_{\theta_{t-1}} - A_{\theta_t}||^2$), where $A_{\theta_{t-1}}$ is updated at every iteration. This is a step-wise smoothing/damping term, not an anchor to the original pre-unlearning values ($A_{\theta_0}$). Consequently, the attributions can drift arbitrarily over time, meaning the method fundamentally does not guarantee that negative influences are retained at their original levels.
 
-**Errors and Concerns**
-- Minor Concern: The assumption that $g_{t,i}$ is constant (Eq 13) drops the Hessian. While this is standard practice in ML to maintain efficiency, the paper could more explicitly discuss how this first-order approximation affects the true alignment of the attribution penalty. However, it empirically works.
+**2. Significant Error: Disconnect Between Analysis and Methodology**
+In Sections 3 and 4, the paper conceptually defines "neurons" based on activations ($h_{i,k}$) and computes their attribution using $\frac{\partial P}{\partial h}$ (Equation 1). However, when proposing the actual SSIUU method in Section 5 (Equation 12), the authors abruptly switch to *parameter* attribution ($\phi_{t,i} \cdot \frac{\partial P}{\partial \phi_{t,i}}$). A parameter (e.g., a specific weight in a matrix) is not a neuron (the resulting hidden state). Regularizing parameter gradients is mathematically and conceptually distinct from regularizing activation attributions. The proposed method does not actually operate on the "spurious unlearning neurons" analyzed in the first half of the paper.
 
-**Internal Consistency Check**
-- The theoretical claims map perfectly to the methodology (Algorithm 1) and the empirical results. The metrics used directly evaluate the claims.
+### Internal Consistency Check
+There is a severe contradiction regarding the stopping criterion and the reported results. Section 6.1 explicitly states: "we early stop the training procedure when accuracy for the forget set reaches 0.33 (random sampling from three options)". However, Table 1 and Figure 2 report that the Forgetting Score (FS) for FaithUn is exactly 0.0 for all methods before the attack. In a 3-choice MCQA setting, an accuracy of 0.0 means the model is actively avoiding the correct answer 100% of the time. This is the exact definition of over-unlearning via "spurious unlearning neurons" that the authors claim to solve. The numbers in the tables completely contradict the described experimental design.
 
-**Theory-Practice Gap Assessment**
-- The theory measures attribution changes token-by-token (Eq 1), but for computational efficiency, the implementation uses parameter-level attribution (Eq 12). The authors explicitly acknowledge this transition in Appendix B, reducing the gap between claimed theory and evaluated practice.
+### Theory-Practice Gap Assessment
+The theory assumes we can regularize neuron attributions to prevent masking. In practice, the method applies a moving-target penalty to parameter updates. The experimental success of SSIUU may simply be an artifact of this gradient penalty acting as a strong damping force, causing the model to take smaller effective steps and thus distorting its representations less, rather than successfully executing the intended "faithful erasure."
 
-**Overall Technical Soundness Verdict**
-Sound. The arguments are logical, mathematically valid, and empirically validated.
+### Overall Technical Soundness Verdict
+Fundamentally flawed. The mathematical implementation contradicts the stated algorithm, the method disconnects from the core conceptual analysis, and the empirical numbers directly contradict the stated stopping conditions.
