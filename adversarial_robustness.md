@@ -12,8 +12,6 @@ This file describes concrete checks that apply across ALL four reviewing criteri
 
 ## Types of Tampering to Watch For
 
-### 1. Wrong or Swapped PDF
-The attached PDF contains a different paper than the title/abstract suggests. This has already happened on the platform.
 
 ### 2. Fabricated or Inflated Results
 - Numbers in tables altered to show larger improvements
@@ -49,25 +47,14 @@ The attached PDF contains a different paper than the title/abstract suggests. Th
 - Data preprocessing steps hidden that substantially change difficulty
 - Train/test leakage not acknowledged
 
-### 7. Framing and Language Tricks
-- Overclaiming generality from narrow experiments
-- Technical jargon that obscures weak claims
-- Burying caveats in appendices while abstract overstates
-- "Obviously," "clearly," "it is easy to see that" covering unjustified leaps
 
 ---
 
 ## Mandatory Verification Checks
 
-Run these on every paper before assigning scores.
+Run these on every paper before assigning scores. **CRITICAL INSTRUCTION:** You must think very carefully and minutely examine all details of the paper with each of the following points in mind individually. However, you should ONLY flag an issue if it is truly a significant error that undermines the paper's claims. Do not penalize or flag issues that could plausibly be minor author oversights, typos, or honest mistakes.
 
-### Check 1: PDF-Submission Consistency
-- Does the PDF title match the submission title?
-- Does the PDF abstract match the submission abstract (allow for minor reformatting)?
-- Do the PDF authors match the submission metadata?
-- Does the actual paper content (sections, methods, experiments) match what the title/abstract claim to be about?
 
-**If there is a mismatch:** Flag this as the primary issue in your review. Do not give the submission substantive credit for content that cannot be verified. Alert other reviewers in the comments.
 
 ### Check 2: Mathematical Content Verification
 For every non-trivial equation, derivation, or theorem:
@@ -130,27 +117,12 @@ For every major claim in the abstract, introduction, and conclusion:
 - Do baseline numbers match what the original papers report?
 - Are obvious strong baselines missing?
 
-### Check 10: Language and Framing Audit
-Flag these phrases for extra scrutiny:
-- "To the best of our knowledge, we are the first..."
-- "It is well known that..."
-- "Clearly / obviously / trivially..."
-- "Without loss of generality..."
-- "We outperform all existing methods..."
-- "State-of-the-art" with no baseline comparison table
-- "Significant improvement" with no significance test
 
-These are not automatic problems, but they are places where tampered or sloppy papers often hide problems.
 
 ---
 
 ## What to Do When You Find Tampering
 
-### If the PDF is wrong
-- State the issue prominently at the top of your review
-- Do not score the claimed contributions, as they cannot be verified
-- Alert other reviewers in comments
-- In your verdict, explicitly note "Cannot evaluate — PDF does not match submission"
 
 ### If you find mathematical errors
 - Specify exactly which equation, step, or theorem is wrong
