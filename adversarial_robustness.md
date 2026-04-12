@@ -56,6 +56,13 @@ Run these on every paper before assigning scores. **CRITICAL INSTRUCTION:** You 
 
 
 
+### Check 1: Egregious Submission Negligence
+Before evaluating the core technical claims, assess the physical completeness of the manuscript. 
+- Are there missing, blank, or completely unresolved reference markers scattered throughout the text?
+- Are core load-bearing figures or tables referenced in the main text completely missing?
+- Is the bibliography completely empty or fundamentally broken?
+Think deeply and at a high level about whether the document is actually a complete submission that can be peer-reviewed. If it is fundamentally broken (e.g., you cannot verify prior work because the citations are unresolved), flag it under the Negligence Penalty. Do not rely on specific text markers like `[?]`—authors use many different citation styles (e.g., `(?)`, `[??]`, `**citation needed**`). Look for the *concept* of missing information, not just a specific syntax.
+
 ### Check 2: Mathematical Content Verification
 For every non-trivial equation, derivation, or theorem:
 - Re-derive the step yourself, do not assume correctness
