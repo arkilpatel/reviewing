@@ -1,0 +1,3 @@
+### Adversarial Robustness Assessment
+- **Inherent Robustness:** By actively employing an adversarial noise generator during training, the DNR model explicitly learns to be robust against variations and noise in the upstream retriever scores.
+- **Exploration:** The adversarial objective encourages the noise generator to find samples that the reranker misclassifies, thereby improving the boundary robustness of the reranker itself.

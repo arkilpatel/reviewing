@@ -1,0 +1,3144 @@
+Universal Model Routing for Efficient LLM Inference
+Wittawat Jitkrittum
+
+Harikrishna Narasimhan
+
+Ankit Singh Rawat
+
+wittawat@google.com
+
+hnarasimhan@google.com
+
+ankitsrawat@google.com
+
+Jeevesh Juneja
+
+Congchao Wang
+
+Zifeng Wang
+
+jeeveshjuneja@google.com
+
+congchaowang@google.com
+
+zifengw@google.com
+
+Alec Go
+
+Chen-Yu Lee
+
+Pradeep Shenoy
+
+ago@google.com
+
+chenyulee@google.com
+
+shenoypradeep@google.com
+
+Rina Panigrahy
+
+Aditya Krishna Menon
+
+Sanjiv Kumar
+
+rinap@google.com
+
+adityakmenon@google.com
+
+sanjivk@google.com
+
+Google
+Abstract
+Model routing is a simple technique for reducing the inference cost of large language models
+(LLMs), wherein one maintains a pool of candidate LLMs, and learns to route each prompt to
+the smallest feasible LLM. Existing works focus on learning a router for a fixed pool of LLMs.
+In this paper, we consider the problem of dynamic routing, where new, previously unobserved
+LLMs are available at test time. We propose UniRoute, a new approach to this problem that
+relies on representing each LLM as a feature vector, derived based on predictions on a set of
+representative prompts. Based on this, we detail two effective instantiations of UniRoute,
+relying on cluster-based routing and a learned cluster map respectively. We show that
+these are estimates of a theoretically optimal routing rule, and quantify their errors via an
+excess risk bound. Experiments on a range of public benchmarks show the effectiveness of
+UniRoute in routing amongst more than 30 unseen LLMs.
+
+1
+
+Introduction
+
+Large language models (LLMs) have seen a flurry of recent development [???????]. These impressive abilities
+notwithstanding, the inference cost of LLMs can be prohibitive [???]. This has motivated several techniques
+to improve LLM inference efficiency, such as speculative decoding [???], early-exiting [?], quantisation [?],
+compression [???], and others [???].
+Our interest is in model routing for efficient inference. Here, one maintains a pool of candidate LLMs of
+various sizes and capabilities. Given a prompt, one learns to predict the lowest-cost LLM which can reasonably
+address the prompt. In doing so, one can learn to use high-cost LLMs sparingly, only on the (relatively)
+few “hard” inputs. This is a conceptually simple but effective technique, which has seen a surge of recent
+interest [?????????????????????].
+Existing works largely focus on routing over a fixed pool of LLMs. In practice, however, the pool of candidate
+LLMs can constantly change; e.g., older LLMs may be deprecated in favor of new, performant LLMs. To
+leverage such new LLMs, perhaps the simplest approach is to re-train the router. However, with frequent
+changes to the LLM pool, this may be impractical owing to the non-trivial overhead of both model re-training,
+as well as obtaining sufficient training labels for each new LLM.
+In this paper, we propose UniRoute, a new approach to this problem based on representing each LLM as a
+feature vector, derived from their prediction errors on a set of representative prompts. By learning a router over
+these LLM features, we enable generalisation to previously unseen LLMs without any re-training. Building on
+Preprint. Under review.
+
+Clustered training sample (unlabeled)
+
+Training example
+
+Validation example
+Cluster centroid
+
+Cluster membership
+Prompt
+Embedder
+
+Prompt
+
+LLM1
+
+LLM2
+
+LLM
+Embedder
+
+Unseen
+during training
+
+1.0
+
+0.0
+
+Error
+scores
+
+0.0
+
+0.3
+
+0.6
+
+0.0
+
+0.6
+
+0.2
+
+0.4
+
+0.3
+
+Dot
+product
+
+Per-cluster errors
+
+0.6
+
+Cost adjustment
+λ⋅Model cost
+
+➕
+
+LLM1
+
+0.5
+
+LLM2
+
+0.1
+
+argmin
+
+Route to LLM2
+
+Labelled validation sample
+assigned to training clusters
+
+Figure 1: Illustration of our proposed UniRoute with a cluster-based router (see §5.1). We first perform
+K-means on a training set to find K centroids, and then partition the validation set into K representative clusters.
+Each test-time LLM can then be represented as a K-dimensional feature vector of per-cluster errors. This yields
+an intuitive routing rule: for each test prompt, we route to the LLM with the smallest cost-adjusted average
+error on the cluster the prompt belongs to. The prompt embedder may either be completely unsupervised (as
+shown in the figure), or fitted via supervised learning using labels from a set of training LLMs different from
+those seen during test time (§5.2).
+the observation that K-NN routing [?] is a special case of UniRoute, we detail two concrete instantiations of
+UniRoute relying on unsupervised and supervised prompt clustering respectively. While conceptually simple,
+empirically, these enable effective routing with a dynamic LLM pool across several benchmarks. In sum, our
+contributions are:
+(i) we formalise the problem setting of model routing with a dynamic pool of LLMs (§3);
+(ii) we propose UniRoute (§4.1), a novel routing approach relying on an LLM feature representation based on
+its prediction error vector on a small set of representative prompts (§4.2);
+(iii) we propose two simple yet effective instantiations of UniRoute based on unsupervised or supervised
+clustering (§5.1, §5.2, Figure 1), with an accompanying excess risk bound (§5.3);
+(iv) we present experiments (§7) on EmbedLLM [?], SPROUT o3-mini [?], RouterBench [?], and Chatbot
+Arena [?], illustrating the ability to effectively route amongst > 30 unseen LLMs.
+
+2
+
+Background: Model Routing with a Static LLM Pool
+
+Language models (LMs). Given a finite,
+non-empty vocabulary of tokens V, a language model (LM) is a
+. S∞
+distribution p ∈ ∆(V∗ ), where V∗ = n=0 Vn and ∆(·) denotes the set of distributions over a set. Large
+language models (LLMs) based on Transformers [?] have proven highly versatile.
+
+LLMs for predictive tasks. Our interest is in using LLMs for the following prediction problem. Let X ⊂ V∗
+be a set of input prompts, and Y be a set of targets. Let ℓ(x, y, ŷ) denote a loss function measuring the loss (or
+disutility) of a predicted response ŷ on a given (prompt, target) pair (x, y). For example, ℓ(x, y, ŷ) = 1(y ̸= ŷ)
+measures whether the response is an exact string match of the target. Our goal is to construct a predictor
+.
+h : X → Y minimising R(h) = E(x,y)∼P [ℓ(x, y, h)].
+
+An LLM natively provides a distribution over V∗ . To convert such a distribution to a predicted target, we
+assume there is some (task-specific, and possibly randomised) prediction function predict : ∆(V∗ ) → Y;
+e.g., in the simple case where Y ⊂ V∗ , we may employ a standard decoding algorithm [???]. More generally,
+predict may involve some non-trivial processing (e.g., stripping non-numeric tokens). Given such a function,
+.
+we may construct h(x) = predict(p(· | x)) to minimise R(h).
+2
+
+Model routing. Model routing is a means for achieving efficiency at inference time by selecting an appropriate
+LLM for each input prompt. Inference efficiency is gained by sparingly calling a large model only on “hard”
+input prompts. More precisely, suppose we have a set of M ≥ 2 LLMs {p(m) }m∈[M ] , with corresponding
+inference costs {c(m) }m∈[M ] denoting, e.g., their average monetary costs for processing one prompt. We
+assume c(1) ≤ c(2) ≤ . . . ≤ c(M ) . Let r : X → [M ] be a router that, given a prompt, predicts the most suitable
+LLM. In the standard (“static”) routing problem, we seek a router which achieves (cf. ????)
+i
+h
+i
+h
+X
+X
+E(x,y) 1(r(x) = m) · ℓ(x, y, h(m) ) :
+min
+E(x,y) 1(r(x) = m) · c(m) ≤ B. (1)
+r : X→[M ]
+
+m∈[M ]
+
+m∈[M ]
+
+.
+
+Here, B ≥ 0 is some fixed budget on the cost of the routed solution. We use h(m) (x) = predict(p(m) (· | x))
+for some fixed prediction function predict.
+Model routing strategies. The most naı̈ve routing strategy randomly assigns prompts to the various models,
+potentially pruning inadmissible solutions (see Appendix D). A more refined strategy is to learn a router. ?
+proposed an intuitive strategy (see also ?), wherein one constructs a predictor γ (m) : X → R+ of the expected
+loss incurred by each LLM h(m) , and routes via
+h
+i
+r(x) = argmin γ (m) (x) + λ · c(m) .
+(2)
+m∈[M ]
+
+Here, λ ≥ 0 is a hyper-parameter trading between cost and quality. In §5, we show formally that the routing
+rule in (2) is a plug-in estimator of a theoretically optimal routing rule (cf. also ?).
+.
+
+tr
+Given a training sample Str = {(x(i) , y (i) )}N
+i=1 , there are several approaches to construct γ. For example,
+DP
+given a text embedder φ : X → R (e.g., BERT [?], Sentence-T5 [?]), one may employ:
+
+(m)
+
+⊤
+γlin (x) = wm
+φ(x) + bm ,
+
+where wm ∈ RDP , bm ∈ R and (optionally) φ may be fit with a suitable empirical loss, e.g.,
+1 X X
+(m)
+(ℓ(x(i) , y (i) , h(m) ) − γlin (x(i) ))2 .
+N
+
+(3)
+
+(4)
+
+i∈[Ntr ] m∈[M ]
+
+A related matrix factorisation approach operating over frozen embeddings was proposed in ?, fitted on a sample
+comprising of either pairwise comparisons [?] or pointwise correctness labels [?]. Alternatively, a K-NN
+estimator can be used [?, Section 5.1]:
+X
+1
+(m)
+γkNN (x) =
+ℓ(x(i) , y (i) , h(m) ),
+(5)
+k
+i∈NN(x,k)
+
+where NN(x, k) denotes the k-nearest neighbours of (the embeddings of) x in Str .
+
+3
+
+Model Routing with a Dynamic LLM Pool
+
+We now formalise the model routing problem when the set of LLMs may vary dynamically.
+3.1
+
+Problem Setup
+
+The routing setup in (1) assumed a static pool of LLMs: indeed, observe that the linear model (3) only estimates
+parameters {(wm , bm )}m∈[M ] for a fixed set of LLMs, namely, {p(m) }m∈[M ] . In practice, the LLM pool may
+frequently change, as new models are released and old models are deprecated. Naı̈vely, one may simply re-train
+a router such as (3) with each such new LLM. However, this requires both annotating each training sample
+with the new LLM’s predictions, several steps of iterative training, and initiating a fresh router deployment.
+For a constantly refreshing LLM pool, this can impose a non-trivial overhead (e.g., computational cost). This
+motivates an alternate routing setup.
+Concretely, let Hall denote the set of all possible LLM predictors, where for simplicity we assume |Hall | < +∞.
+.
+(1)
+(M )
+Let H = 2Hall denote the set of all subsets of Hall . Let Htr = {htr , . . . , htr } ∈ H denote the set of LLM
+predictors observed during training. During evaluation, we seek to route amongst the LLM predictors in
+3
+
+(1)
+
+(N )
+
+Hte = {hte , . . . , hte } ∈ H. If Htr = Hte , we obtain the original routing problem in (1). However, we aim
+to allow Htr ̸= Hte , including the case Htr ∩ Hte = ∅.
+
+To accommodate such a dynamic LLM pool, we first modify our router to accept both an input prompt and a
+set of candidate LLMs, with the goal to pick the best option from this set; i.e., we consider dynamic routers
+.
+R = {r(·, H) : X → [|H|] | H ∈ H}. Next, we assume that the set of training LLMs Htr is itself drawn from
+some meta-distribution H over H. Rather than perform well on the specific set Htr , we would like to generalise
+to any set of LLMs drawn from H. Concretely, we wish to solve:
+
+
+
+
+X
+X
+min E 
+1(r(x, H) = m) · ℓ(x, y, h(m) ) : E 
+1(r(x, H) = m) · c(h(m) ) ≤ B, (6)
+r∈R
+
+m∈[|H|]
+
+m∈[|H|]
+
+.
+
+where as before B ≥ 0 denotes a cost budget, H = {h(1) , . . . , h(M ) } ∼ H denotes a sample of M LLMs,
+c : Hall → R+ denotes the cost of a given LLM, and E is a shorthand for E(x,y,H) .
+3.2
+
+Optimal Routing with a Dynamic Pool
+
+To guide the design of a dynamic router, we begin by studying the Bayes-optimal rule for (6). Interestingly, we
+find the Bayes-optimal rule decomposes across each of the constituent LLMs. The result is known for a fixed
+candidate set H ∈ H [?, Lemma F.1], [??]. The distinction arises for a varying candidate set, where the result
+closely mirrors ?, Eq. 6, derived in the related setting of learning to defer to an expert (see §6).
+Proposition 1 (Optimal dynamic routing). Under a mild regularity condition on P, for any input x ∈ X, LLM
+candidate set H ∈ H, and budget B > 0, there exists a subset-dependent Lagrange multiplier λH ≥ 0 such
+that the optimal dynamic router r∗ for the constrained optimization in (6) is
+h
+h
+i
+i
+r∗ (x, H) = argmin Ey|x ℓ(x, y, h(m) ) + λH · c(h(m) ) .
+(7)
+m∈[|H|]
+
+Intuitively, it is optimal to route to the model that has the lowest expected loss on the given input x, after
+applying a cost adjustment of λH · c(h(m) ) to the loss. The hyperparameter λH ≥ 0 allows one to trade off the
+expected quality and the average cost specific to the evaluated subset H. If one wishes to sweep B to trace a
+cost-quality deferral curve (Appendix E.2), one may equally treat λH as a constant to be swept from [0, +∞).
+Special case: 0-1 Loss Consider a setting where an LLM response may be compared to a ground-truth target
+based on an exact match criteria: i.e., we pick the 0-1 loss ℓ(x, y, h(m) ) = 1[h(m) (x) ̸= y], with values either
+0 (incorrect) or 1 (correct). Here, the optimal rule in (7) becomes:
+h
+i
+r∗ (x, H) = argmin γ ∗ (x, h(m) ) + λH · c(h(m) )
+(8)
+m∈[|H|]
+
+∗
+
+.
+
+γ (x, h) = P [y ̸= h(x) | x] .
+
+For simplicity, we will focus on the the 0-1 loss henceforth, and consider (8) as the optimal routing rule; our
+results can be readily adapted (as we shall see in our experiments in §7) to other loss functions by considering
+(7). Example problems where the 0-1 loss are appropriate include GSM8K [?], MMLU ?, and problems in
+SuperGLUE [?].
+3.3
+
+Plug-in Routing with a Dynamic Pool
+
+Proposition 1 and (8) suggest a simple practical approach to routing with a dynamic pool of test LLMs
+(n)
+Hte = {hte }n∈[N ] : we may construct a plug-in estimator γ(x, h) of γ ∗ (x, h), and estimate (8) via
+h
+i
+(n)
+(n)
+r(x, Hte ) = argmin γ(x, hte ) + λ · c(hte ) .
+(9)
+n∈[N ]
+
+A key question arises: how should we parameterise γ(x, h)? We study this question next.
+
+4 UniRoute: Universal Routing via an LLM Feature Representation
+We present a general dynamic routing approach based on constructing LLM feature representations.
+4
+
+UniRoute: Routing with a Dynamic LLM Pool
+tr
+(1) Train base router. Fit parameters of γuni from (10) on training set Str = {(x(i) , y (i) )}N
+i=1 .
+(2) Embed test LLMs. Compute Ψ(hte ) for each test LLM hte ∈ Hte , e.g., via (11) on a validation set
+val
+Sval = {(x(j) , y (j) )}N
+j=1 .
+
+(3) Route on new prompts. Given a new input prompt x, pick the best test LLM via (9).
+
+4.1
+
+The UniRoute Approach
+
+To enable routing with a dynamic LLM pool, we propose to parameterise γ by representing both prompts and
+LLMs as feature vectors. Specifically, for fixed K > 1 let Φ : X → RK and Ψ : Hall → RK denote feature
+maps for prompts and LLMs respectively. Then, we propose:
+γuni (x, h) = Φ(x)⊤ Ψ(h).
+
+(10)
+
+We may now fit any parameters associated with Φ, Ψ on the training set Str , and then route as before via (9).
+Crucially, provided we define an easily computable Ψ, this seamlessly handles any h ∈ Hall , including
+one unobserved during training; this is analogous to semantic output codes for zero-shot classification [?].
+Thus, (10) provides an approach for universal routing with dynamic LLM pools.
+To realise the potential of this approach, it now remains to specify Φ(x) and Ψ(h).
+Prompt representation. The choice of prompt representations Φ(x) ∈ RK has been well-studied in prior
+work [?]. A natural choice is to build on a general-purpose text embedding such as text-embedding-3 [?],
+NV-Embed [?], E5-Mistral-7B [?], or Gecko [?]. Such embeddings may be projected from a native DP to
+K ≪ DP dimensional space, e.g., via a linear transformation.
+LLM representation. A good choice for Ψ(h) is less apparent than that for Φ(x). Observe that the standard
+(1)
+(M )
+linear router
+h (3) for a static
+i pool Htr = {htr , . . . , htr } corresponds to a one-hot LLM representation
+
+Ψoh (h) = 1(h = h(m)
+tr )
+
+m∈[M ]
+
+, and a prompt representation Φ(x) = Wφ(x) ∈ RM for W ∈ RM ×DP . As
+
+noted previously, such an approach is inherently tied to the LLM pool Htr , analogous to the cold-start problem
+in collaborative filtering [?]. A naı̈ve alternate idea is to flatten the LLM’s trained parameters. However, these
+would be in excess of billions of dimensions (exacerbating the risk of overfitting), and are inadmissible for
+many proprietary LLMs. We now examine an alternative LLM representation based on its performance on a
+subset of prompts.
+4.2
+
+Representing an LLM via the Prediction Error Vector
+
+A key desideratum for our LLM representation Ψ is that Ψ(h)⊤ Ψ(h′ ) ought to be large for a pair (h, h′ )
+of “similar” LLMs, and small for a pair of “dissimilar” LLMs. A reasonable definition of “similar” would
+thus enable the design of Ψ. To this end, we posit that two LLMs are “similar” if they have comparable
+performance on a set of representative prompts, akin to proposals in ??.
+val
+Concretely, suppose that we have access to a small (labelled) validation set Sval = {(x(j) , y (j) )}N
+j=1 . Further,
+suppose that any LLM h ∈ Hall – including new LLMs unobserved during training – can be evaluated
+efficiently on these prompts. Then, one may represent the LLM based on its prediction error vector on prompts
+from Sval : for suitable F : RNval → RK (e.g., a linear projection), we choose:
+
+
+
+(11)
+Ψ(h) = F 1(y (j) ̸= h(x(j) )) j∈[N ] ∈ RK .
+val
+
+Interestingly,
+a special
+case of this is the K-NN method (5) from ? applied to Sval : for Ψknn (h) =
+
+
+1(y (j) ̸= h(x(j) )) j∈[Nval ] ∈ RNval and Φknn (x) ∈ {0, 1}Nval indicating which validation samples are the
+k-nearest neighbours of x, (10) exactly reduces to (5). In general, however, it can prove useful to parameterise
+F and learn some compressed LLM representation in K ≪ Nval dimensions.
+
+We remark that ? also considered representing LLMs as feature vectors, with the goal of enabling routing.
+Crucially, however, their representations do not enable generalisation to unseen LLMs, and thus do not support
+dynamic routing; cf. §6 for more discussion.
+5
+
+4.3
+
+Discussion: UniRoute versus Standard Routing
+
+A central assumption in UniRoute is that for any new LLM, one may efficiently compute Ψ(·); for Ψ(·)
+given by (11), this in turn assumes that any new LLM can be efficiently evaluated on Sval . We stress some
+important points regarding this. First, the choice of prompts in Sval is of clear import. In the simplest case, this
+may be a small subset of the training set Str . More generally, these could be hand curated based on domain
+knowledge, or drawn from a standard benchmark suite (which is often available for any new LLM). Second, we
+emphasise that Sval is assumed to be of modest size (e.g., O(103 )); consequently, performing inference for a
+new LLM on Sval is not prohibitive. Third, UniRoute involves significantly less overhead than naı̈ve router
+re-training. Per §3.1, re-training a router such as (3) on Sval involves several steps of iterative training, which
+for a constantly refreshing LLM pool can impose a cumulatively onerous overhead. Further, since Sval is of
+modest size, re-training the router is susceptible to overfitting; thus, UniRoute can also yield better quality.
+Interestingly, the K-NN method from [?] – which, as noted in §4.2, is a special case of UniRoute – does
+support new LLMs without re-training. Indeed, one may readily compute γkNN in (5) based solely on the
+prediction error vector. However, as Sval is assumed to be of modest size, this approach may not generalise
+favourably; indeed, even in moderate data regimes, ? observed that K-NN may underperform. Further, it does
+not exploit any information from the (potentially large) training set Str .
+These limitations notwithstanding, K-NN has the appealing ability to exploit non-linear structure in the data.
+We now explore a cluster-based instantiation of UniRoute with a similar property.
+
+5
+
+UniRoute with Cluster-Based LLM Feature Representations
+
+Building on the above, we now consider certain cluster-based LLM representations, involving either unsupervised or supervised cluster assignments based on a large set of training prompts.
+5.1
+
+Representing an LLM via Per-Cluster Prediction Errors
+
+We propose an instantiation of (11) that represents any LLM h ∈ Hall through its average errors Ψclust (h) ∈
+[0, 1]K on K > 1 pre-defined clusters. Similarly, we represent prompts via their cluster membership
+Φclust (x) ∈ {0, 1}K . This yields the following instantiation of (10):
+.
+
+γclust (x, h) = Φclust (x)⊤ Ψclust (h).
+
+(12)
+
+Intuitively, γclust (x, h) estimates the performance of a given LLM on a prompt x by examining its performance
+on similar prompts, i.e., those belonging to the same cluster.
+Naı̈vely, one may directly cluster Sval ; however, this is prone to overfitting, since (by assumption) the set is
+of modest size. Thus, we instead cluster the prompts in the training set Str . We then use this to group the
+validation prompts into K disjoint clusters, and compute per-cluster errors for a new LM using Sval . Concretely,
+given a text embedder φ : X → RDP , we compute Φclust (x), Ψclust (h) via:
+
+tr
+(i) Cluster the training set embeddings {φ(x(i) )}N
+i=1 to construct K non-overlapping clusters. This yields a
+K
+cluster assignment map Φclust : X → {0, 1} , where the k-th index is 1 when x belongs to cluster k (i.e.,
+it is on average closest to samples in cluster k). This step does not require labels.
+.
+(ii) Assign each validation set prompt to a cluster. Let Ck = {(x, y) : (x, y) ∈ Sval , Φclust,k (x) = 1} be the
+subset of the validation set that belongs to cluster k.
+(iii) For any LLM h ∈ Hall , compute Ψclust (h) ∈ [0, 1]K using its per-cluster validation errors:
+
+.
+
+Ψclust,k (h) =
+
+1
+|Ck |
+
+X
+
+(x,y)∈Ck
+
+
+
+1 y ̸= h(x) .
+
+(13)
+
+(n)
+
+Plugging these into (12), we may now approximate the expected loss for hte on an input prompt x using the
+average error of the LLM on the cluster the prompt is assigned to, and route via (9).
+This cluster-based instantiation of UniRoute can route with new LLMs in a highly efficient manner: given any
+new test LLM, we simply need to estimate its average per-cluster clusters for all validation prompts. This does
+not require any expensive gradient updates, and is a one-off cost: further routing can operate entirely on this
+vector, and is oblivious to any further changes in the LLM pool.
+6
+
+A natural choice of clustering algorithm in step (ii) is K-means [?], which returns a set of K centroids and an
+assignment map Φclust that assigns prompts to the cluster with the nearest centroid. For K = 1, the router
+devolves to the ZeroRouter from [?] (see Appendix D). Clearly, the practical utility of UniRoute depends on
+selection of K; empirically, UniRoute is reasonably robust to this parameter. An illustration of our proposal
+is shown in Figure 1.
+5.2
+
+From Fixed to Learned Cluster Assignment Maps
+
+The above cluster-based router does not leverage the labels in Str . We may exploit this information to
+further improve routing quality. Specifically, given the same clustering as above, we propose to learn a
+cluster assignment map Φclust (·; θ) ∈ [0, 1]K parameterised by θ, that can better map an input prompt to a
+distribution over clusters. Specifically, we parameterise Φclust,k (x; θ) ∝ exp θk⊤ φ(x) , for θ ∈ RK×DP and
+text embedding φ. Analogous to (12), we have:
+γclust (x, h; θ) = Φclust (x; θ)⊤ Ψclust (h),
+
+where Ψclust (h) denotes the per-cluster errors for the LM estimated from the validation set Sval , as in (13);
+note that this does not depend on θ. To pick θ, we minimize the log loss on the training set Str against the
+correctness labels for the training LMs Htr :
+X X 
+
+
+
+−
+1 y ̸= h(x) · log γclust (x, h; θ) + 1 y = h(x) · log (1 − γclust (x, h; θ)) .
+(x,y)∈Str h∈Htr
+
+5.3
+
+Excess Risk Bound
+
+We now present an excess risk bound for our cluster-based routing strategy. Suppose we represent the underlying
+PK
+data distribution over (x, y) by a mixture of K latent components: P(x, y) = k=1 πk · P(x, y | z = k),
+where z denotes a latent random variable that identifies the mixture component and πk = P(z = k). For
+a fixed k, we may denote the probability of incorrect predictions for h ∈ H conditioned on z = k by:
+.
+Ψ∗k (h) = Px,y|z=k [h(x) ̸= y] .Then, cluster-based routing seeks to mimic the following population rule:
+h
+i
+(n)
+(n)
+∗
+r̃∗ (x, Hte ) = argmin γclust
+(x, hte ) + λ · c(hte ) ;
+(14)
+n∈[N ]
+
+(n)
+∗
+γclust
+(x, hte ) =
+
+X
+
+k∈[K]
+
+(n)
+
+P(z = k|x) · Ψ∗k (hte ).
+(n)
+
+(n)
+
+Proposition 2. Let r∗ be as per (8). For any Hte = {hte }n∈[N ] ∈ H, hte ∈ Hte , and x ∈ X, let:
+h
+i
+(n) .
+(n)
+(n)
+∆k (x, hte ) = Py|x,z=k hte (x) ̸= y − Ψ∗k (hte ) .
+h
+i
+. P
+(n)
+Let R01 (r, Hte ) = n P hte (x) ̸= y ∧ r(x, Hte ) = m denote the 0-1 risk. Then under a regularity
+condition on P, the difference in 0-1 risk between r̃∗ and r∗ is bounded by:
+#
+"
+EHte [R01 (r̃∗ , Hte )] − EHte [R01 (r∗ , Hte )] ≤ EHte ,x
+
+max
+
+(n)
+hte ∈Hte ,k∈[K]
+
+(n)
+
+∆k (x, hte ) .
+
+This suggests that the quality gap between cluster-based routing in (14) and the optimal rule in (8) is bounded
+by the discrepancy between the per-cluster and per-prompt errors: i.e., the gap between the LLM’s error on a
+prompt versus the average constituent cluster error (see Appendix C.3 for proof).
+
+6
+
+Related Work
+
+Model routing. Model routing has emerged as a simple yet effective strategy to lower LLMs’ inference cost [??].
+Recent works have studied various strategies to learn a router, including training an explicit “meta-model”
+based on a neuronal network [????], k-nearest neighbours [????], matrix factorisation [???], and graph neural
+networks [?]. Works have also explored the role of supervision in training a router [??], and enhancing router
+robustness [???]. Typically, the router orchestrates amongst multiple independent LLMs, although it is also
+possible to route amongst implicit sub-models in a larger model, such as those defined by a MatFormer [??].
+7
+
+Routing approach
+
+Candidate
+LLMs
+
+Smoothie
+
+Any
+
+Cascading with
+token-level features
+
+2
+
+Summon the titans
+
+2
+
+RouteLLM
+
+2
+
+K-NN router
+
+Any
+
+GraphRouter
+
+Any
+
+Our proposal
+
+Any
+
+Unseen
+Works
+Adaptive
+models at
+without
+computation
+test time
+task labels
+
+Training signals
+Query embeddings. No label
+required.
+Pointwise evaluation.
+Annotations from a teacher
+model.
+Pairwise comparison
+metrics.
+Pointwise evaluation, query
+embeddings.
+Task information
+Pointwise evaluation, query
+clusters
+
+Reference
+
+✓
+
+✘
+
+✘
+
+?
+
+✓
+
+✓
+
+✘
+
+?
+
+✓
+
+✓
+
+✘
+
+?
+
+✓
+
+✓
+
+✘
+
+?
+
+✓
+
+✓
+
+△
+
+??
+
+✘
+
+✓
+
+✓
+
+?
+
+✓
+
+✓
+
+✓
+
+This work
+
+Table 1: A qualitative comparison of recently proposed model routing approaches. Adaptive computation
+refers to the ability to trade quality for a reduced inference cost. △: The K-NN approach considered in ?? is
+for a fixed pool of LLMs. However, the approach can be straightforwardly extended to support unseen models
+at test time (i.e., dynamic pool).
+
+Model cascading. Cascading is a closely related technique for orchestrating amongst multiple models, wherein
+one sequentially invokes each model in order of cost. One then uses statistics from the resulting model output
+(e.g., the confidence) to decide whether or not to proceed to the next costlier model. Cascading has a long
+history in computer vision applications [???????]. Recently, cascades have also been successfully proven in
+the case of LLMs [???????].
+Selective classification and learning to defer. The formal underpinnings of routing and cascading can be
+traced to three closely related literatures: learning to reject [???], selective classification [???], and learning to
+defer to an expert [??]. Following pioneering studies of ???, a series of works have studied the routing and
+cascading problem through these lenses [?????].
+Model fusion Model routing may be contrast to model fusion, where the primary goal is to leverage multiple
+models to improve quality, potentially at the expense of efficiency. This can involve invoking multiple models
+prior to generating an output [?????], or producing a single fused model [?].
+Mixture of experts (MoE). Classically, MoE models focused on learning parameters for independent models,
+along with a suitable routing rule [??]. These have proven an plausible alternative to model specialisation [??].
+Such models are typically of the same size; thus, cost considerations do not factor into the router design. More
+recently, MoEs have focussed on sub-models within a single larger model, e.g., a Transformer [??].
+Early-exiting. Early-exiting enables adaptive computation within a single neural model, by allowing computation
+to terminate at some intermediate layer [???]. Often, the termination decision is based on a simple model
+confidence (akin to simple model cascading), but learning approaches have also been considered [??].
+Speculative decoding. Speculative decoding is another technique that leverages two models to speed up
+inference, by using the smaller model to draft tokens and having the larger model verify them [?????????].
+Recent works have studied approaches to combine speculative decoding with early-exits [?] and cascades [?].
+
+7
+
+Experiments
+
+We demonstrate the effectiveness of UniRoute in the setting of observing new LLMs at test time on
+EmbedLLM [?], RouterBench [?], a Math+Code dataset from ? (containing a subset of Minerva Math and
+LiveCodeBench [??]), SPROUT o3-mini [?], and Chatbot Arena [?].
+7.1
+
+Experimental Setup
+
+We first describe the LLM pool construction. With EmbedLLM, RouterBench, and SPROUT o3-mini, we
+partition the set of LLMs into two disjoint sets: training models (Htr in §5) and testing models (Hte ). For
+8
+
+PP
+P Dataset
+MethodPPP
+P
+
+EmbedLLM
+
+RouterBench
+
+Math+Code
+
+SPROUT o3-mini
+
+Area (50%) ↑ Area ↑ QNC ↓ Area (50%) ↑ Area ↑ QNC ↓ Area (50%) ↑ Area ↑ QNC ↓ Area (50%) ↑ Area ↑
+
+QNC ↓
+
+ZeroRouter [?]
+K-NN ??
+UniRoute (K-Means)
+UniRoute (LearnedMap)
+
+.285 ∗
+.298 ∗
+.307 ∗
+.308
+
+.607 ∗ 87.5% ∗
+.636 ∗ 46.1% ∗
+.648 ∗ 33.9%
+.651 33.2%
+
+.320 ∗
+.328 ∗
+.332
+.331
+
+.689 ∗ 99.9%
+.707 ∗ 99.7%
+.712 99.4%
+.711 99.6%
+
+.193 ∗ .395 ∗ 82.8% ∗
+.237 ∗ .487 ∗ 25.7%
+.238 .490 25.7%
+—
+—
+—
+
+.404 ∗
+.418 ∗
+.421
+.420
+
+.820 ∗ 100.0% ∗
+.844 ∗ 29.6% ∗
+.850
+19.6%
+.846
+23.4%
+
+MLP (Clairvoyant)
+
+.314
+
+.664
+
+.339
+
+.723
+
+.242
+
+.427
+
+.859
+
+0.62
+
+Area
+
+Area
+
+0.59
+
+UniRoute (K-means)
+K-NN
+100 150 200 250 300 350 400 450 500
+
+Number of validation samples
+
+0.700
+0.695
+
+Math+Code
+
+0.490
+
+0.470
+
+Number of validation samples
+
+0.850
+
+0.835
+
+0.475
+
+100 150 200 250 300 350 400 450 500
+
+4.5%
+
+SPROUT o3-mini
+
+0.840
+
+0.480
+
+UniRoute (K-means)
+K-NN
+
+25.1%
+
+0.845
+
+0.485
+
+0.705
+
+0.61
+0.60
+
+RouterBench
+0.710
+
+.500
+
+Area
+
+EmbedLLM
+
+95.2%
+
+Area
+
+0.63
+
+26.9%
+
+UniRoute (K-means)
+K-NN
+100 150 200 250 300 350 400 450 500
+
+Number of validation samples
+
+0.830
+0.825
+
+UniRoute (K-means)
+K-NN
+100
+
+200
+
+300
+
+400
+
+Number of validation samples
+
+500
+
+Figure 2: Top: We report the area under the deferral curve (up to 50% and 100% cost), and the Quality-Neutral
+Cost (QNC), i.e., the minimum relative cost to achieve the same performance as the most accurate LLM. For
+Math+Code, we do not have training LLMs; so we do not report results for UniRoute (LearnedMap). ∗
+indicates the method is statistically significantly worse than UniRoute (LearnedMap) at significance level
+α = 0.01 (we compare against K-means for Math+Code). MLP (Clairvoyant) is an oracle that uses the test
+LLMs for training (provides a performance upper bound). Bottom: Areas under the deferral curve (↑) with
+96% CI on unseen test LLMs for varying number of validation samples. UniRoute (K-means) consistently
+outperforms K-NN for small sample sizes.
+EmbedLLM (112 LLMs) and SPROUT o3-mini (15 LLMs), we use a random subset of 2/3 for training and 1/3
+for testing. For RouterBench (11 LLMs in total), we use a random 50% for training and the rest for testing. For
+Math+Code, we use all 4 LLMs for testing; consequently, the training data is unlabeled.
+For each of the 400 independent trials, we randomly split examples into 60%/10%/30% for training, validation,
+and testing (for RouterBench, and SPROUT o3-mini we use 1% for validation). The training portion is for
+training a router, and only has correctness labels of training models. The validation split is the small dataset
+used to represent each test-time LLM as a feature vector (see §5.1). All baselines are evaluated on the test
+examples and only on the test LLMs. We use Gecko 1B [?] to produce a 768-dimensional prompt embedding
+where required.
+Per-example metrics. All datasets considered in the main text use binary accuracy as the the evaluation metric.
+Thus, all methods rely on the deferral rule described in (8).
+Baselines. We reiterate that, with the notable exception of K-NN [?], most existing routers in the literature
+are inadmissible in a settingwith a dynamic pool of LLMs. This is true of the multi-layer perceptron (MLP)
+[?], matrix factorization [??] and BERT [??] routers, which have a fixed number of outputs, one per training
+LLM, and are thus inherently tied to those LLMs. Nonetheless, we include some of these methods as an oracle
+(by assuming the set of LLMs is fully known) to estimate an upper bound on router performance on unseen
+LLMs. The baselines we consider are:
+• ZeroRouter ?. A random router that randomizes between two LLMs, where the LLMs and mixing
+coefficients are chosen to maximize the expected quality on the validation sample, while satisfying the
+budget constraint (details in Appendix D).
+• K-NN [??]. A special case of UniRoute (see §4.2) that for each prompt, looks up the K nearest prompts
+in the validation set in the space of prompt embeddings, computes γ for each test LLM using (5) (with the
+0-1 loss), and routes via (2).
+• MLP (Clairvoyant upper bound). An MLP router with one output for each train and test LLM, trained on
+prompt embeddings to estimate γ. For training, we use the combined training and validation set, annotated
+with correctness labels from both the train and test LLMs. This oracle baseline provides an estimate of the
+performance achievable when all LLMs are observed.
+We compare them to our UniRoute cluster-based routing method using both (i) unsupervised K-means for
+clustering (§5.1), and (ii) the supervised learned cluster assignment map (§5.2). In Section F, we also include
+as a baseline Clairvoyant version of the matrix factorization router [??].
+Evaluation. We evaluate each method with a deferral
+curve (Appendix E.2; [???]), which plots the trade-off of
+average quality against cost. The trade-off is realized by
+
+0.70
+
+Accuracy
+
+0.65
+9
+
+0.60
+0.55
+
+K-NN
+MLP (Clairvoyant)
+MatFac (Clairvoyant)
+UniRoute (K-Means)
+
+varying λH in the routing rule in (7). For EmbedLLM,
+we use the number of parameters of the LLM as the cost
+of processing one prompt. This cost is a proxy for the
+amount of computation required to call each LLM. For
+RouterBench and SPROUT o3-mini, we plot LLMs’ API
+calling costs (in USD) as available in the dataset.
+Hyper-parameter tuning. We apply the following procedure to pick K for K-NN, K-means, and the Learned
+cluster map: for each parameter, we represent the training
+LLM using correctness labels in the training set, evaluate
+the routing rule for the training LLMs on the validation
+set, and measure the area under the deferral curve. This
+evaluation metric can be seen as the average improvement
+in quality per unit cost (analogous to the AIQ metric used in ?). The parameter with the maximum area is then
+chosen. See Appendix F.1 for details.
+7.2
+
+Experimental Results
+
+We present deferral curves for different methods on EmbedLLM in Figure 3, and on other datasets in Appendix
+F.2. Each isolated point × represents the cost and average test accuracy of one testing LLM. In the table, we
+report three evaluation metrics for each method: (i) the area under the deferral curve (Area); (ii) the area
+up to 50% cost; and (iii) the quality-neutral cost (QNC) or the minimum relative cost needed to achieve the
+same performance as the most accurate testing LLM. Note that the QNC is analogous to the call-performance
+threshold reported in ?. The table in Figure 2 summarizes these metrics for all four datasets.
+UniRoute enables generalisation under dynamic LLM pools. UniRoute yields competitive quality-cost
+trade-offs, with the gains over K-NN being statistically significant. In particular, on EmbedLLM – featuring
+> 30 unseen LLMs – we provide compelling gains over K-NN on all metrics. Further, on all four datasets,
+we consistently outperform ZeroRouter, which was noted as a strong baseline in ?. Appendix F.3 further shows
+UniRoute is effective when the LLM representations are constructed from Chatbot Arena, and evaluated on
+EmbedLLM.
+UniRoute is effective even with a small validation sample. We show in Figure 2 (bottom), that our proposal
+is often significantly better than K-NN across a range of validation sample sizes. One potential reason for this
+is the requirement in K-NN that only the retrieved neighbors from the validation set can be used to estimate test
+models’ performance. It is hence unable to exploit the training set in any way. In contrast, our methods are able
+to exploit the training data either in an unsupervised (K-means) or supervised (Learned cluster map) manner.
+UniRoute is robust to choice of clusters K. Section F shows that in general, UniRoute is effective for
+several different K values, and our hyperparameter selector picks an effective K.
+UniRoute maintains generalisation under static LLM pools. While the dynamic pool setting is the focal
+point of our work, we show in Appendix F.4 that even in the static LLM pool setting, UniRoute typically
+performs comparable to most baselines.
+Qualitative analysis of Ψ(h) embeddings. Appendix F.5 presents further qualitative analysis of the LLM
+embeddings deriving from the prediction error vector representation. These show that a largely intuitive
+grouping of “similar” LLMs (e.g., coding-specialists) in the embedding space.
+
+8
+
+Conclusion and Future Work
+
+We present principled strategies for routing amongst multiple unseen test-time LLMs, by leveraging a prediction
+error vector LLM representation. An interesting future direction is to enhance routing robustness to prompt
+distribution shifts, such as by allowing the set of representative prompts Sval to dynamically vary. Such a
+routing system will further reduce the need for frequent router re-training.
+
+References
+
+10
+
+Appendix
+Table of Contents
+A Limitations
+
+11
+
+B Societal Impact
+
+11
+
+C Proofs of Results in Main Body
+C.1 Intermediate Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+C.2 Proof of Proposition 1 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+C.3 Proof of Proposition 2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+12
+12
+14
+15
+
+D Zero Routing
+D.1 Special Case: Optimal Cluster Routing Rule for K = 1
+
+17
+. . . . . . . . . . . . . . . . . . . 17
+
+E Experimental Setup
+E.1 Splitting Data and LLMs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+E.2 Evaluation: Deferral Curve . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+E.3 Implementation Details of UniRoute (LearnedMap) . . . . . . . . . . . . . . . . . . . . .
+E.4 Router Cost . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+18
+18
+18
+18
+20
+
+F Additional Experimental Results
+F.1 Hyper-parameter Choices & Statistical Significance . . . . . . . . . . . . . . . . . . . . . .
+F.2 Deferral Curves and Additional Comparisons . . . . . . . . . . . . . . . . . . . . . . . . .
+F.3 Train on Chatbot Arena and Test on EmbedLLM . . . . . . . . . . . . . . . . . . . . . . .
+F.4 Static LLM Pool Setting . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+F.5 Visualisation of LLM Embeddings . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+20
+20
+21
+23
+23
+24
+
+A Limitations
+Our work has some limitations that would be worthy subjects for future research. First, in the fully static LLM
+pool setting, our proposed method is not guaranteed to recover the performance of existing methods such as
+the linear router (3) (owing to a dependence on the validation sample, which may be a subset of the training
+data); designing hybrid static-dynamic routers would be of interest.
+Second, while we proposed certain natural cluster-based routers, there could be other instances of UniRoute
+that are also worth exploring. A more systematic study of this design space would be worthwhile.
+
+B Societal Impact
+Our primary contribution is a mathematical formalism for routing amongst multiple dynamic LLMs, with
+concrete instantiations based on prompt clustering. These are coupled with empirical results on public
+benchmarks, typically involving LLM accuracy as the primary metric.
+We do not foresee immediate negative societal impact from our mathematical framework. While well-studied
+in the literature, the underlying routing problem itself could lend itself to some undesirable outcomes; e.g., a
+router may overly favour models that produce outputs that are systematically biased on certain data sub-groups.
+We believe that our framework is amenable to such constraints, and believe that accounting for these is a worthy
+subject of future research.
+
+11
+
+C Proofs of Results in Main Body
+In what follows, we use rH (x) and r(x, H) interchangeably. As a shorthand, we define
+
+
+X
+.
+S(r) = E(x,y,H) 
+1(r(x, H) = m) · ℓ(x, y, h(m) ) ,
+m∈[|H|]
+
+.
+
+
+
+C(r) = E(x,H) 
+
+X
+
+m∈[|H|]
+
+
+
+1(r(x, H) = m) · c(h(m) ) .
+
+The constrained optimization problem in (6) is equivalent to
+
+min S(r) subject to C(r) ≤ B.
+
+(15)
+
+r∈R
+
+It will be useful to consider the following related unconstrained optimization objective:
+L(r, λ) = S(r) + λ · C(r).
+
+(16)
+
+For any λ ≥ 0, let rλ∗ be the minimiser of L(r, λ).
+C.1
+
+Intermediate Results
+
+We first provide results that will be useful for providing the main claims in §C.2 and §C.3.
+Lemma 3. Given λ ≥ 0, the optimal solution rλ∗ ∈ arg minr L(r, λ) to the unconstrained problem in (16) is
+h
+i
+rλ∗ (x, H) ∈ argminm∈[|H|] Ey|x ℓ(x, y, h(m) ) + λ · c(h(m) ).
+Proof. Starting with the definition of L,
+L(r, λ) = S(r) + λ · C(r)
+
+
+
+
+X
+X
+= E(x,y,H) 
+1(r(x, H) = m) · ℓ(x, y, h(m) ) + λ · E(x,H) 
+1(r(x, H) = m) · c(h(m) )
+m∈[|H|]
+
+
+
+(a)
+
+= EH Ex Ey|x 
+
+= EH E x
+
+ X
+
+m∈[|H|]
+
+m∈[|H|]
+
+|
+
+X
+
+m∈[|H|]
+
+n
+
+1(r(x, H) = m) · ℓ(x, y, h(m) ) + λ · c(h(m) )
+
+o
+
+
+
+x
+
+n
+i
+o
+h
+1(r(x, H) = m) · Ey|x ℓ(x, y, h(m) ) x + λ · c(h(m) ) ,
+{z
+
+LH,x
+
+}
+
+where (a) uses the fact that the draw of H is independent of the draw of (x, y). The last line makes it clear
+that for any fixed H ∼ H, and any fixed x, to minimize the overall loss, the router ought to route to the model
+that has the lowest cost-adjusted loss LH,x . Thus,
+h
+i
+r∗ (x, H) ∈ argminm∈[|H|] Ey|x ℓ(x, y, h(m) ) + λ · c(h(m) ).
+Lemma 4. For any λ ≥ 0, let rλ∗ be the minimiser of L(r, λ). Then, for any r, if C(rλ∗ ) ≥ C(r), then
+S(rλ∗ ) ≤ S(r).
+Proof. Since rλ∗ minimises L(r, λ), for any r, we have L(rλ∗ , λ) ≤ L(r, λ). That is,
+S(rλ∗ ) + λ · C(rλ∗ ) ≤ S(r) + λ · C(r)
+⇐⇒ S(rλ∗ ) ≤ S(r) + λ · (C(r) − C(rλ∗ )) .
+
+Since λ ≥ 0, it follows that S(rλ∗ ) ≤ S(r) by the assumption that C(r) − C(rλ∗ ) ≤ 0.
+12
+
+(17)
+
+Lemma 5. Let rλ∗ be the minimiser of L(r, λ). For λ, λ′ ≥ 0, λ ≥ λ′ if and only if C(rλ∗ ) ≤ C(rλ∗ ′ ). In other
+words, λ 7→ C(rλ∗ ) is a non-increasing function. Hence, supλ≥0 C(rλ∗ ) = C(r0∗ ).
+Proof. Since rλ∗ ∈ arg minr L(r, λ), by definition, we have
+
+S(rλ∗ ) + λ · C(rλ∗ ) ≤ S(r) + λ · C(r),
+
+for any r, including rλ∗ ′ . This means
+
+S(rλ∗ ) + λ · C(rλ∗ ) ≤ S(rλ∗ ′ ) + λ · C(rλ∗ ′ ).
+In a symmetric manner,
+S(rλ∗ ′ ) + λ′ · C(rλ∗ ′ ) ≤ S(rλ∗ ) + λ′ · C(rλ∗ ).
+Adding the above two inequalities, we have
+S(rλ∗ ) + λ · C(rλ∗ ) + S(rλ∗ ′ ) + λ′ · C(rλ∗ ′ ) ≤ S(rλ∗ ′ ) + λ · C(rλ∗ ′ ) + S(rλ∗ ) + λ′ · C(rλ∗ )
+=⇒ λ · C(rλ∗ ) + λ′ · C(rλ∗ ′ ) ≤ λ · C(rλ∗ ′ ) + λ′ · C(rλ∗ )
+
+=⇒ λ · (C(rλ∗ ) − C(rλ∗ ′ )) + λ′ · (C(rλ∗ ′ ) − C(rλ∗ )) ≤ 0
+
+=⇒ (λ − λ′ ) (C(rλ∗ ) − C(rλ∗ ′ )) ≤ 0.
+
+The last inequality above implies that λ ≥ λ′ if and only if C(rλ∗ ) ≤ C(rλ∗ ′ ).
+
+Lemma 6. Let λ, λ′ ≥ 0 such that λ ≤ λ′ . Given x ∈ X and H ∈ H, if rλ∗ (x, H) ̸= rλ∗ ′ (x, H), then there
+exists a model pair h(m) , h(k) ∈ H with h(m) ̸= h(k) such that
+
+
+
+
+Ey|x ℓ(x, y, h(k) ) − Ey|x ℓ(x, y, h(m) )
+λ≤
+≤ λ′ .
+c(h(m) ) − c(h(k) )
+
+
+
+.
+Proof. Given H, define Am (λ, x) = Ey|x ℓ(x, y, h(m) ) + λ · c(h(m) ). Recall that
+rλ∗ (x, H) = argminm∈[|H|] Am (λ, x).
+
+Observe that given (x, H), for each m ∈ [|H|], Am (λ, x) is a one-dimensional affine function of λ. So,
+rλ∗ (x, H) is the index of the affine function that gives the lowest value when evaluated at λ. Fix x. Since
+λ 7→ Am (λ, x) is continuous, for any m, if rλ∗ (x, H) ̸= rλ∗ ′ (x, H), it must mean that the index of the lowest
+affine function changes as we move from λ to λ′ . This implies that there is an index pair m and k (with m ̸= k)
+for which λ 7→ Am (λ, x) and λ 7→ Ak (λ, x) cross, as we move from λ to λ′ . The cross point is precisely at λ̄
+such that
+Am (λ̄, x) = Ak (λ̄, x)
+h
+i
+h
+i
+⇐⇒ Ey|x ℓ(x, y, h(m) ) + λ̄ · c(h(m) ) = Ey|x ℓ(x, y, h(k) ) + λ̄ · c(h(k) )
+
+
+
+
+Ey|x ℓ(x, y, h(k) ) − Ey|x ℓ(x, y, h(m) )
+.
+⇐⇒ λ̄ =
+c(h(m) ) − c(h(k) )
+Lemma 7. Assume x is a continuous random vector. Then, λ 7→ C(rλ∗ ) is continuous.
+∗
+Proof. We will show that for any ∆λ ∈ R, lim∆λ→0 |C(rλ+∆λ
+) − C(rλ∗ )| = 0. Observe that
+h  ∗
+i
+h  ∗
+i
+∗
+|C(rλ+∆λ
+) − C(rλ∗ )| = E(x,H) c h(rλ+∆λ (x,H)) − E(x,H) c h(rλ (x,H))
+ ∗
+
+ ∗
+
+(a)
+≤ E(x,H) c h(rλ+∆λ (x,H)) − c h(rλ (x,H))
+Z
+ ∗
+
+ ∗
+
+.
+c h(rλ+∆λ (x,H)) − c h(rλ (x,H)) p(x) dx = ♠,
+= EH
+x∈X
+
+∗
+where we applied Jensen’s inequality at (a). Define S∆λ to be the set of input points for which rλ∗ and rλ+∆λ
+make different decisions. Precisely,
+. 
+∗
+S∆λ (H) = x | rλ+∆λ
+(x, H) ̸= rλ∗ (x, H) .
+
+13
+
+.
+
+Let cmax = maxh∈Hall c(h) i.e., the maximum per-query cost of any LLM in our finite universe. The quantity
+♠ can be bounded further with
+Z
+ ∗
+
+ ∗
+
+c h(rλ+∆λ (x,H)) − c h(rλ (x,H)) p(x) dx
+♠ = EH
+x∈S∆λ (H)
+Z
+≤ 2cmax EH
+p(x) dx
+x∈S∆λ (H)
+
+= 2cmax EH P(S∆λ (H)).
+The proof now amounts to showing that lim∆λ→0 EH P(S∆λ (H)) = 0.
+h
+i
+Ey|x ℓ(x, y, h(k) ) −Ey|x [ℓ(x,y,h(m) )]
+
+.
+
+Define a shorthand λm,k (x, H) =
+where h(m) , h(k) ∈ H. We start by
+c(h(m) )−c(h(k) )
+expanding S∆λ (H) to have
+
+∗
+S∆λ (H) = x | rλ+∆λ
+(x, H) ̸= rλ∗ (x, H)
+(a)
+
+⊆ {x | ∃k ̸= m : λm,k (x, H) ∈ [λ, λ + ∆λ]}
+[
+=
+{x | λm,k (x, H) ∈ [λ, λ + ∆λ]}
+m̸=k
+
+.
+
+= F∆λ (H),
+where at (a) the subset relationship is due to Lemma 6. Since S∆λ (H) ⊆ F∆λ (H), we have
+♠ ≤ 2cmax EH P(F∆λ (H))
+X
+(a)
+≤ 2cmax EH
+P ({x | λm,k (x, H) ∈ [λ, λ + ∆λ]})
+m̸=k
+
+= 2cmax EH
+
+X
+
+m̸=k
+
+P (λm,k (x, H) ∈ [λ, λ + ∆λ]) ,
+
+where at (a) we use the union bound. Note that there are a finite number of summands because Hall is
+finite. Since x is a continuous random variable, for any H, λm,k (x, H) is also a continuous random variable.
+As ∆λ → 0, we have P (λm,k (x, H) ∈ [λ, λ + ∆λ]) → 0 for any m, k. This means ♠ → 0 and thus
+∗
+lim∆λ→0 |C(rλ+∆λ
+) − C(rλ∗ )| = 0.
+Proposition 8. Suppose P(y|x) and P(x) are continuous in x. Let r0∗ ∈ arg minr L(r, 0) where L(r, λ) =
+S(r) + λ · C(r) (see also (16)). For any budget B ∈ (0, C(r0∗ )] in the constrained problem in (6) (or
+equivalently in (15)), there exists λH ≥ 0 such that the minimiser of L(r, λH ) also minimises (6).
+Proof. Since P(y|x) and P(x) are continuous in x, and λ 7→ C(rλ∗ ) is continuous (by Lemma 7), there exists
+λB ≥ 0 such that C(rλ∗ B ) = B. Applying Lemma 4 with this choice of λB implies that
+
+S(rλ∗ B ) ≤ S(r),
+for any r such that C(r) ≤ C(rλ∗ B ) = B. This proves that rλ∗ B is the minimiser of (6). Setting λH = λB
+completes the proof.
+C.2
+
+Proof of Proposition 1
+
+Proposition (Restated). Assume that x ∼ P and η(x) = P(y | x) are continuous random variables. Then, for
+any LLM meta-distribution H, and budget B ∈ (0, C(r0∗ )] (see §C for the definitions of C and r0 ), there exists
+a subset-dependent λH ≥ 0 such that the optimal dynamic router r∗ for the constrained optimization in (6) is
+h
+h
+i
+i
+r∗ (x, H) = argmin Ey|x ℓ(x, y, h(m) ) + λH · c(h(m) ) .
+m∈[|H|]
+
+Note that the continuity assumption on the data distribution applies to the setting where x can be represented
+via a fixed-length sentence embedding (i.e., a Euclidean vector). This is the primary setting of this work.
+Proof. Under the continuity assumption on P, by Proposition 8, there exists λH ) ≥ 0 such that the minimiser
+of the unconstrained objective L(r, λH ) (see (16)) also minimises (6). By Lemma 3, r∗ is established.
+
+14
+
+C.3
+
+Proof of Proposition 2
+
+Proposition (Restated). For a set of LLMs H, let r∗ denote the Bayes-optimal routing rule in Proposition 1.
+For any x ∈ X and h(m) ∈ H, let:
+∆k (x, h(m) ) = Py|x,z=k [h(x) ̸= y] − Ψ∗k (h(m) ) .
+h
+i
+. P
+(n)
+Let R01 (r, Hte ) = n P hte (x) ̸= y ∧ r(x, Hte ) = m denote the 0-1 risk. Then under the regularity
+condition on P in Proposition 1, the difference in 0-1 risk between r̃∗ and r∗ can be bounded as:
+
+
+(n)
+∗
+∗
+EHte [R01 (r̃ , Hte )] ≤ EHte [R01 (r , Hte )] + E(xHte )
+max
+∆k (x, hte ) .
+m∈[|Hte |],k∈[K]
+
+(m)
+
+For simplicity, we will refer to Hte simply by H, and hte by h(m) . We define a proxy risk objective:
+
+
+X
+R̃01 (r, H) = Ex,z 
+Ψ∗z (h(m) ) · 1 [r(x, H) = m] ,
+
+(18)
+
+m∈[|H|]
+
+where the expectation is over the joint distribution over (x, z) (and not (x, y)).
+
+Consider solving a variant of the constrained optimization problem in (6) where the original risk objective is
+replaced with the proxy risk in (18):
+i
+h
+min EH R̃01 (r, H)
+r
+
+
+X
+s.t. E(x,y,H) 
+c(m) · 1[r(x, H) = m] ≤ B.
+(19)
+m∈[|H|]
+
+We can then show that the optimal solution to above proxy constrained optimization problem admits the same
+form as the cluster-based routing rule r̃∗ in (14):
+Lemma C.1. Under the assumption on P in Proposition 2, for any set of models H, the minimizer of the proxy
+constrained optimization problem in (19) is given by:
+X
+r̃∗ (x, H) = argmin
+P(z = k|x) · Ψ∗k (h(m) ) + λ · c(m) ,
+m∈[|H|]
+
+k∈[K]
+
+for some λ ≥ 0.
+
+We will also find it useful to bound the difference between the original risk R01 (r, H) and the proxy risk in
+(18):
+Lemma C.2. For any routing rule r and fixed H,
+
+
+R01 (r, H) − R̃01 (r, H) ≤ Ex
+max
+∆k (x, h(m) ) .
+m∈[|H|],k∈[K]
+
+We are now ready to prove Proposition 2:
+Proof. The excess risk we wish to bound is given by:
+EH [R01 (r̃∗ , H) − R01 (r∗ , H)]
+oi
+hn
+o
+n
+= EH R01 (r̃∗ , H) − R̃01 (r̃∗ , H) + R̃01 (r̃∗ , H) − R̃01 (r∗ , H) + R̃01 (r∗ , H) − R01 (r∗ , H)
+
+
+i
+h
+i
+h
+(a)
+∗
+∗
+(m)
+≤ EH R̃01 (r̃ , H) − EH R̃01 (r , H) + 2 · E(x,H)
+max
+∆k (x, h )
+m∈[|H|],k∈[K]
+
+(b)
+
+≤ 0 + 2 · E(x,H)
+
+
+
+max
+
+m∈[|H|],k∈[K]
+
+
+
+∆k (x, h(m) ) ,
+
+as desired. To derive (a), we apply Lemma C.2 to
+h bound thei first and third terms. To derive (b), we use the fact
+∗
+that r̃ is the minimizer of the proxy-risk EH R̃01 (·, H) subject to the budget constraint in (19); since r∗
+also satisfies the same budget constraint, it has an equal or higher expected risk than r̃∗ .
+15
+
+We now prove Lemmas C.1 and C.2.
+Proof of Lemma C.1. Under the assumption on P, the constrained problem in (19) is equivalent to minimizing
+the following Lagrangian objective for some Lagrange multiplier λ [?]:
+
+
+
+
+X
+X
+L = E(x,z,H) 
+Ψ∗z (h(m) ) · 1 [r(x, H) = m] + λ · E(x,y,H) 
+1(r(x, H) = m) · c(m) 
+m∈[|H|]
+
+
+
+(a)
+
+= EH Ex Ez|x 
+
+= EH E x
+
+m∈[|H|]
+
+X
+
+m∈[|H|]
+
+ X
+
+m∈[|H|]
+
+
+
+n
+o
+1(r(x, H) = m) · Ψ∗z (h(m) ) + λ · c(m) 
+
+1(r(x, H) = m) ·
+
+|
+
+n X
+
+k∈[K]
+
+P(z = k|x) · Ψ∗k (h(m) ) + λ · c(m)
+
+{z
+
+o
+
+,
+
+}
+
+LH,x
+
+where (a) uses the fact that the draw of H is independent of the draw of (x, y). The last line makes it clear that
+for any fixed H and any fixed x, to minimize the overall loss, the router ought to route to the model that has the
+lowest cost-adjusted loss LH,x . Thus,
+X
+r̃∗ (x, H) = argmin
+P(z = k|x) · Ψ∗k (h(m) ) + λ · c(m) .
+m∈[|H|]
+
+k∈[K]
+
+Proof of Lemma C.2. Expanding the original risk, we have:
+
+
+h
+i
+X
+R01 (r, H) = E(x,y) 
+1 h(m) (x) ̸= y · 1 [r(x, H) = m]
+m∈[|H|]
+
+= Ex
+
+ X
+
+m∈[|H|]
+
+
+
+= Ex 
+
+
+= Ex 
+
+X
+
+m∈[|H|]
+
+X
+
+h h
+i
+i
+Ey|x 1 h(m) (x) ̸= y · 1 [r(x, H) = m]
+h
+
+
+
+i
+
+Py|x h(m) (x) ̸= y · 1 [r(x, H) = m]
+X
+
+m∈[|H|] k∈[K]
+
+h
+
+
+
+i
+
+πk · Py|x,z=k h(m) (x) ̸= y · 1 [r(x, H) = m] .
+
+Recall that:
+h
+i
+∆k (x, h(m) ) = Py | x,z=k h(m) (x) ̸= y − Ψ∗k (h(m) )
+h
+i
+h
+i
+= Py | x,z=k h(m) (x) ̸= y − Px′ ,y′ | z=k h(m) (x′ ) ̸= y ′ .
+We may next bound (20) in terms of ∆m (x, h(m) ):
+R01 (r, H)
+
+X
+≤ Ex 
+
+X
+
+m∈[|H|] k∈[K]
+
+
+
+= Ex 
+
+X
+
+k∈[K]
+
+πk ·
+
+
+
+h
+
+i
+
+
+
+
+
+πk · Px′ ,y′ | z=k h(m) (x′ ) ̸= y ′ + ∆k (x, h(m) ) · 1 [r(x, H) = m]
+
+X
+
+m∈[|H|]
+
+h
+
+i
+
+
+
+Px′ ,y′ |z=k h(m) (x′ ) ̸= y ′ · 1 [r(x, H) = m]
+16
+
+(20)
+
+
+
+(a)
+
+
+
+≤ Ex 
+
+(b)
+
+
+
+≤ Ex 
+
+X
+
+k∈[K]
+
+X
+
+k∈[K]
+
+
+
+= E(x,z) 
+
+πk ·
+πk ·
+
+X
+
+m∈[|H|]
+
++ Ex 
+
+X
+
+k∈[K]
+
+πk ·
+
+X
+
+m∈[|H|]
+
+h
+
+i
+
+h
+
+i
+
+P
+
+x′ ,y ′ |z=k
+
+m∈[|H|]
+
+= R̃01 (r, H) + Ex
+
+∆k (x, h(m) ) · 1 [r(x, H) = m]
+
+
+
+
+h
+
+(m)
+
+′
+
+(x ) ̸= y
+
+
+′
+
+
+
+· 1 [r(x, H) = m] + Ex
+
+Ψ∗z (h(m) ) · 1 [r(x, H) = m] + Ex
+
+
+
+
+Px′ ,y′ |z=k h(m) (x′ ) ̸= y ′ · 1 [r(x, H) = m] + Ex 
+
+m∈[|H|]
+
+X
+
+X
+
+max
+
+m∈[|H|],k∈[K]
+
+where (a) uses the fact that
+
+P
+
+
+
+max
+
+m∈[|H|],k∈[K]
+
+
+
+X
+
+k∈[K]
+
+πk · max ∆k (x, h(m) )
+m∈[|H|]
+
+max
+
+m∈[|H|],k∈[K]
+
+∆k (x, h(m) )
+
+
+
+(m)
+
+∆k (x, h
+
+
+
+
+
+∆k (x, h(m) ) .
+
+m 1 [r(x, H) = m] = 1 and (b) follows from the fact that
+
+One can similarly show that:
+
+R01 (r, H) ≥ R̃01 (r, H) − Ex
+
+
+
+max
+
+m∈[|H|],k∈[K]
+
+(m)
+
+∆k (x, h
+
+P
+
+k πk = 1.
+
+
+
+) ,
+
+which completes the proof.
+
+D Zero Routing
+An elementary approach to multi-model routing is to identify the points on the non-decreasing convex hull
+of the set of cost-risk pairs {(c(m) , R(h(m) ) : m ∈ [M ]}, and to route amongst the corresponding LLMs [?].
+Specifically, given a budget B ∈ (c(1) , c(M ) ), we may pick the two nearest costs c(m1 ) ≤ B < c(m2 ) from the
+c(m2 ) −B
+non-decreasing convex hull, and route a query to LLM h(m1 ) with probability c(m
+and to h(m2 ) with
+2 ) −c(m1 )
+(m1 )
+
+B−c
+probability c(m
+.
+2 ) −c(m1 )
+
+This approach can be seen as a random router that randomizes between two LLMs, where the LLMs and
+mixing coefficients are chosen to maximize the expected quality on the validation sample, while satisfying the
+budget constraint. Despite its simplicity (i.e., the routing decision being agnostic to the input), this approach
+was noted as a strong baseline in ?.
+D.1
+
+Special Case: Optimal Cluster Routing Rule for K = 1
+
+When the number of clusters K = 1, the routing rule in (9) returns the same LLM for all queries x, and is
+given by:
+
+(n)
+(n) 
+r(x, Hte ) = argmin Ψ(hte ) + λ · c(hte ) ,
+(21)
+n∈[N ]
+
+P
+.
+(n)
+(n)
+where Ψ(hte ) = N1val (x,y)∈Sval 1[hte (x) ̸= y]. This rule is closely aligned with the Pareto-random
+
+router.
+Proposition 9. For any λ ∈ R≥0 , the routing rule in (21) returns an LLM on the non-decreasing convex hull of
+P
+(n)
+(n)
+(n)
+(n)
+the set of cost-risk pairs {(c(hte ), r01 (hte ) : n ∈ [N ]}, where r01 (hte ) = N1val (x,y)∈Sval 1[hte (x) ̸= y].
+(m)
+
+Proof. Suppose there exists a λ1 ∈ R≥0 and m1 ∈ argminm Ψ(hte )+λ1 ·c(m) such that (c(m1 ) , r01 (h(m1 ) ))
+is not on the non-decreasing convex hull. Then there exists h(m2 ) ∈ H such that either c(m2 ) < c(m1 ) and
+(m )
+r01 (h(m2 ) ) ≤ r01 (h(m1 ) ), or c(m2 ) ≤ c(m1 ) and r01 (h(m2 ) ) < r01 (h(m1 ) ). In either case, Ψ(hte 2 ) + λ1 ·
+(m )
+(m )
+(m )
+c(m2 ) = r01 (hte 2 ) + λ1 · c(m2 ) < r01 (hte 1 ) + λ1 · c(m1 ) = Ψ(hte 1 ) + λ1 · c(m1 ) , which contradicts the
+(m)
+fact that m1 ∈ argminm [Ψ(hte ) + λ1 · c(m) ].
+17
+
+)
+
+
+
+E Experimental Setup
+We provide more details on the experiments discussed in Section 7.
+E.1
+
+Splitting Data and LLMs
+
+In the experiment on each of the four datasets (EmbedLLM [?], MixInstruct [?], RouterBench [?]), and
+Math+Code dataset ?), we split the data into three disjoint portions: train, validation, and test. The set of all
+LLMs available in each dataset is also split into two disjoint sets: training models and testing models. The
+relationship of data splits and model splits is summarized in the following table.
+HH
+
+Data split
+HH
+Model splitHH
+H
+Training models
+Testing models
+
+Train
+
+Validation
+
+Test
+
+✓
+✗
+
+✓
+✓
+
+✗
+✓
+
+• Training set. The training examples are meant for router training. Only information of the training
+models (not testing models) is available in this data portion. The only exceptions are the clairvoyant
+oracle baselines which are allowed access to correctness labels of testing models on training examples.
+In other words, unlike other baselines, these oracle methods observe all models during training,
+and are trained on both training and validation portions. These baselines are meant to establish
+performance achievable if a router has access to all models.
+• Validation set. The validation examples are meant to be used to represent new LLMs. For instance,
+for our proposed UniRoute (K-Means) approach, the validation set is used to compute per-cluster
+performance metrics of each testing LLM observed at test time, to represent it as a feature vector.
+• Test set. The test examples are only used for evaluating routing methods.
+Testing models represent new models that arrive at deployment time, and are not available for training (except
+to the clairvoyant fixed-pool router baseline). Training models are meant for router training. For instance, our
+UniRoute (K-Means) approach learns to route among the training models, and is tested on the test set to route
+among the testing models.
+For the Math+Code dataset alone (in Figure 2), we have no training LLMs; so the training sample is unlabeled.
+E.2
+
+Evaluation: Deferral Curve
+
+Routing performance may be assessed via a deferral curve [???] C = {(B, R(hRM (·, rB )) : B ∈ [c(1) , c(M ) ]},
+tracing the tradeoff between the cost budget B and loss of the resulting routed model. Specifically, one varies
+the cost budget B ∈ [c(1) , c(M ) ]; computes a router rB (·) for this budget; and plots the resulting expected loss
+R(hRM (·, rB )). We may also use a quality metric (e.g., accuracy) in place of the loss to capture quality-cost
+trade-offs.
+E.3
+
+Implementation Details of UniRoute (LearnedMap)
+
+In this section, we give details on the architecture and training of our proposed UniRoute (LearnedMap).
+Architecture Recall from Section 5.2 that the LearnedMap attempts to learn x 7→ Φclust (x; θ) parameterised
+by θ. This is a function that maps an input prompt x to a probability vector Φclust (x; θ) ∈ ∆K where ∆K
+denotes the K-dimensional probability simplex. In experiments, Φclust (·; θ) is defined by an MLP with two
+hidden layers:
+.
+
+Φclust (x; θ) = (Softmax ◦ FC(M ) ◦ H′ ◦ H ◦ BN ◦ φ) (x),
+.
+H = [ReLU ◦ BN ◦ FC(128)] ,
+where:
+• ◦ denotes function composition,
+18
+
+(22)
+(23)
+
+• H and H′ denote the two, separate (i.e., no parameter sharing) hidden layers of the same architecture
+as described in (23),
+• FC(z) denotes a fully connected layer with z ∈ N outputs,
+.
+• ReLU denotes the rectified linear unit i.e., ReLU(a) = max(0, a),
+• Softmax denotes a softmax layer,
+• BN denotes the batch normalization layer, and
+• φ denotes a frozen text embedding.
+Recall from the experiments in Section 7 that we use Gecko ? for the text embedding φ.
+Training We use Keras for implementing (22). In all experiments on EmbedLLM, MixInstruct, and
+RouterBench, the Learned Cluster Map is trained for only 5 epochs using Adam as the optimization algorithm.
+We observe that training for too long can lead to overfitting. Training batch size is set to 64, and the learning
+rate is 0.005. Since φ is frozen, training Φclust (·; θ) amounts to training the MLP with two hidden layers. It is
+sufficient to use CPUs for training. For one trial, training takes only a few minutes to complete.
+EmbedLLM
+
+MixInstruct
+
+0.59
+
+0.58
+
+0.57
+Area under the deferral curve
+
+0.56
+0
+
+50
+
+100
+
+150
+
+Number of nearest neighbors
+
+200
+
+RouterBench
+
+0.0410
+
+0.675
+
+0.0405
+
+0.670
+
+0.0400
+
+0.665
+
+0.0395
+
+Area under the deferral curve
+0
+
+100
+
+200
+
+300
+
+Number of nearest neighbors
+
+(a) K-NN
+
+0.660
+
+400
+
+(b) K-NN
+0.0408
+
+0.676
+
+0.0406
+
+0.674
+
+0.0404
+
+0.672
+
+0.0402
+
+0.670
+
+0.60
+Area under the deferral curve
+20
+
+40
+
+60
+
+Number of clusters
+
+80
+
+0.0400
+0.0398
+
+100
+
+(d) UniRoute (K-Means)
+0.610
+
+0.606
+0.604
+
+Area under the deferral curve
+50
+
+100
+
+150
+
+5
+
+10
+
+Number of clusters
+
+15
+
+20
+
+Number of clusters
+
+Area under the deferral curve
+
+0.628
+0.626
+Area under the deferral curve
+
+0.624
+50
+
+100
+
+150
+
+Number of clusters
+
+200
+
+0.668
+
+0.0394
+
+0.667
+
+0.0392
+
+0.666
+
+5
+
+10
+
+15
+
+20
+
+25
+
+Number of clusters
+
+(j) UniRoute (LearnedMap)
+
+Area under the deferral curve
+
+0.665
+
+0.0404
+
+0.670
+
+0.0402
+
+0.668
+
+Number of clusters
+
+12
+
+(k) UniRoute (LearnedMap)
+
+100
+
+Area under the deferral curve
+50
+
+100
+
+150
+
+200
+
+Number of clusters
+
+250
+
+Area under the deferral curve
+
+0.666
+
+10
+
+80
+
+(i) UniRoute (K-Means Attributes
+0.672
+
+8
+
+60
+
+0.674
+
+0.0406
+
+6
+
+40
+
+Number of clusters
+
+0.670
+
+0.0396
+
+0.0400
+
+150
+
+(f) UniRoute (K-Means)
+0.669
+
+0.0408
+
+0.630
+
+20
+
+0.0398
+
+(g) UniRoute (K-Means Attributes (h) UniRoute (K-Means Attributes
+0.632
+
+125
+
+Area under the deferral curve
+
+0.666
+
+25
+
+(e) UniRoute (K-Means)
+
+200
+
+100
+
+0.668
+
+Area under the deferral curve
+
+0.0400
+
+0.608
+
+75
+
+(c) K-NN
+
+0.62
+0.61
+
+50
+
+Number of nearest neighbors
+
+0.63
+
+0.59
+
+Area under the deferral curve
+25
+
+20
+
+40
+
+60
+
+Number of clusters
+
+80
+
+100
+
+(l) UniRoute (LearnedMap)
+
+Figure 4: Validation performance of four methods considered in Figure 2 and Section F.3: K-NN, UniRoute
+(K-Means), UniRoute (K-Means Attributes, and UniRoute (LearnedMap). See Section F.1 for more details.
+19
+
+E.4
+
+Router Cost
+
+All routing methods rely on a frozen prompt embedding model φ. As described in Section F.2, φ is set be the
+token probability quantiles of the Gemma 2B model in the Headlines dataset. For other datasets, we use Gecko
+1B model [?] for φ. Importantly, all methods rely on the same embedding model, and thus share the same
+overhead for prompt embedding.
+At inference time, for UniRoute (K-Means), deciding the LLM to route to for a given test query involves
+computing the text embedding, and finding the nearest centroid out of K centroids (recall that K-means is run
+only once on the training set). For UniRoute (LearnedMap), after computing the prompt embedding, we pass
+the embedding through a small MLP as described in (22). Compared to the sizes of candidate LLMs (up to
+60+B in EmbedLLM, for instance), invoking the text embedding model and performing a few operations after
+(centroid lookup, or invoking a small MLP) incur a negligible cost.
+When plotting the deferral curves, we do not include the cost of the routing model. Including the router’s
+overhead will simply shift all the deferral curves to the right by a small amount, without changing the relative
+ordering of the methods.
+
+F Additional Experimental Results
+We present additional experimental results we omitted in the main text.
+F.1 Hyper-parameter Choices & Statistical Significance
+There are three methods that we consider in the experiments in Section 7 that depend on a hyperparameter
+K. Specifically, K in K-NN refers to the number of nearest neighbors, and K in UniRoute (K-means) and
+UniRoute (LearnedMap) refers to the number of clusters. In Figure 2, we report the performance of these
+methods with the best K found on each dataset separately. We now describe the validation procedure we used
+to select the best K.
+K-NN For each candidate K, and each prompt in the validation set, find the K nearest queries in the training
+set (in the Gecko embedding space). Route each prompt in the validation set to the most appropriate training
+LLM according to the routing rule (8) where γ (m) is estimated with (5). Produce a deferral curve on the
+validation set, and compute the normalized area under such curve. Select K that maximizes the area. The list
+of candidate K’s is set to be from 5 to one third of the validation sample size.
+UniRoute (K-Means) For each candidate K, perform K-means on the training set using Gecko embeddings
+[?]. Compute the feature vector representation of each training LLM on the training set using (13). For each
+prompt in the validation set, find the nearest cluster, and route the prompt to the most appropriate training LLM
+according to the routing rule (9). Produce a deferral curve on the validation set, and compute the normalized
+area under such curve. Select K that maximizes the area. The list of candidate K’s is from 3 to the number of
+validation sample size, divided by 50.
+UniRoute (K-Means Attributes) An alternate approach that we consider in Appendix F.3 is to construct
+a binary vector of prompt attributes, denoting whether a prompt possesses certain characteristics [??], e.g.,
+whether it requires multi-step reasoning, seeks a single correct answer, and so on. These can be seen as
+a generalised “task”. Compared to a general purpose text embedding, such a representation is a coarser
+representation; on the other hand, for the purposes of model routing, this can help mitigate overfitting.
+Concretely, we parameterize the prompt embedding model to be Φ(x) = σ(V⊤ φGecko (x)) where V ∈ R768×7 ,
+and σ denotes the sigmoid function. Train each head vj ∈ R768 (with φGecko frozen) by minimizing the
+sigmoid cross entropy to predict whether the j-th semantic attribute is active on each input prompt. We use the
+seven prompt difficulty attributes as described in ?, and prompt Gemini 1.5 Pro 002 to annotate each binary
+attribute on each training example. Once the prompt embedding model Φ is trained, we freeze it, and perform
+the same hyperparameter selection procedure as used for K-means (Gecko) by replacing the Gecko embedding
+function with Φ.
+UniRoute (LearnedMap) For each candidate K, perform K-means on the training set using Gecko
+embeddings. Compute the feature vector representation of each training LLM on the training set using (13).
+Parameterize the cluster assignment map with a softmax-dense layer as described in Section 5.2, resulting in a
+20
+
+parameter θ to learn. Learn the parameter by minimizing the binary sigmoid cross entropy on the training with
+the labels given by the correctness labels of the training LLMs. With the cluster map trained, for each prompt
+in the validation set, route the prompt to the most appropriate training LLM according to the routing rule (9).
+Produce a deferral curve on the validation set, and compute the normalized area under such curve. Select K
+that maximizes the area. The list of candidate K’s is from 3 to the number of validation sample size, divided
+by 50.
+The above tuning procedure for K cannot be applied to
+√the Math+Code dataset considered in Section 7, where
+we have no training LLMs. In this case, we set K to Nval for K-NN and to Nval /50 for K-Means.
+Effect of K Figure 4 shows the area under the deferral curve (on the validation set) vs candidate parameter K.
+Importantly, the testing models and the test set are never used in the above hyperparameter selection process.
+MLP (Clairvoyant) For this oracle baseline, as per [?], we fix the number of hidden layers to two and the
+number of hidden nodes in each hidden layer to 100. We fit the MLP on the combined training and validation
+set to predict a quality score for each test LLM, and route via (2). For training, we once again ran 30 epochs od
+Adam with a learning rate of 10−3 and batch size 64, and picked the checkpoint that yielded the best quality
+metric on the validation set.
+Matrix Factorization (Clairvoyant) For this oracle baseline, we fit a factorized model A · B, with
+A ∈ RDP ×d , B ∈ Rd×m , where DP is the dimension of the pretrained query embedding, d is an intermediate
+dimension, and N is the number of test LLMs to route to. We choose d using the same procedure used to pick
+the hyper-parameter K above. For a query x ∈ X and pre-trained φ(x) ∈ RDP , this router predicts N LLM
+scores via A · B · φ(x), and routes via (2). For training, we ran 30 epochs of Adam with a learning rate of
+10−3 and batch size 64, and picked the checkpoint that yielded the best quality metric on the validation set.
+Statistical Significance For the table in Figure 2 (Top), we repeat the experiments over 400 trials, and report
+statistical significance (via the sign test) at signficance level α = 0.01. For the plots of area vs. validation
+sample size in Figure 2 (Bottom), we repeat the experiments over 100 trials for EmbedLLM, RouterBench,
+SPROUT o3-mini and 1000 trials for Math+Code, and report 96% confidence intervals (i.e. two-sigma standard
+errors).
+F.2 Deferral Curves and Additional Comparisons
+As described in Section 7, for each of the 400 independent trials, we randomly split examples of each dataset
+into training, validation and testing. Figure 5 presents the mean deferral curves of all the methods we consider.
+All the statistics (Area (50%), Area and QNC) reported in Figure 2 are derived from these curves. All results
+here are for the dynamic LLM pool setting as considered in Figure 2.
+EmbedLLM Figure 5a presents deferral curves on the EmbedLLM problem. These results are the same
+as in Figure 3 where we add two oracle baselines: Matrix Factorization (MatFac) [??], and MLP [?]. We
+reemphasize that these two baselines are not designed for the dynamic pool setting, and are allowed to observe
+test LLMs during training to be applicable to our setting.
+Headlines We consider the Headlines dataset as used in ? consisting of 10K prompts in total. Each prompt
+asks an LLM to determine the price direction (up, down, neutral, or none) of an item in a list of news headlines.
+There are 12 LLMs of various sizes in this dataset. Each LLM has a distinct cost (USD) of processing one
+prompt, which is a function of the input length, output length, and a fixed cost per request (see Table 1 in ?).
+We hold out six LLMs for training and the other six LLMs for testing:
+• Training LLMs: Textsynth FAIRSEQ, OpenAI GPT-4, OpenAI GPT-Curie, Textsynth GPT-Neox,
+AI21 J1-Large, Cohere Xlarge;
+• Test LLMs: OpenAI ChatGPT, OpenAI GPT-3, Textsynth GPT-J, AI21 J1-Grande, AI21 J1-Jumbo,
+Cohere Medium.
+In each of the 400 independent trials, we randomly partition the data into 4000, 400, 5600 examples for training,
+validation, and testing, respectively. For Headlines, unlike other datasets, we do not use Gecko for embedding
+prompts. Rather, the frozen text embedding φ is constructed based on the output of the Gemma 2B model1 :
+1
+
+Gemma 2B model: https://huggingface.co/google/gemma-2b.
+
+21
+
+for each prompt, its embedding is the seven equally spaced quantiles of the per-token probabilities of the output
+tokens from Gemma 2B.
+The mean deferral curves over 400 trials are shown in Figure 5d. We observe that our proposed UniRoute
+(LearnedMap) has higher accuracy than K-NN throughout the whole cost range.
+MixInstruct MixInstruct is a dataset from ? containing responses from 11 LLMs. We use a random split of
+50% of the LLMs for training and the rest for testing. We use (exponentiated) BARTScore [?] as the evaluation
+metric, following ?. The MixInstruct dataset does not have LLM API costs annotated. We use the number of
+parameters of the LLM as the cost of processing one prompt.
+PP
+P Dataset
+MethodPPP
+P
+
+EmbedLLM
+
+RouterBench
+
+SPROUT o3-mini
+
+Area (50%) ↑ Area ↑ QNC ↓ Area (50%) ↑ Area ↑ QNC ↓ Area (50%) ↑ Area ↑
+
+Headlines
+
+MixInstruct
+
+QNC ↓ Area (50%) ↑ Area ↑ QNC ↓ Area (50%) ↑ Area ↑ QNC ↓
+
+ZeroRouter
+K-NN
+UniRoute (K-Means)
+UniRoute (LearnedMap)
+
+.285 ∗
+.298 ∗
+.307 ∗
+.308
+
+.607 ∗ 87.5% ∗
+.636 ∗ 46.1% ∗
+.648 ∗ 33.9%
+.651 33.2%
+
+.320 ∗
+.328 ∗
+.332
+.331
+
+.689 ∗ 99.9%
+.707 ∗ 99.7%
+.712 99.4%
+.711 99.6%
+
+.404 ∗
+.418 ∗
+.421
+.420
+
+.820 ∗ 100.0% ∗
+.844 ∗ 29.6% ∗
+.850
+19.6%
+.846
+23.4%
+
+.0233 ∗ .0487 ∗ 96.8%
+.0235 ∗ .0494 94.8%
+.0235 ∗ .0491 95.2%
+.0236 .0491 96.2%
+
+.380 ∗
+.411
+.409 ∗
+.411
+
+.819 ∗ 88.0% ∗
+.830 ∗ 43.7% ∗
+.828 ∗ 56.9% ∗
+.832 34.9%
+
+MLP (Clairvoyant)
+Matrix Fac. (Clairvoyant)
+
+.314
+.313
+
+.664
+.663
+
+.339
+.338
+
+.723
+.720
+
+.427
+.426
+
+.859
+.857
+
+.0240
+.0242
+
+.412
+.413
+
+.835
+.835
+
+26.9%
+27.7%
+
+95.2%
+99.5%
+
+4.5%
+5.0%
+
+0.70
+
+85.7%
+82.9%
+
+18.1%
+13.7%
+
+0.86
+
+K-NN
+MLP (Clairvoyant)
+MatFac (Clairvoyant)
+UniRoute (K-Means)
+UniRoute (LearnedMap)
+ZeroRouter
+
+0
+
+20
+
+40
+
+0.70
+
+K-NN
+MLP (Clairvoyant)
+MatFac (Clairvoyant)
+UniRoute (K-Means)
+UniRoute (LearnedMap)
+ZeroRouter
+
+0.65
+0.60
+
+60
+
+0
+
+Cost budget (model size)
+
+1
+
+K-NN
+MLP (Clairvoyant)
+
+0.82
+
+MatFac (Clairvoyant)
+UniRoute (K-Means)
+
+3
+
+UniRoute (LearnedMap)
+ZeroRouter
+
+0
+
+Cost budget (USD) per 1K queries
+
+(a) EmbedLLM
+
+2
+
+4
+
+6
+
+Cost budget (USD)
+
+(b) RouterBench
+
+0.840
+
+(c) SPROUT o3-mini
+
+0.052
+
+0.835
+
+0.050
+
+Accuracy
+
+0.830
+0.825
+
+K-NN
+MLP (Clairvoyant)
+MatFac (Clairvoyant)
+UniRoute (K-Means)
+UniRoute (LearnedMap)
+ZeroRouter
+
+0.820
+0.815
+0.810
+
+2
+
+0.84
+
+0.80
+
+Exp(BARTScore)
+
+0.55
+
+Accuracy
+
+Accuracy
+
+0.60
+
+Quality
+
+0.75
+
+0.65
+
+0.50
+
+.0502
+.0505
+
+0.0
+
+0.2
+
+0.4
+
+0.6
+
+Relative cost (USD)
+
+0.8
+
+0.048
+
+K-NN
+MLP (Clairvoyant)
+MatFac (Clairvoyant)
+UniRoute (K-Means)
+UniRoute (LearnedMap)
+ZeroRouter
+
+0.046
+0.044
+8
+
+1.0
+
+(d) Headlines
+
+10
+
+12
+
+14
+
+Cost budget (model size)
+
+16
+
+(e) MixInstruct
+
+Figure 5: Deferral curves and router evaluation metrics (Area (50%), Area, and QNC) for different methods in
+the dynamic pool setting. MLP [?] and MatFac [??], are oracle methods that observe testing LLMs during
+training. ZeroRouter [?] and K-NN ?? are baselines applicable to the dynamic LLM pool setting.
+
+22
+
+0.55
+
+Accuracy
+
+0.50
+K-means (Gecko)
+K-means (Attributes)
+K-NN
+Individual models
+Pareto-random router
+
+0.45
+0.40
+20
+
+40
+
+Method
+
+Area↑ QNC↓ Peak Acc.↑
+
+Pareto-random router
+K-NN
+K-means (Gecko)
+K-means (Attributes)
+
+.507
+.472
+.529
+.545
+
+∞
+∞
+∞
+.97
+
+51.9%
+52.1%
+54.5%
+55.8%
+
+60
+
+Number of parameters (Billions)
+Figure 6: Deferral curves of routers trained on Chatbot Arena with pairwise comparison labels, and tested on
+EmbedLLM with per-prompt correctness labels.
+F.3 Train on Chatbot Arena and Test on EmbedLLM
+We observe that representing each prompt with a small number of binary attributes that capture its inherent
+hardness shines when there is a prompt distribution shift at test time. To illustrate this, we use the seven binary
+difficulty attributes proposed in ?, and prompt Gemini 1.5 Pro to annotate each attribute for each training
+prompt. We then construct a query embedder
+φ(x) = σ(V ⊤ Gecko(x)) ∈ [0, 1]7 ,
+
+(24)
+
+where V ∈ R768×7 is distilled using the training set to predict the 7-category attributes for any new prompt x.
+
+We compare Gecko-based prompt representation and attribute-based representation by training on Chatbot
+Arena conversation data [?], and testing on EmbedLLM, which contains mostly Q&A prompts. To reduce
+confounding factors, we train on all LLMs that are present in both datasets (26 LLMs), and test on the same set
+of LLMs (i.e., no unseen LLMs at test time). After appropriate filtering, the Chatbot Arena dataset has 8447
+records left. The filtering step ensures that we only deal with LLMs that are present in both datasets. These
+examples are split further into 90% training and 10% validation splits.
+The Chatbot Arena dataset contains pairwise comparison labels: each user prompt is responded to by
+two random LLMs, to which the user selects the better response. To evaluate per-cluster performance for
+representing each LLM, we fit the Bradley-Terry-Luce model [?] to the pairwise comparison labels within a
+cluster and estimate the pointwise quality scores for each LLM for that cluster. We use the full EmbedLLM
+dataset for testing.
+The results are shown in Figure 6 where we compare two variants of our proposed UniRoute (K-means):
+1. K-means (Gecko). This is UniRoute (K-means) (see Section 5.1) where the text embedding is set to
+the Gecko model [?].
+2. K-means (Attributes). This is UniRoute (K-means) where the text embedding is set to (24).
+We observe that K-means (Attributes) in this case performs better than K-means (Gecko), suggesting that using
+prompt hardness attributes helps improve robustness to prompt distribution shifts. In fact, this routing approach
+is the only method that can reach the performance of the most accurate model in the pool, thus attaining a
+finite quality-neutral cost (QNC). The reason the Pareto-random router has a decreasing trend is because the
+Pareto-optimal LLMs are chosen using the validation set, and turn out to be not optimal for the test set.
+F.4 Static LLM Pool Setting
+While the dynamic pool setting is the focal point of our work, we show in Table 2 that even in the static LLM
+pool setting, UniRoute is typically comparable to most baselines. The MLP baseline alone often has a slight
+edge. This is because, unlike our methods, which are tied to a particular input LLM representation, the MLP
+approach has the flexibility of learning its own representation for each fixed LLM. Note that this is possible
+only in the static LLM pool setting.
+In this case, all LLMs are seen during training, and hence the training and validation samples have correctness
+label annotations from all LLMs. We tune the hyper-parameters, such as K in K-NN and K-Means, the number
+23
+
+of hidden nodes in MLP, and the intermediate dimension in Matrix Factorization, to maximize the area under the
+deferral curve on the validation sample. We pick K from the range {5, 10, 25, 50, 75, 100, 150, 200, 250, 300}
+for K-NN and K-Means, pruning out values that are too large for the given validation sample size.
+For UniRoute (LearnedMap), we used two hidden layers, with the same chosen number of hidden nodes as
+MLP. We set the number of clusters to be the same as the chosen number of clusters for UniRoute (K-Means).
+We employed Adam with learning rate 0.001 and batch size 64 for training, picking the checkpoint with the
+best quality metric on the validation set. For MixInstruct alone, given that the dataset is prone to overfitting,
+we replicate the same hyper-parameter choices as in the dynamic LLM pool setting (Appendix E.3).
+For these experiments, we additionally consider the Headlines dataset (see Section F.2) where all LLMs are
+fully observed during training. We additionally consider the LiveCodeBench coding benchmark [?], and
+include from it 15 LLMs for which the model size was publicly available (the Math+Code dataset contains two
+LLMs from this benchmark). We split the LiveCodeBench dataset into 60% for training, 10% for validation,
+and 30% for testing, and employ the same hyper-parameter choices as in MixInstruct. For Headlines, we use
+40%, 10%, 50% for training, validation, and testing, respectively.
+
+ch
+lin
+ad
+He
+
+od
+Li
+
+ve
+C
+
+es
+
+en
+eB
+
+od
+M
+
+ath
+
++C
+
+Be
+ter
+Ro
+u
+
+ix
+M
+
+e
+
+nc
+h
+
+ct
+str
+u
+In
+
+dL
+be
+Em
+
+PP
+P Dataset
+MethodPPP
+P
+
+LM
+
+Table 2: Comparing UniRoute with existing methods for the static LLM pool setting, where Htr = Hte . We
+report the area under the deferral curve (↑). The best baseline results are highlighted, and the best UniRoute
+results are boldfaced. Even in the static setting, our approach is competitive compared to most baselines. The
+MLP baseline often has a slight edge. This is because, unlike our methods, which are tied to a particular input
+LLM representation, the MLP approach has the flexibility of learning its own representation for each fixed
+LLM. Note that this is possible only in the static LLM pool setting, and not the dynamic setting, which is the
+focus of this paper.
+
+ZeroRouter [?]
+MLP ?
+Matrix Factorization [??]
+K-NN ??
+
+.601
+.689
+.682
+.636
+
+.0483
+.0500
+.0503
+.0510
+
+.707
+.747
+.744
+.744
+
+.392
+.483
+.482
+.475
+
+.457
+.480
+.482
+.474
+
+.834
+.852
+.849
+.854
+
+UniRoute (K-Means)
+UniRoute (LearnedMap)
+
+.682
+.683
+
+.0504
+.0502
+
+.744
+.744
+
+.480
+.463
+
+.481
+.479
+
+.845
+.854
+
+F.5 Visualisation of LLM Embeddings
+We visualise the cluster-based LLM embeddings Ψ learned from our clustering procedure on the EmbedLLM
+and RouterBench datasets in Figures 7 and 8. These heatmaps illustrate the Gaussian kernel similarity between
+all pairs of LLM embeddings on these datasets. The results are largely intuitive: e.g., on RouterBench, we find
+that the claude family of models are highly similar to each other. Similarly, on EmbedLLM, code-focussed
+models generally tend to demonstrate a high degree of similarity.
+We emphasise again that EmbedLLM previously also considered representing LLMs as feature vectors.
+Importantly, however, their representation depends on a fixed pool of LLMs, and does not readily generalise to
+new LLMs (without further retraining).
+
+24
+
+octocoder
+34b-beta
+Meta-Llama-3-70B-Instruct
+mpt-7b-chat
+CodeFuse-DeepSeek-33B
+CodeLlama-13b-Instruct-hf
+koala-13B-HF
+vicuna-7B-physics
+tulu-2-dpo-70b
+CodeLlama-70B-Instruct-AWQ
+llemma_34b
+Meta-Llama-Guard-2-8B
+Nous-Hermes-13b
+NeuralTrix-bf16
+CodeLlama-34b-Instruct-hf
+Meta-Llama-3-8B-Instruct
+Mixtral_11Bx2_MoE_19B
+Starling-LM-7B-alpha
+SOLAR-10.7B-Instruct-v1.0
+openchat_3.5
+Llama-2-7B-physics
+AlphaMonarch-7B
+BioMistral-7B-DARE
+tigerbot-13b-base
+mpt-30b-instruct
+phi-2
+vicuna-13b-v1.5
+Starling-LM-7B-beta
+Llama-2-13b-chat-hf
+WizardLM-70B-V1.0
+openbuddy-codellama2-34b-v11.1-bf16
+Yi-6B-200K
+Moe-4x7b-math-reason-code
+Llama-2-70b-chat-hf
+llama2-13b-math1.2
+neural-chat-7b-v3-3
+SciPhi-Mistral-7B-32k
+
+octocoder
+34b-beta
+Meta-Llama-3-70B-Instruct
+mpt-7b-chat
+CodeFuse-DeepSeek-33B
+CodeLlama-13b-Instruct-hf
+koala-13B-HF
+vicuna-7B-physics
+tulu-2-dpo-70b
+CodeLlama-70B-Instruct-AWQ
+llemma_34b
+Meta-Llama-Guard-2-8B
+Nous-Hermes-13b
+NeuralTrix-bf16
+CodeLlama-34b-Instruct-hf
+Meta-Llama-3-8B-Instruct
+Mixtral_11Bx2_MoE_19B
+Starling-LM-7B-alpha
+SOLAR-10.7B-Instruct-v1.0
+openchat_3.5
+Llama-2-7B-physics
+AlphaMonarch-7B
+BioMistral-7B-DARE
+tigerbot-13b-base
+mpt-30b-instruct
+phi-2
+vicuna-13b-v1.5
+Starling-LM-7B-beta
+Llama-2-13b-chat-hf
+WizardLM-70B-V1.0
+openbuddy-codellama2-34b-v11.1-bf16
+Yi-6B-200K
+Moe-4x7b-math-reason-code
+Llama-2-70b-chat-hf
+llama2-13b-math1.2
+neural-chat-7b-v3-3
+SciPhi-Mistral-7B-32k
+
+Figure 7: Gaussian kernel similarity between pairs of LLM embeddings on EmbedLLM dataset.
+
+claude-v1
+gpt-3.5-turbo-1106
+claude-v2
+claude-instant-v1
+mixtral-8x7b-chat
+Yi-34B-Chat
+WizardLM-13B-V1.2
+gpt-4-1106-preview
+mistral-7b-chat
+llama-2-70b-chat
+code-llama-instruct-34b-chat
+
+claude-v1
+gpt-3.5-turbo-1106
+claude-v2
+claude-instant-v1
+mixtral-8x7b-chat
+Yi-34B-Chat
+WizardLM-13B-V1.2
+gpt-4-1106-preview
+mistral-7b-chat
+llama-2-70b-chat
+code-llama-instruct-34b-chat
+
+Figure 8: Gaussian kernel similarity between pairs of LLM embeddings on RouterBench dataset.
+25
+
+26
+
+

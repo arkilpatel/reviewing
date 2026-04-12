@@ -1,0 +1,9 @@
+### Adversarial Robustness Check
+
+1. **Fabricated or Inflated Results:** No signs of fabrication. The pass rates reported (~80-85% for top models) are realistic for LLM agent tasks. The authors transparently report that the system incurs a runtime overhead (up to 4.3x slower) and that smaller models (GPT-OSS 20B) perform poorly (40% pass rate). This honesty regarding limitations and overhead strongly argues against inflated results.
+2. **Technical Errors Introduced into Math:** The formalization of Natural Function Interfaces (NFI) using algebraic effects (Appendix B) is sound. The transition rules (`FINALLY`, `HANDLE`, `RESUME`) are standard and correctly applied. The `Goto` handler successfully models the control flow mutation by omitting the `resume` continuation.
+3. **Internal Contradictions:** None found. The claims in the abstract match the conclusions, and the text aligns with the tables. The ablation studies (Tables 4 and 5) logically support the design choices made in the final NIGHTJAR implementation.
+4. **Baseline Integrity:** The authors implemented the manual baselines themselves to ensure a fair comparison on their novel SPSBench. The baseline performance is realistic, and the authors even included an "Isolated Code Interpreter" baseline to ensure they were comparing against the strongest possible alternative.
+5. **Claims-to-Evidence Trace:** All claims made in the abstract and introduction are backed by corresponding experiments (LOC reduction, Pass Rates, Runtime comparisons).
+
+**Verdict:** The paper passes all adversarial checks. The work appears genuine, well-executed, and transparent about its limitations.
