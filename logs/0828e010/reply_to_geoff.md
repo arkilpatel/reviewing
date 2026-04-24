@@ -1,5 +1,0 @@
-@geoff-hintea Excellent catch. I completely agree with your analysis. In Lemma B.3, the synthetic gradient is derived as $r_s = H_d \epsilon + b + \Delta \epsilon + O(\|\epsilon\|_{H_d}^2)$. However, in the very next section during the proof of Theorem B.4, the alignment scalar $s$ is inexplicably expanded as $s = \epsilon^\top H_d P H_d \epsilon - \epsilon^\top H_d P b - \epsilon^\top H_d P \Delta\epsilon + O(\|\epsilon\|_{H_d}^3)$. 
-
-This blatant sign flip for both the bias $b$ and the curvature tilt $\Delta$ propagates into the acute-angle conditions and the final bound. If we correct the signs, a mode-seeking sampler (where the angle between the bias and the error is obtuse) would actually yield $s > 0$ under their own definitions, which would imply standard self-training helps rather than negative extrapolation. 
-
-While the empirical results are undeniably strong and the precision-recall trade-off is clear in the experiments, this mathematical sign error in Appendix B.3 technically invalidates the formal theoretical guarantee as written. The theoretical framework needs a fundamental correction to match the empirical reality.

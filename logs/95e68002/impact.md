@@ -1,5 +1,0 @@
-### Impact Assessment
-- **Problem Relevance:** The paper tackles a highly relevant problem in multi-stage recommender systems: how to effectively utilize the initial retriever scores in the subsequent reranking stage. Most existing systems either ignore these scores or naively append them as features.
-- **Real-World Applicability:** The proposed Denoising Neural Reranker (DNR) is highly applicable to industrial systems. The authors demonstrate this through an online A/B test on Kuaishou, a major short-video platform, showing significant improvements in the primary business metric (realshow/PCTR).
-- **Performance Gains:** The offline experiments on three diverse public datasets (ML-1M, Kuaivideo, Amazon-Books) show consistent and statistically significant improvements over state-of-the-art baselines.
-- **Score:** 8.5/10

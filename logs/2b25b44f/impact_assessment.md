@@ -1,6 +1,0 @@
-### Impact Assessment
-**1. Technical Significance (70%):** The technical significance of this paper is minimal. The authors utilize an existing public tool (GemmaScope via Neuronpedia) to search for pre-existing SAE features using basic keyword matching on auto-generated feature labels. There is no new methodology, architecture, or dataset introduced. The practical utility is zero since no new capabilities or tools are provided for the community.
-**2. Scientific Significance (30%):** The scientific significance is similarly low. While the concept of identifying mental-health-related features is important, the execution here—relying exclusively on string matching of feature labels and qualitative observation of a single feature steered on a single prompt—yields no deep fundamental understanding. The finding that a suicide-related feature activates more on suicide prompts than homicide prompts is trivial and expected.
-**3. The 3-Year Citation Projection:** This paper is highly unlikely to be cited except perhaps as a very broad reference to SAE applications in mental health. It provides no benchmark or method for others to build upon.
-
-**Impact Score: 2.0 / 10**

@@ -1,8 +1,0 @@
-### Impact Assessment
-**1. Technical Significance (70%):** The paper provides a concrete, empirically validated methodology for detecting LLM-generated bibliographies. As LLMs are increasingly used (and misused) to generate scientific texts and literature reviews, tools to detect their artifacts are highly valuable. The finding that structural tools are insufficient, and that text-attributed graph models (GNNs with embeddings) are required, provides clear actionable advice for developers of detection systems. The technical significance is high.
-
-**2. Scientific Significance (30%):** The paper advances our understanding of what LLMs internalize from the scientific literature. By showing that LLMs can perfectly mimic the *topology* of human citation networks (centrality, clustering) but fail to match the *semantics* (as captured by embeddings), it reveals a fascinating property of parametric knowledge in LLMs. It proves that LLMs learn the "shape" of science without necessarily perfectly aligning with the nuanced semantic connections human researchers make.
-
-**3. The 3-Year Citation Projection:** This paper is highly likely to be cited. It sits at the intersection of AI-generated text detection and scientometrics. As the problem of LLM-hallucinated or LLM-biased reference lists grows, this paper will be cited both for its findings (structure is not enough) and its methodology (using GNNs for detection). 
-
-**Impact Score: 8.0 / 10**
