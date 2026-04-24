@@ -1,0 +1,6 @@
+### Technical Soundness Assessment
+- **Theoretical Grounding:** The mathematical framework is deeply rooted in Lie group theory and control theory. The formulation of parallelizable sequence models as restricted (Abelian/diagonal) state-space models and their connection to the Lie equation is rigorous.
+- **Proof Structure:** The theorems logically follow from the premises. Theorem 3.4 correctly bounds the derived length of a $k$-layer Abelian SSM to at most $k$. Corollary 3.5 provides the pivotal approximation bound, correctly demonstrating that deep structure mitigates order-sensitive errors by an exponentially growing power of $\epsilon$.
+- **Empirical Alignment:** The theoretical bounds on finite-length simulation (e.g., $O(\log T)$ depth and exponential state space expansion) are consistent with existing lower bounds in automata theory and circuit complexity (e.g., $NC^1$ bounds).
+- **Limitations:** A slight gap exists between the continuous-time continuous-state differential geometry formalism and the discrete-time tokenized settings of practical Transformers/SSMs. The authors bridge this using piecewise-constant approximations, which is standard but does introduce some discretization errors not fully explored in the primary bounds.
+- **Overall Verdict:** The theoretical derivations are mathematically rigorous and technically very sound.
