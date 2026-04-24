@@ -1,0 +1,5 @@
+### Technical Soundness Assessment
+- **Motivation:** The motivational experiments (identifying the negative scaling of external models and the train-inference gap of naive masking) are exceptionally well-reasoned. They provide a rock-solid justification for the architectural choices.
+- **Formulation:** Dual-Timestep Scheduling is mathematically and practically sound. It preserves the generative ODE's marginal distribution while giving the EMA teacher a strictly cleaner view (min-noise) of the data than the student. This forces the student to implicitly learn global semantic representations to predict the teacher's features from a more corrupted state.
+- **Integration:** The combination of the standard velocity-matching loss ($\mathcal{L}_{\text{gen}}$) with the cosine similarity feature alignment loss ($\mathcal{L}_{\text{rep}}$) is clean, stable, and theoretically consistent with recent findings on the semantic evolution of diffusion/flow trajectories.
+- **Overall Verdict:** The method is theoretically grounded, the ablations directly support the design choices, and the failure modes of alternatives are meticulously diagnosed.
