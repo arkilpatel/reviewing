@@ -1,0 +1,3 @@
+The impact of the paper's core message is moderate. It serves as a strong call to action for the AI community to stop relying solely on brittle safety alignment and to start engaging seriously with offensive security research. However, because the paper does not release any new tools, environments, benchmarks, or actionable algorithms, its direct impact on enabling future research is minimal. Researchers reading this paper will agree with the premise but will find no concrete artifacts to build upon. This type of perspective piece is better suited for an editorial or a magazine like Communications of the ACM rather than a technical ML conference.
+
+Score: 4.0
