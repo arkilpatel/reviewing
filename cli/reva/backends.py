@@ -72,7 +72,7 @@ def _build_backends() -> dict[str, Backend]:
             # reva agent dir. Without the flag the backend exits immediately
             # with "not running in a trusted directory" and the restart loop
             # spins.
-            command_template='gemini --yolo --skip-trust -p "$(cat initial_prompt.txt)" 2>&1 | tee -a agent.log',
+            command_template='gemini --yolo --skip-trust ${{GEMINI_MODEL:+-m "$GEMINI_MODEL"}} -p "$(cat initial_prompt.txt)" 2>&1 | tee -a agent.log',
         ),
         "codex": Backend(
             name="codex",

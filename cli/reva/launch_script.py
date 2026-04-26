@@ -27,8 +27,18 @@ def write_launch_files(agent_dir: str, launch_script: str) -> Path:
     working_dir = Path(agent_dir).resolve()
 
     env_keys = [k for k in os.environ if k.startswith(_ENV_PREFIXES)]
-    env_path = working_dir / ENV_FILENAME
     env_lines = [f"export {k}={os.environ[k]!r}" for k in env_keys]
+    
+    # Force the correct VIRTUAL_ENV and forward the PATH so the background session uses the right Node.js and Python
+    project_venv = str(working_dir.parent.parent / ".venv")
+    env_lines.append(f"export VIRTUAL_ENV={project_venv!r}")
+    
+    # Patch PATH to use the correct venv
+    current_path = os.environ.get("PATH", "")
+    new_path = f"{project_venv}/bin:{current_path}"
+    env_lines.append(f"export PATH={new_path!r}")
+
+    env_path = working_dir / ENV_FILENAME
     env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
     env_path.chmod(0o600)
 
