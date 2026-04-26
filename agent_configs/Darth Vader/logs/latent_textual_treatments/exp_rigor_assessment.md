@@ -1,0 +1,8 @@
+### Experimental Rigor Assessment
+
+1. **Semi-Synthetic Limitations:** The empirical evaluation relies heavily on semi-synthetic simulations. While the text covariates $\mathbf{X}$ are real (derived from steering real texts), the downstream outcomes $y$ are generated from arbitrary synthetic functional forms (e.g., $100\sin(x)$, $100x^2$). While this is standard practice in causal inference literature to establish ground-truth ATE/CATE for error measurement, the complete absence of a real-world, fully end-to-end downstream task is a glaring omission. For a paper claiming to provide a practical pipeline for social scientists, failing to demonstrate the estimation of a real causal effect (e.g., predicting human-annotated perceived civility or real user engagement) makes the empirical validation feel incomplete.
+2. **Comprehensive Ablations:** The authors rigorously test their residualization strategy across a wide variety of dimensions: multiple LLMs (Gemma, Qwen), multiple embedding models, multiple SAE features, and various synthetic data generating processes (DGPs). This exhaustive cross-validation of the algorithmic components is commendable.
+3. **Evaluation Metrics:** The reporting of both bias and RMSE for CATE estimation provides a clear picture of the estimator's performance. The contrast between naive estimation (using raw embeddings) and the residualized method strongly supports the paper's claims within the synthetic bounds.
+4. **Baseline Comparisons:** The paper lacks comparisons against alternative text-as-treatment causal methodologies (e.g., text matching, generative prompting interventions without SAEs). The only comparison is an ablation against their own naive baseline (raw embeddings).
+
+Score: 5.0

@@ -1,0 +1,8 @@
+### Technical Soundness Assessment
+
+1. **Theoretical Formalization:** The formulation of the text-as-treatment problem within the potential outcomes framework is well-executed. Theorem 3.4 correctly bounds the CATE estimation bias under imperfect controls using Wasserstein distances and Lipschitz assumptions. The theoretical motivation for residualization is rigorous and mathematically sound.
+2. **Positivity Violation Insight:** The authors accurately diagnose that using the full document embedding $\mathbf{X}$ as a covariate perfectly predicts the latent treatment $T_\phi$, causing a violation of the positivity assumption. Their proposed solutions (dimension-by-dimension residualization and dropping the first principal component) are theoretically coherent workarounds.
+3. **Discretization Bias:** A significant technical flaw is the binarization of the continuous treatment variable. The authors construct a binary treatment $T_\phi \in \{0,1\}$ by taking the top and bottom quintiles of the measured SAE feature intensity. Discretizing a continuous treatment is known to induce measurement error and can lead to biased causal estimates. The paper does not analytically or empirically address the information loss and bias introduced by ignoring the middle 60% of the distribution or treating the extremes as homogeneous bins.
+4. **Selection Bias from Coherence Filtering:** The pipeline uses an LLM-as-judge to remove steered texts that are deemed invalid or incoherent. Dropping these texts post-treatment introduces a severe risk of selection bias (conditioning on a post-treatment variable). The theoretical framework entirely ignores this dynamic, assuming the data sample is exogenously fixed.
+
+Score: 6.0
