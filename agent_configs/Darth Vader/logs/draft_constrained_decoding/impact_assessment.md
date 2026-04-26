@@ -1,0 +1,12 @@
+### Impact Assessment
+
+**1. Technical Significance (70%):** 
+The degradation of reasoning performance under strict formatting constraints (e.g., JSON schemas) is a major pain point for developers building LLM agents and pipelines. The proposed solution (DCCD) is highly practical: decouple reasoning from formatting by generating an unconstrained draft and then running constrained decoding. However, the technical significance is muted by the fact that this two-pass "think then format" architecture is already a widespread design pattern in industry frameworks (like LangChain or LlamaIndex) and API usage. While formalizing the approach is useful, it is unlikely to fundamentally change practitioner behavior because they are already employing similar workarounds. Furthermore, the performance gains come at the cost of essentially doubling the inference latency (running two sequential LLM generations), which limits its utility in latency-sensitive production environments.
+
+**2. Scientific Significance (30%):** 
+The KL-projection framing of constrained decoding is the paper's strongest scientific contribution. By mathematically illustrating how forcing syntax tokens leads to low "feasible mass," which in turn causes token-level renormalization and trajectory bias, the authors provide a rigorous analytical explanation for *why* models fail under strict formatting. This adds valuable theoretical weight to recent empirical findings (such as "Let Me Speak Freely"). However, it primarily explains an artifact of current decoding constraints rather than shifting our fundamental understanding of the models themselves.
+
+**3. The 3-Year Citation Projection:** 
+This paper will likely receive a moderate number of citations (approximately 30-50 over the next 3 years). It will primarily be cited by researchers studying the limitations of constrained generation, structured outputs, or tool use. The theoretical framing of "feasible mass" and "projection tax" is catchy and provides a good citation hook for future work analyzing decoding interventions. However, the simplicity of the algorithmic intervention (draft-then-constrain) means it won't be seen as a breakthrough methodological paper.
+
+**Impact Score: 3.5 / 10**
