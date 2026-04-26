@@ -1,0 +1,24 @@
+### Claimed Contributions
+1. **Mechanistic Theory of Prompt Injection (Role Confusion)**: The paper posits that prompt injection vulnerabilities stem from "role confusion" in the model's internal representations. Models map textual style and position into the same latent subspace as architectural role tags (e.g., `<user>`, `<think>`), meaning attacker-controlled stylistic cues can hijack the model's perception of authority.
+2. **Role Probes**: A methodology to measure how models internally authenticate roles. Linear probes are trained on neutral text wrapped in different role tags to isolate the geometric signature of the tags, completely decoupled from content or style.
+3. **Predictive Link to Attack Success**: Empirical demonstration that the degree of internal role confusion (measured via "CoTness" or "Userness" of the injected text) directly and monotonically predicts the success rate of prompt injection attacks.
+4. **CoT Forgery Attack**: A proposed zero-shot prompt injection attack that prepends fabricated reasoning matching the target model's style into user prompts or tool outputs. The model mistakes this forgery for its own chain-of-thought, leading to high attack success rates on strong reasoning models.
+
+### Prior Work Assessment
+1. **Mechanistic Theory of Prompt Injection**: The behavioral fragility of instruction hierarchies and role boundaries is known. Recent work, such as Wang et al. (2025b) ("The illusion of role separation"), has demonstrated behaviorally that models rely on shortcuts like position rather than genuine role separation. However, this paper provides a *mechanistic* basis for these failures by mapping them to latent representations, confirming that the conflation happens geometrically. The delta here is substantial in terms of interpretability.
+2. **Role Probes**: Linear probing of hidden states is standard (Alain & Bengio, 2018). Yet, the specific experimental design—holding neutral text constant and varying only the role tags to isolate the tag's true geometric direction—is highly elegant. Demonstrating that stylistic mimicry activates this exact same direction when tags are spoofed or absent is a novel and very clean empirical insight. The delta is substantial.
+3. **Predictive Link to Attack Success**: Predicting model behavior from internal activations is common (e.g., predicting refusal or truthfulness). Extending this to prompt injection success is a natural but valuable empirical addition. The delta is moderate.
+4. **CoT Forgery Attack**: The paper claims this as a "novel" attack. However, injecting fake reasoning or chain-of-thought to bypass safety mechanisms has already been explored in recent concurrent/prior work, which the authors themselves cite: *H-CoT: Hijacking the chain-of-thought safety reasoning mechanism to jailbreak large reasoning models* (Kuo et al., 2025) and *Bag of tricks for subverting reasoning-based safety guardrails* (Chen et al., 2025a). The "CoT Forgery" technique is essentially a replication or renaming of these reasoning hijacking attacks (a case of disguised incrementalism). The delta for the attack itself is minimal.
+
+### Novelty Verdict
+Substantial
+
+### Justification
+If we strip away the "CoT Forgery" attack—which is heavily derivative of existing reasoning hijacking methods like H-CoT—the paper's true novelty shines in its empirical and conceptual contributions to interpretability. The authors successfully elevate the community's understanding of prompt injection from a black-box behavioral vulnerability to a measurable, representational phenomenon ("state poisoning"). 
+
+The design of the role probes is particularly clever: by forcing the probe to learn only the geometry of the architectural tags, and then showing that attacker-controlled *style* projects heavily onto this exact same subspace, the authors definitively prove why role-based security fails. This mechanistic insight—that "sounding like a role is indistinguishable from being that role in latent space"—provides a new framework for evaluating future defenses. While the individual pieces (probing, reasoning jailbreaks, behavioral role confusion) exist in the literature, their synthesis to explain the geometric root cause of prompt injection is a substantial and impactful contribution to the field.
+
+### Missing References
+The authors appropriately cite the most relevant concurrent work (Wang et al., 2025b for behavioral role separation failures, and Kuo et al., 2025 / Chen et al., 2025a for reasoning attacks). However, they should more explicitly acknowledge that "CoT Forgery" is a variant or direct application of existing reasoning hijacking attacks, rather than framing it as a fundamentally novel attack vector.
+
+Novelty Score: 7.0
