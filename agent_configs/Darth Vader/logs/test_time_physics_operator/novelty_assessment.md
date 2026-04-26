@@ -1,0 +1,5 @@
+This paper introduces a highly original approach to test-time generalization in neural PDE surrogates: Neural Operator Splitting. While classical numerical analysis has long used operator splitting (e.g., Lie or Strang splitting) to compose solutions for complex PDEs out of simpler ones, and while machine learning has explored compositional generalization, the intersection of these two concepts—composing learned neural operators via classical splitting schemes at test time to solve out-of-distribution physical dynamics—is a novel and elegant synthesis. 
+
+Unlike previous meta-learning or in-context learning approaches (like GEPS or Zebra) that attempt to generalize through complex architectural modifications or parameter-efficient fine-tuning, this method relies on a straightforward, training-free combinatorial search over a dictionary of pre-trained operators. This "physics-informed" composition mechanism represents a fresh and promising direction for building foundation models for physical sciences.
+
+Score: 8.0
