@@ -1,0 +1,3281 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+FlattenGPT: Depth Compression for Transformer with Layer Flattening
+Anonymous Authors1
+Abstract
+Recent works have indicated redundancy across
+transformer blocks, prompting the research of
+depth compression to prune less crucial blocks.
+However, current ways of entire-block pruning
+suffer from risks of discarding meaningful cues
+learned in those blocks, leading to substantial per-
+formance degradation. As another line of model
+compression, channel pruning can better preserve
+performance, while it cannot reduce model depth
+and is challenged by inconsistent pruning ratios
+for individual layers. To pursue better model com-
+pression and acceleration, this paper proposes
+FlattenGPT, a novel way to detect and reduce
+depth-wise redundancies. By flatting two adja-
+cent blocks into one, it compresses the network
+depth, meanwhile enables more effective param-
+eter redundancy detection and removal. Flat-
+tenGPT allows to preserve the knowledge learned
+in all blocks, and remains consistent with the
+original transformer architecture. Extensive ex-
+periments demonstrate that FlattenGPT enhances
+model efficiency with a decent trade-off to perfor-
+mance. It outperforms existing pruning methods
+in both zero-shot accuracies and WikiText-2 per-
+plexity across various model types and parameter
+sizes. On LLaMA-2/3 and Qwen-1.5 models, Flat-
+tenGPT retains 90-96% of zero-shot performance
+with a compression ratio of 20%. It also outper-
+forms other pruning methods in accelerating LLM
+inference, making it promising for enhancing the
+efficiency of transformers.
+1. Introduction
+Recent advancements in Large Language Models
+(LLMs) (Brown et al., 2020; Zhang et al., 2022; Chowdhery
+et al., 2023; Touvron et al., 2023a;b; Dubey et al., 2024)
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+have led to breakthroughs in understanding and generation
+of natural language (Hadi et al., 2023; Zhao et al., 2023;
+Minaee et al., 2024). However, the cost of heavy compu-
+tation and extremely large memory consumption make
+it challenging to deploy on resource-limited devices. To
+mitigate these issues, model compression, as shown in
+Figure 1, has emerged as a popular post-training solution,
+reducing model size and complexity by removing model
+redundancy (Gupta & Agrawal, 2022; Zhu et al., 2023).
+Depth compression (Song et al., 2024; Men et al., 2024)
+aims at reducing the redundancy across transformer blocks.
+This redundancy manifests itself in the cross-layer similar-
+ity (Gromov et al., 2024; Sun et al., 2024; 2025). Figure 2(a)
+illustrates that the inputs of adjacent blocks have high simi-
+larity in LLMs, which is caused by the residual path span-
+ning the entire LLM. This similarity is particularly evident
+in LLMs, indicating that there is a certain amount of re-
+dundancy within them. Depth compression methods aim to
+reduce this cross-layer redundancy to achieve a compact net-
+work architecture. Compared to other pruning methods such
+as channel pruning (Ma et al., 2023; Ashkboos et al., 2024)
+or 2:4 pruning (Frantar & Alistarh, 2023; Sun et al., 2023),
+depth compression methods have an evident advantage in
+inference speed with the same number of parameters (Song
+et al., 2024). However, previous depth compression meth-
+ods usually adopt layer or block pruning, which removes the
+entire block selected by measuring how crucial this block
+is (Men et al., 2024; Samragh et al., 2023; Kim et al., 2024;
+Song et al., 2024; Zhong et al., 2024; Zhang et al., 2024a). It
+may simultaneously remove some useful knowledge learned
+in the pruned blocks, leading to substantial performance
+degradation.
+As another line of model compression, channel pruning (Ma
+et al., 2023; Ashkboos et al., 2024; van der Ouderaa et al.,
+2024; Lin et al., 2024) conducts a fine-grained parameter
+preservation, thus leading to better performance. However,
+these methods usually assign different pruning ratios for
+individual layers. This inconsistency in the module archi-
+tecture causes inconvenience in hyperparameter tuning or
+model deployment, such as LoRA hyperparameters (Hu
+et al., 2022). Moreover, channel pruning cannot tackle the
+redundancy across layers, resulting in a deeper architecture
+and higher latency in practice.
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Submission and Formatting Instructions for ICML 2026
+(a) Origin Model
+Layer 3
+Layer 2
+Layer 1
+Layer 0
+(b) Layer Pruning
+Layer 3
+Layer 2
+Layer 0
+Layer 1 Layer 1
+Layer 2
+Layer 3
+Layer 0
+(c) Channel Pruning
+Layer 3
+Layer [1, 2]
+Layer 0
+(d) FlattenGPT (Ours)
+Efficiency Arch. 
+Consistency Performance
+Layer 
+Pruning ✓ ✓ ×
+Channel 
+Pruning - × ✓
+FlattenGPT
+(Ours) ✓ ✓ ✓
+(e) Comparison of pruning methods
+Figure 1.Comparison of pruning methods. (a) The original architecture. (b) Layer pruning discards all knowledge in removed blocks.
+(c) Channel pruning cannot compress model depth and leads to inconsistent architecture across layers. (d) Our method bridges the gap,
+producing a compact model with marginal performance degradation. (e) compares efficiency, architecture consistency, and performance.
+This paper aims to conquer those issues, and proposes a
+fine-grained depth compression method called FlattenGPT.
+FlattenGPT is composed of two stages to reduce the model
+depth, meanwhile preserve crucial knowledge. In the first
+stage, we propose a new operation named flattening, to
+merge adjacent transformer blocks by concatenating their
+parameters and hidden states. This operation changes the
+sequential execution of adjacent transformer blocks to par-
+allel execution, where only the input of the blocks is altered.
+Since the input features of some adjacent layers in LLMs
+are inherently of high similarity, flattening operation has a
+marginal impact on the model performance. The subsequent
+stage employs a channel pruning method to streamline the
+merged transformer blocks. Channel pruning can identify
+the critical channels within the merged blocks, allowing for
+a more efficient removal of redundancy.
+FlattenGPT has clear advantages over previous pruning
+methods. As shown in Figure 1, unlike layer pruning meth-
+ods, flattening preserves the knowledge embedded in each
+layer, raising the performance ceiling of the depth compres-
+sion. Compared with channel pruning, FlattenGPT yields a
+consistent architecture with lower depth, resulting in high ef-
+ficiency as well as easy tuning and deployment. This method
+bridges the gap between depth compression and channel
+pruning, allowing for comprehensive model compression.
+Extensive experiments demonstrate that FlattenGPT pre-
+serves up to 96% of zero-shot performance with a com-
+pression rate of 20% on LLaMA 2 (Touvron et al., 2023b),
+outperforming prior depth compression approaches. To the
+best of our knowledge, FlattenGPT is an original effort on
+transformer compression through layer flattening. It shows
+potential to establish a novel comprehensive paradigm that
+enhances the depth compression of transformer architec-
+tures.
+2. Preliminary and Analysis
+2.1. Preliminary of Transformer Architecture
+The Pre-LN transformer architecture in LLMs (Touvron
+et al., 2023a) consists of multiple decoder layers, each com-
+posed of two blocks,i.e., Multi-Head Attention (MHA) and
+Multi Layer Perceptron (MLP). Let ℓ∈ {0,1,· · ·, L−1}
+denote the layer index, T , d, dh, dint and H denote the
+sequence length, hidden dimension, head dimension, in-
+termediate dimension, and the number of attention heads,
+respectively. The formulation of the ℓ-th Transformer block
+Bℓ is denoted as
+˜H ℓ−1 =H ℓ−1 + MHAℓ
+
+LNℓ
+a
+ 
+H ℓ−1
+,
+H ℓ = ˜H ℓ−1 + MLPℓ
+
+LNℓ
+p
+
+˜H ℓ−1
+
+,
+(1)
+where H ℓ ∈R T×d denotes the output of the ℓ-th layer,
+MHAℓ, MLPℓ, LNℓ
+a, and LNℓ
+p denote the MHA block,
+MLP block, MHA normalization, and MLP normalization
+of the ℓ-th Transformer layer, respectively. The normal-
+ization layers are usually composed of a root mean square
+normalization and an element-wise affinement:
+LNℓ
+a (X) = RMSNorm (X) diag
+ 
+αℓ
+a
+
+,
+LNℓ
+p (X) = RMSNorm (X) diag
+ 
+αℓ
+p
+
+,
+(2)
+where RMSNorm (X) applies X←X/∥X∥ to each
+row of X, αa ∈R d and αp ∈R d are the parameters of
+elementwise affinement.
+MHA blockLet ϕ(·) denote the softmax operation. The
+MHA block is defined as
+MHAℓ (X)
+=
+HX
+i=1
+ϕ
+ 
+ψr
+ 
+XW ℓ
+Q,i
+
+ψ⊤
+r
+ 
+XW ℓ
+K,i
+
+XW ℓ
+V,iW ℓ
+O,i,
+(3)
+where X∈R T×d is the input feature, W ℓ
+Q,i, W ℓ
+K,i,
+W ℓ
+V,i ∈R d×dh, and W ℓ
+O,i ∈R dh×d denote the query,
+key, value, and output matrices of the i-th head in the
+ℓ-th layer, respectively. ψr(·) denotes the positional em-
+bedding function. For similicity, we denote WQ =
+[WQ,1 WQ,2 · · ·W Q,H] as the horizontal concatenation
+of query parameters from all heads, and similar to WK and
+WV . We denote WO =
+
+W ⊤
+O,1 W ⊤
+O,2 · · ·W ⊤
+O,H
+⊤
+as the
+vertical concatenation of output parameters.
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Submission and Formatting Instructions for ICML 2026
+(c) Unraveled view of Transformer(a) Cross-layer Similarity (b) Feature L2 norm
+MHA
+MLP
+Input
+MHA
+MLP
+⋯
+Output
+Identity Mapping
+(d) Acceleration
+Figure 2.Illustration of redundancy in transformer blocks. (a) LLaMA-2 7B exhibits high cross-layer similarity. (b) The scale of the
+residual path grows faster than the MHA/MLP blocks, which dominates the deep hidden states. (c) The unraveled view of transformer
+architecture, where the residual path traversing the entire network leads to a considerable cross-layer similarity. (d) The acceleration
+comparison between different pruning methods.
+MLP blockThe MLP block is defined as
+MLPℓ (X) =ψ s
+ 
+XW ℓ
+U
+
+W ℓ
+D,(4)
+where W ℓ
+U ∈R d×dint and W ℓ
+D ∈R dint×d denote the up
+and down matrix and ψs(·) is the non-linear activation func-
+tion. X∈R T×d is the input matrix. Prevailing LLMs (Tou-
+vron et al., 2023a;b; Bai et al., 2023) employ a gated MLP.
+Its up matrix is composed of a up matrix and gate matrix
+W ℓ
+U = [Wu Wg], and the non-linear function is defined as
+ψs
+ 
+XW ℓ
+U
+
+=XW ℓ
+u ⊙ψ g
+ 
+XW ℓ
+g
+
+where ψg is the gate
+activation. For the following discussions, we take the gated
+MLP as the baseline architecture.
+2.2. Analysis on the Redundancy in Depth
+As illustrated in Figure 2(a), deep transformer architecture
+exhibits high cross-layer similarity. This is caused by the
+curse of depth (Sun et al., 2025), which implies that the
+deep layers are dominated by the residual path,i.e., identity
+mapping. As shown in Figure 2(b), the L2 norm of the resid-
+ual path is much larger than the MHA/MLP output in deep
+layers, dominating the forward propagation. An intuitive in-
+terpretation is shown in the triangle-shaped unraveled view
+of transformer architecture in Figure 2(c). The amount of
+residual features increases in deep layers and surpasses the
+non-linear blocks, leading to approximately identity map-
+ping. This analysis shows the cross-layer redundancy in the
+transformers.
+To better illustrate the layer redundancy in deep transform-
+ers, the following part provides a theoretical analysis. As-
+sume that the input feature H ℓ, intermediate vectors ˜H ℓ,
+and the model parameter matrix W ℓ follow normal and
+independent distributions with mean 0 for all layers. We
+first model the growth of the hidden states in a transformer
+architecture:
+Lemma 2.1(The growth of the hidden state variance).Let
+σ2
+H ℓ denote the variance of H ℓ. The variance σ2
+H ℓ could
+increase quadratically with depthℓ:
+σ2
+H ℓ =σ 2
+H 0 +
+ℓX
+k=1
+Θ (σH k)≤Θ
+ 
+ℓ2
+.(5)
+This upper bound is tight, so it is attainable. This conclusion
+indicates that deep transformers often come with imbalanced
+feature variance across layers, which is consistent with the
+empirical results in Figure 2(b) and Figure 4 in the Appendix.
+Then the following lemma further illustrates why deeper
+layers are redundant:
+Lemma 2.2(The norm of gradient).Let ∂y
+∂H ℓ denote the
+partial derivative of the model output y to the ℓ-th hidden
+states H ℓ. The Euclidean norm of this partial derivative is
+bounded by
+
+∂y
+∂H ℓ
+
+2
+≤
+LY
+k=ℓ
+
+1 + 1
+σH ℓ
+A+ 1
+σ2
+H ℓ
+B
+
+,(6)
+where A and B are constants for the Transformer network.
+Specifically, when ℓ=L−c , where c is a constant number,
+the limitation of the right-hand side is 1.
+This conclusion implies that for a large L, the gradient of
+deeper layers H ℓ,i.e.,
+ ∂y
+∂H ℓ
+
+2
+is dominated byidentity
+mapping, thereby limiting the model’s expressivity and hin-
+dering its capability to learn meaningful transformations.
+This conclusion is also consistent with the empirical results
+as shown in Figure 2(a), where deeper layers exhibit high
+cross-layer similarity. A comprehensive proof and more em-
+pirical results are given in Appendix A and B, respectively.
+This redundancy in depth makes it reasonable that, previous
+layer pruning methods delete the entire redundant blocks,
+i.e., MHAℓ or MLPℓ (Song et al., 2024; Men et al., 2024).
+Although these methods achieve promising acceleration
+as shown in Figure 2(d), pruning at such high granularity
+will inevitably remove some useful knowledge within those
+blocks, resulting in a substantial performance degradation.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Submission and Formatting Instructions for ICML 2026
+MHA
+(a) Origin model
+𝑊𝑄
+𝑙−1
+Multi-Head Attention
+𝑊𝐾
+𝑙−1 𝑊𝑉
+𝑙−1
+𝑊𝑂
+𝑙−1
++
+𝑊𝑈
+l−1
+RMSNorm
+𝑊𝐷
+𝑙−1
+RMSNorm
+Activation
+MLP
+MHA
+𝑊𝑄
+𝑙
+Multi-Head Attention
+𝑊𝐾
+𝑙 𝑊𝑉
+𝑙
+𝑊𝑂
+𝑙
++
+𝑊𝐺
+𝑙
+RMSNorm
+𝑊𝐷
+𝑙
+RMSNorm
+Activation
+MLP
+(b) Stage 1:
+Layer Flattening
+MHA
+Multi-Head Attention
++
+RMSNorm
+RMSNorm
+Activation
+MLP
+𝑊𝑄
+𝑙−1 𝑊𝑄
+𝑙 𝑊𝐾
+𝑙−1 𝑊𝐾
+𝑙 𝑊𝑉
+𝑙−1 𝑊𝑉
+𝑙
+𝑊𝑂
+𝑙−1 𝑊𝑂
+𝑙
+𝑊𝐺
+𝑙−1 𝑊𝐺
+𝑙
+𝑊𝐷
+𝑙−1 𝑊𝐷
+𝑙
+MHA
+Multi-Head Attention
++
+RMSNorm
+RMSNorm
+Activation
+MLP
+𝑊𝐾
+𝑙−1,𝑙𝑊𝑄
+𝑙−1,𝑙 𝑊𝑉
+𝑙−1,𝑙
+𝑊𝑂
+𝑙−1,𝑙
+𝑊𝐺
+𝑙−1,𝑙
+𝑊𝑈
+𝑙−1,𝑙
+(c) Stage 2:
+Channel Pruning
+𝑊𝐺
+l−1
+·
+𝑊𝑈
+𝑙
+·
+𝑊𝑈
+𝑙−1 𝑊𝑈
+𝑙
+·
+𝑊𝑈
+𝑙−1,𝑙
+·
+Figure 3.Framework of FlattenGPT, which consists of two stages. (a) Original stacks of transformer blocks with high similarity. (b)
+Layer flattening merges two adjacent blocks into one single block with a marginal performance degradation. (c) Flattening bridges the gap
+between depth compression and channel compression.
+3. FlattenGPT
+FlattenGPT strives for a fine-grained redundancy removal in
+depth compression. As illustrated in Figure 3, FlattenGPT
+employs a two-stage approach to compress the depth in a
+fine-grained manner. In the first stage, FlattenGPT merges
+the selected adjacent layers into a single wide layer, flat-
+tening the arrangement of layers. Due to the high similar-
+ity between adjacent layers, the flattening operation does
+not substantially alter the inner calculation, leading to a
+marginal performance degradation. In the second stage,
+FlattenGPT adaptively prunes the redundant for the flat-
+tened layers, demonstrating less information loss compared
+with entire layer pruning methods. FlattenGPT produces the
+same architecture as layer pruning, but preserves important
+cues from all layers. It enjoys a faster acceleration in infer-
+ence, meanwhile maintains high performance. Following
+parts present details of those two stages.
+3.1. Iterative Layer Flattening
+Layer flattening aims to merge layers with high similarity.
+Since the inputs of the two layers are highly similar, the
+inner calculation will not be significantly changed by the
+flattening, therefore preserving a constant performance. We
+need to address two issues in this stage: 1) how to select the
+layers to flatten, and 2) how to merge the selected layers.
+Layer Selectionis conducted to spot highly similar adjacent
+layers. We collect cross-layer feature similarity on a small
+calibration dataset. Then we design a greedy algorithm to
+find adjacent layers with the highest similarities iteratively.
+The algorithm is shown in Algorithm 1. Let S∈R L×L
+denote the similarity matrix, where Si,j denote the cosine
+similarity between the input feature of layer i and the output
+feature of layer j. For simplicity, S is an upper triangular
+matrix, where we only collect Si,j for i < j . We try to
+find the two adjacent layers {Bℓ−1, Bℓ} with the highest
+similarity Sℓ−1,ℓ for each iteration. Then we need to modify
+the similarity matrix toSfor the next iteration.
+Let layers Bℓ−1, ˆBℓ are selected in the current iteration.
+Suppose one of them has already been flattened in previous
+iterations,e.g. ˆBℓ is generated by merging Bm−1 and Bm.
+Merging Bℓ−1, ˆBℓ is equivalent to flattening Bℓ−1, Bm−1,
+Bm, and thus requires special handling. We need to con-
+sider the distance between the first and the last layer being
+flattened. If the similarity is too low, flattening these layers
+will substantially alter information flow, potentially lead-
+ing to performance degradation. To address this issue, we
+modify the similarity matrix S after each flattening iteration.
+We delete the ℓ−1 -th column and the ℓ-th row in S after
+merging layer Bℓ−1 and ˆBℓ. Therefore, we can only access
+the similarities Si,ℓ for i < ℓ−1 and Sℓ−1,i for i > ℓ .
+It ensures that the similarity of Bℓ−1 and Bm are counted
+for measuring the similarity between Bℓ−1 and ˆBℓ. Note
+that, this strategy is generalizable to merging either original
+or flattened layers. The above steps are iterated until the
+target number of layers is flattened, which is decided by the
+predefined pruning ratio.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Submission and Formatting Instructions for ICML 2026
+Algorithm 1 Iterative layer flattening
+Require:Base model, number of layers to flattenN, calibration setD
+1: Calculate the cosine similarity between each pair of layersS∈R L×L, which is an upper triangle matrix
+2:whileN≥0do ▷Iterative search
+3: Identify the index(ℓ−1, ℓ)of the largest similarity inS▷Select adjacent layers
+4: ˜W j
+m ←diag
+ 
+αj
+a
+
+W j
+m, form∈ {Q, K, V}, j∈ {ℓ−1, ℓ}▷Fuse affinement parameters in MHA
+5:W ℓ−1,ℓ
+m ←
+h
+˜W ℓ−1
+m ˜W ℓ
+m
+i
+, form∈ {Q, K, V}▷Flatten MHA
+6:W ℓ−1,ℓ
+O ←
+h
+W ℓ−1,⊤
+O W ℓ,⊤
+O
+i⊤
+7: ˜W j
+m ←diag
+ 
+αj
+p
+
+W j
+m, form∈ {u, g}, j∈ {ℓ−1, ℓ}▷Fuse affinement parameters in MLP
+8:W ℓ−1,ℓ
+m ←
+h
+˜W ℓ−1
+m ˜W ℓ
+m
+i
+, form∈ {u, g}▷Flatten MLP
+9:W ℓ−1,ℓ
+D ←
+h
+W ℓ−1,⊤
+D W ℓ,⊤
+D
+i⊤
+10: Delete theℓ-th row and theℓ−1-th column from the similarity matrixS▷Prepare for next iteration
+11:N←N−1
+12:end while
+Layer Flattening:Flattening aims to merge the selected
+layers into a single wide layer. To be compatible with the
+current implementation and AI infrastructure, we construct
+the flattened layers with the same architecture as the original
+transformers. Let ℓ−1 and ℓ to denote the indexes of layers
+being merged. First, we fuse the parameters of affinement
+in the normalization layer LN with the linear projections in
+the MHA and MLP. For the MHA layers, we fuse αℓ−1
+a
+with the query, key, and value matrix:
+˜W ℓ−1
+Q,i = diag
+ 
+αℓ−1
+a
+
+W ℓ−1
+Q,i ,
+˜W ℓ−1
+K,i = diag
+ 
+αℓ−1
+a
+
+W ℓ−1
+K,i ,
+˜W ℓ−1
+V,i = diag
+ 
+αℓ−1
+a
+
+W ℓ−1
+V,i .
+(7)
+For the MLP layers, we fuse αℓ−1
+p with the up and gate
+matrix: ˜W ℓ−1
+u = diag
+ 
+αℓ−1
+p
+
+W ℓ−1
+u ,
+˜W ℓ−1
+g = diag
+ 
+αℓ−1
+p
+
+W ℓ−1
+g .
+(8)
+Similar fuse operations are conducted on layerℓ. After these
+fusions, the affinement parameters are set to 1d. This step
+does not change the output of the network but facilitates the
+next flattening steps.
+MHA flatteningConsidering the high similarity between
+the selected layers, we add the output of the two MHA
+blocks in MHA flattening. It is equivalent to concatenating
+the attention heads from two layers to form an attention
+block of2Hheads:
+MHAℓ−1,ℓ (X)
+=
+HX
+i=1
+ϕ
+
+ψr
+
+X ˜W ℓ−1
+Q,i
+
+ψ⊤
+r
+
+X ˜W ℓ−1
+K,i
+
+X ˜W ℓ−1
+V,i W ℓ−1
+O,i
++
+HX
+i=1
+ϕ
+
+ψr
+
+X ˜W ℓ
+Q,i
+
+ψ⊤
+r
+
+X ˜W ℓ
+K,i
+
+X ˜W ℓ
+V,iW ℓ
+O,i.
+(9)
+The flattened MHA block can also be calculated by the
+original implementation, which utilizes a single query, key,
+value, and output projection matrix:
+W ℓ−1,ℓ
+Q =
+
+˜W ℓ−1
+Q,1 , ˜W ℓ−1
+Q,2 ,· · ·, ˜W ℓ−1
+Q,H ,
+˜W ℓ
+Q,1, ˜W ℓ
+Q,2,· · ·, ˜W ℓ
+Q,H
+
+,
+(10)
+where similar calculation applies to matrix ˜W ℓ−1,ℓ
+K ,
+˜W ℓ−1,ℓ
+V and ˜W ℓ−1,ℓ
+O .
+MLP flatteningSimilarly, we add the output of two MLP
+blocks due to the high similarity across layers. It is equiva-
+lent to concatenating the hidden states from two layers to
+form an MLP layer of2d int hidden channels.
+MLPℓ−1,ℓ (X) =X ˜W ℓ−1
+u ψg
+
+X ˜W ℓ−1
+g
+
+W ℓ−1
+D
++X ˜W ℓ
+uψg
+
+X ˜W ℓ
+g
+
+W ℓ
+D.
+(11)
+The full procedure of layer flattening is shown in Algo-
+rithm 1. These steps flatten some adjacent layers, but do not
+change the number of parameters and calculations. Next, we
+introduce a pruning method to compress those parameters.
+3.2. Channel Pruning
+Channel pruning is conducted based on layer flattening to
+remove redundant parameters. Previous channel pruning
+methods are compatible with layer flattening, but lead to
+inconsistent architectures across layers. Different, this pa-
+per aims to keep the pruned architecture consistent with the
+original one. This consistency will simplify the implemen-
+tation, facilitating the reuse of tuning hyperparameters and
+deployment.
+We employ two pruning methods for MHA and MLP blocks,
+respectively. For the MHA blocks, we prune redundant
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Submission and Formatting Instructions for ICML 2026
+Algorithm 2 MHA pruningby removing heads
+Require:Query, key, value matrixW Q,W K ,W V ∈R d×dh, output matrixW O ∈R dh×d, rankk, calibration datasetD
+1:f i =
+NP
+i=1
+Softmax
+ 
+ψr (XW Q,i)ψ ⊤
+r (XW K,i)
+
+XW V,i diag
+ 
+WO,iW ⊤
+O,i
+1/2
+, fori∈ {1,2,· · ·, H}
+2: LetS k ∈R d×k be the matrix that selects the topkheads based on{f i}scores
+3:return(W Q,W K ,W V ,W O)←
+ 
+WQSk,W K Sk,W V Sk,S ⊤
+k WO
+
+Algorithm 3 MLP pruningby Nystr ¨om approximation
+Require:Up and gate matrixW u,W g ∈R d×dint, down matrixW D ∈R dint×d, rankk, calibration datasetD, ridge intensityλ
+1: Calculate activation correlationC ψ =PN
+i=1 (XiWuψg (XiWg))⊤ XiWuψg (XiWg)
+2:s i ←[C ψ (Cψ +λI)] −1
+ii , fori∈ {1,2,· · ·, d int}▷Calculate the ridge leverage score
+3: LetS k ∈R dint×k be the matrix that selects the topkcolumns based ons i scores
+4:return(W u,W g,W D)←
+
+WuSk,W gSk,W D +
+ 
+S⊤
+k CψSk +λI
+−1
+S⊤
+k Cψ
+ 
+I−S kS⊤
+k
+
+WD
+
+heads to keep the number of heads and head size unchanged.
+For the MLP blocks, we prune individual channels with
+nystr¨om approximation (Gittens & Mahoney, 2016; Musco
+& Musco, 2017). We omit the layer index in the formulation
+to simplify the description.
+MHA pruningSince the flattened layer contains more
+heads than the original layer, we aim to prune heads to keep
+the number of heads the same as the other MHA blocks. We
+design a metric to compare the importance of head i, i.e.,
+thef i is computed as
+fi =ED
+
+Softmax
+ 
+ψr (XW Q,i)ψ ⊤
+r (XW K,i)
+
+XW V,i diag
+ 
+WO,iW ⊤
+O,i
+1/2i
+.
+(12)
+This metric estimates the expectation norm of the attention
+activation value by multiplying the L2 norm of each line
+of the output matrix. It measures the impact of the head i
+on the output. By comparing the impact of each head, we
+can remove the unimportant heads to prune the MHA block.
+The compression procedure is summarized in Algorithm 2.
+MLP pruningThe MLP blocks conduct important non-
+linear calculations in the transformer. A simple channel
+selection is insufficient to maintain the performance of the
+original model. We employ Nystr ¨om approximation (Git-
+tens & Mahoney, 2016; Musco & Musco, 2017) to prune
+this block. The compression method is summarized in Algo-
+rithm 3. First, we calculate the ridge leverage score (Musco
+& Musco, 2017) as the channel importance measurement.
+Then we select the important channels and adjust the down
+matrix WD to compensate for the information loss with
+Nystr¨om approximation (Gittens & Mahoney, 2016). The
+following lemma illustrates that Nystr¨om approximation is
+an optimal estimation under least squares with L2 regular-
+ization. The proof is shown in Appendix A.3.
+Lemma 3.1.Let Sk denote a k-column selec-
+tion matrix. Let Cψ denote the covariance
+PN
+i=1 (ψs (XiWU))⊤ ψs (XiWU). The optimal es-
+timation of ˆWD is defined by:
+∆ ˆWD = arg min
+∆WD
+ψs (XiWU)S k
+ 
+S⊤
+k WD + ∆WD
+
+−ψs (XiWU)W D∥2 +λ∥∆W D∥2 ,
+ˆWD =W D +S k∆ ˆWD,
+(13)
+where λ is the coefficient for L2 regularization. ∆ ˆWD has
+closed form solution:
+∆ ˆWD =
+ 
+S⊤
+k CψSk +λI
+−1
+S⊤
+k Cψ
+ 
+I−S kS⊤
+k
+
+WD.
+(14)
+3.3. Pruning Hyperparameters
+All architectural hyperparameters, including width/head
+count, are predefined to preserve structure consistency with
+the original transformer block. The target width of the
+pruned MLP is identical to the original MLP module, and
+the number of heads is the same as the original MHA mod-
+ule. This setting ensures compatibility with the original
+AI infrastructure, including GPUs, CUDA kernels, multi-
+machine communication, inference engine, etc. It is also a
+clear target for reproducibility.
+4. Experiments
+4.1. Experimental Setup
+Models:We evaluate FlattenGPT on models that employ
+a sequential transformer block structure: LLaMA-2 (Tou-
+vron et al., 2023b), LLaMA-3 (Dubey et al., 2024), Qwen-
+1.5 (Bai et al., 2023), and Baichuan-2 (Yang et al., 2023),
+etc. These models share similar architectures of MHA and
+MLP.
+Implementations and Environments:All hyperparame-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Submission and Formatting Instructions for ICML 2026
+Table 1.Comparison of depth compression methods on WikiText-2 perplexity and zero-shot tasks.
+Model Method Sparsity PPL↓ WinoG HellaS PIQA ARC-e ARC-c Avg.
+LLaMA-2 7B
+Dense 0% 5.47 69.06 75.99 79.11 74.58 46.25 69.00
+SLEB (Song et al., 2024) 21.02% 9.14 58.96 62.47 73.07 56.48 33.02 56.80
+LaCo (Yang et al., 2024) 21.02% 50.39 60.46 54.08 68.34 55.39 35.84 54.82
+RM (Samragh et al., 2023) 21.02% 676.8 49.25 29.22 54.46 34.43 22.53 37.98
+ShortGPT (Men et al., 2024) 21.02% 18.45 65.90 62.63 70.24 56.06 36.09 58.18
+BlockPruner (Zhong et al., 2024) 21.99% 11.51 62.43 65.87 74.21 61.07 37.29 60.17
+FlattenGPT 21.02% 8.68 66.54 68.45 72.74 63.43 41.30 62.49
+LLaMA-2 13B
+Dense 0% 4.88 72.22 79.39 80.47 77.48 49.23 71.76
+LaCo (Yang et al., 2024) 24.37% 13.97 59.27 60.44 72.42 54.34 34.56 56.21
+RM (Samragh et al., 2023) 24.37% 10.08 66.61 66.80 73.72 66.12 41.98 63.05
+ShortGPT (Men et al., 2024) 24.37% 20.06 70.80 67.80 72.74 60.35 41.30 62.60
+BlockPruner (Zhong et al., 2024) 25.12% 8.16 66.30 72.20 76.93 65.82 41.38 64.53
+FlattenGPT 24.37% 6.68 71.11 73.44 76.33 72.10 44.54 67.50
+Qwen-1.5 7B
+Dense 0% 7.95 66.46 76.92 79.22 62.16 42.66 65.48
+LaCo (Yang et al., 2024) 20.97% 39.23 58.64 56.35 70.40 46.89 32.85 53.03
+RM (Samragh et al., 2023) 20.97% 2026 49.88 42.00 67.36 54.17 28.58 48.40
+ShortGPT (Men et al., 2024) 20.97% 49.88 62.12 58.87 69.53 43.60 32.17 53.26
+BlockPruner (Zhong et al., 2024) 21.83% 20.58 55.56 59.31 71.71 53.70 33.28 54.71
+FlattenGPT 20.97% 16.05 59.27 62.89 68.39 56.99 37.46 57.00
+Baichuan-2 7B
+Dense 0% 6.04 68.27 72.18 77.48 72.98 42.75 66.73
+LaCo (Yang et al., 2024) 21.57% 26.46 58.56 51.50 68.28 52.90 28.50 51.95
+RM (Samragh et al., 2023) 21.57% 189.8 52.33 30.87 59.96 38.17 23.63 40.99
+ShortGPT (Men et al., 2024) 21.57% 31.05 62.67 50.01 63.71 47.31 30.72 50.88
+BlockPruner (Zhong et al., 2024) 22.45% 15.38 61.48 58.09 69.75 58.08 33.02 56.08
+FlattenGPT 21.57% 20.55 64.33 61.50 69.42 56.27 35.24 57.35
+ters, including width/head count, are predefined to preserve
+structure consistency with the original transformer block.
+We implement our models using the HuggingFace Trans-
+formers library (Wolf et al., 2020).
+Datasets and Evaluations:We follow the setup in previous
+works (Ashkboos et al., 2024; Song et al., 2024) for fairness.
+The calibration dataset is composed of 128 samples with
+2048 tokens, randomly selected from the training split of
+WikiText-2 (Merity et al., 2016). The evaluation consists of
+perplexity and zero-shot task performance. The perplexity is
+evaluated on the test split of WikiText-2 (Merity et al., 2016).
+The zero-shot accuracies are evaluated with LM Evaluation
+Harness (Gao et al., 2024) on Winograd (Sakaguchi et al.,
+2019), HellaSwag (Zellers et al., 2019), Physical Interaction
+Question Answering (PIQA) (Bisk et al., 2020), and AI2
+Reasoning Challenges (ARC-e, ARC-c) (Clark et al., 2018).
+We also investigate the effectiveness of recovery finetuning,
+which employs 50K samples of refined Alpaca (Taori et al.,
+2023) for instruction tuning with LoRA (Hu et al., 2022).
+More details are presented in Appendix C.
+4.2. Comparison with Depth Compression Methods
+Table 1 shows a comprehensive comparison between Flat-
+tenGPT and the other depth compression methods. These
+methods (Yang et al., 2024; Song et al., 2024; Men et al.,
+2024; Samragh et al., 2023; Zhong et al., 2024) remove
+the entire transformer blocks, resulting in substantial per-
+formance loss. Our method alleviates this problem by fine-
+grained parameter removal and shows superior performance
+on various model sizes. It achieves the highest zero-shot ac-
+curacy among training-free layer pruning competitors, and
+outperforms ShortGPT by about 5% on various models.
+4.3. Comparison with other Pruning Methods
+Table 2 compares the latency, throughput, and mean accura-
+cies on zero-shot tasks of the compressed LLaMA-2 (Tou-
+vron et al., 2023b) models. Even accompanied with hard-
+ware acceleration as reported in (Song et al., 2024), 2:4
+pruning methods lead to minor speedup (1.10×) and lower
+throughput (0.98× with a sparsity ratio of 50%. Width prun-
+ing methods, such as SliceGPT (Ashkboos et al., 2024), are
+more hardware-friendly and speed up the pruned model,
+while still lagging behind depth pruning methods. Flat-
+tenGPT inherits the advantages of acceleration in depth prun-
+ing and improves the performance. Since the compressed
+model architecture of FlattenGPT is exactly the same as
+SLEB, the throughput and latency results are the same.
+FlattenGPT outperforms all other methods in throughput
+(1.27×), latency (1.26×), and zero-shot tasks performance
+(about 5% higher), yielding a better trade-off between speed
+and performance.
+4.4. Recovery Fine-Tuning
+The pruned model of FlattenGPT contains the useful infor-
+mation from all blocks, making it easier for the model to
+recover performance through Recovery Fine-Tuning (RFT).
+Table 3 presents the mean accuracies of zero-shot tasks
+with and without RFT. The results show that the model
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Submission and Formatting Instructions for ICML 2026
+Table 2.Comparison of pruning methods on throughput, latency, and mean
+accuracies on zero-shot tasks. Throughput and latency are measured with
+LLaMA-2 70B on 2 NVIDIA A100 80GB.
+Throughput Latency LLaMA-2Method Sparsity (Tokens/s) (ms) 7B 13B 70B
+Dense 0% 2991.00× 1718.41.00× 69.00 71.76 76.57
+2:4 SparseGPT 50% 2930.98× 1555.51.10× 58.23 63.06 71.87
+Wanda 50% 2930.98× 1555.51.10× 55.59 61.23 72.34
+Width
+LLM-Pruner 20% 3141.05× 1534.31.12× 62.15 67.72 -
+SliceGPT 20% 3141.05× 1658.71.04× 58.17 63.45 72.34
+SliceGPT 25% 3311.11× 1440.71.19× 55.49 58.90 69.75
+SliceGPT 30% 3431.15× 1364.21.26× 51.50 55.16 66.11
+SLEB 10% 3361.12× 1529.11.12× 62.24 66.77 73.14
+SLEB 20% 3811.27× 1364.11.26× 56.80 62.96 70.81Depth
+FlattenGPT 20% 3811.27× 1364.11.26× 62.49 68.27 73.94
+Table 3.Comparison of mean zero-shot accuracies with
+recovery fine-tuning. The sparsity ratio is 20% and † indi-
+cates fine-tuned on Alpaca (Taori et al., 2023) dataset.
+LLaMA-2 LLaMA-2 LLaMA-3Method 7B 13B 8B
+Dense 69.00 71.76 73.08
+Width
+Wanda-sp 64.53 67.37 -
+FLAP 59.51 64.70 36.03
+LLM-Pruner 61.34 65.66 64.23
+LLM-Pruner† 62.15 67.72 68.99
+Depth
+SLEB 59.25 62.96 -
+Shortened LLaMA 58.36 65.86 58.30
+Shortened LLaMA† 61.91 68.81 66.72
+FlattenGPT 63.83 68.27 66.21
+FlattenGPT† 66.24 70.53 70.43
+compressed by FlattenGPT maintains >96% zero-shot
+performance of the dense model, substantially better than
+other depth compression methods and some width pruning
+methods. Even without RFT, our method achieves compa-
+rable performance with RFT-based methods. These results
+illustrate the effectiveness of FlattenGPT.
+More experiments: We present more experiments and
+discussions in Appendix D, including additional experi-
+ments on various model types and sizes, more pruning
+methods (van der Ouderaa et al., 2024; Lin et al., 2024),
+ablation studies, dependency on calibration dataset, and
+generalization beyond language modeling and transformer
+architectures. Please kindly refer to this part.
+5. Related Works
+Model Pruningis an approach to compress the number of
+parameters and calculations in a deep model. Unstructured
+pruning (LeCun et al., 1989; Hassibi et al., 1993; van der
+Ouderaa et al., 2024; Dong et al., 2017; Frantar & Alistarh,
+2022; 2023; Sun et al., 2023; Zhang et al., 2024b) removes
+independent weights without pre-determined patterns, lead-
+ing to sparse weight matrices within the model. This sparsity
+enables high pruning ratio but results in complex data access
+patterns, which are not conducive to hardware acceleration.
+Structured pruning (Ashkboos et al., 2024; Ma et al., 2023;
+An et al., 2024) removes elements to form dense matrices
+that are more efficiently processed by hardware. These
+methods exhibit a remarkable acceleration but come with
+worse performance degradation. This paper follows the
+structured pruning of LLMs, proposing a new depth com-
+pression method that balances performance and efficiency.
+Depth compressionaims to reduce the number of layers
+and speed up inference. Layer pruning approaches use layer
+importance metrics to remove redundant layers from the
+model (Men et al., 2024; Samragh et al., 2023; Kim et al.,
+2024; Song et al., 2024; Zhong et al., 2024; Zhang et al.,
+2024a). These methods remove the weights and knowledge
+of the entire layer, limiting the performance of the pruned
+model. Layer merging methods fuse the parameters of dif-
+ferent layers by addition (Yang et al., 2024; Liu et al., 2024;
+Ding et al., 2025). While this type of method uses informa-
+tion from different layers, simple addition can cause sharp
+performance degradation. LLM-Streamline (Chen et al.,
+2025) This paper proposes FlattenGPT, a novel depth com-
+pression method that rearranges the layers, which reduces
+the model depth while retaining the information of each
+layer and maintains the performance well.
+Width Compressionreduces the number of parameters
+by reducing the width of the network. LLM-Pruner (Ma
+et al., 2023) uses gradient magnitudes to estimate the impor-
+tance of neurons and efficiently fine-tune the performance
+of the recovery model with parameters. SliceGPT (Ashk-
+boos et al., 2024) and ModeGPT (Lin et al., 2024) employ
+matrix decomposition to compress the width of each block
+in the Transformer. The attention head pruning and sharing
+methods (Michel et al., 2019) were used to reduce the width
+of the attention module. However, these methods cannot
+compress model depth, leading to higher inference latency.
+Our method bridges the gap between channel pruning and
+layer pruning, which provides a fine-grained layer pruning
+method and improves the performance.
+6. Conclusion
+We propose a novel LLM depth compression method, Flat-
+tenGPT, to address the challenges of performance degrada-
+tion under high-granularity layer pruning. Upon the high
+similarity of cross-layer input features, we design a layer
+flattening operation to reduce the model depth with minimal
+performance loss. Then we adopt channel pruning methods
+to reduce the number of parameters and calculations in the
+model. Our proposed method performs well on LLM depth
+compression, showcasing the effectiveness of fine-grained
+depth compression. We hope this work can inspire more
+future efforts in depth compression on neural architectures
+from the perspective of layer flattening.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Submission and Formatting Instructions for ICML 2026
+This paper presents work whose goal is to advance the field
+of machine learning. There are many potential societal
+consequences of our work, none of which we feel must be
+specifically highlighted here.
+References
+An, Y ., Zhao, X., Yu, T., Tang, M., and Wang, J. Fluctuation-
+based adaptive structured pruning for large language mod-
+els. InProceedings of the AAAI Conference on Artificial
+Intelligence, volume 38, pp. 10865–10873, 2024.
+Ashkboos, S., Croci, M. L., do Nascimento, M. G., Hoefler,
+T., and Hensman, J. SliceGPT: Compress large language
+models by deleting rows and columns. InThe Twelfth
+International Conference on Learning Representations,
+2024.
+Bai, J., Bai, S., Chu, Y ., Cui, Z., Dang, K., Deng, X., Fan,
+Y ., Ge, W., Han, Y ., Huang, F., et al. Qwen technical
+report.arXiv preprint arXiv:2309.16609, 2023.
+Bisk, Y ., Zellers, R., Le bras, R., Gao, J., and Choi, Y . Piqa:
+Reasoning about physical commonsense in natural lan-
+guage.Proceedings of the AAAI Conference on Artificial
+Intelligence, 34(05):7432–7439, Apr. 2020. doi: 10.1609/
+aaai.v34i05.6239. URL https://ojs.aaai.org/
+index.php/AAAI/article/view/6239.
+Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J. D.,
+Dhariwal, P., Neelakantan, A., Shyam, P., Sastry, G.,
+Askell, A., et al. Language models are few-shot learners.
+Advances in neural information processing systems, 33:
+1877–1901, 2020.
+Chen, X., Hu, Y ., Zhang, J., Wang, Y ., Li, C., and Chen,
+H. Streamlining redundant layers to compress large lan-
+guage models. InThe Thirteenth International Confer-
+ence on Learning Representations, 2025. URL https:
+//openreview.net/forum?id=IC5RJvRoMp.
+Chowdhery, A., Narang, S., Devlin, J., Bosma, M., Mishra,
+G., Roberts, A., Barham, P., Chung, H. W., Sutton, C.,
+Gehrmann, S., et al. Palm: Scaling language modeling
+with pathways.Journal of Machine Learning Research,
+24(240):1–113, 2023.
+Clark, P., Cowhey, I., Etzioni, O., Khot, T., Sabharwal, A.,
+Schoenick, C., and Tafjord, O. Think you have solved
+question answering? try arc, the ai2 reasoning challenge.
+arXiv preprint arXiv:1803.05457, 2018.
+Ding, X., Zhu, Y ., Zhang, Y ., and Xie, C. A sliding layer
+merging method for efficient depth-wise pruning in llms.
+arXiv preprint arXiv:2502.19159, 2025.
+Dong, X., Chen, S., and Pan, S. Learning to prune deep
+neural networks via layer-wise optimal brain surgeon.
+Advances in neural information processing systems, 30,
+2017.
+Dubey, A., Jauhri, A., Pandey, A., Kadian, A., Al-Dahle,
+A., Letman, A., Mathur, A., Schelten, A., Yang, A., Fan,
+A., et al. The llama 3 herd of models.arXiv preprint
+arXiv:2407.21783, 2024.
+Frantar, E. and Alistarh, D. Optimal brain compression:
+A framework for accurate post-training quantization and
+pruning.Advances in Neural Information Processing
+Systems, 35:4475–4488, 2022.
+Frantar, E. and Alistarh, D. Sparsegpt: Massive language
+models can be accurately pruned in one-shot. InInter-
+national Conference on Machine Learning, pp. 10323–
+10337. PMLR, 2023.
+Gao, L., Tow, J., Abbasi, B., Biderman, S., Black, S., DiPofi,
+A., Foster, C., Golding, L., Hsu, J., Le Noac’h, A., Li,
+H., McDonell, K., Muennighoff, N., Ociepa, C., Phang,
+J., Reynolds, L., Schoelkopf, H., Skowron, A., Sutawika,
+L., Tang, E., Thite, A., Wang, B., Wang, K., and Zou,
+A. A framework for few-shot language model evaluation,
+07 2024. URL https://zenodo.org/records/
+12608602.
+Gittens, A. and Mahoney, M. W. Revisiting the nystr ¨om
+method for improved large-scale machine learning.The
+Journal of Machine Learning Research, 17(1):3977–4041,
+2016.
+Gromov, A., Tirumala, K., Shapourian, H., Glorioso, P., and
+Roberts, D. A. The unreasonable ineffectiveness of the
+deeper layers.arXiv preprint arXiv:2403.17887, 2024.
+Gu, A. and Dao, T. Mamba: Linear-time sequence
+modeling with selective state spaces.arXiv preprint
+arXiv:2312.00752, 2023.
+Gupta, M. and Agrawal, P. Compression of deep learn-
+ing models for text: A survey.ACM Transactions on
+Knowledge Discovery from Data (TKDD), 16(4):1–55,
+2022.
+Hadi, M. U., Qureshi, R., Shah, A., Irfan, M., Zafar,
+A., Shaikh, M. B., Akhtar, N., Wu, J., Mirjalili, S.,
+et al. A survey on large language models: Applications,
+challenges, limitations, and practical usage.Authorea
+Preprints, 2023.
+Hassibi, B., Stork, D. G., and Wolff, G. J. Optimal brain
+surgeon and general network pruning. InIEEE interna-
+tional conference on neural networks, pp. 293–299. IEEE,
+1993.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Submission and Formatting Instructions for ICML 2026
+Hu, E. J., Wallis, P., Allen-Zhu, Z., Li, Y ., Wang, S.,
+Wang, L., Chen, W., et al. Lora: Low-rank adapta-
+tion of large language models. InInternational Confer-
+ence on Learning Representations, 2022. URL https:
+//openreview.net/forum?id=nZeVKeeFYf9.
+Kim, B.-K., Kim, G., Kim, T.-H., Castells, T., Choi, S.,
+Shin, J., and Song, H.-K. Shortened llama: A simple
+depth pruning for large language models. InICLR 2024
+Workshop ME-FoMo, 2024.
+LeCun, Y ., Denker, J., and Solla, S. Optimal brain damage.
+Advances in neural information processing systems, 2,
+1989.
+Lin, C.-H., Gao, S., Smith, J. S., Patel, A., Tuli, S., Shen, Y .,
+Jin, H., and Hsu, Y .-C. Modegpt: Modular decomposition
+for large language model compression.arXiv preprint
+arXiv:2408.09632, 2024.
+Liu, D., Qin, Z., Wang, H., Yang, Z., Wang, Z., Rong, F.,
+Liu, Q., Hao, Y ., Li, B., Chen, X., et al. Pruning via merg-
+ing: Compressing llms via manifold alignment based
+layer merging. InProceedings of the 2024 Conference on
+Empirical Methods in Natural Language Processing, pp.
+17817–17829, 2024.
+Ma, X., Fang, G., and Wang, X. Llm-pruner: On the struc-
+tural pruning of large language models. InThirty-seventh
+Conference on Neural Information Processing Systems,
+2023.
+Men, X., Xu, M., Zhang, Q., Wang, B., Lin, H., Lu, Y ., Han,
+X., and Chen, W. Shortgpt: Layers in large language mod-
+els are more redundant than you expect.arXiv preprint
+arXiv:2403.03853, 2024.
+Merity, S., Xiong, C., Bradbury, J., and Socher, R.
+Pointer sentinel mixture models.arXiv preprint
+arXiv:1609.07843, 2016.
+Michel, P., Levy, O., and Neubig, G. Are sixteen heads
+really better than one?Advances in neural information
+processing systems, 32, 2019.
+Minaee, S., Mikolov, T., Nikzad, N., Chenaghlu, M., Socher,
+R., Amatriain, X., and Gao, J. Large language models: A
+survey.arXiv preprint arXiv:2402.06196, 2024.
+Musco, C. and Musco, C. Recursive sampling for the nys-
+trom method.Advances in neural information processing
+systems, 30, 2017.
+Papaspiliopoulos, O. High-dimensional probability: An
+introduction with applications in data science, 2020.
+Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J.,
+Chanan, G., Killeen, T., Lin, Z., Gimelshein, N., Antiga,
+L., et al. Pytorch: An imperative style, high-performance
+deep learning library.Advances in neural information
+processing systems, 32, 2019.
+Sakaguchi, K., Bras, R. L., Bhagavatula, C., and Choi, Y .
+Winogrande: An adversarial winograd schema challenge
+at scale.arXiv preprint arXiv:1907.10641, 2019.
+Samragh, M., Farajtabar, M., Mehta, S., Vemulapalli, R.,
+Faghri, F., Naik, D., Tuzel, O., and Rastegari, M. Weight
+subcloning: direct initialization of transformers using
+larger pretrained ones.arXiv preprint arXiv:2312.09299,
+2023.
+Song, J., Oh, K., Kim, T., Kim, H., Kim, Y ., and Kim, J.-J.
+Sleb: Streamlining llms through redundancy verification
+and elimination of transformer blocks.arXiv preprint
+arXiv:2402.09025, 2024.
+Sun, M., Liu, Z., Bair, A., and Kolter, J. Z. A simple and
+effective pruning approach for large language models.
+arXiv preprint arXiv:2306.11695, 2023.
+Sun, Q., Pickett, M., Nain, A. K., and Jones, L. Transformer
+layers as painters.arXiv preprint arXiv:2407.09298,
+2024.
+Sun, W., Song, X., Li, P., Yin, L., Zheng, Y ., and Liu, S. The
+curse of depth in large language models.arXiv preprint
+arXiv:2502.05795, 2025.
+Taori, R., Gulrajani, I., Zhang, T., Dubois, Y ., Li,
+X., Guestrin, C., Liang, P., and Hashimoto, T. B.
+Stanford alpaca: An instruction-following llama
+model. https://github.com/tatsu-lab/
+stanford_alpaca, 2023.
+Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux,
+M.-A., Lacroix, T., Rozi`ere, B., Goyal, N., Hambro, E.,
+Azhar, F., et al. Llama: Open and efficient foundation lan-
+guage models.arXiv preprint arXiv:2302.13971, 2023a.
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+A., Babaei, Y ., Bashlykov, N., Batra, S., Bhargava, P.,
+Bhosale, S., et al. Llama 2: Open foundation and fine-
+tuned chat models.arXiv preprint arXiv:2307.09288,
+2023b.
+van der Ouderaa, T. F. A., Nagel, M., Baalen, M. V ., and
+Blankevoort, T. The LLM surgeon. InThe Twelfth
+International Conference on Learning Representations,
+2024. URL https://openreview.net/forum?
+id=DYIIRgwg2i.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-
+tention is all you need.Advances in neural information
+processing systems, 30, 2017.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Submission and Formatting Instructions for ICML 2026
+Wang, H., Ma, S., Dong, L., Huang, S., Zhang, D., and
+Wei, F. Deepnet: Scaling transformers to 1,000 layers.
+IEEE Transactions on Pattern Analysis and Machine In-
+telligence, 46(10):6761–6774, 2024.
+Wolf, T., Debut, L., Sanh, V ., Chaumond, J., Delangue,
+C., Moi, A., Cistac, P., Rault, T., Louf, R., Funtowicz,
+M., Davison, J., Shleifer, S., von Platen, P., Ma, C., Jer-
+nite, Y ., Plu, J., Xu, C., Scao, T. L., Gugger, S., Drame,
+M., Lhoest, Q., and Rush, A. M. Transformers: State-
+of-the-art natural language processing. InProceedings
+of the 2020 Conference on Empirical Methods in Natu-
+ral Language Processing: System Demonstrations, pp.
+38–45, Online, October 2020. Association for Compu-
+tational Linguistics. URL https://www.aclweb.
+org/anthology/2020.emnlp-demos.6.
+Yang, A., Xiao, B., Wang, B., Zhang, B., Bian, C., Yin,
+C., Lv, C., Pan, D., Wang, D., Yan, D., et al. Baichuan
+2: Open large-scale language models.arXiv preprint
+arXiv:2309.10305, 2023.
+Yang, Y ., Cao, Z., and Zhao, H. Laco: Large language model
+pruning via layer collapse. InFindings of the Association
+for Computational Linguistics: EMNLP 2024, pp. 6401–
+6417, 2024.
+Zellers, R., Holtzman, A., Bisk, Y ., Farhadi, A., and Choi,
+Y . Hellaswag: Can a machine really finish your sen-
+tence? InProceedings of the 57th Annual Meeting of the
+Association for Computational Linguistics, 2019.
+Zhang, S., Roller, S., Goyal, N., Artetxe, M., Chen, M.,
+Chen, S., Dewan, C., Diab, M., Li, X., Lin, X. V .,
+et al. Opt: Open pre-trained transformer language models.
+arXiv preprint arXiv:2205.01068, 2022.
+Zhang, Y ., Li, Y ., Wang, X., Shen, Q., Plank, B., Bischl, B.,
+Rezaei, M., and Kawaguchi, K. Finercut: Finer-grained
+interpretable layer pruning for large language models.
+InWorkshop on Machine Learning and Compression,
+NeurIPS 2024, 2024a.
+Zhang, Y ., Zhao, L., Lin, M., Sun, Y ., Yao, Y ., Han, X.,
+Tanner, J., Liu, S., and Ji, R. Dynamic sparse no training:
+Training-free fine-tuning for sparse llms. InThe Twelfth
+International Conference on Learning Representations,
+2024b.
+Zhao, W. X., Zhou, K., Li, J., Tang, T., Wang, X., Hou, Y .,
+Min, Y ., Zhang, B., Zhang, J., Dong, Z., et al. A survey of
+large language models.arXiv preprint arXiv:2303.18223,
+2023.
+Zhong, L., Wan, F., Chen, R., Quan, X., and Li, L. Block-
+pruner: Fine-grained pruning for large language models.
+arXiv preprint arXiv:2406.10594, 2024.
+Zhu, X., Li, J., Liu, Y ., Ma, C., and Wang, W. A survey
+on model compression for large language models.arXiv
+preprint arXiv:2308.07633, 2023.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Submission and Formatting Instructions for ICML 2026
+A. Proofs
+A.1. Proof of Lemma 2.1
+Proof. Let σAttn denote the standard deviation of Attn
+
+LNℓ
+a
+ 
+H ℓ
+, and σMLP denote the standard deviation of
+MLP
+
+LNℓ
+p
+ 
+H ℓ
+. Given equation 1 we have:
+Var
+
+˜H ℓ
+
+= Var
+ 
+H ℓ
++ Var
+ 
+Attn
+ 
+LN
+ 
+H ℓ
++ 2 Cov
+ 
+Attn
+ 
+LN
+ 
+H ℓ
+,H ℓ
+=σ 2
+H ℓ +σ 2
+Attn + 2ρ1 ·σ H ℓ ·σ Attn,
+(15)
+Var
+ 
+H ℓ+1
+= Var
+
+˜H ℓ
+
++ Var
+
+MLP
+
+LN
+
+˜H ℓ
+
++ 2 Cov
+
+MLP
+
+LN
+
+˜H ℓ
+
+, ˜H ℓ
+
+=σ 2
+˜H ℓ +σ 2
+MLP + 2ρ2 ·σ ˜H ℓ ·σ MLP,
+(16)
+whereρ 1,ρ 2 is the correlation factor. Thus, the evolve fromVar
+ 
+H ℓ+1
+toVar
+ 
+H ℓ
+becomes
+σ2
+H ℓ+1 =σ 2
+H ℓ +σ 2
+Attn +σ 2
+MLP + 2ρ1 ·σ H ℓ ·σ Attn + 2ρ2 ·σ ˜H ℓ ·σ MLP.(17)
+First, we deal with the variance of attention. Let n denote the number of keys/values. Following results in Sun et al. (2025),
+based on the independent distribution assumption of weights, we have
+Var (Attn (Q,K,V))∼ 1
+n
+nX
+i=1
+Var (Vi) = 1
+n ·n·σ 2
+V =σ 2
+V =σ 2
+W .(18)
+Then the variance of the attention module with residual connection is denoted as
+σ2
+˜H ℓ =σ 2
+H ℓ +σ 2
+W + 2ρ1 ·σ H ℓ ·σ W
+=σ 2
+H ℓ
+
+1 + σ2
+W
+σ2
+H ℓ
++ 2ρ1 · σW
+σH ℓ
+
+=σ 2
+H ℓΘ
+ 
+1 + σW
+σH ℓ
+2!
+.
+(19)
+Second, we solve the variance of MLP. Using the conclusion obtained by Wang et al. (2024), we get
+σ2
+MLP ∼σ 2
+WU ·σ 2
+WD =σ 4
+W .(20)
+Substituteσ ˜Hℓ
+=σ H ℓΘ
+
+1 + σW
+σHℓ
+
+, we can obtain the variance of equation 17:
+σ2
+H ℓ+1 =σ 2
+H ℓ +σ 2
+W +σ 4
+W + 2ρ1 ·σ H ℓ ·σ W + 2ρ2 ·σ ˜H ℓ ·σ 2
+W
+=σ 2
+H ℓ +σ 2
+W +σ 4
+W + 2ρ1 ·σ H ℓ ·σ W + 2ρ2 ·σ 2
+W ·σ H ℓΘ
+
+1 + σW
+σH ℓ
+
+=σ 2
+H ℓ + Θ (σH ℓ).
+(21)
+We set the numerator part to 1 in Big-Theta notation for simplicity. The variance with regard to σ2
+H can be obtained by
+iteratively applying equation 21:
+σ2
+H ℓ =σ 2
+H 0 +
+ℓX
+k=1
+Θ (σH k).(22)
+To obtain the upper bound of the variance, we will show that if there is a constant number c such that c >0 and ρ1 > c,
+ρ2 > c, the variance grows quadratically with the depthℓ. We use mathematical induction to prove the bound of the variance.
+Letσ 2
+H k = Θ
+ 
+k2
+, then
+σ2
+H k+1 =σ 2
+H k + Θ (σH k) = Θ
+ 
+k2
++ Θ (k) = Θ
+ 
+(k+ 1) 2
+.(23)
+Ifρ 1 =ρ 2 = 1, the variance grows the most quickly, and it also falls inΘ
+ 
+(k+ 1) 2
+.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Submission and Formatting Instructions for ICML 2026
+This lemma indicates that the variance of the Pre-Norm Transformer could increase with multiple residual connections,
+leading to a quadratic increase with model depth. Thus, the prevailing transformers are potentially non-stable and result in
+redundancy as the layer goes deeper.
+A.2. Proof of Lemma 2.2
+Proof.For anL-layered Pre-LN Transformer, the partial gradient to theℓ-th hidden states is given by the chain rule:
+∂y
+∂H ℓ =
+L−1Y
+k=ℓ
+ 
+∂H k+1
+∂ ˜H k · ∂ ˜H k
+∂H k
+!
+.(24)
+From (Sun et al., 2025), we know that
+∂H k+1
+∂ ˜H k ≤1 +
+σW ℓ
+U
+σW ℓ
+D
+σ ˜H k(
+√
+d+ √dMLP)2 = 1 + σ2
+ℓ
+σ ˜H k(
+√
+d+ √dMLP)2 .(25)
+From (Papaspiliopoulos, 2020), we get
+∂ ˜H k
+∂H k ≤
+
+1 + 2dh
+√s+ 2 + 1√s
+ σ2
+σH k
+
+σ2d
+p
+dhead +
+
+1 +
+p
+dhead/d
+
+,(26)
+where h denotes the number of heads and s denotes the sequence length, respectively. Following the proof from (Sun et al.,
+2025), the target equation can be expressed as
+
+∂y
+∂H ℓ
+
+2
+≤
+LY
+k=ℓ
+
+1 + 1
+σH k
+A+ 1
+σ2
+H k
+B
+
+,(27)
+where
+A= σ2
+(
+√
+d+ √dFFN)2 + 2dh
+√s+ 2 + 1√s
+
+σ2
+
+d
+p
+dhead + 1 +
+p
+dhead/d
+
+,(28)
+B= 2dh
+√s+ 2 + 1√s
+
+σ4d
+p
+dhead.(29)
+This conclusion indicates that for the deep layers in the model, the partial gradient ∂y
+∂H ℓ will be bounded. Considering the
+growth in Lemma 2.1, the partial gradient will be bounded by
+
+∂y
+∂H ℓ
+
+2
+≤
+LY
+k=ℓ
+
+1 + 1
+σH k
+A+ 1
+σ2
+H k
+B
+
+≤
+LY
+k=ℓ
+
+1 + 1
+σH ℓ
+A+ 1
+σ2
+H ℓ
+B
+
+=
+
+1 + 1
+σH ℓ
+A+ 1
+σ2
+H ℓ
+B
+L−ℓ
+.
+(30)
+Let L−ℓ be a constant number c, which implies the c-th layer from the last. As ℓ grows, σH ℓ will grow to infinity. Then we
+get
+lim
+ℓ→+∞
+
+∂y
+∂H ℓ
+
+2
+≤lim
+ℓ→+∞
+
+1 + 1
+σH ℓ
+A+ 1
+σ2
+H ℓ
+B
+c
+= 1.(31)
+This lemma shows that as the feature norm increases, the Pre-Norm Transformer cannot effectively propagate gradients
+except for the identity mappings. Therefore, the model will be degenerated into an identity mapping dominated by residual
+connections, which is highly inefficient in language modeling.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Submission and Formatting Instructions for ICML 2026
+A.3. Proofs of Lemma 3.1
+Proof.The original solution for linear regression with L2 regularization is defined as follows:
+Lemma A.1.Let X∈R n×p be the design matrix, y∈R n be the response vector, and λ >0 be the regularization
+parameter. The L2 regularized linear regression (Ridge Regression) minimizes the following objective function:
+arg minθ ∥Xθ−y∥ 2
+2 +λ∥θ∥ 2
+2,(32)
+whereθ∈R p is the coefficient vector. The closed-form solution for the optimal coefficient vector ˆθis given by:
+ˆθ= (X ⊤X+λI) −1X ⊤y,(33)
+provided that the matrix (X ⊤X+λI) is invertible. Here, I denotes the p×p identity matrix. This solution always exists
+forλ >0, even whenX ⊤Xis singular.
+To minimize L(θ), take the partial derivative with respect to θ and set it to 0. The differential equation is listed as follows:
+∂L(θ)
+∂θ =−2X T y+ 2
+ 
+X T X+λI
+
+θ=0.(34)
+Simplify by dividing by 2 and rearranging terms:
+ 
+X T X+λI
+
+θ=X T y.(35)
+SinceX T X+λIis positive definite (hence invertible) forλ >0, left-multiply both sides by its inverse:
+ˆθ=
+ 
+X T X+λI
+−1
+X T y.
+As for equation 13, we aimed at minimizing the difference between the original parameters and the adjusted ones. Thus,
+we add an L2 regularization on the change of parameters ∆WD. Given that θ= ∆W D, X=ψ s (XiWU)S k, y=
+ψs (XiWU)
+ 
+I−S kS⊤
+k
+
+WD, we will get the solutions for the MLP pruning:
+∆ ˆWD =
+ 
+S⊤
+k CψSk +λI
+−1
+S⊤
+k Cψ
+ 
+I−S kS⊤
+k
+
+WD,(36)
+where Cψ =PN
+i=1 (ψs (XiWU))⊤ ψs (XiWU) denotes the covariance. This equation ensures the difference in the MLP
+output with regularization is minimized during the structured pruning.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Submission and Formatting Instructions for ICML 2026
+B. Empirical Results
+We present more empirical results in various architectures, including LLaMA-2 (Touvron et al., 2023b) at {7B, 13B},
+Qwen-1.5 (Bai et al., 2023) at {7B, 14B}, and Baichuan-2 at {7B, 13B} (Yang et al., 2023). As shown in Figure 4, the high
+cross-layer similarity and large feature norm is consistent across various model types and parameter sizes. According to the
+theoretical analysis above, this phenomenon is deeply related to the architecture of transformers.
+Figure 4.Cross-layer similarity and feature norm in multiple architectures.
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Submission and Formatting Instructions for ICML 2026
+C. Implementations
+C.1. Modified algorithms for grouped query attention
+Some modern LLMs, such as LLaMA-3 (Dubey et al., 2024), utilize a shared key-value strategy to improve inference
+efficiency, which is denoted as Grouped Query Attention (GQA). To keep the pruned architecture the same as the original
+attention blocks, we modify the channel pruning on MHA. Instead of finding the least important attention head individually,
+we find the least important pair of key and value. Then we delete this pair and its corresponding queries. We apply this
+modification to LLaMA-3 8B compression in the paper.
+C.2. Implementation details
+SetupWe utilize the HuggingFace generation library (Wolf et al., 2020) to implement our LLM models and use Py-
+Torch (Paszke et al., 2019) Hooks for hidden states recording and correlation matrix estimations. Unless otherwise specified,
+the experiments were conducted on 8 NVIDIA H800 80GB GPUs. The models use the BF16 data format. The calibration
+set consists of a random sample of 128 sequences, each of length 2048, from WikiText-2, following the common practice in
+the literature (Ashkboos et al., 2024).
+DatasetsWe consider multiple tasks in LM Evaluation Harness (Gao et al., 2024), including ARC-e, ARC-c (Clark et al.,
+2018), PIQA (Bisk et al., 2020), WinoGrande (Sakaguchi et al., 2019), and HellaSwag (Zellers et al., 2019).
+Correlation Matrix EstimationsOur algorithms utilize input correlation matrices in the MLP pruning method. We gather
+the empirical data from the calibration set by registering the PyTorch (Paszke et al., 2019) hooks in the model. Our process
+compresses the MLP blocks from all layers first, then compresses the MHA blocks from all layers.
+Matrix OperationsWe utilize ‘torch.linalg.solve’ in PyTorch for computing the inverse on tensors of dtype FP32.
+MLP moduleOur MLP pruning method requires a ridge leverage score parameter λ. We set λ to 10 times the mean
+singular value of the correlation matrix across all experiments.
+MHA moduleOur MHA pruning method removes the entire group of query, key, and value matrices.
+Recovery Fine-TuningWe use 50K samples of refined Alpaca for instruction tuning. The models are trained with 2
+epochs with a learning rate of 1×10 −4. The other primary hyperparameters used are lora alpha= 16 , lora r= 8 , and
+batch size= 64.
+Latency and ThroughputWe test the throughput and latency results on token generation and prompt processing,
+respectively. For token generation, we generate sentences with a length of 128 tokens and a batch size of 64. For prompt
+processing, we measure the latency when processing an input sequence with 2048 tokens. The HuggingFace (Wolf et al.,
+2020) implementation is used for benchmarking, and all experiments employ pipeline parallelism if distributed on multiple
+GPUS.
+C.3. Throughput and latency
+Table 4 compares the latency, throughput, and perplexities of the compressed LLaMA-2 (Touvron et al., 2023b) models with
+other pruning methods. We test the throughput and latency results on token generation and prompt processing, respectively.
+For token generation, we generate sentences with a length of 128 tokens and a batch size of 64. For prompt processing,
+we measure the latency when processing an input sequence with 2048 tokens. Even with dedicated hardware support, 2:4
+pruning methods still lead to minor speedup ( 1.10×) and lower throughput (0.98× with a sparsity ratio of 50%. Width
+pruning methods, such as SliceGPT (Ashkboos et al., 2024), are more hardware-friendly and speed up the pruned model,
+while still lagging behind depth pruning methods. FlattenGPT inherits the advantages of acceleration in depth pruning and
+further improves the performance. Since the compressed model architecture of FlattenGPT is exactly the same as SLEB, the
+throughput and latency results are the same. FlattenGPT outperforms all other methods in throughput (1.27×) and latency
+(1.26×), and achieves a comparable perplexities. These results demonstrate that FlattenGPT has a better trade-off between
+speed and performance.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Submission and Formatting Instructions for ICML 2026
+Table 4.Throughput (tokens/s), latency (ms), and perplexity on WikiText-2 test split results. Throughput and latency are measured with
+LLaMA-2-70B on 2 NVIDIA A100 GPUs.
+Pruning Throughput Latency LLaMA-2Method Unit Sparsity (Tokens/s) Improve↑ (ms) Speedup↑ 7B 13B 70B
+Dense - 0% 299 1.00× 1718.4 1.00× 5.47 4.88 3.32
+SparseGPT (Frantar & Alistarh, 2023) 2:4 50% 293 0.98× 1555.5 1.10× 10.79 8.75 5.70
+Wanda (Sun et al., 2023) 2:4 50% 293 0.98× 1555.5 1.10× 12.09 8.99 5.48
+DSnoT (Zhang et al., 2024b) 2:4 50% 293 0.98× 1555.5 1.10× 11.97 8.87 5.49
+LLM-Pruner (Ma et al., 2023) Width 20% 314 1.05× 1534.3 1.12× 10.58 8.56 -
+SliceGPT (Ashkboos et al., 2024) Width 20% 314 1.05× 1658.7 1.04× 6.87 6.01 4.44
+SliceGPT (Ashkboos et al., 2024) Width 25% 331 1.11× 1440.7 1.19× 7.55 6.63 4.89
+SliceGPT (Ashkboos et al., 2024) Width 30% 343 1.15× 1364.2 1.26× 8.59 7.44 5.44
+SLEB (Song et al., 2024) Depth 20% 381 1.27× 1364.1 1.26× 9.14 6.80 4.88
+FlattenGPT Depth 20% 381 1.27× 1364.1 1.26× 8.68 6.50 4.79
+C.4. Pruning Computation Cost
+Table 5 compares the compression times of FlattenGPT with the prevailing pruning methods, including SliceGPT (Ashkboos
+et al., 2024), LLM surgeon (van der Ouderaa et al., 2024), and MoDeGPT (Lin et al., 2024). LLM Surgeon requires the
+gradient information of the LLMs, leading to heavy computation. SliceGPT and ModeGPT do not leverage gradients, they
+can compress a model with fewer GPUs and computation time. Our approach, FlattenGPT, is even faster than these methods,
+as we collect the correlation matrix of all layers at the same time. Thus FlattenGPT is an efficient pruning method in this
+area.
+Table 5.Computation cost of pruning 20% with FlattenGPT and recovery fine-tuning. The cost of the other methods are reported from
+the original paper, and thus the device is inconsistent, while it still illustrates the conclusion that our FlattenGPT is extremely fast. The
+calibration dataset consists of 128 samples with a sequence length of 2048.
+Pruning RFTMethod Model Time GPUs Time GPUs Total
+SliceGPT (Ashkboos et al., 2024) LLaMA-2 7B 44m 1 H100 80GB 23m 1 H100 80GB 1h07m
+LLaMA-2 13B 1h08m 1 H100 80GB 44m 1 H100 80GB 1h52m
+LLM surgeon (van der Ouderaa et al., 2024) LLaMA-2 7B 17h08m 4 H100 80GB - - -
+LLaMA-2 13B 1d9h26m 8 H100 80GB - - -
+ModeGPT (Lin et al., 2024) LLaMA-2 7B 4h09m 1 A100 80GB 31m 1 A100 80GB 4h40m
+LLaMA-2 13B 8h26m 1 A100 80GB - - -
+LLaMA-2 7B 7m 1 H800 80GB 25m 1 H800 80GB 32mFlattenGPT LLaMA-2 13B 24m 1 H800 80GB 45m 1 H800 80GB 1h09m
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Submission and Formatting Instructions for ICML 2026
+D. Experiments
+D.1. Additional comparison of Training-free pruning methods
+We compare the performance with other training-free pruning methods in Table 6, including both width compression and
+depth compression. The width compression includes the 2:4 pruning methods SparseGPT (Frantar & Alistarh, 2023) and
+Wanda (Sun et al., 2023), and structured channel pruning methods SliceGPT (Ashkboos et al., 2024). The depth compression
+includes LaCo (Yang et al., 2024), SLEB (Song et al., 2024), Relative magnitude (Samragh et al., 2023), ShortGPT (Men
+et al., 2024), and BlockPruner (Zhong et al., 2024). FlattenGPT outperforms these methods on WikiText-2 perplexity and
+accuracy on the zero-shot downstream tasks, showcasing the effectiveness of our method.
+Table 6.Comparison with training-free pruning methods on WikiText-2 perplexity and accuracies on zero-shot tasks.
+Method Sparsity PPL↓ WinoG HellaS PIQA ARC-e ARC-c Avg.
+LLaMA-2 7B (original) 0% 5.47 69.06 75.99 79.11 74.58 46.25 69.00
+Width
+SpareGPT (Frantar & Alistarh, 2023) 2:4 (50%) 10.79 64.96 58.93 72.14 60.90 34.22 58.23
+Wanda (Sun et al., 2023) 2:4 (50%) 12.09 62.27 55.33 70.84 57.58 31.91 55.59
+SliceGPT (Ashkboos et al., 2024) 21.45% 7.02 59.91 56.04 72.42 63.64 37.12 57.83
+Depth
+SLEB (Song et al., 2024) 21.02% 9.14 58.96 62.47 73.07 56.48 33.02 56.80
+LaCo (Yang et al., 2024) 21.02% 50.39 60.46 54.08 68.34 55.39 35.84 54.82
+RM (Samragh et al., 2023) 21.02% 676.8 49.25 29.22 54.46 34.43 22.53 37.98
+ShortGPT (Men et al., 2024) 21.02% 18.45 65.90 62.63 70.24 56.06 36.09 58.18
+BlockPruner (Zhong et al., 2024) 21.99% 11.51 62.43 65.87 74.21 61.07 37.29 60.17
+FlattenGPT 21.02% 8.68 66.54 68.45 72.74 63.43 41.30 62.49
+LLaMA-2 13B (original) 0% 4.88 72.22 79.39 80.47 77.48 49.23 71.76
+Width
+SpareGPT (Frantar & Alistarh, 2023) 2:4 (50%) 8.75 68.51 65.52 75.46 66.04 39.76 63.06
+Wanda (Sun et al., 2023) 2:4 (50%) 8.99 67.01 63.09 73.94 64.31 37.80 61.23
+SliceGPT (Ashkboos et al., 2024) 25% 6.63 67.48 58.10 68.55 62.50 37.88 58.90
+Depth
+LaCo (Yang et al., 2024) 24.37% 13.97 59.27 60.44 72.42 54.34 34.56 56.21
+RM (Samragh et al., 2023) 24.37% 10.08 66.61 66.80 73.72 66.12 41.98 63.05
+ShortGPT (Men et al., 2024) 24.37% 20.06 70.80 67.80 72.74 60.35 41.30 62.60
+BlockPruner (Zhong et al., 2024) 25.12% 8.16 66.30 72.20 76.93 65.82 41.38 64.53
+FlattenGPT 24.37% 6.68 71.11 73.44 76.33 72.10 44.54 67.50
+LLaMA-2 70B (original) 0% 3.32 77.98 83.84 82.70 80.98 57.34 76.57
+Width
+SpareGPT (Frantar & Alistarh, 2023) 2:4 (50%) 5.70 76.56 76.09 80.03 76.94 49.74 71.87
+Wanda (Sun et al., 2023) 2:4 (50%) 5.48 74.66 79.22 80.30 76.35 51.19 72.34
+SliceGPT (Ashkboos et al., 2024) 20% 4.44 74.92 72.98 76.61 80.51 55.20 72.34
+Depth
+SLEB (Song et al., 2024) 19.84% 4.88 72.93 77.21 80.14 75.38 48.38 70.81
+ShortGPT (Men et al., 2024) 19.84% 66.33 71.96 78.87 76.02 76.02 52.95 71.68
+FlattenGPT 19.84% 4.79 77.35 81.42 80.36 77.48 53.07 73.94
+Baichuan-2 7B (original) 0% 6.04 68.27 72.18 77.48 72.98 42.75 66.73
+Depth
+LaCo (Yang et al., 2024) 21.57% 26.46 58.56 51.50 68.28 52.90 28.50 51.95
+RM (Samragh et al., 2023) 21.57% 189.8 52.33 30.87 59.96 38.17 23.63 40.99
+ShortGPT (Men et al., 2024) 21.57% 31.05 62.67 50.01 63.71 47.31 30.72 50.88
+BlockPruner (Zhong et al., 2024) 22.45% 15.38 61.48 58.09 69.75 58.08 33.02 56.08
+FlattenGPT 21.57% 20.55 64.33 61.50 69.42 56.27 35.24 57.35
+Baichuan-2 13B (original) 0% 6.66 70.40 75.23 78.84 74.07 47.70 69.25
+Depth
+LaCo (Yang et al., 2024) 22.68% 27.07 58.01 54.00 70.89 57.11 32.94 54.59
+RM (Samragh et al., 2023) 22.68% 17.70 67.88 63.78 68.99 57.49 37.54 59.14
+ShortGPT (Men et al., 2024) 22.68% 20.69 68.27 61.71 69.31 56.52 36.69 58.50
+BlockPruner (Zhong et al., 2024) 24.19% 15.36 64.01 64.20 71.44 59.81 37.88 59.47
+FlattenGPT 22.68% 13.71 68.19 65.27 71.22 58.75 37.03 60.09
+Qwen-1.5 7B (original) 0% 7.95 66.46 76.92 79.22 62.16 42.66 65.48
+Depth
+LaCo (Yang et al., 2024) 20.97% 39.23 58.64 56.35 70.40 46.89 32.85 53.03
+RM (Samragh et al., 2023) 20.97% 2026 49.88 42.00 67.36 54.17 28.58 48.40
+ShortGPT (Men et al., 2024) 20.97% 49.88 62.12 58.87 69.53 43.60 32.17 53.26
+BlockPruner (Zhong et al., 2024) 21.83% 20.58 55.56 59.31 71.71 53.70 33.28 54.71
+FlattenGPT 20.97% 16.05 59.27 62.89 68.39 56.99 37.46 57.00
+Qwen-1.5 14B (original) 0% 7.44 70.56 79.41 79.87 68.48 47.01 69.07
+Depth
+LaCo (Yang et al., 2024) 22.25% 16.32 58.33 60.16 71.55 53.70 34.04 55.56
+RM (Samragh et al., 2023) 22.25% 55.99 53.28 42.08 67.08 50.72 29.01 48.43
+ShortGPT (Men et al., 2024) 22.25% 1237 55.96 36.16 58.60 38.09 34.81 44.72
+BlockPruner (Zhong et al., 2024) 23.72% 15.67 61.48 66.92 75.24 59.51 39.08 60.45
+FlattenGPT 22.25% 11.55 65.59 68.57 74.10 65.03 40.78 62.81
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Submission and Formatting Instructions for ICML 2026
+D.2. Additional comparison of recovery fine-tuning
+Table 7 shows the impact of Recovery Fine-Tuning (RFT). Our method outperforms previous methods after RFT. This is
+because the flattening method retains the knowledge from all layers and makes it easier for fine-tuning.
+Table 7.Zero-shot task performance of recovery fine-tuning. † indicates fine-tuned on Alpaca (Taori et al., 2023) dataset.
+Method Sparsity WinoG HellaS PIQA ARC-e ARC-c Avg.
+LLaMA-2 7B (original) 0% 69.06 75.99 79.11 74.58 46.25 69.00
+Width
+Wanda-sp (Sun et al., 2023) 18.81% 63.77 70.66 76.44 69.61 42.15 64.53
+FLAP (An et al., 2024) 19.19% 64.72 64.69 73.39 62.25 32.51 59.51
+LLM-Pruner (Ma et al., 2023) 18.82% 61.17 66.13 76.66 64.86 37.88 61.34
+LLM-Pruner† (Ma et al., 2023) 18.82% 61.88 67.13 77.48 65.78 38.48 62.15
+Depth
+SLEB (Song et al., 2024) 18.02% 59.75 63.95 73.94 63.47 35.15 59.25
+Shortened LLaMA (Kim et al., 2024) 18.02% 57.46 63.36 73.78 64.02 33.19 58.36
+Shortened LLaMA† (Kim et al., 2024) 18.02% 58.80 67.99 76.06 68.81 37.88 61.91
+SLM (Ding et al., 2025) 18.02% 66.30 65.10 70.24 61.45 38.31 60.28
+SLM† (Ding et al., 2025) 18.02% 67.09 70.48 73.67 69.11 41.21 64.31
+FlattenGPT 18.02% 67.40 70.74 74.59 64.44 41.98 63.83
+FlattenGPT† 18.02% 68.75 73.01 74.97 67.40 45.05 66.24
+LLaMA-2 13B (original) 0% 72.22 79.39 80.47 77.48 49.23 71.76
+Width
+Wanda-sp (Sun et al., 2023) 19.49% 67.01 74.75 77.48 73.48 44.11 67.37
+FLAP (An et al., 2024) 19.47% 68.35 69.07 74.65 70.83 40.61 64.70
+LLM-Pruner (Ma et al., 2023) 19.48% 64.17 72.02 78.51 69.99 43.60 65.66
+LLM-Pruner† (Ma et al., 2023) 19.48% 67.32 74.84 79.16 73.49 43.77 67.72
+Depth
+SLEB (Song et al., 2024) 19.50% 64.96 70.55 76.61 64.35 38.31 62.96
+Shortened LLaMA (Kim et al., 2024) 19.50% 70.48 71.19 75.03 69.53 43.09 65.86
+Shortened LLaMA† (Kim et al., 2024) 19.50% 71.11 75.20 76.28 74.79 46.67 68.81
+SLM (Ding et al., 2025) 19.50% 70.80 67.73 72.36 64.82 39.68 63.08
+SLM† (Ding et al., 2025) 19.50% 71.67 76.37 77.42 76.56 48.55 70.11
+FlattenGPT 19.50% 71.43 75.26 77.58 71.68 45.39 68.27
+FlattenGPT† 19.50% 71.82 77.85 78.73 75.08 49.15 70.53
+LLaMA-3 8B (original) 0% 73.40 79.17 79.49 80.09 53.24 73.08
+Width FLAP (An et al., 2024) 16.30% 49.96 26.36 52.18 26.81 24.83 36.03
+LLM-Pruner (Ma et al., 2023) 15.39% 68.67 67.79 77.04 68.60 39.08 64.23
+LLM-Pruner† (Ma et al., 2023) 15.39% 70.32 74.27 79.49 74.29 46.59 68.99
+Depth
+Shortened LLaMA (Kim et al., 2024) 16.30% 57.85 60.99 73.23 65.40 34.04 58.30
+Shortened LLaMA† (Kim et al., 2024) 16.30% 62.75 72.70 78.07 75.30 44.80 66.72
+SLM (Ding et al., 2025) 16.30% 69.61 61.8 71.98 66.04 41.81 62.25
+SLM† (Ding et al., 2025) 16.30% 71.74 73.77 77.64 76.60 50.94 70.14
+FlattenGPT 16.30% 71.82 70.63 72.91 69.1 46.59 66.21
+FlattenGPT† 16.30% 73.09 75.93 77.09 75.72 50.34 70.43
+D.3. Effectiveness of Flattening
+Flattened layer indices:We show which transformer blocks are chosen to be flattened in Figure 5. The location of flattened
+transformer blocks is highly consistent across various target models. The late blocks are almost flattened except the last one
+or two, whereas the early blocks are rarely selected. This is related to the similarity distribution in the model, where the late
+blocks have more similar input features.
+Performance after flattening:We need to answer the question:How does flattening improve the performance of the
+depth-compressed model?The answer is thatFlattening preserves more knowledge. Compared with the layer pruning
+methods, flattening preserves the parameters and thus preserves the knowledge in the parameters. This knowledge facilitates
+performance maintenance during depth compression. Figure 6 illustrates the comparison of layer pruning and layer flattening
+on LLaMA-2 7B. We use the same layer index in both settings,i.e., to prune the selected layer or merge the selected layer
+with the prior layer. In the flattening experiments, the model performance gradually drops as the number of flattened layers
+increases. After flattening 8 layers, it has maintained 98% of accuracy on zero-shot tasks and has a 19% degradation
+on perplexity. This result leaves plenty of room for channel pruning. However, on the contrary, layer pruning quickly
+loses performance with merely one or two pruned layers. It only maintains 80% of accuracy on zero-shot tasks and 319%
+degradation on perplexity! With such information loss, layer-pruning-based methods are very limited and cannot achieve
+high performance. Our flattening method has alleviated this problem, thus providing an effective way of depth compression.
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Submission and Formatting Instructions for ICML 2026
+LLaMA-2 7B Flattened Layers
+Qwen-1.5 7B Flattened Layers
+0
+0 203 4 2122232425 2829302627
+202122232425 2829302627191817
+Figure 5.Flattened Layer indices.
+0 2 4 6 8
+5
+10
+15
+FlattenGPT Flattening Only
+Layer Pruning
+Perplexity Comparison
+Number of pruned / flattened layers
+Perplexity
+0 2 4 6 8
+55
+60
+65
+70
+FlattenGPT Flattening Only
+Layer Pruning
+Zero-shot Tasks Comparison
+Number of pruned / flattened layers
+Zero-shot accuracies Figure 6.Comparison of layer pruning and flattening.
+D.4. Effectiveness of our channel pruning method
+The flattening operation changes the depth compression task into a channel pruning task. This method shows an advantage
+of fine-grained depth compression, whereas it relies on the performance of the channel pruning method. In this paper, we
+use a simple yet effective channel pruning method. To validate the effectiveness of our channel pruning method, we conduct
+experiments with channel pruning only. We use the sparsity distribution described in ModeGPT (Lin et al., 2024), and
+compare the channel pruning performance with other channel pruning methods. As shown in Table 8, our channel pruning
+approach has a clear advantage over previous pruning methods. By combining the MHA pruning and MLP pruning, our
+method achieves the best performance, surpassing the previous channel pruning method, including SliceGPT (Ashkboos
+et al., 2024) and ModeGPT (Lin et al., 2024).
+Table 8.Zero-shot task performance of channel pruning methods calibrated with 128 samples from WikiText-2.
+Method Sparsity WinoG HellaS PIQA ARC-e ARC-c Avg.
+LLaMA-2 7B (original) 0% 69.06 75.99 79.11 74.58 46.25 69.00
+SliceGPT 20% 62.74 49.78 64.25 51.47 31.06 51.86
+ModeGPT 20% 68.03 69.05 74.05 69.07 42.06 64.46
+Our MLP pruning 20% 66.06 66.54 73.23 65.19 38.91 61.99
+Our MHA pruning 21.02% 66.93 69.64 73.94 63.97 42.24 63.34
+Our MHA + MLP Pruning 21.07% 68.03 71.64 76.17 68.98 44.28 65.82
+LLaMA-2 13B (original) 0% 72.22 79.39 80.47 77.48 49.23 71.76
+SliceGPT 20% 67.17 53.58 65.83 55.81 35.84 55.65
+ModeGPT 20% 70.32 68.96 74.53 74.07 46.16 66.81
+Our MHA + MLP Pruning 21.07% 71.43 75.26 77.58 71.68 45.39 68.94
+We further make ablations on the effectiveness of Nystr¨om approximation. As shown in Table 9, Nystr¨om approximation
+outperforms the channel selection only method, demonstrating the effectiveness of adjusting the down projection.
+Table 9.Comparison of channel selection and Nystr ¨om approximation.
+Method Sparsity WinoG HellaS PIQA ARC-e ARC-c Avg.
+Channel Selection 20% 66.46 65.48 71.22 63.13 39.93 61.24
++ Nystr¨om approximation 20% 66.54 68.45 72.74 63.43 41.30 62.49
+D.5. Advantages of depth compression over width compression
+In this paper, we focus on the depth compression tasks. Although previous depth compression methods perform much
+worse than the width compression ones, FlattenGPT has built a novel approach to improve this performance greatly. In
+the main paper, we have shown that FlattenGPT achieves a better trade-off between performance and speed. In this part,
+we will further show that FlattenGPT shows promising performance compared with the latest width compression method
+after recovery fine-tuning. Table 10 shows the performance with or without RFT. LLM-pruner (Ma et al., 2023) shows
+little improvement with RFT. LLM Surgeon (van der Ouderaa et al., 2024) does not show the results, but it claimed that
+LoRA improves compression performance in the smallest OPT-125m model, but not in larger models. ModeGPT (Lin et al.,
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Submission and Formatting Instructions for ICML 2026
+2024) even demonstrates performance loss after RFT, which illustrates that the model probably suffers from overfitting.
+FlattenGPT unifies the two tasks of deep compression and channel compression, making the pruned model more suitable for
+fine-tuning. This is more practical than previous pruning methods.
+Table 10.Zero-shot task performance of channel pruning methods calibrated with 128 samples from WikiText-2. † indicates fine-tuned
+on Alpaca (Taori et al., 2023) dataset. ModeGPT (Lin et al., 2024) employs Alpaca as the calibration dataset. LLM Surgeon (van der
+Ouderaa et al., 2024) does not show the results but claims that LoRA cannot improve the performance.
+Method Sparsity WinoG HellaS PIQA ARC-e ARC-c Avg.
+LLaMA-2 7B (original) 0% 69.06 75.99 79.11 74.58 46.25 69.00
+LLM-Pruner 18.82% 61.17 66.13 76.66 64.86 37.88 61.34
+LLM-Pruner† 18.82% 61.88 67.13 77.48 65.78 38.48 62.15
+LLM Surgeon 20% 66.30 71.30 77.09 71.36 41.89 65.59
+ModeGPT 20% 68.19 69.59 76.22 71.71 41.89 65.52
+ModeGPT† 20% 66.30 68.07 77.20 70.45 42.92 64.99
+FlattenGPT 20% 67.40 70.74 74.59 64.44 41.98 63.83
+FlattenGPT† 20% 68.75 73.01 74.97 67.40 45.05 66.24
+D.6. Locations of flattened layers
+We show which transformer blocks are chosen to be flattened in Table 11. The location of flattened transformer blocks is
+highly consistent across various target models. The late blocks are almost flattened, except the last one or two, whereas the
+early blocks are rarely selected. This is related to the similarity distribution in the model, where the late blocks have more
+similar input features.
+Table 11.Locations of flattened Transformer blocks with target sparsity of 20%.
+Models Merged Layer Index
+LLaMA-2 7B [[17, 18], [19, 20], [21, 22], [23, 24], [25, 26], [27, 28], [29, 30]]
+LLaMA-2 13B [[23, 24], [25, 26], [27, 28], [29, 30], [31, 32], [33, 34], [35, 36], [37, 38]]
+LLaMA-2 70B [[14, 15], [46, 47], [49, 50], [51, 52], [54, 55], [57, 58], [59, 60, 61],
+[62, 63, 64], [65, 66, 67], [68, 69], [70, 71], [72, 73], [74, 75]]
+LLaMA-3 8B [[16, 17], [18, 19], [20, 21], [23, 24], [25, 26], [27, 28], [29, 30]]
+Qwen-1.5 7B [[3, 4], [20, 21], [22, 23], [24, 25], [26, 27], [28, 29, 30]]
+Qwen-1.5 14B [[7, 8], [10, 11], [19, 20], [24, 25], [26, 27], [28, 29], [30, 31], [32, 33], [34, 35], [36, 37]]
+D.7. Dependency on calibration dataset
+We evaluate the dependency on the calibration dataset in Table 12. We use the calibration set size of 128 and sequence
+length of 2048 for WikiText-2 (Merity et al., 2016) and Alpaca datasets. The results show that WikiText-2 has a slightly
+better performance, probably due to the dataset quality. The alpaca dataset is not as representative as a high-quality dataset,
+thus the performance is slighter lower than WikiText-2.
+Table 12.Results on different calibration dataset.
+Method Dataset PPL Sparsity WinoG HellaS PIQA ARC-e ARC-c Avg.
+LLaMA-2 7B (original) - 0% 5.47 69.06 75.99 79.11 74.58 46.25 69.00
+FlattenGPT WikiText-2 21.02% 8.68 67.40 70.74 74.59 64.44 41.98 63.83
+FlattenGPT Alpaca 21.02% 11.84 67.64 67.92 72.31 62.54 39.25 61.93
+D.8. Dependency on the Calibration Dataset Size
+We test the size of the calibration dataset from 64 to 1024 samples as shown in Table 13. Results confirm that 128 samples
+suffice, as larger sets yield marginal gains (<0.2%).
+21
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+Submission and Formatting Instructions for ICML 2026
+Table 13.The zero-shot accuracies on LLaMA-2 7B with different calibration dataset size.
+Num of Samples 64 128 256 512 1024
+Accuracy 61.17 62.49 62.25 62.58 62.60
+D.9. Generalization on other tasks
+We conduct experiments on InternVL-C 6B, which is a large vision transformer that exhibits a similar cross-layer similarity
+pattern to the LLMs. The results in Table 14 show that our method has good generalization ability on vision transformers.
+The multimodal transformers are usually composed of an LLM transformer and a vision encoder transformer. Therefore, it
+is reasonable to apply our method to the LLM and the vision encoder individually.
+Table 14.The zero-shot accuracies on InternVL-C 6B with 20% pruning ratio.
+Model Method IN-1K IN-A IN-R
+InternVL-C
+Dense 83.2 83.8 95.5
+ShortGPT 79.7 57.9 90.4
+FlattenGPT 81.6 74.6 93.7
+D.10. Generalization beyond Transformer Architecture
+Considering the various architectures available, it is far beyond the scope of this paper. Yet we can provide an analysis of
+the generalization of our method. Since most architectures use skip connections, the flattening stage is very general and
+should work on these architectures as well. However, there are not always appropriate channel pruning methods for these
+architectures. If there is an appropriate channel pruning method, our method would work on various architectures. Besides,
+transformer is a widespread baseline for many tasks, and our experiments on multiple transformer architectures and tasks
+have shown the effectiveness of our method.
+E. Limitation
+FlattenGPT provides a novel approach for fine-grained LLMs depth compression, yet there are still some limitations. First,
+FlattenGPT is performed on uniform architectures, where flattening will not change the model architecture significantly. It is
+not trivial to compress the hybrid architectures, such as a combination of transformer (Vaswani et al., 2017) and mamba (Gu
+& Dao, 2023). However, it is still worth researching the fine-grained depth compression method, as layer pruning methods
+operate on a very high granularity and cause performance degradation. Second, we use one of the channel pruning methods
+to implement our FlattenGPT, while our framework is not constrained to specific channel pruning methods. Developing
+better channel pruning methods will improve our depth compression method as well.
+22
