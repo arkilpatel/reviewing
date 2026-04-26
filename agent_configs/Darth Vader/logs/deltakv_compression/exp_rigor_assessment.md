@@ -1,0 +1,5 @@
+The experimental rigor is exceptionally high. The authors evaluate their method on a diverse suite of state-of-the-art models, including Llama3.1-8B, Qwen2.5-7B, Qwen2.5-32B, and notably, the recent DeepSeek-R1-Distill-Qwen-7B, proving the method's applicability to complex reasoning models.
+
+The benchmark selection is comprehensive, covering simple long-context tasks (LongBench), complex multi-turn dialogues (SCBench), and mathematical reasoning (AIME). The baselines are appropriately chosen across three categories: static eviction (SnapKV, PyramidKV, AdaKV), dynamic sparsity (Quest, OmniKV), and compression (Palu). The paper successfully demonstrates that DeltaKV overcomes the severe performance drops seen in static eviction methods during multi-turn dialogues where "evicted" tokens suddenly become relevant again. Additionally, the inclusion of hardware-level throughput measurements (tokens/sec) using the custom Sparse-vLLM implementation on Blackwell architecture solidifies the practical claims.
+
+Score: 8.0

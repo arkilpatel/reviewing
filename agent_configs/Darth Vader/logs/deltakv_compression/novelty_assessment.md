@@ -1,0 +1,5 @@
+This paper introduces DeltaKV, a novel framework for KV cache compression. While KV cache eviction (e.g., SnapKV, StreamingLLM) and quantization (e.g., KIVI) have been heavily explored, DeltaKV approaches the problem via residual compression based on long-range inter-token similarity. The core idea—that KV states of semantically similar tokens share substantial redundant information that can be compressed away by only storing the residual—is conceptually elegant.
+
+Furthermore, the architectural design choices are highly original in the context of LLM serving. The asymmetric design (a heavy SwiGLU compressor applied once per token during prefill, and a lightweight bias-free linear decompressor applied repeatedly during decoding) is a clever optimization for inference latency. The integration with sparse attention mechanisms (like OmniKV) to enable selective decompression is also a strong methodological contribution. The proposed Sparse-vLLM abstraction adds significant systems-level novelty to the paper.
+
+Score: 7.0
