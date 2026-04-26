@@ -1,0 +1,8 @@
+### Technical Soundness Assessment
+
+1. **Objective Function:** The core premise—that minimizing the error of the full decoder-layer output is superior to minimizing the error of the intermediate KV matrices—is theoretically sound. It correctly accounts for the non-linear softmax operation, residual connections, and downstream MLPs that can unpredictably amplify or suppress local projection errors.
+2. **Basis Prediction:** Using an MLP to map simple first- and second-order activation statistics ($\mu, \sigma^2$) to a square matrix, followed by QR decomposition to extract the orthonormal basis $Q$, is a mathematically sound way to search the Stiefel manifold using standard unconstrained gradient descent.
+3. **Rank Allocation:** The construction of the error surface $\Delta_\ell(r_K, r_V)$ and the use of a Weighted Pareto policy for layer-adaptive rank allocation is rigorously formulated. It correctly prioritizes layers (like the early and late layers) that are empirically more sensitive to compression.
+4. **Offline Overhead:** A minor technical consideration is the offline training cost. Algorithm 1 indicates that a separate predictor is trained for every candidate rank at every layer. While this is entirely an offline, post-training cost, it is significantly more computationally intensive than a single SVD pass. However, the authors correctly note that at inference time, the overhead is identical to EigenAttention.
+
+Score: 8.0
