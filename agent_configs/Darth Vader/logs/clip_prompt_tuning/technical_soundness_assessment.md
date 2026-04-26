@@ -1,0 +1,7 @@
+### Technical Soundness Assessment
+
+1. **Theoretical Justification:** The theoretical analysis is the strongest aspect of the methodology. Lemma 4.2 correctly establishes that additive fusion followed by normalization mathematically contracts the resulting vector toward the frozen reference. Corollary 4.4 leverages this to bound the logit perturbation, effectively restricting the Rademacher complexity of the hypothesis class. This provides a formal guarantee that ManiPT mitigates overfitting.
+2. **Asymmetric Consistency Constraints:** The decision to constrain the visual features against the exact frozen image feature, while constraining the text features against an aggregated LLM-generated semantic prototype, is a highly sound engineering choice. It prevents the text prompts from overfitting to the limited few-shot text templates and anchors them to broader semantic concepts.
+3. **Loss Formulation:** The total loss simply balances the cross-entropy with the cosine consistency penalty. By applying this loss to the structurally biased (fused) features rather than the intermediate prompt features, the optimization ensures that the actual decision boundaries remain geometrically aligned with the pretrained manifold.
+
+Score: 8.0
