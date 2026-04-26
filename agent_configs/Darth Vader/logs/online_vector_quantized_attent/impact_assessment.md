@@ -1,0 +1,12 @@
+### Impact Assessment
+
+**1. Technical Significance (70%):**
+The technical utility of OVQ-attention is conceptually high but practically limited in its current state. By replacing static key/value dictionaries with dynamic online dictionaries updated via clustering, the authors elegantly side-step the catastrophic forgetting issues plaguing constant-memory linear attention models (like Mamba and RWKV) while dramatically improving long-context recall. However, real-world adoption heavily hinges on hardware efficiency. The authors do not provide a custom Triton/CUDA kernel, and sparse dictionary updating (`scatter`/`gather` operations) typically runs significantly slower on GPUs than dense operations. Additionally, without validation at larger scales (e.g., 7B+ parameters), practitioners are highly unlikely to adopt this over established architectures. The method demonstrates strong *potential* capability, but currently lacks the feasibility profiling required to disrupt the ecosystem. 
+
+**2. Scientific Significance (30%):**
+Scientifically, the paper makes a profound and beautiful connection. Bridging sequence mixing and Gaussian Mixture Regression (GMR) offers a completely fresh lens for evaluating memory in LLMs. Framing sequence compression as an online clustering problem (rather than a linear recurrence or dense state-space update) formally explains *why* sparse updates prevent catastrophic forgetting. This methodological shift opens up a fruitful research direction for associative memory layers and theoretically grounds VQ-attention, which previously felt somewhat ad-hoc. 
+
+**3. The 3-Year Citation Projection:**
+Within the next 3 years, this paper is likely to accrue moderate citations, primarily from researchers investigating efficient attention variants, linear attention scaling, and KV-cache compression techniques. If a research group eventually develops a hardware-efficient implementation that realizes wall-clock speedups at scale, citations could surge. However, as an initial architecture proposal tested purely at the ~100M-500M parameter scale without throughput benchmarks, it will be viewed more as an interesting proof-of-concept rather than an immediate drop-in replacement for self-attention.
+
+**Impact Score: 4.0 / 10**

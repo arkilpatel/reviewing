@@ -1,0 +1,2710 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Online V ector Quantized Attention
+Anonymous Authors1
+Abstract
+Standard sequence mixing layers used in language
+models struggle to balance efficiency and perfor-
+mance. Self-attention performs well on long con-
+text tasks but has expensive quadratic compute
+and linear memory costs, while linear attention
+and SSMs use only linear compute and constant
+memory but struggle with long context process-
+ing. In this paper, we develop a sequence mixing
+layer that aims to find a better compromise be-
+tween memory-compute costs and long-context
+processing, which we call online vector-quantized
+(OVQ) attention. OVQ-attention requires linear
+compute costs and constant memory, but, unlike
+linear attention and SSMs, it uses a sparse mem-
+ory update that allows it to greatly increase the
+size of its memory state and, consequently, mem-
+ory capacity. We develop a theoretical basis for
+OVQ-attention based on Gaussian mixture re-
+gression, and we test it on a variety of synthetic
+long context tasks and on long context language
+modeling. OVQ-attention shows significant im-
+provements over linear attention baselines and the
+original VQ-attention, on which OVQ-attention
+was inspired. It demonstrates competitive, and
+sometimes identical, performance to strong self-
+attention baselines up 64k sequence length, de-
+spite using a small fraction of the memory of full
+self-attention.
+1. Introduction
+Sequence mixing layers allow LLMs to utilize information
+across input tokens to perform complex tasks. Predominant
+sequence mixing layers used in LLMs currently struggle
+to balance computational efficiency and performance. Self-
+attention (Bahdanau et al., 2014; Vaswani et al., 2017) shows
+an impressive ability to utilize long sequences for tasks re-
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+quiring in-context learning (Dong et al., 2024), reasoning
+(Chen et al., 2025), and long-range information retrieval
+(Hsieh et al., 2024). However, self-attention incurs an expen-
+sive quadratic compute cost and linearly growing memory.
+Linear attention (Katharopoulos et al., 2020; Shen et al.,
+2021; Yang et al., 2024b;a; von Oswald et al., 2025) and
+SSM models (Gu & Dao, 2024; Dao & Gu, 2024), on the
+other hand, are highly efficient, incurring only linear com-
+pute and a relatively small constant memory cost. However,
+the small capacity of these layers leads to large performance
+deficits on tasks requiring precise and accurate processing of
+information over long contexts (e.g., (Aky¨urek et al., 2024;
+Wang et al., 2025)). Hybrid models (Glorioso et al., 2024b;
+Lieber et al., 2024; Glorioso et al., 2024a; Team et al., 2025),
+that interleave self-attention and SSM layers, alleviate, but
+do not eliminate, the quadratic compute and linear memory
+costs of the self-attention layers.
+In this paper, we develop a novel approach to sequence
+mixing that aims to find a better compromise between mem-
+ory/compute costs and long-context processing ability. Our
+approach builds upon a little-explored sequence mixing
+layer called vector quantized attention (Lingle, 2023) (VQ-
+attention), which, like linear attention and SSM models, has
+constant memory and linear compute costs. However, unlike
+these methods, VQ-attention uses a sparse memory update,
+based on k-means clustering. The state update is decou-
+pled from memory size,allowing for the use of very large
+memory states and, potentially, storage capacity while being
+computationally tractable and efficient. VQ-attention stores
+a dictionary of centroids modeling keys and values. The
+key dictionary, Dk, is learned during pretraining, while the
+value dictionary, Dv, is learned online during the forward
+pass.
+Despite this potential, we show the original form of VQ-
+attention struggles on simple long-context processing tasks.
+We find the main issue is related to the static, pretrained
+key dictionary Dk, which struggles to model keys well
+during the forward pass. Motivated by this, we develop
+an alternative form of VQ-attention, which we call online
+VQ-attention (OVQ-attention) which learns both the key
+and value dictionaries online. We demonstrate that OVQ
+attention substantially outperforms original VQ attention
+and can be competitive with full attention at long context
+lenghts.
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Online V ector Quantized Attention
+Our contributions in this paper can be described as follows:
+1. We propose an alternative form of VQ-attention, called
+online VQ-attention (OVQ-attention), which learns
+both Dk and Dv online during the forward pass. We de-
+velop a novel theoretical framework for OVQ-attention
+based on Gaussian Mixture Regression and use this
+theoretical basis to develop a principled online learn-
+ing algorithm for the OVQ-attention layer, involving
+novel methods for growing the memory state [Dk, Dv]
+asymptotically toward a constant maximum size and
+for updating the memory states using sparse online
+update rules.
+2. We test our OVQ-attention layer’s ability to perform
+long context processing, using a variety of synthetic
+tasks testing in-context recall (ICR) and long range
+in-context learning (ICL), as well as long-context lan-
+guage modeling. Where OVQ-attention shows signifi-
+cant improvements in performance over VQ-attention
+and baseline linear attention models, across all tasks.
+OVQ-attention matches or slightly deviates from strong
+baselines that use full self-attention, even at long test
+lengths when only using a state size 10-25 % of that
+used by self-attention.
+3. OVQ-attention also demonstrates the ability to effec-
+tively length extrapolate from 4k tokens on ICR and
+ICL up to and beyond 64k tokens. We also find the
+amount of memory OVQ-attention uses can be dy-
+namically adjusted at test time, with larger memory
+allocations consistently leading to better performance.
+2. Background
+2.1. Self Attention
+Let X∈R T×D be the layer input, where T is sequence
+length and D is the model dimension. Let Q, K, V∈R T×d ,
+where d is the dimension of each head. These are computed
+Q=f(W QX), K=f(W V X), V=W V X, where f may
+be the identity function, layer norm, or other non-linearity.
+The causal self-attention operation for input at position t is
+Oatt
+t =softmax(βq tK ⊤
+0:t)V0:t,(1)
+where qt ∈R 1×d is the query at position t. This operation
+is parallelized through the use of an attention mask:
+Oatt =softmax(βQK ⊤ +M)V(2)
+where softmax is applied row-wise.
+2.2. V ector Quantized Attention
+Let Dk ∈R N×d be a dictionary of centroids,
+[µk⊤
+0 ,µ k⊤
+1 , ...,µ k⊤
+N ]⊤, used to quantize K in the self at-
+tention operation, where N is the number of centroids. VQ-
+attention treats Dk as a set of parameters optimized during
+pretraining (Lingle, 2023). During inference, VQ-attention
+applies vector quantization to keys by replacing each key,
+kt, with its nearest centroid. Let the set of quantized keys
+be ˆK. VQ-attention can be expressed in a form that has
+quadratic time complexity:
+Ovq-att
+t =softmax(q t ˆK ⊤
+0:t)V0:t,(3)
+Ovq-att =softmax(Q ˆK ⊤ +M)V.(4)
+The quadratic version of VQ-attention is simply self-
+attention with vector-quantized keys. However, crucially,
+the quadratic form of VQ-attention has an equivalent lin-
+ear time and constant memory version (Lingle, 2023). The
+intuition is that when we vector-quantize the keys, we do
+not need to compare queries to each of the previous keys.
+We only need to compare queries to each dictionary cen-
+troid and track the number of keys assigned to each centroid.
+These two quantities allow us to get back output equivalent
+to that of the quadratic VQ-attention version (for proof see
+(Lingle, 2023)):
+Ovq-att
+t =softmax(q t ˆK ⊤
+0:t)V0:t (5)
+=softmax(q tD⊤
+k +log(c t))Dv,(6)
+where ct ∈R 1×N is a count vector representing the num-
+ber of keys up to position t assigned to each of the N
+centroids, and Dv ∈R N×d is a dictionary of centroids,
+[µv⊤
+0 ,µ v⊤
+1 , ...,µ v⊤
+N ]⊤, used to quantize values. Dv, unlike
+Dk, computed on-the-fly during inference. Specifically,
+each value vt in V uses the same centroid assignment as the
+keys. Each centroid µv
+n is set to an average of all previous
+values assigned to centroid n. We can see that the right hand
+side of equation 5 uses a constant amount of compute per
+query, since qt is compared to a fixed number of centroids
+(N).
+Chunk-Parallel Form.Without a causal mask, the right
+side of equation 6 can be parallelized as follows
+Ovq-att =softmax(QD ⊤
+k +log(C))D v,(7)
+where tensor C∈R T×N are the cumulative counts storing
+the number of key-values assigned to each row of Dv at
+each point in the sequence. Introducing a causal mask while
+retaining linear time complexity requires a more complex
+equation that uses chunk-level recurrence (Lingle, 2023).
+The sequence is split into C chunks of a fixed chunk length,
+L. For each chunk c, the value dictionary Dv(c) is up-
+dated recurrently using values from the current and previous
+chunks. The VQ-attention output is then computed as fol-
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Online V ector Quantized Attention
+lows
+Ovq-att = 1
+Z (exp(QcD⊤
+k +log(c c−2))Dv(c−2) (8)
++exp(Q c ˆK ⊤
+c−1 +M c−1)Vc−1 (9)
++exp(Q c ˆK ⊤
+c +M c)Vc),(10)
+where 1
+Z is a vector that does the softmax normalization
+and cc−2 stores the counts up until the last key-value of
+chunk c−2 . Mc−1 and Mc create a causal sliding window
+mask such that future keys are masked and each query can
+attend to the previous L quantized keys, represented in
+equation 5 and 6, and dictionary elements, shown in line 4.
+Each operation (line 7, 8, and 9) has linear time complexity,
+which entails this chunk-wise recurrent formulation of VQ-
+attention also has linear time complexity (Lingle, 2023).
+2.3. Preliminary Testing: In-Context Recall
+Figure 1.Preliminary test of in-context recallin model interleav-
+ing sliding window and VQ-attention layers. Differing number of
+centroids,N, are tested.
+Previous works, e.g., (Lingle, 2023), tested transformers
+that utilize VQ-attention layers on short-context language
+modeling tasks. However, as far as we can find, there has
+been no direct testing of VQ-attention on tasks requiring
+long-context abilities. Here we test a model that interleaves
+sliding window layers with RoPE and VQ-attention layers
+with NoPE ( sw-vq), and we compare to a baseline that
+interleaves sliding window with RoPE and standard self-
+attention with NoPE (sw-nope) on a key-value retrieval
+task (explained further in experiment section). These models
+are set up so the only difference between the two is that VQ-
+attention model quantizes keys, while the baseline does
+not (see equation 3). We test the VQ-attention model with
+dictionaries that have 1k, 2k, and 3k centroids using SOTA
+dictionary training methods (see appendix 8.1 for details).
+Figure 1 shows the results. The baseline model performs the
+task perfectly up to the maximum training length of 4k and
+also demonstrates excellent length extrapolation capability,
+performing nearly perfectly to the maximum test context
+length of 48k. The performance of the VQ model begins to
+degrade prior to the maximum train length and shows poor
+length extrapolation abilities. Importantly, increasing the
+number of centroids in Dk provides diminishing returns in
+improvements, meaning this issue cannot be trivially solved
+by adding more centroids to the dictionaries.
+3. Online V ector Quantized Attention
+The only difference between the self-attention baseline and
+the VQ-attention model are the quantized keys (see equa-
+tion 3). These performance deficits must therefore be due
+to the quantization error, i.e., the difference between each
+kt and the nearest neighbor centroid it gets replaced with.
+Figure 2.Process for generating
+OVQ-attention output for token at
+positionT.
+This quantization er-
+ror adds a bias to
+the self-attention opera-
+tion and the gradients,
+since we must use a
+straight-through estima-
+tor to propagate gradi-
+ents through the quanti-
+zation operation. As we
+saw, this performance
+degredation cannot be
+trivially solved by in-
+creasing the size of Dk.
+We, therefore, propose
+an alternative solution,
+which is to learn Dk on-
+lineduring the forward pass. We call thisonline vector
+quantized attention(OVQ-attention), since now all parame-
+ters of VQ-attention (Dk, Dv, and c) are learned on-the-fly
+during the forward pass. By dynamically computing Dk
+during the forward pass, we hypothesize that Dk should be
+able to better fit keys to both in and out of training distribu-
+tion lengths and provide potential benefits by removing the
+need for a straight through estimator.
+3.1. Gaussian Mixture Regression: A Theoretical Basis
+for OVQ-attention
+First, we provide a novel theoretical basis on which to de-
+velop and further motivate OVQ-attention. Self-attention
+has previously been shown to be equivalent to Gaussian
+kernel regression (GKR), under certain assumptions (e.g.,
+(Bahdanau et al., 2014; Murphy, 2022)). GKR estimates
+the conditional probability distribution P(V|K) using sam-
+ples (k0,v 0),(k 1,v 1), ...,(k T ,v T ). It’s prediction is the
+expected value of V given a value for input K. Assume
+K=q T and queries and keys have the same L2-norm. In
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Online V ector Quantized Attention
+this case,
+E(V|K=q T ) =
+TX
+t=0
+e−β||qT −kt||2
+PI
+i=0 e−β||qT −ki||2 vt (11)
+=softmax(βq T K ⊤)V(12)
+where β is the precision (see appendix 7.1 for more de-
+tailed derivation). This description, combined with equation
+3, suggests VQ-attention may be interpreted as doing GKR
+with quantized keys. However, we show VQ-attention has
+a deeper connection to a different model, which naturally
+incorporates vector quantization and the count vectors used
+in the linear form of VQ-attention. In particular, we show
+VQ-attention, and our OVQ-attention layer in particular,
+is closely related to a model known as Gaussian mixture
+regression (GMR). Like GKR, GMR computes the condi-
+tional probability P(V|K) using a dataset consisting of
+inputs (keys) and outputs (values). Unlike GKR, GMR
+does not use the raw dataset to compute the conditional
+distribution. Instead, it first fits a Gaussian mixture model
+(GMM) to the dataset [k0,v 0],[k 1,v 1], ...,[k T ,v T ], where
+the brackets indicate that associated keys and values are
+concatenated to form a single data point. To generate pre-
+dictions, the model computes the conditional distribution
+P(V|K) using some input and the Gaussian mixture. More
+specifically, assuming that keys and queries have the same
+L2-norm norm and Σn =I 1
+β , we show in the appendix 7.3
+that the prediction of a GMR model is
+E(V|K=q T ) =
+NX
+n=0
+πne−β||qT −µk
+n||2
+PJ
+j=0 πje−β||qT −µk
+j ||2 µv
+n (13)
+=softmax(q T D⊤
+k +log(c T ))Dv,
+(14)
+where µk
+n and µv
+n are the n-th means in Dk and Dv, respec-
+tively, and πn, is the prior probability distribution, which
+is proportional to the counts, cn. Although the way GMR
+and VQ-attention generate predictions is related, the way
+these models learn is significantly different: VQ-attention
+learns Dk and Dv separately, one in pretraining and the
+other online during inference, while GMR learns these si-
+multaneously, treating them as a single set of parameters
+fitted to the same dataset. This further motivates an alter-
+native form of VQ-attention that learns both Dk and Dv
+simultaneously: in order to accurately compute P(V|K) ,
+the underlying GMM model must be trained in a principled
+way such that Dk and Dv are fitted to the same dataset of
+interest, which in the case of sequence mixing layers, is the
+input sequence of keys and values. We now show how our
+OVQ-attention accomplishes this learning process.
+3.2. The Online Learning Formulation
+Following the test time training framework (Sun et al., 2024),
+we use an online learning formulation for OVQ-attention.
+Figure 3.State updates in linear and OVQ-attention models.
+We assume at each point in the sequence,t, we have a GMR
+model that is presented withqt, kt, and vt. The model must
+generate a prediction, as in equation (14) above, using qt
+and the current model, and it must update the parameters
+(Dk, Dv, and the counts c) using kt and vt to optimize
+the loss function for Gaussian mixtures, described below.
+In practice, we use a chunk-parallel formulation, in which
+the model is presented with a small chunk of consecutive
+queries, keys, and values. The model does a mini-batch
+update and generates predictions so that the update and
+prediction generation are parallelized across the chunk. As
+above, we assume qt and kt are unit norm and Σn =I 1
+β ,
+where β is a parameter fixed during test time training and
+learned in the outer-loop.
+Prediction.Our algorithm uses a chunk-wise parallel
+implementation, where the model loops through chunks,
+Qc, Kc, Vc, each of length L, but parallelizes operation
+within each chunk. Every chunk, the model first generates
+a prediction over V using the expectation E(V|K=q T )
+given an input query via our GMR, shown in equation (14).
+To do this, we first merge the data points in the current
+chunk with the existing mixture model. Let D∗
+k = [Dk, Kc]
+and D∗
+v = [Dv, Vc], where the brackets are concatenations.
+Let cc−1 be the counts updated to chunk c−1 , and let
+c∗ = [cc−1,1] , where 1∈R 1×L, is a tensor of ones, which
+act as the counts for the new keys and values concatenated
+to the dictionaries.
+Oovq-att =softmax(βQ cD∗⊤
+k +log(c ∗) +M)D ∗
+v,
+(15)
+where M is a causal mask. Note that unlike the original VQ-
+attention, the chunks concatenated to the dictionaries are not
+quantized, but rather are the keys and value in their original
+form. Further, because both Dk and Dv are weighted sums
+of the keys and values (see below), gradients can propa-
+gate through these matrices without any straight through
+estimator.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Online V ector Quantized Attention
+Figure 4.In-context recall.Left two plots show per-token-accuracy for our two synthetic recall tasks up to 64k context length. The right
+plot shows how the memory state, i.e. kv-cache, grows with context length.
+Learning.The loss function minimized during training of
+GMRs is the negative log likelihood (NLL):
+L(θ) =−
+TX
+t=1
+ln
+ NX
+n=1
+πnN([k t,v t]|[µ k
+n,µ v
+n],Σ n)
+!
+,
+(16)
+where, in the online setting, T is the current
+timestep/iteration. That is, this loss sums the NLL
+of the model over the current and all previously observed
+data points. In the offline setting, GMMs are typically
+trained via expectation maximization (EM) (Dempster et al.,
+1977), which has guarantees of converging to minima of
+the NLL. EM iteratively performs batch updates on the
+parameters for multiple epochs until convergence. In the
+online scenario, however, it is assumed there is not enough
+memory or compute available to store and train on all
+data points observed up until T . Thus, the train set as a
+whole cannot be retroactively used to perform multiple
+batch updates using EM. However, in the appendix we
+show that what can be done in the online setting is to
+closely approximate 1) the standard initialization process
+for Gaussian mixtures, and 2) a single batch EM update
+over these initialized parameters, under our assumption
+Σn =I 1
+β . A single batch update may not seem sufficient
+to achieve a good GMM parameters, but we show that the
+first EM update in this setting is equivalent to performing
+a Newton update on the NLL thus providing a good
+second-order approximation of parameters that minimize
+the NLL.
+A standard method for initializing the means of the N com-
+ponents in a GMM is to set the means equal to a subset of
+N data points from the train set (Bishop & Nasrabadi, 2006;
+Pedregosa et al., 2011). This can be done through random
+sampling, but there are more effective methods. One indus-
+try standard, k-means++ (Arthur & Vassilvitskii, 2006), uses
+a procedure that attempts to maximize the distance between
+initial Gaussian means. We approximate this process by
+adding some number, nnew, components each chunk c. To
+determine the number of new components to add each chunk
+we use the following growth function for the dictionaries:
+Nt =t N
+t+N ,(17)
+where Nt is the number of centroids in Dk and Dv at step t,
+N is the maximum number of centroids. This is a plateauing
+growth function, loosely inspired by the Dirichlet process
+(Escobar, 1994), that grows quickly early in the sequence
+and slows later in the sequence. We can see that as t→ ∞ ,
+Nt →N . For every chunk, c, of length L we calculate the
+number of new centroids:
+nnew =N Lc −N L(c−1).(18)
+The data points within the current chunk assigned as new
+centroids are the nnew that have the smallest dot prod-
+ucts with their nearest neighbor centroid. Like k-means++
+(Arthur & Vassilvitskii, 2006), this procedure aims to have
+a large spread between initial centroids. Data points not
+assigned as new means are merged with old means. We use
+the following update
+∆[µk
+t∗ ,µ v
+t∗] = 1
+ct∗ +c t∗,c
+([kt,v t]−[µ k
+t∗ ,µ v
+t∗]),(19)
+where [µk
+t∗ ,µ v
+t∗] is the nearest neighbor cluster assignment
+to [kt,v t] and ct∗,c is the number of datapoint in the current
+chunk, c, assigned to cluster t∗. This is an online version of
+the batch K-means update. We show in the appendix that the
+first batch EM update performed after initializing parameters
+is equivalent to batch K-means, under our assumptions about
+covariance matrix. Importantly, previous results (Bottou &
+Bengio, 1994) can be used to show this first EM update
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Online V ector Quantized Attention
+is equivalent to a Newton update on the NLL loss (see
+appendix 7.3), which yields a second-order approximation
+of parameters that minimize the loss.
+3.3. Computational Properties For Training
+OVQ stores Dk, Dv and count tensor c. As T→ ∞ these
+tensors grow in their number of components toward the
+hard upper bound of N, incurring constant O(N) memory
+costs. The main compute cost in OVQ-attention comes from
+the attention operation QcD∗⊤
+k and the operation to get dot
+product values between keys and centroids,KcD⊤
+k , yielding
+linear compute cost O(2N LC) =O(2N T) , where L is
+fixed chunk length andCis the number of chunks.
+3.4. Comparison to Linear Attention Models
+A central difference between OVQ-attention and common
+sequence mixing layers with constant memory, i.e., SSMs
+(Gu & Dao, 2024; Dao & Gu, 2024) and linear attention
+models (Qin et al., 2022), is that their state update does not
+grow in size with the memory state size. Let dk and dv
+be key and value dimension, respectively. Linear attention
+models, for example, store state S∈R dk×dv. In standard
+chunk-parallel implementations, state updates are produced
+for each of the L tokens in the current chunk yielding ∆S∈
+RL×dk×dv. The memory footprint of the update tensor
+limits the chunk size and the state size that can be used in
+practice. OVQ-attention sparsely updates its state. Each
+of the L tokens in the current chunk only update a single
+row of Dk and Dv. Thus, only updates for specific rows
+are computed and stored, yielding ∆S∈R L×2×d. Memory
+updates can therefore be expressed in terms of gather and
+scatter operations (see appendix 8.3) that only retrieve and
+operate on a fixed number of columns of the memory state.
+Importantly, this implies the memory footprint of ∆S is
+unrelated to the number of components, N, in the dictionary.
+OVQ-attention can, consequently, increase its state size, S,
+without increasing the memory footprint of ∆S. Increasing
+N increases compute costs elsewhere but mainly to matrix
+multiplications (see previous section), which can be highly
+optimized.
+4. Experiments
+4.1. Synthetic Long-Context Tasks
+Sequence mixing layers with constant memory, like SSMs
+and linear attention layers, are known to struggle signifi-
+cantly relative to self-attention with tasks that require in-
+context recall (ICR) and in-context learning (ICL) over long
+context lengths (Aky¨urek et al., 2024; Wang et al., 2025).
+We test our models on several hard synthetic tasks that stress
+these abilities. All models tested on these tasks have eight
+layers and model dimension of 768 and 70M parameters.
+Long In-Context Recall.We create two synthetic ICR
+tasks. The first, which we call ”basic ICR”, fills a context
+with key-value pairs. Each key and each value are unique
+and consist of eight tokens. At the end of the context, a ran-
+dom sample of six keys-value pairs from the context are pre-
+sented, and the model must predict the correct value tokens
+for these key-value pairs. We measure the per-token accu-
+racy over these value tokens (i.e., the proportion of tokens in
+each value that is correctly predicted). The second ICR task
+has the same setup except in the context there are four copies
+of each key, and each copy is assigned a distinct value. At
+the end of the context, four copies of one key are presented
+and the model must output all of its associated values in the
+order they appeared in the context. We call this ”positional
+ICR”, since it requires understanding the global relative
+position of key-values pairs. Models are trained at context
+lengths 500, 1k, 2k, and 4k, and tested up to 64k. Results
+are shown in figure 4. Our strongest baseline, sw-nope,
+which interleaves sliding window size 128 and full attention
+NoPE layers, performs both of these tasks almost perfectly
+up to 64k. The sw-vq layer struggles on these tasks at long
+train length of 4k, and has quickly decaying performance
+beyond 4k. We train a single sw-ovq with N=2k centroids.
+However, we test at a variety of larger dictionary sizes to
+see if the model can adapt at test time. The sw-ovq shows
+superior performance to sw-vq at similar dictionary sizes
+(N=2k to 4k), sw-ovq. Further, increasing the maximum
+dictionary size at test time beyond the train length shows
+considerable improvements in OVQ-attention layers. On
+basic ICR, sw-ovq very nearly matches performance up to
+64k context length w N= 16 and N= 20, which compress
+the context to 75-80%. Performance is slightly worse on the
+more difficult positional ICR, but still near perfect perfor-
+mance up to 16k context length for N≥4 k+. Further, we
+find small architecture tweaks can improve the performance
+of sw-ovq on positional ICR by 10-20% at 16k-64k con-
+text lengths (see appendix C). Finally, in figure 8, we see
+equal-parameter linear attention baselines fail at both tasks
+beyond 2k sequence length.
+Long In-Context Learning.Next, we test models on a
+long-context version of linear regression based ICL tasks
+(Aky¨urek et al., 2022). In this task, the context consists of
+input-output pairs, x,y , where the output of each is gener-
+ated by some linear function, funcf(x) =y=b+aPx .
+In our tests, a and b are integers such that 0< a <5 ,
+0< b <5 and P is a permutation matrix. Using a permuta-
+tion matrix and small a and b ensures the function output is
+a vector of integers within the model’s vocab range. Each
+input-output pair has 12 tokens. To make this task require
+ICL over long-contexts, input-output pairs from multiple
+functions are shown in context. Each example is marked
+with a special token that identifies which function type gen-
+erated the output. This means the more function types there
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Online V ector Quantized Attention
+Figure 5.In context learning. Models are trained on 2k context with 16 functions. We show the per-token accuracy over the output, yn,
+for each example,n, in the context, averaged over the test set.
+Figure 6.Long context language modeling on PG19.
+are in context the greater the average distance between ex-
+amples for each function, funcf . For example, we find it
+takes transformers about five examples, minimum, to learn a
+function. In our hardest test, with 128 functions, the average
+distance between input-output examples for some function
+funcf is 3000+ tokens, so information must be integrated,
+on average, over 15000+ tokens to learn each function. Mod-
+els are trained on context lengths of 2k with 16 functions
+and tested long contexts with 1, 32, 64, and 128 functions.
+Figure 5 displays the results. The baseline sw-nope model
+successfully learns all functions in all scenarios, even in the
+hardest case 128 function scenario. The sw-ovq model
+impressively matches the performance of sw-nope, even
+when using a small dictionary N= 4k. The sw-vq model
+struggles to successfully learn even a single function in this
+task. Equal-parameter linear attention baselines also strug-
+gle to perform both ICL and basic ICR beyond 2k contexts
+(see figure 8).
+4.2. Long Context Language Modeling
+We also test OVQ models on long context language model-
+ing using the PG19 dataset. We filter the dataset to remove
+sequences less than 16k tokens. Sliding window and gated
+delta net (gdn) (Yang et al., 2024a) interleaved models are
+tested at size 230M parameters each. Models are trained
+at sequence length 10k and tested at 16k sequence length.
+OVQ-attention layers are trained with N= 2k. Results are
+shown in figure 6. Adding OVQ layers to pure sliding win-
+dow and gdn models drastically improves long context lan-
+guage modeling performance, even for small N= 2 k. Per-
+formance of gdn-ovq and sw-ovq does not quite match
+the nope baseline at long lengths, differing at 10k by about
+.02 cross-entropy. We found our sw-nope interleave base-
+line to be significantly stronger than the full attention w/
+RoPE baseline, std-att on long context language model-
+ing. The sw-ovq model matches, even slightly surpasses,
+std-att.
+4.3. Short Context Benchmarks
+OVQ-attention does not compress keys and values signifi-
+cantly over short contexts, so we should expect similar per-
+formance on common short context benchmarks to standard
+attention. To confirm this, we compare a 480M parame-
+ter sw-nope, std att , and sw-ovq model on standard
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Online V ector Quantized Attention
+Model Params PIQA Hella. Wino. ARC-e ARC-c A vg.
+std att480M66.4 ±0.1 40.5±0.1 52.3±0.7 52.8±0.4 29.1±0.5 48.21
+sw-nope480M66.7 ±0.4 40.9±0.1 52.6±0.6 53.1±0.1 28.4±0.4 48.35
+sw-ovq480M66.6 ±0.2 41.1±0.2 52.4±0.2 52.7±0.1 28.7±0.4 48.30
+Table 1.Short context benchmarks.
+Figure 7.Ablations on Basic ICR.
+short context benchmarks. Models are trained for 50B to-
+kens of fineweb-edu (Penedo et al., 2024) at context
+length 1536. Scores shown in table 1 are the averages and
+standard deviation over the last three checkpoints of the
+training run for each model and test. We see nearly all
+scores are within one standard deviation of each other, and
+the average score for sw-ovq is well within the average
+standard deviation levels of the other two baselines.
+4.4. Ablations
+We test several ablations on our OVQ layer. First, instead of
+setting new centroids using our spread maximizing scheme,
+we set new centroids to a random sample of key-values from
+the current chunk. Second, instead of using our plateauing
+dictionary growth method, we test adding new centroids lin-
+early (i.e., dividing nnew evenly across each chunk). Finally,
+instead of using the adaptive learning rates for updating dic-
+tionary centroids (equation 3.2), we use a constant learning
+rate. Using a constant learning rate makes the dictionary
+update equivalent to a kind of gradient descent, or first order
+approximation of the minimizing parameters rather than a
+second-order one. We test on basic ICR (figure 7) and PG19
+language modeling (appendix C). Each ablation worsens
+performance in at least one of these tasks.
+5. Related Works
+Previous work on VQ-attention.VQ-attention was first
+proposed by Lingle (2023). In this initial paper, a model
+with VQ-attention was tested on relatively short sequence
+language modeling. We could only find two subsequent
+works, (Li et al., 2025b; Huang et al., 2025), that try to
+build and improve upon original VQ-attention. Both apply
+product quantization and/or residual quantization methods
+to try to reduce the quantization error. However, these
+modifications are not compatible with linear compute and
+constant memory. Although they can reduce memory and
+compute, relative to standard attention, they yield the same
+complexity. Our aim, however, is to improve performance
+of VQ-attention, while maintaining its compute and memory
+complexity.
+VQ for KV-cache Compression and Sparse Attention.
+Multiple works use vector quantization (e.g., (Kumar, 2024;
+Li et al., 2025a;c)) as a method for KV-cache compression
+applied after training. While these methods lead to a re-
+duction KV-cache memory cost, they do not reduce the
+complexity of memory or compute compared to standard
+self-attention. VQ has also been used to make sparse atten-
+tion operations more efficient (e.g., (Zhang et al., 2025a;
+Hang & Yang, 2025; Liu et al., 2025; Zhang et al., 2025b)).
+These methods often achieve linear complexity, however
+they do not provide a method for storing keys and value
+using constant memory.
+Fast Product Key Memory.Perhaps most similar to
+our OVQ-attention is the recent fast product key memory
+(FPKM) layer (Zhao & Jones, 2026). This algorithm was
+published during the writing of this manuscript and its code
+has not been released, so comparisons could not be made.
+FPKM uses a sparse top-k update on a constant sized mem-
+ory. Unlike OVQ-attention, FPKM does not use multiple
+heads and does not have principled adaptive learning rates
+or dictionary growth.
+6. Discussion and Limitations
+Limitations.Our OVQ layer was tested at relatively small
+scale (<500 M), so more testing is needed to understand
+how it performs at larger scales. A hardware-efficient im-
+plementation of OVQ-attention has yet to be developed, so
+it remains to be seen how a highly optimized implementa-
+tion of OVQ attention compares to those of linear and self
+attention in terms of latency and throughput.
+Future Directions and Continual Learning.Beyond scal-
+ing and improving the efficiency of OVQ, we believe there is
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Online V ector Quantized Attention
+Figure 8.Comparison to Linear Attention and SSM Baselines.Left two plots show per-token-accuracy for ICL tasks. Models train on
+2k context with four functions, tested on four and 16 functions. The right plot shows performance for basic ICR.
+promise to investigating the use of OVQ-attention layers for
+continual learning. OVQ-attention fits within the test-time
+training framework (Sun et al., 2024), which formalizes
+linear attention layers as storing a model that optimizes an
+online loss function. The best performing linear attention
+models implement linear regression layers or MLPs that use
+types of dense, gradient updates such as (Sun et al., 2024;
+Yang et al., 2024a; Behrouz et al., 2024). In language mod-
+eling, it is typical that individual input sequences are non-
+I.I.D, implying the online learning problem these models
+must solve to achieve ICL is thus also a continual, non-I.I.D.
+learning problem. It is well-established that MLP-like mod-
+els trained with gradient descent suffer from catastrophic
+forgetting in non-I.I.D. learning scenarios (McCloskey &
+Cohen, 1989; French, 1999). This fact may partially explain
+why linear attention and similar SSM models often struggle
+on long-context tasks. OVQ-attention, on the other hand,
+implements an associative memory mechanism more closely
+related to online Gaussian mixture models and online clus-
+tering. The sparse updates used in online clustering allow for
+fast learning, while being resilient to catastrophic forgetting.
+For example, Alonso & Krichmar (2024) showed, in a vari-
+ety of non-I.I.D., online-continual learning scenarios, that
+associative memory models trained via online clustering-
+like algorithms are able to rapidly adapt to data distribution
+shifts without catastrophic forgetting. In figure 3, we visu-
+alize how the state updates performed by linear attention
+models may lead to in-context catastrophic forgetting, while
+the sparse OVQ-attention updates prevent forgetting. OVQ-
+attention, in this way, may provide a useful basis for rapidly
+incorporating new knowledge and skills into LLMs with-
+out catastrophic forgetting. Future work could look into
+explicitly testing the continual learning capabilities of such
+layers.
+Conclusions.OVQ-attention, like linear attention and
+SSMs, has constant memory and linear compute complex-
+ity. Unlike linear attention and SSMs, OVQ-attention uses
+sparse state updates that are small and independent of state
+size (along a certain dimension). State size can, therefore,
+be increased without increasing the memory footprint of
+the state update, leaving room to use very large state sizes
+that drastically increase memory capacity. We provided
+empirical evidence that OVQ-attention has drastically im-
+proved ICR, ICL, and language modeling at long context
+lengths relative to linear attention and SSMs. This approach,
+therefore, marks an important research direction for efficient
+alternatives to self-attention.
+References
+Aky¨urek, E., Schuurmans, D., Andreas, J., Ma, T., and
+Zhou, D. What learning algorithm is in-context learn-
+ing? investigations with linear models.arXiv preprint
+arXiv:2211.15661, 2022.
+Aky¨urek, E., Wang, B., Kim, Y ., and Andreas, J. In-context
+language learning: Architectures and algorithms. InInter-
+national Conference on Machine Learning, pp. 787–812.
+PMLR, 2024.
+Alonso, N. and Krichmar, J. L. A sparse quantized hopfield
+network for online-continual memory.Nature Communi-
+cations, 15(1):3722, 2024.
+Arthur, D. and Vassilvitskii, S. k-means++: The advantages
+of careful seeding. Technical report, Stanford, 2006.
+Bahdanau, D., Cho, K., and Bengio, Y . Neural machine
+translation by jointly learning to align and translate.arXiv
+preprint arXiv:1409.0473, 2014.
+Behrouz, A., Zhong, P., and Mirrokni, V . Titans: Learning to
+memorize at test time.arXiv preprint arXiv:2501.00663,
+2024.
+Bishop, C. M. and Nasrabadi, N. M.Pattern recognition
+and machine learning, volume 4. Springer, 2006.
+Bottou, L. and Bengio, Y . Convergence properties of the
+k-means algorithms.Advances in neural information
+processing systems, 7, 1994.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Online V ector Quantized Attention
+Chen, Q., Qin, L., Liu, J., Peng, D., Guan, J., Wang, P., Hu,
+M., Zhou, Y ., Gao, T., and Che, W. Towards reasoning
+era: A survey of long chain-of-thought for reasoning
+large language models.arXiv preprint arXiv:2503.09567,
+2025.
+Dao, T. and Gu, A. Transformers are ssms: Generalized
+models and efficient algorithms through structured state
+space duality.arXiv preprint arXiv:2405.21060, 2024.
+Declercq, A. and Piater, J. H. Online learning of gaussian
+mixture models-a two-level approach. InVISAPP (1), pp.
+605–611, 2008.
+Dempster, A. P., Laird, N. M., and Rubin, D. B. Maximum
+likelihood from incomplete data via the em algorithm.
+Journal of the royal statistical society: series B (method-
+ological), 39(1):1–22, 1977.
+Dong, Q., Li, L., Dai, D., Zheng, C., Ma, J., Li, R., Xia,
+H., Xu, J., Wu, Z., Chang, B., et al. A survey on in-
+context learning. InProceedings of the 2024 conference
+on empirical methods in natural language processing, pp.
+1107–1128, 2024.
+Escobar, M. D. Estimating normal means with a dirichlet
+process prior.Journal of the American Statistical Associ-
+ation, 89(425):268–277, 1994.
+Figliolia, T., Alonso, N., Iyer, R., Anthony, Q., and Mil-
+lidge, B. Compressed convolutional attention: Efficient
+attention in a compressed latent space.arXiv preprint
+arXiv:2510.04476, 2025.
+French, R. M. Catastrophic forgetting in connectionist net-
+works.Trends in cognitive sciences, 3(4):128–135, 1999.
+Glorioso, P., Anthony, Q., Tokpanov, Y ., Golubeva, A.,
+Shyam, V ., Whittington, J., Pilault, J., and Millidge,
+B. The zamba2 suite: Technical report.arXiv preprint
+arXiv:2411.15242, 2024a.
+Glorioso, P., Anthony, Q., Tokpanov, Y ., Whittington, J., Pi-
+lault, J., Ibrahim, A., and Millidge, B. Zamba: A compact
+7b ssm hybrid model.arXiv preprint arXiv:2405.16712,
+2024b.
+Gu, A. and Dao, T. Mamba: Linear-time sequence mod-
+eling with selective state spaces. InFirst conference on
+language modeling, 2024.
+Hall, P. M., Hicks, Y ., and Robinson, T. A method to add
+gaussian mixture models. 2005.
+Hang, J. and Yang, X. Enhancing local attention with global
+information interaction via progressive cluster propaga-
+tion.Pattern Recognition, pp. 112713, 2025.
+Hsieh, C.-P., Sun, S., Kriman, S., Acharya, S., Rekesh, D.,
+Jia, F., Zhang, Y ., and Ginsburg, B. Ruler: What’s the
+real context size of your long-context language models?
+arXiv preprint arXiv:2404.06654, 2024.
+Huang, X., Du, H., Zhou, M., Yan, Z., Zhuo, C., and Yin,
+X. Vqt-cim: Accelerating vector quantization enhanced
+transformer with ferroelectric compute-in-memory. In
+2025 62nd ACM/IEEE Design Automation Conference
+(DAC), pp. 1–7. IEEE, 2025.
+Katharopoulos, A., Vyas, A., Pappas, N., and Fleuret, F.
+Transformers are rnns: Fast autoregressive transformers
+with linear attention. InInternational conference on ma-
+chine learning, pp. 5156–5165. PMLR, 2020.
+Kumar, A. Residual vector quantization for kv cache
+compression in large language model.arXiv preprint
+arXiv:2410.15704, 2024.
+Kumar, A. and Kannan, R. Clustering with spectral norm
+and the k-means algorithm. In2010 IEEE 51st Annual
+Symposium on F oundations of Computer Science, pp. 299–
+308. IEEE, 2010.
+Li, J., Zhang, Y ., Hassan, M. Y ., Chafekar, T., Cai, T., Ren,
+Z., Guo, P., Karimzadeh, F., Wang, C., and Gan, C. Com-
+mvq: Commutative vector quantization for kv cache com-
+pression.arXiv preprint arXiv:2506.18879, 2025a.
+Li, K., Tang, Y ., Cheng, Y ., Bai, Y ., Zeng, Y ., Wang, C.,
+Liu, X., and Jiang, P. Vql: An end-to-end context-aware
+vector quantization attention for ultra-long user behavior
+modeling.arXiv preprint arXiv:2508.17125, 2025b.
+Li, Z., Xiao, C., Wang, Y ., Liu, X., Tang, Z., Lu, B., Yang,
+M., Chen, X., and Chu, X. Antkv: Anchor token-aware
+sub-bit vector quantization for kv cache in large language
+models.arXiv preprint arXiv:2506.19505, 2025c.
+Lieber, O., Lenz, B., Bata, H., Cohen, G., Osin, J., Dalmedi-
+gos, I., Safahi, E., Meirom, S., Belinkov, Y ., Shalev-
+Shwartz, S., et al. Jamba: A hybrid transformer-mamba
+language model.arXiv preprint arXiv:2403.19887, 2024.
+Lingle, L. D. Transformer-vq: Linear-time transformers via
+vector quantization.arXiv preprint arXiv:2309.16354,
+2023.
+Liu, G., Li, C., Zhao, J., Zhang, C., and Guo, M. Clus-
+terkv: Manipulating llm kv cache in semantic space for
+recallable compression. In2025 62nd ACM/IEEE Design
+Automation Conference (DAC), pp. 1–7. IEEE, 2025.
+McCloskey, M. and Cohen, N. J. Catastrophic interfer-
+ence in connectionist networks: The sequential learning
+problem. InPsychology of learning and motivation, vol-
+ume 24, pp. 109–165. Elsevier, 1989.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Online V ector Quantized Attention
+Murphy, K. P.Probabilistic machine learning: an introduc-
+tion. MIT press, 2022.
+Pedregal, P.Introduction to optimization, volume 46.
+Springer, 2004.
+Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V .,
+Thirion, B., Grisel, O., Blondel, M., Prettenhofer, P.,
+Weiss, R., Dubourg, V ., et al. Scikit-learn: Machine
+learning in python.the Journal of machine Learning
+research, 12:2825–2830, 2011.
+Penedo, G., Kydl´ıˇcek, H., Lozhkov, A., Mitchell, M., Raffel,
+C. A., V on Werra, L., Wolf, T., et al. The fineweb datasets:
+Decanting the web for the finest text data at scale.Ad-
+vances in Neural Information Processing Systems, 37:
+30811–30849, 2024.
+Peng, B., Alcaide, E., Anthony, Q., Albalak, A., Arcadinho,
+S., Biderman, S., Cao, H., Cheng, X., Chung, M., Grella,
+M., et al. Rwkv: Reinventing rnns for the transformer era.
+arXiv preprint arXiv:2305.13048, 2023.
+Qin, Z., Han, X., Sun, W., Li, D., Kong, L., Barnes, N., and
+Zhong, Y . The devil in linear transformer.arXiv preprint
+arXiv:2210.10340, 2022.
+Rae, J., Hunt, J. J., Danihelka, I., Harley, T., Senior, A. W.,
+Wayne, G., Graves, A., and Lillicrap, T. Scaling memory-
+augmented neural networks with sparse reads and writes.
+Advances in Neural Information Processing Systems, 29,
+2016.
+Shen, Z., Zhang, M., Zhao, H., Yi, S., and Li, H. Efficient
+attention: Attention with linear complexities. InProceed-
+ings of the IEEE/CVF winter conference on applications
+of computer vision, pp. 3531–3539, 2021.
+Stulp, F. and Sigaud, O. Many regression algorithms, one
+unified model: A review.Neural Networks, 69:60–79,
+2015.
+Sun, Y ., Li, X., Dalal, K., Xu, J., Vikram, A., Zhang, G.,
+Dubois, Y ., Chen, X., Wang, X., Koyejo, S., et al. Learn-
+ing to (learn at test time): Rnns with expressive hidden
+states.arXiv preprint arXiv:2407.04620, 2024.
+Team, K., Zhang, Y ., Lin, Z., Yao, X., Hu, J., Meng, F.,
+Liu, C., Men, X., Yang, S., Li, Z., et al. Kimi linear: An
+expressive, efficient attention architecture.arXiv preprint
+arXiv:2510.26692, 2025.
+Vali, M. H., B¨ackstr¨om, T., and Solin, A. Diveq: Differen-
+tiable vector quantization using the reparameterization
+trick.arXiv preprint arXiv:2509.26469, 2025.
+Van Den Oord, A., Vinyals, O., et al. Neural discrete rep-
+resentation learning.Advances in neural information
+processing systems, 30, 2017.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-
+tention is all you need.Advances in neural information
+processing systems, 30, 2017.
+von Oswald, J., Scherrer, N., Kobayashi, S., Versari, L.,
+Yang, S., Schlegel, M., Maile, K., Schimpf, Y ., Sieber-
+ling, O., Meulemans, A., et al. Mesanet: Sequence mod-
+eling by locally optimal test-time training.arXiv preprint
+arXiv:2506.05233, 2025.
+Wang, D., Zhu, R.-J., Abreu, S., Shan, Y ., Kergan, T., Pan,
+Y ., Chou, Y ., Li, Z., Zhang, G., Huang, W., et al. A sys-
+tematic analysis of hybrid linear attention.arXiv preprint
+arXiv:2507.06457, 2025.
+Yang, S., Kautz, J., and Hatamizadeh, A. Gated delta net-
+works: Improving mamba2 with delta rule.arXiv preprint
+arXiv:2412.06464, 2024a.
+Yang, S., Wang, B., Zhang, Y ., Shen, Y ., and Kim, Y . Par-
+allelizing linear transformers with the delta rule over se-
+quence length.Advances in neural information process-
+ing systems, 37:115491–115522, 2024b.
+Zhang, H., Ji, X., Chen, Y ., Fu, F., Miao, X., Nie, X., Chen,
+W., and Cui, B. Pqcache: Product quantization-based
+kvcache for long context llm inference.Proceedings of
+the ACM on Management of Data, 3(3):1–30, 2025a.
+Zhang, J., Nolte, N., Sadhukhan, R., Chen, B., and Bottou,
+L. Memory mosaics.arXiv preprint arXiv:2405.06394,
+2024.
+Zhang, M., Sun, H., Wang, J., Li, S., Ning, W., Qi, Q.,
+Zhuang, Z., and Liao, J. Clusterattn: Kv cache com-
+pression under intrinsic attention clustering. InProceed-
+ings of the 63rd Annual Meeting of the Association for
+Computational Linguistics (V olume 1: Long Papers), pp.
+14451–14473, 2025b.
+Zhao, T. and Jones, L. Fast-weight product key memory.
+arXiv preprint arXiv:2601.00671, 2026.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Online V ector Quantized Attention
+7. Appendix A: Theoretical Results
+7.1. Details on Relation between Gaussian Kernel Regression and Self-Attention
+Assumeq t andk t are unit norm. In this case,
+−1
+2 ||qT −k t||2 =− 1
+2(||qT ||2 +||k t||2 −2q Tk⊤
+t )(20)
+=− 1
+2(1 + 1−2q Tk⊤
+t )(21)
+=−1 +q Tk⊤
+t .(22)
+If we take the exponent of this result we get
+e−1+qT k⊤
+t =P e qT k⊤
+t (23)
+where P is a constant. This result can be used to derive self-attention from Guassian kernel regression (Bahdanau et al.,
+2014; Murphy, 2022), in the case whereq T andk t have the same norm.
+E(V|K=q T ) =
+TX
+t=0
+e− β
+2 ||qT −kt||2
+PT
+i=0 e− β
+2 ||qT −ki||2 vt (24)
+=
+TX
+t=0
+eβqT k⊤
+t
+PT
+i=0 eβqT k⊤
+i
+vt (25)
+=softmax(βq T K ⊤)V(26)
+7.2. Introduction to Gaussian Mixture Regression
+Here we provide a brief description of GMR based on the description in (Stulp & Sigaud, 2015). GMR involves fitting
+a Gaussian mixture model (GMM) to a dataset, where each data point consists of an input, kt, and a target output, vt
+combined as [k0,v 0],[k 1,v 1], ...,[k T ,v T ], where the brackets indicate concatenation. GMR fits a Gaussian mixture model
+to the joint distribution over these data points:
+p(K, V) =
+NX
+n=1
+πnN([K, V]|[µ k
+n,µ v
+n],Σ n),with
+NX
+n=1
+πn = 1,(27)
+where the prior probability of component n is πn, and [µk
+n,µ v
+n] is the concatenation of the mean for the input and output
+portion of componentn. The covariance is defined as
+Σn =
+ Σk
+n Σkv
+n
+Σvk
+n Σv
+n.
+
+(28)
+Generating predictions of output given some new input requires computing the conditional expectation over V given an
+input using the conditional distribution P(V|K=q T ) where qT is a query input at time T . In this case the conditional
+mean is defined
+µv|qt
+n =µ v
+n +Σ vk
+n Σk,−1
+n (qT −µ k
+n).(29)
+The expectation is then the weighted average over each conditional mean, weighted by their conditional probability,
+computed using the inputsq T and input (key) portion of the Gaussian components:
+E(V|K=q T ) = πnN(q T |µ k
+n,Σ k
+n)PN
+i=1 πiN(q T |µ k
+i ,Σ k
+i )
+µv|qt
+n (30)
+GMR models are typically trained using expectation maximization (EM) (Dempster et al., 1977). GMRs use EM to fit a
+Gaussian mixture model to maximize the likelihood of the data, P(K,V), or equivalently minimize the negative log likelihood
+(NLL) of the data, where input and outputs are treated as a single data point:
+L(θ) =−
+TX
+i=1
+ln
+ NX
+n=1
+πnN([k t,v t]|[µ k
+n,µ v
+n],Σ n)
+!
+,(31)
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Online V ector Quantized Attention
+where n is the component and πn is its prior probability. EM is the standard for minimizing this loss function in the batch
+training scenario. EM minimizes the NLL over the batch using multiple training iterations. Each iteration, the EM algorithm
+performs two-steps to achieve its parameter update.
+1. E-Step (Expectation). Evaluate the responsibilities zt,n using the current parameter values. This represents the posterior
+probability that data point[k t,v t]belongs to componentn:
+zt,n = πnN([k t,v t]|[µ k
+n,µ v
+n],Σ n)Pn
+j=1 πnN([k t,v t]|[µ kn,µ vn],Σ n) .(32)
+Under our assumptions about the covariance matrix
+N([k t,v t]|[µ k
+n,µ v
+n],Σ n)∝e −β||[kt,vt]−[µk
+n,µv
+n]||2
+.(33)
+2. M-Step (Maximization). Re-estimate the parameters using the responsibilities calculated in the E-step. First, calculate the
+total weight assigned to componentk:
+γn =
+TX
+t=1
+zt,n (34)
+Then, update the means and mixing coefficients:
+[µk
+n,µ v
+n]new = 1
+γn
+TX
+t=0
+zt,n[kt,v t](35)
+πnew
+n = γn
+γ ,(36)
+whereγ= P
+n γn.
+7.3. Linking GMR and OVQ-attention
+Assumptions.There are two main assumptions on which the following derivations are based:
+• First, we use a simplified approximation of the covariance, Σn =I 1
+β for all n, where β is a scalar and I is the identity
+matrix. Simplifying covariance matrices, in this way, is a common approximating assumption (Bishop & Nasrabadi,
+2006). An implication of this assumption most important for our results below is that Σvk
+n Σk,−1
+n (qT −µ k
+n) = 0, since
+Σvk
+n is a zero matrix. Applying this result to equation 29, we getµ v|qt
+n =µ v
+n.
+• Finally, we assumeq T andµ k
+n are unit norm.
+Setup.The standard method for training GMR models is EM (Dempster et al., 1977), which, as noted above, assumes a
+batch setting, where the model performs multiple epochs of batch updates. However, we are interested in the online setting,
+where a single data point, or very small mini-batch of data points, streams in each training iteration, the model only does
+one pass through the dataset, and there is not enough memory to store all or most the training data to do multiple iterations
+of batch EM updates. Common online GMM learning algorithms often resemble online k-means (e.g., (Hall et al., 2005;
+Declercq & Piater, 2008)). K-means is identical to EM in the case of uniform prior distribution, and a hard, one hot posterior
+distribution, which naturally results from using infinite precision, β=∞ ) (Bishop & Nasrabadi, 2006). Below, we show
+how learning in our OVQ model approximates the initialization and one batch EM applied to a GMR model. We then show
+how this leads to the equivalence between GMR and OVQ-attention predictions. More specifically,
+1. First, we show how our algorithm implements standard GMM initialization techniques.
+2. Next, we show that, under this initialization scheme and our assumption, Σn =I 1
+β , the first batch EM step on a GMM
+is equivalent to a batch k-means update, and we explain how our update rule is the standard online approximation of
+batch k-means.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Online V ector Quantized Attention
+3. Next, we show that the first EM update, after our initialization scheme, is equivalent to a Newton update on the NLL,
+thus providing a second-order approximation of the minimizing parameters.
+4. Finally, we show that generating predictions using GMR after initialization and one EM update is equivalent to
+OVQ-attention.
+1. Initialization.First, our online algorithm instantiates a standard initialization process for GMMs. EM describes how
+to update parameters of a GMM, but it does not specify how to initialize parameters of GMMs. The common method
+for initialization in the batch setting sets the means of the N Gaussian components of a GMM equal to a subset of N
+data points (Bishop & Nasrabadi, 2006; Pedregosa et al., 2011). This practice produces much better results than random
+initialization. These N data points may be drawn randomly, or a more strategic algorithm may be used. One standard
+approach is k-means++ (Arthur & Vassilvitskii, 2006), which chooses a subset of data points to initialize the means with the
+goal of maximizing the squared distance between the initial means. Our online algorithm, as explained above, initializes
+means with data points. Our theoretical results only depend on means being initialized with data points (see next step).
+However, our algorithms also tries to choose these means in a way increases the spread between initial means, similar to
+k-means++ (see pseudo-code below).
+2. OVQ-attention Approximates a Batch EM Update.After initializing means with a sample of N data points, a step of
+EM is performed using the remaining T−N data points. To perform this EM step the values of the prior distribution, π,
+and precision,β, need to be set. Setting the prior to a uniform distribution is justified at this point, since immediately after
+initialization, each existing mean has exactly one data point assigned to it, and thus cn =γ n = 1 for all n components,
+yielding a uniform distribution. Additionally, setting the precision β=∞ is justified, since, immediately after initialization,
+the mean of each Gaussian component equals the one data point assigned to it, so there is no empirical variance between
+mean and its assigned data point. Prior work has shown that a step of K-means is equivalent to a step of EM on a GMM,
+when the GMM’s prior is uniform and varianceβ=∞ (Bishop & Nasrabadi, 2006) (this can easily be inferred as well from
+EM description above). Thus, the first step of batch EM after initialization is equivalent to a batch K-means update. Our
+online update shown in equation 3.2 is the online version of the batch K-means update, in the sense the two are equivalent,
+under the same cluster assignments (Bottou & Bengio, 1994). In practice, cluster assignments will vary between batch and
+online versions, since in the online version input kt will be assigned to a version of the dictionary that is altered by the
+previous data points, whereas the batch version assigned all data points to the same dictionary after initialization. However,
+these deviations in cluster assignments are not observed empirically to negatively effect performance negatively, e.g., see
+(Bottou & Bengio, 1994).
+3. K-means and Newton’s Method.It has previously been establish by Bottou et al. (Bottou & Bengio, 1994) that a
+batched K-means update is equivalent to performing a step of Newton’s method on the K-mean’s loss function, which in our
+case, would be
+L(θ) =
+TX
+i=1
+||[kt,v t]−[µ k
+t∗ ,µ v
+t∗]||2,(37)
+where [µk
+t∗ ,µ v
+t∗] is the nearest neighbor mean for data point [kt,v t]. Newton’s method is equivalent to computing a
+second-order Taylor approximation of the parameters that minimizes this loss (Pedregal, 2004). As mentioned above, an
+EM update on a Gaussian mixture is equivalent to a K-means update in the case of a uniform prior and β=∞ (Bishop &
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Online V ector Quantized Attention
+Nasrabadi, 2006). Additionally, the K-means loss, in this case, is equivalent to the EM loss, i.e., the NLL:
+L(θ) =−
+TX
+i=1
+ln
+ NX
+n=1
+πnN([k t,v t]|[µ k
+n,µ v
+n],Σ n)
+!
+(38)
+=−
+TX
+i=1
+ln
+ NX
+n=1
+N([k t,v t]|[µ k
+n,µ v
+n],Σ n)
+!
+(39)
+=−
+TX
+i=1
+ln
+ NX
+n=1
+e−β||[kt,vt]−[µk
+n,µv
+n]||2
+!
+(40)
+=−
+TX
+i=1
+ln
+
+e−β||[kt,vt]−[µk
+t∗ ,µv
+t∗ ]||2
+(41)
+∝
+TX
+i=1
+||[kt,v t]−[µ k
+t∗ ,µ v
+t∗]||2.(42)
+The first step is a result of the fact that the prior is uniform. The second step applies our covariance assumption. The third
+step results from setting β=∞ , yielding hard assignments. Thus, a step of EM in the case of a uniform prior and β=∞ is
+equivalent to performing a Newton update on the NLL.
+4. OVQ-attention and GMR Prediction.Under the assumptions, we can see that the procedure for computing E(V|K=
+qT )for a GMR is equivalent to OVQ-attention.
+E(V|K=q T ) = πnN(q T |µ k
+n,Σ k
+n)PN
+i=1 πiN(q T |µ k
+i ,Σ k
+i )
+µv|qt
+n (43)
+=
+NX
+n=0
+πne−(qT −µk
+n)⊤Σk,−1
+n (qT −µk
+n)
+PN
+j=0 πne−(qT −µkn)⊤Σk,−1
+n (qT −µkn)
+µv
+n (44)
+=
+NX
+n=0
+cne− β
+2 ||qT −µk
+n||2
+PJ
+j=0 cje− β
+2 ||qT −µk
+j ||2 µv
+n (45)
+=
+NX
+n=0
+cneβq⊤
+T µk
+n
+PJ
+j=0 cjeβq⊤
+T µk
+j
+µv
+n (46)
+=
+NX
+n=0
+eβq⊤
+T µk
+n+log(cn)
+PJ
+j=0 eβq⊤
+T µk
+j +log(cj ) µv
+n (47)
+=softmax(βq T D⊤
+k +log(c))D v,(48)
+where c is the vector of counts. The first step expands the probability terms and setsµv|qt
+n =µ v
+n, which is true by assumption
+1. The second step also applies assumption 1 to covariance term, and replaces πn with cn, which is true in the case where
+learning is done via hard cluster assignments, which is the implied by the previous result. The third step applies our second
+assumption, and the finaly step simply moves the count term,c n, inside the exponential.
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Online V ector Quantized Attention
+8. Appendix B: Methods
+8.1. VQ-attention Implementation
+Dictionary Training.The original VQ-attention implementation (Lingle, 2023) trained Dk in pre-training using exponential
+moving average updates. It also used an auxiliary commitment loss similar to the original VQ-V AE (Van Den Oord et al.,
+2017). This approach is known to have several difficulties: it requires tuning numerous extra hyper-parameters, it suffers
+from dead neuron problems (some centroids stop getting updated), and dictionary updates are not computed during the
+backward pass but are instead computed outside the computation graph, making incorporation into parallelized training
+tricky. We use a recent SOTA method for training dictionaries in VQ-V AE layers, known as differentiable vector quantization
+(DiVeq) (Vali et al., 2025), that does not require auxiliary losses and computes dictionary updates through the backward pass.
+The same work (Vali et al., 2025) adds a method to help prevent dead neurons, known as space filling DiVeq (SF-DiVeq).
+SF-DiVeq updates a weighted combination of centroids instead of single centroids, to increase the number of columns in the
+dictionary updated, thereby reducing chances of dead centroids. We found SF-DiVeq prevented dead centroids better than
+DiVeq, but was imperfect. To further improve, we simply add a penalty each training iteration to those centroids that have
+zero magnitude updates, eventually forcing dead centroids to be updated. See figure 12. Finally, we normalize centroids and
+keys to unit norm, which is known to further ease cluster and prevent negative effects of outliers (Kumar & Kannan, 2010).
+Following the recommendations of (Vali et al., 2025), we first train the model for 4-9 thousand iterations without quantized
+keys, then begin quantizing keys and training the dictionary afterward.
+Architecture.The original implementation of VQ-attention uses an non-standard architecture in which a single head with
+small key dimension (i.e., 128) and very large value dimension (2D) are used. Learned position encoding are applied to the
+sliding window but NoPE is used outside the sliding window. Equation 3 shows the only mathematical difference between
+standard self-attention and VQ-attention are the quantized keys. In our tests, we aim to isolate the effects of quantizing
+keys from the other non-standard architecture choices of the original VQ transformer architecture (e.g., non-standard head
+number, non-standard head dimensions, learned position encodings, etc.). To do so, we use a VQ-attention layer that uses
+multiple heads and identically sized keys and values. All models use queries and keys that are unit norm, multiplied by
+learned, per head, scalar β. The only difference between a self-attention layer with NoPE and the VQ-attention layers we
+use, is the fact that VQ quantizes keys, while the baseline does not.
+8.2. Sliding Window - NoPE Interleave Implementation
+The sw-nope baseline interleaves sliding window attention with RoPE and full attention with NoPE in an alternating patter.
+All models use queries and keys that are unit norm, multiplied by learned, per head, scalar β. Sliding window are size 128
+on all models, unless specified otherwise. Head dimension is 128 in all models.
+8.3. OVQ-attention Implementation
+OVQ-attention use queries and keys that are unit norm, multiplied by learned, per head, scalar β. Our OVQ-attention layer
+uses NoPE. We use chunk size L= 128 in all experiments. We sketch a naive implementation in pythonic pseudo-code
+below.
+1def ovq_attention(Q_chunks, K_chunks, V_chunks, dict_sizes):
+2#Q_chunks: [Q_0, Q_1, ...Q_C]
+3#K_chunks: [K_0, K_1, ...K_C]
+4#V_chunks: [V_0, V_1, ...V_C]
+5#dict_sizes: [N_L, N_{2L}, ..., N_{CL}] via equation 17
+6
+7#Initialize GMR components
+8D_k = empty(B, H, dict_sizes[-1], d)
+9D_v = empty(B, H, dict_sizes[-1], d)
+10counts = empty(B, H, dict_sizes[-1], 1)
+11ones = empty(B, H, L, 1)
+12
+13outs = []
+14for c in range(C):
+15# Calculate OVQ-attention using current chunk and dictionary, see equation 15
+16d_sz = dict_sizes[c]
+17attn_out = causal_attention(Q_chunks[c],
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Online V ector Quantized Attention
+18cat([D_k[:,:,0:d_sz,:], K_chunks[c]]),
+19cat([D_v[:,:,0:d_sz,:], V_chunks[c]]),
+20cat([counts[:,:,0:d_sz,:], ones]))
+21
+22outs.append(attn_out)
+23
+24# Update dictionary states for next chunk
+25num_new = dict_sizes[c+1] - dict_sizes[c]
+26update_dict(D_k, D_v, counts, K_chunks[c], V_chunks[c], num_new, d_sz)
+27
+28return outs
+The dictionary update first gets nearest neighbor assignments for each key in the current chunk and the existing centroids
+in the dictionary. It then uses a series of gather and scatter add operations to updated the counts vector and to perform a
+mini-batch update on the dictionary centroids being updated. In preliminary tests, we found keeping the centroids normalized
+does not noticably effect performance, so we list that step as optional.
+1def update_dict(D_k, D_v, counts, K_c, V_c, ones, num_new, d_sz):
+2# Get nearest neighbor assignments for each key-value
+3nn_assignments = get_nn_assignments(D_k[:,:,0:d_sz,:],
+4K_c,
+5num_new)
+6
+7#Update count vector
+8counts.scatter_add(2, nn_assignments, ones)
+9
+10#Get lr for each centroid update
+11lr = 1.0 / counts.gather(2, nn_assignments)
+12
+13#Get nearest neighbor centroid for each key value
+14k_quant = torch.gather(D_k, 2, best_cluster)
+15v_quant = torch.gather(D_v, 2, best_cluster)
+16
+17#Update dictionaries, equation 19
+18D_k.scatter_add(2, best_cluster, -lr * (k_quant - K_c))
+19D_v.scatter_add(2, best_cluster, -lr * (v_quant - V_c))
+20
+21#Normalization (optional)
+22Dk = Dk.normalize(dim=-1)
+23Dv = Dv.normalize(dim=-1)
+Nearest neighbor assignments are obtained by getting the dot products between keys, kt, and centroids in Dk. Our theory
+suggests we should be comparing keys and values, [kt,v t] to both dictionaries, [Dk, Dv]. However, we found that just using
+key dot products works well in practice and halves the compute cost.
+1def get_nn_assignments(D_k, K_c, num_new, d_sz):
+2#Current dictionary size
+3N_c = D_k.size(2)
+4
+5# Get nearest neighbor assignments for each key-value
+6sim = einsum(’bhsd,bhnd->bhsn’, K_c, D_k)
+7best_sim, best_cluster = sim.max(dim=3)
+8
+9# Lowest-similarity keys -> new centroids
+10low_sim_idx = best_sim.topk(k=num_new, dim=-1, smallest=True).indices
+11
+12# Map those sequence positions -> their new centroid ids
+13new_ids = arange(N_c, N_c + num_new)
+14new_ids = new_ids.view(1,1,-1).expand(B,H,-1)
+15
+16# Best_cluster overwrite: scatter new centroid ids into those positions
+17# Low_sim_idx gives sequence indices, so we scatter into dim=2 of best_cluster
+18best_cluster.scatter(2, low_sim_idx, new_ids)
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Online V ector Quantized Attention
+19
+20return best_cluster
+8.4. Long In-Context Recall Task
+Basic ICR.The context is filled with key-value pairs. Each key and each value are unique and consist of 8 tokens. A special
+token marks the assignment of one key to a value ( → in the diagram below), and another special token marks the next
+key-value pair (’|’ in the diagram below). At the end of the context, a query token marks the start of a query section, where
+copies of keys from the context are presented and the model must predict the correct value tokens. We use a vocab size of
+10,000.
+InputK1→V1|K2→V2|K3→V3|K4→V4|K5→V5|K6→V6|....|K6→V6|K2→V2 (49)
+Targetϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕV6ϕ ϕ ϕV2ϕ(50)
+Positional ICRtask has the same setup except in the context there are four copies of each key, and each copy is assigned a
+distinct value. In the query section four copies of one key are presented and the model must output all the values in the order
+they appear in the context.
+InputK1→V1|K2→V2|K3→V3|K2→V4|K3→V5|K1→V6|....|K2→V2|K2→V4 (51)
+Targetϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕ ϕV2ϕ ϕ ϕV4ϕ(52)
+Model Params LR Layers Model Dim Key Dim Value Dim Heads MLP Size
+sw-nope77M6e −4 8 768 128 128 6 2304
+sw-vq 1k80M4e −4 8 768 128 128 6 2304
+sw-vq 2k83M4e −4 8 768 128 128 6 2304
+sw-vq 3k86M4e −4 8 768 128 128 6 2304
+sw-ovq77M6e −4 8 768 128 128 6 2304
+gdn77M6.5e −4 8 768 128 256 3 2304
+mesa-net77M4e −4 8 768 128 128 6 2304
+mamba277M4e −4 8 768 64 64 12 2304
+Table 2.Hyper-parameters used for Basic ICR and Positional ICR. Learning rates are found via a grid search. Cosine decay used with
+min-lr=.00001.
+8.5. Long In-Context Learning Task
+Our ICL task is builds on linear regression ICL tasks (Aky¨urek et al., 2022) to make the task require greater long-context
+ICL abilities. Like these previous works, in our version, the context consists of input-output pairs, where the output of each
+is generated by some linear function, f uncf(x). Each function performs three operations on the input tokens: it shuffles the
+tokens, it multiples by some integer between 0< a <6 , and adds an integer 0< b <6 . These operations can be expressed
+as a single linear regression operation f uncf(x) =b+aPx , where the input x is a column vector of positive integers and
+P is a permutation matrix. We use a vocab size of 10,000. Input and output are 12 tokens each. 128 special tokens are used
+as function identifiers (→f n in diagram below), and one token is used as a next example token (’|’ in the diagram below).
+Examples are I.I.D. throughout the context.
+InputI1→ f4 O1|I2→ f1 O2|I3→ f3 O3|I4→ f4 O4|I5→ f2 O5|I6→ f3 O6....(53)
+TargetϕO1ϕ ϕ ϕO2ϕ ϕ ϕO3ϕ ϕ ϕO4ϕ ϕ ϕO5ϕ ϕ ϕO6ϕ....(54)
+8.6. PG19 Language Modeling
+We filter the PG19 dataset (Rae et al., 2016) to only include sequence 16k or longer, ensuring the model always sees full
+coherent sequences during both training and testing. We train models at sequence length 10k and test at 16k. Models are
+tested every 1000 iterations. The best test score achieved is the one shown in figure 6. In the figure, we average over bins of
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Online V ector Quantized Attention
+Model Params LR Layers Model Dim Key Dim Value Dim Heads MLP Size
+sw-nope77M4e −4 8 768 128 128 6 2304
+sw-vq 1k80M4e −4 8 768 128 128 6 2304
+sw-vq 2k83M4e −4 8 768 128 128 6 2304
+sw-vq 3k86M4e −4 8 768 128 128 6 2304
+sw-ovq77M6e −4 8 768 128 128 6 2304
+gdn77M6.5e −4 8 768 128 256 3 2304
+mesa-net77M2.5e −4 8 768 128 128 6 2304
+mamba277M8e −4 8 768 64 64 12 2304
+Table 3.Hyper-parameters used for ICL tasks. Learning rates found through grid search. Cosine decay used withmin-lr=.00001.
+length 500. Models have model dimension of 1024. Attention layers use eight heads sized 128 each. Following default
+hyper-parameters, the GDN layers use four heads but with double the size values, i.e., keys sized 128 and values sized 256
+doubling each state size.
+Model Params LR Layers Model Dim Key Dim Value Dim Heads MLP Size
+Attn models 257M8e −4 17 1024 128 128 8 2304
+GDN models 257M8e −4 17 1024 128 [128,256] [8,4] 2304
+Table 4.PG19 Hyper-parameters. Cosine decay used with min-lr=.00001. In gdn models sliding window layers use 128 size
+value dim and 8 heads, whilegdnlayer use 256 value dim and 4 heads.
+8.7. Short Context Benchmarks
+Model Params LR Layers Model Dim Key Dim Value Dim Heads MLP Size
+sw-nope480M8e −4 21 1280 128 128 10 3200
+sw-ovq480M8e −4 21 1280 128 128 10 3200
+Table 5.Hyper-parameters usd for short context benchmarks.Cosine decay used withmin-lr=.00002.
+Models are trained on 50B tokens from fineweb-edu (Penedo et al., 2024) tokenized using the Mistral tokenizer. Train
+sequence length is 1536 with batch size 256.
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Online V ector Quantized Attention
+9. Appendix C: Further Results
+Figure 9
+Ablations on Basic ICR.We test three ablations on
+OVQ-attention using the basic ICR task. First, instead
+of assigning setting new centroids based on our spread
+maximizing scheme, we set the new centroids equal
+to a random sample of key values within the current
+chunk (rand assign ). Second, instead of using our
+plateauing dictionary growth scheme where centroids
+are added quickly early in the sequence then slow later
+on, we add new centroids linearly, where every chunk
+in the sequence adds the same number of new centroids
+(linear grow ). Finally, instead of using the adapting
+learning rates for updating dictionary centroids, we use
+a constant learning rate of .25 ( const lr ). Using a
+constant learning rate is equivalent to doing gradient
+descent, instead of our Newton’s method, on the k-means
+loss. We can see that each one of these ablations
+significantly worsens the models ability to recall beyond 4k context.
+Figure 10
+Ablations on PG19.We test the same three ablations
+on PG19 task. We use the same set up as above, with
+10k train length and 16k test length. Model size 257M
+are used. Each model is trained to convergence. The
+linear dictionary growth version does noticeably worse
+than our OVQ attention at short lengths. It does catch
+up, however, and matches, even slightly surpasses at
+very long lengths, likely because it grows much slower
+than our method early in the sequence, and faster later
+in the sequence. The random assignment method is also
+consistently worse across the sequence than our method
+for initializing the dictionary in a way that maximizes
+spread. Interestingly, in this task, the version of OVQ
+with constant learning rate is about the same as the
+original, which uses adaptive learning rates. We believe
+this is because language modeling is more dependent
+on recent tokens and less dependent on long recall
+abilities.
+Figure 11
+Preliminary Testing of V-shifting and Convolutions.
+Inspired by linear attention models like RWKV (Peng
+et al., 2023) and self attention variants (e.g., (Zhang
+et al., 2024; Figliolia et al., 2025)) we test the effects
+of applying convolutions to query and keys, and shifting
+values forward in time, so kt is associated with vt+1.
+Following (Zhang et al., 2024), each kt is associated
+with a weighted average of the current and future value:
+vt+ 1
+2
+=σ(α)v t + (1−σ(α))v t+1, where σ is a sigmoid
+function and α is a learned scalar. Keys and values are
+then both shifted to prevent the model from breaking
+causality. We test on the positional ICR task, the task
+OVQ-attention struggles on the most at long context
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Online V ector Quantized Attention
+lengths. Results are in figure 11. Interestingly, we
+find applying convolutions and v-shifting significantly
+improves length extrapolation at long test lengths.
+These results provide preliminary evidence that the ability of OVQ-attention to perform and generalize to long test
+lengths might be further improved via simple architecture tweaks. Future work can explore alterations like this in more detail.
+Figure 12
+Testing Dictionary Training Methods.We
+test several SOTA methods to pre-train the
+dictionaries in VQ-attention layers: DiVeq
+and SF-DiVeQ (Vali et al., 2025). We also
+test DiVeq with a ”no use penalty”, where
+we add a scalar penalty to the similarity val-
+ues of each centroid. This pentalty increases
+by .0025 with every training iteration that
+the centroid does not get updated. This in-
+creases the chances dead neurons/centroids
+get a nearest neighbor assignment and an up-
+date. Commitment error is the average co-
+sine similarity between keys and their nearest
+neighbor centroid, averaged over batch, head, sequence, and layers.
+21
