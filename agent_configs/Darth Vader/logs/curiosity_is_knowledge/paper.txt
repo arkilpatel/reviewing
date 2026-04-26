@@ -1,0 +1,2468 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Curiosity is Knowledge:
+Self-Consistent Learning and No-Regret Optimization with Active Inference
+Anonymous Authors1
+Abstract
+Active inference (AIF) unifies exploration and
+exploitation by minimizing the Expected Free En-
+ergy (EFE), balancing epistemic value (informa-
+tion gain) and pragmatic value (task performance)
+through a curiosity coefficient. Yet it has been un-
+clear when this balance yields both coherent learn-
+ing and efficient decision-making: insufficient cu-
+riosity can drive myopic exploitation and prevent
+uncertainty resolution, while excessive curiosity
+can induce unnecessary exploration and regret.
+We establish the first theoretical guarantee for
+EFE-minimizing agents, showing that a single re-
+quirement—sufficient curiosity—simultaneously
+ensures self-consistent learning (Bayesian pos-
+terior consistency) and no-regret optimization
+(bounded cumulative regret). Our analysis charac-
+terizes how this mechanism depends on initial un-
+certainty, identifiability, and objective alignment,
+thereby connecting AIF to classical Bayesian
+experimental design and Bayesian optimization
+within one theoretical framework. We further
+translate these theories into practical design guide-
+lines for tuning the epistemic–pragmatic trade-off
+in hybrid learning-optimization problems, vali-
+dated through real-world experiments.
+1. Introduction
+A fundamental challenge in sequential decision-making un-
+der uncertainty is balancing exploration and exploitation: an
+agent must gather information to reduce uncertainty while
+simultaneously pursuing task objectives. This tension leaves
+a primary challenge in classical Bayesian formulations.
+Bayesian Optimization (BO) is primarily goal-seeking: it
+selects actions to maximize reward (or minimize cost) under
+uncertainty, typically emphasizing exploitation tempered
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+by uncertainty-driven exploration (Shahriari et al., 2016;
+Frazier, 2018). In contrast, Bayesian Experimental Design
+(BED) is information-seeking: it selects experiments to max-
+imize information gain about unknown parameters, often
+without an explicit performance objective (Rainforth et al.,
+2023). However, real systems rarely permit a clean separa-
+tion between these two modes; instead, seeking knowledge
+and achieving goals are often deeply intertwined objectives.
+As a sequel, a principled agent should unify goal-seeking
+and information-seeking within a single decision rule.
+Recently, active inference (AIF) (Friston, 2010; Friston
+et al., 2017) has arisen as a promising way to offer such
+a unification. By minimizing the Expected Free Energy
+(EFE), AIF casts action selection as a single variational ob-
+jective that naturally decomposes into an epistemic term
+(expected information gain) and a pragmatic term (expected
+regret). These two terms are balanced by a coefficient called
+curiosity, which sets the trade-off between learning and
+optimization. Despite the empirical success of this new
+paradigm (Li et al., 2026), the formal role of curiosity in
+guaranteeing coherent learning and efficient optimization
+remains incomplete. If curiosity is too low, the agent can
+become myopic, prematurely exploiting, and failing to re-
+solve uncertainty. On the contrary, if curiosity is too high,
+the agent may be devoted to unnecessary exploration, dis-
+carding the goals, and incurring catastrophic regret.
+This raises a critical dilemma in AIF that we formally ad-
+dressed in this paper:
+When can minimizing EFE guarantee both self-
+consistent learning (i.e., posterior convergences
+to the truth) and no-regret optimization (i.e., with
+bounded cumulative regret)?
+We establish the first theoretical guarantee of posterior
+consistency and bounded cumulative regret for agents mini-
+mizing EFE. We prove that these two fundamental properties
+are not merely compatible but are jointly ensured by a single,
+shared mechanism: sufficient curiosity. That is, we derive
+a lower bound of the curiosity coefficient that can prevent
+the epistemic value from being dominated by the pragmatic
+term, and prove that EFE minimization can achieve both
+self-consistent learning and no-regret optimization simul-
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Curiosity is Knowledge
+taneously when the curiosity coefficient is larger than this
+lower bound. Specifically, our contributions are threefold:
+First, we prove that posterior consistency is guaranteed un-
+der the sufficient curiosity condition through Theorem 5.1.
+This theorem provides a sample-complexity bound that ex-
+plicitly depends on prior entropy, model discriminability,
+and curiosity.
+Second, we establish a general regret bound for AIF with
+Gaussian Process (GP) settings in Theorem 6.1. This bound
+holds for generalized heuristic estimators and regret func-
+tions, formally linking convergence rates to smoothness,
+heuristic alignment, and the same sufficient curiosity condi-
+tion. In particular, the classical BO-style regret analysis is a
+special case of our general regret bound.
+Third, we translate these theories into practical design
+guidelines.
+Using both synthetic and real-world prob-
+lems, we provide concrete prescriptions for the epistemic-
+pragmatic balance, hyperparameter selection, and objective
+function design for empirical applications.
+Notably, we show that the requirements to ensure self-
+consistent learning and no-regret optimization depend on
+the same sufficient curiosity condition. This finding ele-
+vates curiosity from an ad-hoc exploration heuristic into
+an intrinsic regularizer that couples belief updating and
+decision-making. Therefore, this work reveals an essential
+fact that, a sufficient curiosity is the critical mechanism en-
+abling simultaneous self-consistent learning and no-regret
+optimization, in other words, curiosity is knowledge.
+2. Preliminaries
+2.1. Bayesian Optimization
+Given an unknown objective function f : X 7→ℜ, BO
+seeks to identify the input x∗that maximizes the objec-
+tive f over an admissible set of queries X, i.e., x∗=
+arg maxx∈X f(x). To achieve this goal, BO relies on a
+surrogate model that provides a probabilistic representation
+of the objective f, and uses this information to compute
+an acquisition function to drive the selection of the most
+promising sample to query.
+Surrogate model.
+We assume the available informa-
+tion regarding the objective function f be stored in the
+dataset Dt
+:=
+{(x1, y1), . . . , (xt, yt))}, where yt
+∼
+N(f(xt), σ2(xt)) is the noisy observation of the objective
+function by assuming the noise follows a zero-mean nor-
+mal distribution with a standard deviation σ. The surro-
+gate model depicts possible explanations of f as f(x) ∼
+p(f(x)|Dt) applying a joint distribution over its behavior at
+each sample x ∈X. In Bayesian inference, the prior distri-
+bution of the objective p(f(x)) is combined with the like-
+lihood function p(Dt|f(x)) to compute the posterior distri-
+bution p(f(x)|Dt) ∝p(Dt|f(x))p(f(x)), representing the
+updated beliefs about f(x). Typically, Gaussian processes
+(GPs) have been widely used as the surrogate model for BO
+due to their efficient posterior sampling that enables cheap,
+gradient-based optimization of the acquisition function to
+propose new query points. GP is specified by a joint normal
+distribution p(f(x)|Dt) = N(µt(x), κt(x, x′)) with mean
+µt(x) and kernel function κt(x, x′), where µt(x) represents
+the prediction and κt(x, x′) the associated uncertainty.
+Acquisition function.
+The surrogate model is utilized
+to decide the next sample xt+1 ∈X through the max-
+imization of an acquisition function α : X 7→ℜ, i.e.,
+xt+1 = arg maxx∈X α(x|Dt), where α(x|Dt) provides a
+measure of the improvement that the next query is likely
+to provide with respect to (w.r.t.) the current surrogate
+model of the objective function. Many acquisition func-
+tions have been proposed, including probability of improve-
+ment (Moˇckus, 1975), expected improvement (Jones et al.,
+1998), upper confidence bound, and various entropy search
+methods (Hennig & Christian J. Schuler, 2012; Hernández-
+Lobato et al., 2014; Wang & Jegelka, 2017; Hvarfner et al.,
+2022; Neiswanger et al., 2021), as well as practical ap-
+proaches to optimize them (Wilson et al., 2018).
+2.2. Bayesian Experimental Design
+Rather than optimizing an objective function f(x), the pur-
+pose of BED is to sequentially select a set of experimental
+designs x ∈X and gather outcomes y, to maximize the
+amount of information obtained about certain parameters of
+interest, denoted as θ. The parameters θ can correspond to
+some explicit model parameters, or any implicitly defined
+quantity of interest (e.g., the optimum of a function, the
+output of an algorithm, or future downstream predictions).
+Based on the current history of experiments Dt
+:=
+{(x1, y1), . . . , (xt, yt))}, BED seeks to find the next experi-
+mental design xt+1 by maximizing the expected information
+gain (EIG) (Chaloner & Verdinelli, 1995) that a potential
+experimental outcome yt+1 can provide about θ, measured
+in terms of expected entropy reduction of the posterior dis-
+tribution of θ:
+EIG(x|Dt) = H[p(θ|Dt)] −Ep(y|x,Dt)[H[p(θ|Dt ∪(x, y))]]
+= I(θ; (x, y)|Dt),
+where H(·) and I(·) denote the entropy and mutual infor-
+mation, respectively.
+3. Active Inference Bridges Learning and
+Optimization
+BO and BED emphasize two complementary behaviors
+in sequential decision-making under uncertainty. BO is
+predominantly goal-seeking: it allocates queries to locate
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Curiosity is Knowledge
+an optimizer with few evaluations. BED is predominantly
+information-seeking: it selects experiments to maximize ex-
+pected information gain about latent parameters. Although
+historically developed as separate paradigms, both can be
+viewed as different responses to the same imperative: act
+under uncertainty so as to improve outcomes while reducing
+uncertainty.
+Active inference (AIF) (Friston, 2010; Friston et al., 2017)
+provides a principled unification through the Expected Free
+Energy (EFE). Minimizing EFE yields a single decision
+objective that decomposes into two components: a prag-
+matic term that favors actions expected to produce preferred
+outcomes (exploitation), and an epistemic term that favors
+actions expected to reduce uncertainty about latent quanti-
+ties (exploration). In this view, exploration and exploitation
+are not separate heuristics but two aspects of one principle.
+Building on this perspective, Li et al. (2026) introduced
+pragmatic curiosity, which implements AIF as the acquisi-
+tion rule
+α(x|Dt) = βtI(s; (x, y)|Dt) −Ep(y|x,Dt)[h(y|Dt)], (1)
+where s ∈S denotes the latent parameter(s) of inter-
+est, defining the learning space; h(y|Dt) is a problem-
+dependent potential energy function quantifying the instan-
+taneous regret associated with outcome y; and βt ≥0 is
+the curiosity coefficient that sets the exchange rate between
+information gain and pragmatic cost.
+Equation (1) makes the key design tension explicit: βt con-
+trols how strongly the epistemic drive influences action se-
+lection. Too little curiosity risks myopic exploitation and in-
+sufficient learning; too much curiosity risks over-exploration
+and degraded task performance. This motivates the central
+question that we aim to address in the following sections:
+how does curiosity govern performance, both in learning
+and in optimization?
+4. Performance Evaluation in Learning and
+Optimization
+We investigate the performance of AIF principle in terms of
+the ultimate goals of (i) learning: learn the true model, char-
+acterized by the posterior consistency; and (ii) optimization:
+reduce the regret, evaluated through bounded cumulative
+regret. We begin by formalizing these notions.
+Definition 4.1 (Posterior Consistency). Let qt(s) denote
+the posterior belief over the latent parameter s ∈S after
+observing dataset Dt. The learning process is said to be
+(strongly) consistent if with probability one (w.p.1.),
+lim
+t→∞qt(s) = δs∗,
+where δs∗is the Dirac measure concentrated at the true
+parameter value s∗.
+Definition 4.2 (Regret Function). Let Y denote the out-
+come space. A regret function is a mapping r : Y →R≥0
+that quantifies the deviation of an outcome y from its desired
+state y∗. The smaller the value of r(y), the closer y is to the
+desired outcome. Specifically,
+• When y∗corresponds to the global optimum of an
+objective function, r(y) reduces to the conventional
+notion of instantaneous regret in BO;
+• When all outcomes are equally desirable or informative,
+as in BED, r(y) ≡0;
+• Intermediate cases correspond to hybrid objectives that
+encode both performance and safety constraints.
+Since the true regret function r(y) is generally unknown or
+intractable, we define a time-varying surrogate energy func-
+tion that encodes the current model’s internal assessment of
+outcome desirability and is updated recursively as new data
+are acquired:
+Definition 4.3 (Potential Energy Function). The poten-
+tial energy function ht : Y →R≥0 serves as a heuristic
+estimator of regret, conditioned on past observations:
+ht(y) := h(y|Dt−1).
+With these definitions in place, we are now equipped to
+analyze the theoretical properties of AIF principle. In the
+following sections, we show that EFE minimization ensures
+posterior consistency and bounded cumulative regret un-
+der mild regularity assumptions. In particular, both results
+rely on a shared sufficient curiosity condition: the curiosity
+coefficient βt must be sufficiently large so that the epis-
+temic value of information gain is not overshadowed by the
+expected energy penalty.
+5. Self-Consistent Learning
+We first derive the conditions under which AIF principle
+guarantees posterior consistency in learning. Specifically,
+we show that when the curiosity is sufficiently large to
+ensure continual information gain, the posterior belief con-
+verges to the true generative model.
+Theorem 5.1 (Posterior Consistency in AIF). Let s be a
+discrete latent parameter of the model with parameter space
+S, and s∗∈S denote the true (data-generating) parameter.
+At each iteration t, the query xt ∈X is chosen according
+to the AIF policy:
+xt = arg max
+x∈X
+n
+βtI(s; (x, y) | Dt−1)−Ep(y|x,Dt−1)[ht(y)]
+o
+,
+(2)
+where I(s; (x, y) | Dt−1) is the conditional mutual infor-
+mation between s and the next observation pair (x, y), and
+ht(y) is the energy function at time t.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Curiosity is Knowledge
+Define the per-hypothesis observation gap as
+∆s(xt) :=
+Z
+y
+p(y|xt, s)ht(y) −
+Z
+y
+p(y|xt, s∗)ht(y).
+Suppose the following conditions hold:
+(i) Finite prior entropy. The prior q0(s) has finite Shan-
+non entropy:
+H0 := H(q0(s)) < ∞;
+(3)
+(ii) Observational distinguishability. The true parameter
+s∗is distinguishable under the observation constraint
+induced by ht(y):
+P
+s̸=s∗∆s(xt)qt−1(s)
+P
+s̸=s∗qt−1(s)
+≥At,
+(4)
+where At ≥0 quantifies the average discriminative
+strength of the current observation;
+(iii) Sufficient curiosity. The curiosity coefficient βt satis-
+fies
+βt ≥min
+x∈X
+Ep(y|x,Dt−1)[ht(y)]
+I(s; (x, y)|Dt−1) ,
+(5)
+ensuring that the value of information is not suppressed
+by the expected regret penalty.
+Then, defining wt := P
+s̸=s∗qt−1(s) as the total posterior
+probability mass assigned to incorrect hypotheses, it suffices
+to run for
+T ≥
+¯βT H0
+AT ϵ
+(6)
+steps to get E[wT ] ≤ϵ, where AT := mint∈[1,T ] At and
+¯βT := maxt∈[1,T ] βt.
+Proof. See Appendix A.
+5.1. Interpretation of Assumptions
+This theorem identifies three complementary requirements
+for posterior consistency in learning:
+• (i) Finite prior entropy ensures that the parameter
+space is learnable: the initial uncertainty is bounded,
+meaning the agent begins with a well-posed inferential
+task and prior.
+• (ii) Observational distinguishability guarantees that,
+under the observation model constrained by ht(y), the
+true parameter generates statistically distinguishable
+outcomes from other hypotheses. This condition ex-
+plicitly couples the informativeness of experiments
+with the expressivity of the energy function: if ht(y)
+excessively filters the signal (e.g., by focusing only on
+narrow outcomes), the system may fail to identify s∗.
+• (iii) Sufficient curiosity enforces that the epistemic
+term dominates enough to prevent premature exploita-
+tion. When βt falls below this threshold, the policy
+may repeatedly select myopic actions that yield low
+expected regret but fail to reduce parameter uncertainty,
+which leads to breaking the consistency guarantee.
+5.2. Interpretation of Convergence Rate
+The upper bound E[wT ] ≤ϵ quantifies the expected resid-
+ual posterior mass on incorrect hypotheses after T queries.
+To reach this level of accuracy, the required number of itera-
+tions (6) reveals how learning efficiency depends on three
+key quantities:
+• H0: the initial uncertainty of the model. Larger priors
+require more evidence to concentrate around the truth.
+• AT : the minimal discriminative power of the queries.
+Experiments that yield greater differences between hy-
+potheses accelerate convergence.
+• ¯βT : the curiosity upper bound, reflecting how much
+exploration the agent permits. A higher curiosity en-
+courages richer sampling but may slow convergence
+toward posterior concentration, as resources are de-
+voted to wide exploration.
+Thus, consistency emerges not from blind exploration but
+from informed curiosity: βt must be large enough to guaran-
+tee identifiability, yet not so large as to diffuse effort away
+from regions of genuine uncertainty reduction.
+5.3. Practical Usability and Implications
+While this theorem assumes idealized conditions (e.g., dis-
+crete S and exact computation of mutual information), it
+yields valuable design principles for practical algorithms:
+• Adaptive curiosity scheduling. In practice, βt can be
+made data-dependent, increasing when the posterior
+entropy is high or when the expected information gain
+is small. This can ensure ongoing exploration without
+manual tuning.
+• Energy function design. ht(y) can be interpreted as
+a “soft constraint” shaping what the system considers
+meaningful feedback. Ensuring that ht(y) does not
+eliminate critical signal differences between hypothe-
+ses helps maintain observational distinguishability.
+• Stopping criteria. The convergence rate about the
+posterior concentration measure wt provides a direct
+diagnostic for learning progress, which can be used
+for stopping criteria or dynamic query allocation in
+sequential design problems.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Curiosity is Knowledge
+In summary, Theorem 5.1 establishes that AIF policies satis-
+fying the sufficient curiosity condition yield self-consistent
+learning under mild assumptions. The result formalizes the
+intuitive idea that curiosity, when bounded but persistent,
+guarantees truth convergence, which is a cornerstone for the
+optimization that follows.
+6. No-Regret Optimization
+Having established the conditions for posterior consistency
+in learning, we now turn to the complementary side of op-
+timization. In contrast to the consistency analysis in the
+previous section, which concerns the convergence of beliefs
+toward the true model, this section concerns the quality of
+decisions generated by those beliefs.
+We characterize the conditions under which the AIF policy
+guarantees bounded cumulative regret with respect to an
+unknown but smooth objective. Importantly, this bound
+holds even when the true regret function r(y) is unknown
+or replaced by a heuristic proxy ht(y).
+Theorem 6.1 (Cumulative Regret Bound in AIF). Let
+the unknown function be modeled by a Gaussian Pro-
+cess (GP) prior f ∼GP(0, k(x, x′)), with bounded ker-
+nel k(x, x′) ≤1, ∀x, x′ ∈X, and Gaussian likelihood
+p(y|f(x)) = N(f(x), σ2). At each iteration t, the query
+xt ∈X is chosen according to the AIF policy:
+xt = arg max
+x∈X
+n
+βtI(s; (x, y) | Dt−1)−Ep(y|x,Dt−1)[ht(y)]
+o
+,
+(7)
+where I(s; (x, y) | Dt−1) is the conditional mutual infor-
+mation between s and the next observation pair (x, y), and
+ht(y) is the energy function at time t.
+Suppose the following conditions hold:
+(i) Smoothness of task. The true regret function r : Y →
+R≥0 is Lipschitz continuous with constant L ≥0:
+|r(y1) −r(y2)| ≤L|y1 −y2|,
+∀y1, y2 ∈Y;
+(ii) Heuristic alignment. The discrepancy between the
+heuristic energy function ht(y) and the true regret r(y)
+is uniformly bounded at each iteration:
+|r(y) −ht(y)| ≤Bt,
+∀y ∈Y,
+where Bt quantifies the maximal discrepancy of the
+heuristic to the true regret;
+(iii) Sufficient curiosity. The curiosity coefficient βt satis-
+fies
+βt ≥min
+x∈X
+Ep(y|x,Dt−1)[ht(y)]
+I(s; (x, y)|Dt−1) ,
+(8)
+ensuring that the value of information is not suppressed
+by the expected regret penalty.
+Then, with probability ≥1 −δ, δ ∈(0, 1), the cumulative
+regret RT = PT
+t=1 r(f(xt)) satisfies:
+RT ≤¯βT ρT +L(ζ1/2
+T
++(2/π)1/2)
+p
+CTρT +
+T
+X
+t=1
+Bt, (9)
+where ¯βT := maxt∈[1,T ] βt, ζT = 2 log(mT /δ) with mt
+satisfies P
+t≥1 m−1
+t
+= 1, mt > 0, π is the Archimedes’
+constant, C = 2/ log(1 + σ−2) and ρT is the maximum
+information gain at most T selected points.
+Proof. See Appendix B.
+6.1. Interpretation of Assumptions
+Each assumption in Theorem 6.1 captures a critical property
+for achieving bounded regret:
+• (i) Smoothness of task ensures the optimization land-
+scape is well-behaved, i.e., the true regret function is
+sufficiently smooth so that nearby outcomes yield sim-
+ilar regret values. This smoothness condition allows
+the GP model to generalize effectively from observed
+samples.
+• (ii) Heuristic alignment guarantees that the agent’s
+internal model of regret ht(y) remains close to the
+true objective’s regret. When this alignment condi-
+tion holds, optimization steps guided by ht(y) remain
+consistent with the underlying objective.
+• (iii) Sufficient curiosity enforces that exploration is
+adequately weighted to avoid premature exploitation,
+i.e., the agent must not undervalue informative queries.
+This condition is the same as the curiosity requirement
+in Theorem 5.1, highlighting that a minimum explo-
+ration pressure is essential both for consistent learning
+and regret minimization.
+6.2. Interpretation of Cumulative Regret Bound
+The bound (9) reveals how cumulative regret depends on
+three key factors:
+• L: the smoothness constant of the true regret function.
+A smaller L implies that the regret function landscape
+is gentler, leading to faster convergence and smaller
+cumulative regret.
+• Bt: the bounded difference between the heuristic and
+true regret. As the learning process proceeds, if ht(y)
+is updated to better approximate r(y), Bt decreases,
+leading to a tighter bound.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Curiosity is Knowledge
+• ¯βT : the maximum degree of curiosity. Larger cu-
+riosity encourages broader exploration and yields more
+information gain, but also increases the exploration
+term in the bound. Thus, βt controls the trade-off be-
+tween learning and regret accumulation.
+6.3. Practical Usability and Implications
+The cumulative regret bound in Theorem 6.1 provides not
+only theoretical guarantees but also practical design guide-
+lines for constructing curiosity-driven optimization systems:
+• Adaptive curiosity scheduling. In practice, βt should
+be annealed over time, i.e., starting large to encour-
+age broad exploration and gradually decreasing as the
+model confidence increases. This strategy ensures con-
+vergence while maintaining adaptability to nonstation-
+ary environments.
+• Refinement of heuristic estimation. The cumulative
+misalignment term PT
+t=1 Bt quantifies the cost of mis-
+alignment between the heuristic ht(y) and the true
+regret r(y). This highlights the importance of itera-
+tive model refinement: by updating ht(y) based on
+posterior feedback, the agent can continually reduce
+Bt, thereby tightening the bound and improving de-
+cision efficiency. Practically, this can be achieved by
+using learned surrogate models, reward shaping, or
+consistency constraints derived from task feedback.
+• Task-dependent smoothness and kernel design. The
+Lipschitz constant L and kernel function k(x, x′)
+jointly determine how well the GP can generalize
+across the input space. In real applications, kernel
+selection should reflect the smoothness of the under-
+lying process. For highly structured or discontinuous
+objectives, combining multiple kernels or using deep
+GPs can help maintain bounded regret behavior.
+Overall, Theorem 6.1 complements Theorem 5.1 by reveal-
+ing the dual role of curiosity in the AIF paradigm: it en-
+ables both posterior consistency in learning and bounded
+cumulative regret in optimization. The degree of curios-
+ity thus emerges as a unifying factor that mediates the bal-
+ance between epistemic (informational) and pragmatic (goal-
+directed) imperatives, which is a balance that lies at the heart
+of intelligent behavior.
+7. Experiments for Theorem Validation
+We first validate the derived theoretical results using two in-
+tentionally simplified synthetic setups: a discrete hypothesis
+sandbox for Theorem 5.1 and a 1D GP bandit for Theo-
+rem 6.1. The goal is to stress-test the mechanisms implied
+by the theorems under controlled conditions. These setups
+(i) directly instantiate the modeling assumptions, (ii) allow
+us to vary one factor at a time (curiosity, distinguishability,
+prior uncertainty, heuristic alignment), and (iii) avoid con-
+founders common in real-world tasks (nonstationarity, high-
+dimensional representation error, and uncontrolled model
+mismatch), thereby enabling clean causal interpretation.
+7.1. Discrete Sandbox
+To test posterior consistency and the qualitative sample-
+complexity dependencies in Theorem 5.1, we consider a
+controlled discrete environment with finite latent states and
+actions (details in Appendix C.1).
+We perform one-factor-at-a-time sweeps: (a) prior en-
+tropy H0 by varying the prior mass assigned to the true
+state q0(s∗) in {0.25, 0.5, 0.7} at fixed β = 2.0; (b) dis-
+tinguishability, by modifying the gap structure at fixed
+β = 2.0 and reporting the empirical pre-convergence aver-
+age At in the plot legend; and (c) curiosity β by varying
+β ∈{2.0, 0.8, 0.05}. We measure posterior contraction us-
+ing the posterior error mass wt = P
+s̸=s∗qt(s), averaged
+over 5 random seeds.
+Figure 1 supports the core qualitative predictions of The-
+orem 5.1: (a) more accurate prior yields faster posterior
+contraction; (b) higher discriminative strength acceler-
+ates convergence, while insufficient distinguishability (< 0)
+leads to stalled contraction; and (c) sufficient curiosity is
+necessary for consistent learning.
+7.2. 1D GP Bandit
+To test the regret dependencies in Theorem 6.1, we consider
+a minimal 1D GP bandit (details in Appendix C.2).
+We isolate two effects central to the bound: heuristic align-
+ment and curiosity. Specifically, we run: (a) a misalign-
+ment sweep at fixed β = 1.0, comparing an aligned
+heuristic to biased heuristics with different bias schedules;
+and (b) a curiosity sweep with aligned heuristics, using
+β ∈{6.0, 3.0, 1.0, 0.3}. We report cumulative regret Rt,
+averaged over 5 seeds.
+Figure 2 matches the qualitative structure of Theorem 6.1:
+(a) heuristic error contributes additively to regret, where
+larger and longer-lasting bias leads to higher cumulative
+regret; and (b) when the curiosity is sufficient, smaller β
+(more exploitation) achieves the lowest regret, while large
+β over-emphasizes information gain and incurs additional
+regret from exploratory queries.
+8. Experiments on Real-World Problems
+Next, we extend the justification of the developed theorems
+through two categories of real-world problems where learn-
+ing and optimization are inherently interwined but with
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Curiosity is Knowledge
+Figure 1. Discrete sandbox to validate Theorem 5.1. Error bars represent ±0.2 std over 5 seeds.
+Figure 2. 1D GP bandit to validate Theorem 6.1. Error bars represent ±0.2 std over 5 seeds.
+different focus on either epistemic consideration (i.e., learn-
+ing), or pragmatic evaluation (i.e., optimization).
+8.1. Constrained System Identification
+The objective is to precisely learn unknown system parame-
+ters, θ, when valid observations can only be gathered under
+specific operational constraints, quantified by C(y) ≤0.
+For instance, when monitoring a chemical plume, the goal
+is to identify its source (θ) while ensuring that sensor mea-
+surements (y) do not exceed a saturation threshold (C(y)).
+This type of task can be found in numerous applications,
+including environmental monitoring (Konakovic Lukovic
+et al., 2020) and catalyst design (Zhong et al., 2020).
+In such cases, it is straightforward to choose the interested
+state as s = θ, and the energy function as h(y|Dt) =
+I(C(y) > 0). This leads to an acquisition function:
+α(x|Dt) = βI(θ; (x, y)|Dt) −Ep(y|x,Dt) [I(C(y) > 0)] .
+We perform experiments on a real-world problem of envi-
+ronmental monitoring in 2d plume fields where the sensors
+have a saturation threshold ymax (i.e., C(y) = y −ymax).
+(Detailed settings and hyper-parameter choices in Ap-
+pendix C.3). We consider three types of monitoring tasks:
+(a) locating the unknown source location; (b) estimating
+unknown wind direction and strength; and (c) identifying
+the active sources in fields with multiple sources.
+We investigate how the sufficient curiosity condition de-
+pends on task-dependent mutual information by performing
+ablations over different β, as illustrated in Figure 3. From
+task (a) to (c), the correlation between sensor measurements
+and latent parameters weakens, so the mutual information
+term shrinks. In these less informative regimes, a larger β
+is needed to rescale the information-gain term. However, if
+β is too large, the acquisition becomes overly exploratory,
+which in turn degrades estimation performance. This yields
+a simple guideline: start with a moderate β, increase it only
+when the mutual information term is consistently small (e.g.,
+due to weak sensor–parameter coupling), and stop or de-
+crease β once further increases no longer reduce, or start
+to increase, the estimation error. In practice, β should be
+just large enough for the curiosity term to matter, but not so
+large that it induces unnecessary exploration.
+8.2. Composite Bayesian Optimization
+A multi-objective optimization problem, where the objec-
+tives are weighted by a preference function g(y) that is
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Curiosity is Knowledge
+Figure 3. Constrained system identification on environmental monitoring in 2d plume fields. Error bars represent ±0.2 std over 5 seeds.
+Figure 4. Composite BO on distributed energy resource allocation in power grids. Error bars represent ±0.2 std over 5 seeds.
+unknown a priori and must be simultaneously learned dur-
+ing the optimization process. Such scenarios commonly
+arise in simulation-based design (González & Zavala, 2025;
+Coelho et al., 2025) and A/B testing (Bakshy et al., 2018)
+We expand the interested state into the whole input space,
+i.e., s = fX , and with non-parametric models like GPs, we
+can leverage Lemma 3.2 in (Li et al., 2026) and derive an
+acquisition function:
+α(x|Dt) = βI(fx; y|Dt) + Ep(y|x,Dt)[ht(y)],
+(10)
+where ht(y) is an estimation of g(y) that will be learned
+online during the optimization process.
+We perform experiments on a real-world problem of dis-
+tributed energy resource allocation in power grids (x:40d,
+y:4d) (Detailed settings and hyper-parameter choices in Ap-
+pendix C.4). We investigate the effect of heuristic models
+and curiosity through two sweeps: (a) fixing β = 1 with
+different heuristic models; and (b) fixing a true heuristic
+model and sweeping β ∈{0.1, 1, 10}.
+Figure 4 further highlights how both the heuristic h and
+curiosity β govern no-regret behavior: (a) cumulative regret
+stabilizes only when h (and its bias) converges, whereas a
+constant bias yields approximately linear regret growth; and
+(b) sufficient curiosity is necessary for regret to converge.
+Moreover, once β is large enough to ensure convergence, in-
+creasing β incurs larger transient regret before stabilization.
+9. Conclusion and Limitation
+AIF offers a single objective that unifies learning and opti-
+mization by trading off epistemic value (information gain)
+and pragmatic value (expected cost). This paper shows that
+the reliability of this trade-off is governed by one mech-
+anism: curiosity. When the curiosity coefficient is suffi-
+ciently large, the epistemic drive cannot be dominated by the
+pragmatic term, and EFE minimization becomes provably
+well-behaved—yielding self-consistent learning (posterior
+concentration on the true model) together with no-regret op-
+timization (bounded cumulative regret). Those theories are
+further turned into actionable guidance for hybrid learning-
+optimization design in real-world problems.
+These guarantees are sufficient but may be conservative, so
+deriving tight or adaptive βt schedules remains open. The
+results also depend on identifiability/regularity assumptions
+and can degrade under misspecification, nonstationarity,
+or partial observability. Finally, controlling the pragmatic
+heuristic alignment in realistic tasks might be challenging,
+so our mechanism-focused experiments do not replace broad
+benchmarking.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Curiosity is Knowledge
+Impact Statement
+This work provides a theoretical foundation for active
+inference as a principled approach to hybrid learning-
+optimization under uncertainty. By formalizing when EFE
+minimization yields posterior self-consistency and no-regret
+behavior, the results can improve the reliability of decision-
+making systems that must learn online while acting—e.g.,
+robotics, adaptive experimentation, scientific discovery
+workflows, and safety-critical monitoring—where myopic
+exploitation or uncontrolled exploration can cause wasted
+resources or degraded performance. The framework also
+clarifies how design choices (curiosity level and heuristic
+alignment) affect learning and regret, offering actionable
+guidance for practitioners who deploy uncertainty-aware
+agents.
+Potential risks stem from misapplication: setting curiosity
+too high can lead to unnecessary exploration and ineffi-
+ciency, while using poorly aligned pragmatic heuristics can
+bias behavior and increase regret, potentially amplifying
+errors in downstream decisions. As our guarantees rely on
+modeling assumptions and heuristic alignment, users should
+validate calibration and alignment in their target domain
+and avoid over-interpreting theoretical guarantees as blan-
+ket safety assurances. We do not anticipate direct negative
+societal impacts beyond these standard risks of deploying
+automated decision-making systems; the primary contribu-
+tion is methodological and aims to support more transparent
+and predictable exploration–exploitation trade-offs.
+References
+Bakshy, E., Dworkin, L., Karrer, B., Kashin, K., Letham,
+B., Murthy, A., and Singh, S. AE: A domain-agnostic
+platform for adaptive experimentation. In Conference on
+neural information processing systems, pp. 1–8, 2018.
+Chaloner, K. and Verdinelli, I. Bayesian experimental de-
+sign: A review. Statistical science, pp. 273–304, 1995.
+Chu, W. and Ghahramani, Z. Preference learning with Gaus-
+sian processes. In Proceedings of the 22nd international
+conference on Machine learning, pp. 137–144, 2005.
+Coelho, R. C., Alves, A. F. C., Pires, T. N., and Pires, F. A. A
+composite bayesian optimisation framework for material
+and structural design. Computer Methods in Applied
+Mechanics and Engineering, 434:117516, 2025.
+Frazier, P. I.
+A Tutorial on Bayesian Optimization.
+(Section 5):1–22, 2018. URL http://arxiv.org/
+abs/1807.02811.
+Friston, K. The free-energy principle: A unified brain the-
+ory?, 2 2010. ISSN 1471003X.
+Friston, K., FitzGerald, T., Rigoli, F., Schwartenbeck, P.,
+and Pezzulo, G. Active Inference: A Process Theory.
+Neural Computation, 29(1):1–49, 1 2017. ISSN 0899-
+7667. doi: 10.1162/NECO{\_}a{\_}00912.
+González, L. D. and Zavala, V. M. Implementation of a
+bayesian optimization framework for interconnected sys-
+tems. Industrial & Engineering Chemistry Research, 64
+(4):2168–2182, 2025.
+Hennig, P. and Christian J. Schuler. Entropy search for
+information-efficient global optimization. Journal of Ma-
+chine Learning Research, 13(6), 2012.
+Hernández-Lobato, J. M., Hoffman, W. M., and Ghahra-
+mani, Z. Predictive entropy search for efficient global
+optimization of black-box functions. In Advances in neu-
+ral information processing systems, 2014.
+Hvarfner, C., Hutter, F., and Nardi, L. Joint Entropy Search
+for Maximally-Informed Bayesian Optimization. 6 2022.
+URL http://arxiv.org/abs/2206.04771.
+Jones, D. R., Schonlau, M., and Welch, W. J. Efficient
+Global Optimization of Expensive Black-Box Functions.
+Journal of Global Optimization, 13(4):455–492, 1998.
+ISSN 09255001. doi: 10.1023/A:1008306431147.
+Konakovic Lukovic, M., Tian, Y., and Matusik, W.
+Diversity-guided multi-objective bayesian optimization
+with batch evaluations. In Advances in Neural Informa-
+tion Processing Systems, pp. 17708–17720, 2020.
+Li, Y., Parashar, A., Zhou, E., and Fan, C. Pragmatic curios-
+ity: A hybrid learning-optimization paradigm via active
+inference. arXiv preprint, 2026.
+Lin, Z. J., Astudillo, R., Frazier, P. I., and Bakshy, E.
+Preference Exploration for Efficient Bayesian Optimiza-
+tion with Multiple Outcomes. In International Confer-
+ence on Artificial Intelligence and Statistics, pp. 4235–
+4258, 3 2022.
+URL http://arxiv.org/abs/
+2203.11382.
+Moˇckus, J.
+On Bayesian Methods for Seeking the Ex-
+tremum. In Optimization Techniques IFIP Technical Con-
+ference, pp. 400–404. Springer Berlin Heidelberg, Berlin,
+Heidelberg, 1975. doi: 10.1007/978-3-662-38527-2{\_
+}55.
+Neiswanger, W., Wang, K. A., and Ermon, S. Bayesian
+algorithm execution: Estimating computable properties
+of black-box functions using mutual information.
+In
+International Conference on Machine Learning, pp. 8005–
+8015, 2021.
+Rainforth, T., Foster, A., Ivanova, D. R., and Smith, F. B.
+Modern Bayesian Experimental Design. 2 2023. URL
+http://arxiv.org/abs/2302.14545.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Curiosity is Knowledge
+Shahriari, B., Swersky, K., Wang, Z., Adams, R. P., and
+De Freitas, N. Taking the human out of the loop: A
+review of Bayesian optimization. Proceedings of the
+IEEE, 104(1):148–175, 2016. ISSN 15582256. doi: 10.
+1109/JPROC.2015.2494218.
+Srinivas, N., Krause, A., Kakade, S. M., and Seeger,
+M.
+Gaussian Process Optimization in the Ban-
+dit Setting:
+No Regret and Experimental Design.
+12 2009.
+doi:
+10.1109/TIT.2011.2182033.
+URL
+http://arxiv.org/abs/0912.3995http:
+//dx.doi.org/10.1109/TIT.2011.2182033.
+Wang, Z. and Jegelka, S. Max-value entropy search for effi-
+cient Bayesian optimization. In International Conference
+on Machine Learning, pp. 3627–3635, 2017.
+Wilson, J. T., Hutter, F., and Deisenroth, M. P.
+Maxi-
+mizing acquisition functions for Bayesian optimization.
+In Conference on Neural Information Processing Sys-
+tems (NeurIPS), 12 2018. URL http://arxiv.org/
+abs/1805.10196.
+Zhong, M., Tran, K., Min, Y., Wang, C., Wang, Z., Dinh,
+C.-T., De Luna, P., Yu, Z., Rasouli, A. S., Brodersen,
+P., Sun, S., Voznyy, O., Tan, C.-S., Askerka, M., Che,
+F., Liu, M., Seifitokaldani, A., Pang, Y., Lo, S.-C., Ip,
+A., Ulissi, Z., and Sargent, E. H. Accelerated discovery
+of CO2 electrocatalysts using active machine learning.
+Nature, 581(7807):178–183, 5 2020. ISSN 0028-0836.
+doi: 10.1038/s41586-020-2242-8.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Curiosity is Knowledge
+A. Proof of Theorem 5.1
+Proof. According to assumption (iii),
+max
+x∈X
+
+βtI(s; (x, y)|Dt−1) −Ep(y|x,Dt−1)[ht(y)]
+	
+≥0.
+Then by the decision criteria (2) of xt,
+βtI(s; (xt, yt)|Dt−1) −Ep(yt|xt,Dt−1)[ht(yt)] ≥0.
+Since ht(y) ≥0, ∀y ∈Y, we have
+βtI(s; (xt, yt)|Dt−1) −Ep(yt|xt,Dt−1)[ht(yt)] +
+Z
+y
+p(y|xt, s∗)ht(y) ≥
+Z
+y
+p(y|xt, s∗)ht(y) ≥0.
+Define the instant regret of expected observation as
+rt := Ep(yt|xt,Dt−1)[ht(yt)] −
+Z
+y
+p(y|xt, s∗)ht(y),
+then
+βtI(s; (xt, yt)|Dt−1) −rt ≥0.
+Therefore,
+I(s; (xt, yt)|Dt−1) ≥rt
+βt
+≥rt
+¯βT
+where ¯βT := maxt∈[1,T ] βt.
+Let It := I(s; (xt, yt)|Dt−1), since E[It] = E[H(qt−1(s)) −H(qt(s))], then
+T
+X
+t=1
+E[It] = E[H(q0(s)) −H(qT (s))] ≤H(q0(s)) < ∞
+Therefore,
+T
+X
+t=1
+E[rt] ≤¯βT
+T
+X
+t=1
+E[It] ≤¯βT H0.
+Since
+rt :=Ep(yt|xt,Dt−1)[ht(yt)] −
+Z
+y
+p(y|xt, s∗)ht(y)
+=
+Z
+y
+X
+s
+p(y|xt, s)qt−1(s)ht(y) −
+Z
+y
+p(y|xt, s∗)ht(y)
+=
+X
+s̸=s∗
+Z
+y
+p(y|xt, s)ht(y)
+
+qt−1(s) −
+Z
+y
+p(y|xt, s∗)ht(y)
+
+(1 −qt−1(s∗))
+=
+X
+s̸=s∗
+Z
+y
+p(y|xt, s)ht(y)
+
+qt−1(s) −
+Z
+y
+p(y|xt, s∗)ht(y)
+ X
+s̸=s∗
+qt−1(s)
+=
+X
+s̸=s∗
+Z
+y
+p(y|xt, s)ht(y) −
+Z
+y
+p(y|xt, s∗)ht(y)
+
+qt−1(s)
+=
+X
+s̸=s∗
+∆s(xt)qt−1(s),
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Curiosity is Knowledge
+then according to assumption (ii), we have
+rt ≥At
+X
+s̸=s∗
+qt−1(s) = Atwt.
+Then
+wt ≤rt
+At
+≤rt
+AT
+,
+where AT := mint∈[1,T ] At.
+Therefore,
+T
+X
+t=1
+E[wt] ≤
+1
+AT
+T
+X
+t=1
+E[rt] ≤
+¯βT
+AT
+T
+X
+t=1
+E[It] ≤
+¯βT H0
+AT
+.
+Then we get a bound on the time-averaged expected posterior mass:
+1
+T
+T
+X
+t=1
+E[wt] ≤
+¯βT H0
+AT T .
+In particular, there exists at least one time t ∈{1, . . . , T} with
+E[wt] ≤
+¯βT H0
+AT T .
+Equivalently, to get E[wt] ≤ϵ, it suffices to run for
+T ≥
+¯βT H0
+AT ϵ
+steps.
+B. Proof of Theorem 6.1
+Lemma B.1 (Lemma 5.3 in (Srinivas et al., 2009)). The information gain for the points selected can be expressed in terms
+of the predictive variances. If fT = (f(xt)) ∈RT :
+I(yT ; fT ) = 1
+2
+T
+X
+t−1
+log(1 + σ−2σ2
+t−1(xt)).
+Lemma B.2 (Lemma 5.5 in (Srinivas et al., 2009)). Pick δ ∈(0, 1) and set ζt = 2 log(mt/δ), where P
+t≥1 m−1
+t
+= 1, mt >
+0. Then,
+|f(xt) −µt−1(xt)| ≤ζ1/2
+t
+σt−1(xt)
+∀t ≥1
+holds with probability ≥1 −δ.
+Lemma B.3 (Lemma 3.2 in (Li et al., 2026)). Let X ⊆X be a subset of inputs, and the corresponding function values
+evaluated at those inputs be denoted as fX. Given a historical dataset Dt, and new measurements Y observed at X, the
+mutual information
+I(fX ; (X, Y)|Dt) = I(fX; Y|Dt),
+for any (finite or infinite) set X.
+Lemma B.4. If y ∼N(µ, σ2), c ∈R, then
+E[|y −c|] = (µ −c)[1 −2Φ(c −µ
+σ
+)] + σ
+r
+2
+π exp{−(c −µ)2
+2σ2
+},
+where Φ(·) is the standard normal CDF.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Curiosity is Knowledge
+Proof. Since p(y) =
+1
+√
+2πσ2 exp{−(y−µ)2
+2σ2
+}, let
+z = y −µ
+σ
+⇒y = µ + σz,
+dy = σdz,
+then p(y)dy = ϕ(z)dz, where ϕ(z) =
+1
+√
+2π exp{−z2
+2 } is the standard normal PDF.
+Define a := c−µ
+σ , then
+E[|y −c|] =
+Z c
+−∞
+(c −y)p(y)dy +
+Z ∞
+c
+(y −c)p(y)dy
+=
+Z a
+−∞
+(c −µ −σz)ϕ(z)dz +
+Z ∞
+a
+(µ −c + σz)ϕ(z)dz
+=
+Z a
+−∞
+(c −µ)ϕ(z)dz −σ
+Z a
+−∞
+zϕ(z)dz +
+Z ∞
+a
+(µ −c)ϕ(z)dz + σ
+Z ∞
+a
+zϕ(z)dz
+= (c −µ)Φ(a) −σ(−ϕ(a)) + (µ −c)(1 −Φ(a)) + σϕ(a)
+= (µ −c)(1 −2Φ(a)) + 2σϕ(a)
+= (µ −c)[1 −2Φ(c −µ
+σ
+)] + σ
+r
+2
+π exp{−(c −µ)2
+2σ2
+}.
+Lemma B.5. Fix t ≥1. If |f(xt) −µt−1(xt)| ≤ζ1/2
+t
+σt−1(xt), then the instant regret r(f(xt)) is bounded by
+r(f(xt)) ≤βtI(f(xt); yt|Dt−1) + L(ζ1/2
+t
++
+r
+2
+π )σt−1(xt) + Bt.
+Proof. According to assumption (iii),
+max
+x∈X
+
+βtI(s; (x, y)|Dt−1) −Ep(y|x,Dt−1)[ht(y)]
+	
+≥0.
+Then by the decision criteria (7) of xt,
+βtI(s; (xt, yt)|Dt−1) −Ep(yt|xt,Dt−1)[ht(yt)] ≥0.
+Since any interested state s can be fully determined by the whole function fX , we have
+Ep(yt|xt,Dt−1)[ht(yt)] ≤βtI(s; (xt, yt)|Dt−1)
+≤βtI(fX ; (xt, yt)|Dt−1)
+= βtI(f(xt); yt|Dt−1),
+where the last equation holds according to Lemma B.3.
+Therefore,
+r(f(xt)) ≤r(f(xt)) + βtI(f(xt); yt|Dt−1) −Ep(yt|xt,Dt−1)[ht(yt)]
+= βtI(f(xt); yt|Dt−1)
+|
+{z
+}
+Term 1
++ Ep(yt|xt,Dt−1)[r(f(xt)) −ht(yt)]
+|
+{z
+}
+Term 2
+.
+Term 2 can be decomposed into two parts:
+Term 2 = Ep(yt|xt,Dt−1)[r(f(xt)) −r(yt) + r(yt) −ht(yt)]
+≤Ep(yt|xt,Dt−1)[|r(f(xt)) −r(yt)|]
+|
+{z
+}
+Term 3
++ Ep(yt|xt,Dt−1)[|r(yt) −ht(yt)|]
+|
+{z
+}
+Term 4
+,
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Curiosity is Knowledge
+According to Lemma B.4 and assumption (i) in Theorem 6.1,
+Term 3 ≤Ep(yt|xt,Dt−1)[L|f(xt) −yt|]
+=LEp(yt|xt,Dt−1)[|f(xt) −yt|]
+=L{(µt−1(xt) −f(xt))[1 −2Φ(f(xt) −µt−1(xt)
+σt−1(xt)
+)]
++ σt−1(xt)
+r
+2
+π exp{−(f(xt) −µt−1(xt))2
+2σ2
+t−1(xt)
+}},
+Since Φ( f(xt)−µt−1(xt)
+σt−1(xt)
+) ∈[0, 1
+2] when µt−1(xt) ≥f(xt), and ∈( 1
+2, 1] when µt−1(xt) < f(xt), then
+(µt−1(xt) −f(xt))[1 −2Φ(f(xt) −µt−1(xt)
+σt−1(xt)
+)] ≤|µt−1(xt) −f(xt)|.
+Furthermore, since exp{z} ∈(0, 1] when z ≤0, we have
+Term 3 ≤L[|µt−1(xt) −f(xt)| +
+r
+2
+π σt−1(xt)].
+Since |f(xt) −µt−1(xt)| ≤ζ1/2
+t
+σt−1(xt), we have
+Term 3 ≤L[ζ1/2
+t
+σt−1(xt) +
+r
+2
+π σt−1(xt)]
+= L(ζ1/2
+t
++
+r
+2
+π )σt−1(xt).
+According to assumption (ii) in Theorem 6.1, we have
+Term 4 ≤Ep(yt|xt,Dt−1)[Bt] = Bt.
+Combining all those together, we can obtain
+r(f(xt)) ≤βtI(f(xt); yt|Dt−1) + L(ζ1/2
+t
++
+r
+2
+π )σt−1(xt) + Bt.
+Now we are ready to prove Theorem 6.1.
+Proof. Pick δ ∈(0, 1) and set ζt as in Lemma B.2. Then according to Lemma B.5, with probability ≥1 −δ, we have
+r(f(xt)) ≤βtI(f(xt); yt|Dt−1) + L(ζ1/2
+t
++
+r
+2
+π )σt−1(xt) + Bt.
+Note that ζt is non-decreasing, then the cumulative regret satisfies:
+RT =
+T
+X
+t=1
+r(f(xt))
+≤¯βT
+T
+X
+t=1
+I(f(xt); yt|Dt−1) + L(ζ1/2
+T
++
+r
+2
+π )
+T
+X
+t=1
+σt−1(xt) +
+T
+X
+t=1
+Bt
+=¯βT I(yT ; fT ) + L(ζ1/2
+T
++
+r
+2
+π )
+T
+X
+t=1
+σt−1(xt) +
+T
+X
+t=1
+Bt,
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Curiosity is Knowledge
+where ¯βT := maxt∈[1,T ] βt.
+When using GP to model p(f(x)|D), assuming Gaussian likelihood N ∼(0, σ2) and the kernel k(x, x′) ≤1, ∀x, x′ ∈X,
+then 0 ≤σ2(x) ≤k(x, x) ≤1, so we have
+σ2
+t−1(xt) ≤log(1 + σ−2σ2
+t−1(xt))
+log(1 + σ−2)
+.
+According to Lemma B.1, we have
+T
+X
+t=1
+σ2
+t−1(xt) ≤
+2
+log(1 + σ−2)I(yT ; fT ).
+By Cauchy-Schwarz inequality, we have
+T
+X
+t=1
+σt−1(xt) ≤
+v
+u
+u
+tT
+T
+X
+t=1
+σ2
+t−1(xt) ≤
+s
+T 2I(yT ; fT )
+log(1 + σ−2).
+Define ρT be the maximum information gain at most T selected points. Then we have
+RT ≤¯βT I(yT ; fT ) + L(ζ1/2
+T
++
+r
+2
+π )
+s
+T 2I(yT ; fT )
+log(1 + σ−2) +
+T
+X
+t=1
+Bt
+≤¯βT ρT + L(ζ1/2
+T
++
+r
+2
+π )
+s
+2TρT
+log(1 + σ−2) +
+T
+X
+t=1
+Bt.
+C. Experimental Details
+C.1. Discrete Sandbox
+The latent state is s ∈{1, . . . , 6}, and at each round the agent chooses an action x ∈{1, . . . , 4} and observes a scalar
+measurement
+yt|(s, xt) ∼N(µs,xt, σ2),
+σ = 0.2,
+where the mean table µs,xt is constructed so that a single “informative” action yields well-separated likelihoods across states
+(average gap ∆≈1.5), while the remaining actions are nearly indistinguishable (∆≈0.05).
+We define an energy-based heuristic
+ht(y) = a · (y −c)2,
+c = 0,
+with a ∈[0.15, 0.35], which acts as the observation constraint surrogate used in the theorem.
+C.2. 1D GP Bandit
+We consider 1D inputs x ∈[0, 1] on a uniform grid of N = 200 points. The unknown objective is
+f(x) = 0.6 sin(3πx) + 0.4 cos(5πx) + 0.2x.
+Observations are noisy:
+yt = f(xt) + ϵt,
+ϵt ∼N(0, σ2),
+σ = 0.05.
+We compute I(f; (x, y) | Dt−1) in closed form from the GP predictive variance (mutual information for a Gaussian
+observation model).
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Curiosity is Knowledge
+To isolate the effect of heuristic alignment (Assumption on bounded discrepancy), we use the regret surrogate
+ht(y) = |y −y∗| + bt(y −y∗),
+where y∗denotes the best achievable value on the grid (computed from the ground-truth f). The aligned setting sets bt = 0.
+Misaligned settings use amplitude b = 2.0 with schedules:
+• Constant bias: bt = b.
+• Slow exponential decay: bt = b exp (−0.02t).
+• Fast exponential decay: bt = b exp (−0.25t).
+C.3. Constrained System Identification
+C.3.1. PLUME FIELD MODEL AND PARAMETERS
+We consider the monitoring of a chemical plume field, where multiple plume sources generate plume particles that can be
+measured by sensors. The field function is represented by the rate of hits, defined as the average number of particles per unit
+time measured by the sensor at a certain location.
+The rate of hits for a chemical plume source is given as:
+Rθ(x) =
+Rs
+log γ
+a
+exp(−⟨θ −x, V ⟩
+2D
+)K0(||θ −x||2
+γ
+),
+where θ is the location of the plume source, Rs is the rate at which the plume source releases the plume particles in the
+environment, γ =
+q
+Dτ/(1 + ||V ||2τ
+4D
+) is the average distance traveled by a plume particle in its lifetime, a is the size of the
+sensor detecting plume particles, V is the average wind velocity, D is the diffusivity of the plume particles, and K0 is the
+Bessel function of zeroth order.
+The measurement y, i.e., the number of particles measured, is modeled as a Poisson random variable with Rθ(x)∆t as the
+rate parameter, which leads to a likelihood model as
+Lθ(y|x) = exp(−Rθ(x)∆t)(Rθ(x)∆t)y
+y!
+,
+where ∆t is the time taken to obtain a measurement.
+General Field and Sensor Parameters:
+• Grid Size: 100 × 100 units.
+• Sensor Size (a): 1.0 units.
+• Measurement Time (∆t): 1.0 seconds.
+Source Parameters: Eight potential plume sources were defined for the experiments. Their specific physical parameters are
+detailed as:
+SOURCE
+θ
+Rs
+γ
+V
+D
+1
+[20.0, 20.0]
+100.0
+50.0
+[0.5, 0.5]
+10
+2
+[30.0, 80.0]
+100.0
+60.0
+[-0.3, 0.2]
+15
+3
+[45.0, 55.0]
+15.0
+50.0
+[0.5, 0.5]
+10
+4
+[50.0, 50.0]
+18.0
+30.0
+[-0.3, 0.2]
+15
+5
+[55.0, 45.0]
+16.0
+40.0
+[0.2, -0.4]
+12
+6
+[48.0, 52.0]
+17.0
+35.0
+[0.1, 0.1]
+11
+7
+[52.0, 55.0]
+14.0
+45.0
+[-0.1, -0.1]
+13
+8
+[52.0, 52.0]
+18.0
+40.0
+[0.1, -0.1]
+13
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Curiosity is Knowledge
+C.3.2. TASK-SPECIFIC CONFIGURATIONS
+Source Localization.
+• Goal: Estimate the unknown location θ = [x, y] of a single active source.
+• Ground Truth: Source 1 was configured as the single active source.
+• Maximum Sensor Threshold (ymax): 60.0 hits/second.
+• Hypothesis Space: A discrete grid of potential locations spanning [0,100]×[0,100] with a resolution of 5 units, resulting
+in a 20 × 20 grid of 400 hypotheses.
+Wind Estimation.
+• Goal: Estimate the unknown wind vector V = [vx, vy] for a single source with a known location.
+• Ground Truth: Source 2 was used, with its true wind vector set to [-0.3, 0.2].
+• Maximum Sensor Threshold (ymax): 60.0 hits/second.
+• Hypothesis Space: A discrete grid of potential wind vectors spanning [-1,1]×[-1,1] with a resolution of 0.1 units,
+resulting in a 20 × 20 grid of 400 hypotheses.
+Active Source Identification.
+• Goal: Identify the subset of active sources from a set of six potential sources with known locations.
+• Ground Truth: Sources 3-8 were used, with Sources 3, 5, 6, and 8 were set as active.
+• Maximum Sensor Threshold (ymax): 30.0 hits/second.
+• Hypothesis Space: The set of all possible on/off combinations for the six sources. This is a discrete space with 26 = 64
+unique hypotheses.
+C.4. Composite Bayesian Optimization
+C.4.1. HEURISTIC ESTIMATION THROUGH PREFERENCE LEARNING
+As in (Lin et al., 2022), we estimate the unknown preference function g(y) by asking a decision-maker (DM) to express
+preferences over pairs of outcomes (y1, y2). Let z(y1, y2) ∈{1, 2} indicate whether the DM preferred the first or second
+outcome offered. Following (Chu & Ghahramani, 2005), we assume that the DM’s responses are distributed according to
+a probit likelihood: L(z(y1, y2) = 1|g(y1), g(y2)) = Φ( g(y1)−g(y2)
+√
+2λ
+), where λ is a hyperparameter, and Φ is the standard
+normal CDF.
+Following (Li et al., 2026), taking the joint exploration and exploitation of the preference function g(y) into consideration,
+we can choose h(y|Dt) as the EFE of the preference model, i.e., h(y|Dt) = EFE(g(y)), which naturally extends the
+acquisition function into a nested structure:
+α(x|Dt) = βI(fx; y|Dt) + Ep(y|x,Dt)[γI(gy; z|Dt) + Ep(gy|y,Dt)gy]],
+(11)
+where x = [x1, x2] are two jointly evaluated candidates, and γ, β ≥0.
+C.4.2. TASK-SPECIFIC CONFIGURATIONS
+Energy Resource Allocation.
+• Goal: Identify deployment strategies for Distributed Energy Resources (DERs) in Optimal Power Flow (OPF) that
+align with implicit ethical preferences across multiple performance dimensions detailed in the following table.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Curiosity is Knowledge
+Performance Metrics
+Definition
+Voltage Fairness
+Measures the variance in bus voltages across the network; lower variance implies
+more equitable voltage delivery.
+Total Cost
+Combines capital expenditures for DER installation and operational costs related
+to reactive power support.
+Priority Area Coverage
+Quantifies the share of power delivered to high-priority buses, such as rural or
+underserved regions.
+Resilience
+Assesses the percentage of time that all bus voltages remain within safe operating
+limits under perturbations (e.g., load uncertainty or line outages).
+• Testbed: IEEE 5-bus network in pandapower library.
+Regret and Heuristic models.
+• Ground Truth Preference: g(y) = a⊺y, where a = [1, −1, 2, 1]
+• Constant Bias h0: h0(y) = −a⊺
+0y, where a0 = [1, −1, 10, 1]
+• Learnt h1: Query according to (11) with γ = 1
+• Learnt h2: Query according to (11) with γ = 10
+18
