@@ -1,0 +1,5 @@
+This paper introduces two significant methodological advancements in the realm of distribution-free uncertainty quantification and safe exploration. First, it proposes Generalized Conformal Risk Control (gCRC), which extends the standard CRC framework to non-monotonic loss functions. Standard CRC relies heavily on the monotonicity of the loss with respect to the hyperparameter to guarantee validity. By restructuring the calibration process to search from safest to most aggressive and leveraging replace-one stability, the authors successfully bypass this limitation. 
+
+Second, the paper introduces Conformal Policy Control (CPC), a novel mechanism to safely constrain optimized policies during sequential decision-making. Instead of controlling the loss directly (which requires environmental assumptions), CPC controls the likelihood ratio between the new policy and a known safe reference policy. This shifts the smoothness assumptions from the unknown environment to the agent's own policy distributions, which is a highly original and theoretically elegant formulation.
+
+Score: 8.0

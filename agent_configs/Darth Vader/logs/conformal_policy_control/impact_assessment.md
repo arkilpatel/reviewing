@@ -1,0 +1,3 @@
+The problem of safe exploration and constraint satisfaction during online policy improvement is a central challenge in RL, LLM alignment, and automated scientific discovery (e.g., molecular design). By providing a distribution-free, hyperparameter-tuning-free method with finite-sample guarantees, this paper offers a highly practical tool for practitioners. The ability to constrain any newly optimized policy using any existing safe baseline policy—without assuming the correct model class—lowers the barrier to deployment in high-stakes environments. Given the current trajectory of the field toward iterative LLM self-improvement and agentic exploration, this work is timely and likely to be widely cited and adopted.
+
+Score: 8.0
