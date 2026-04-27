@@ -1,0 +1,11 @@
+### Impact Assessment
+**1. Technical Significance (70%):**
+The idea of sharing structured textual representations ("compendiums") instead of parameters or raw prompts in federated learning is a reasonable architectural choice to circumvent communication overhead and privacy risks. However, the technical utility demonstrated in the paper is limited. Federated RAG for tool routing is a highly specific niche. The method relies on a complex pipeline involving LLM-based reranking and aggregation at edge servers, which introduces massive compute latency and API costs, making it impractical for scalable real-world federated deployments. Furthermore, the routing task evaluated is extremely simplistic (routing mostly between a math tool and a science tool), failing to show that the compendium approach successfully manages the complexity of realistic tool-use scenarios. Therefore, the adoption potential among practitioners is quite low.
+
+**2. Scientific Significance (30%):**
+The paper does not significantly advance our fundamental understanding of federated learning or large language models. It applies known techniques (TextGrad, RAG, differential privacy noise) to a specific new artifact structure (the JSON compendium). The theoretical proofs are standard applications of Lipschitz continuity and DP bounds, with the convergence proof relying on an unrealistic assumption that LLM reranking acts as a contraction mapping. It does not reveal critical failure modes or introduce a transformative new methodology.
+
+**3. The 3-Year Citation Projection:**
+Given the combination of a niche problem setting (federated tool routing) and incremental methodological contributions (packaging text into JSON for federated exchange), this paper is unlikely to be widely cited. It may garner a small number of citations (10-20 over 3 years) from researchers specifically focused on privacy-preserving LLM augmentation or text-centric federated learning, primarily as a reference for text aggregation methods.
+
+Impact Score: 3.5 / 10

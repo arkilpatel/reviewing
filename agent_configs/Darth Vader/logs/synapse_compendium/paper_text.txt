@@ -1,0 +1,3104 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+SYNAPSE: Compendium-Aware Federated Knowledge Exchange for
+Tool-Routed LLMs
+Anonymous Authors1
+Abstract
+Collaborative learning among LLM-based agents
+under federated learning faces challenges, includ-
+ing communication costs, heterogeneity in data,
+and tool-usage, limiting their effectiveness. We
+introduce SYNAPSE, a framework that trains a
+shared global knowledge model of tool-usage be-
+havior. Client agents with fixed LLMs learn tool-
+usage patterns locally, and transmit artifacts for
+federated aggregation through coordinators. A
+global tool compendium is updated and redis-
+tributed, enabling convergence toward stable tool
+selection.
+SYNAPSE uses templated represen-
+tations, embedding retrieval with LLM rerank-
+ing, and adaptive masking to maintain utility
+while limiting information leakage. The frame-
+work supports heterogeneous data and quantifies
+performance improvements. Results show that
+SYNAPSE improves tool-usage effectiveness and
+reduces communication overhead compared with
+weight or prompt-sharing approaches in multi-
+agent LLM systems.
+1. Introduction
+Tool-augmented large language models have transformed
+how AI systems interact with external tools, enabling
+database queries, API calls, and the use of computational re-
+sources during inference. As these systems are increasingly
+deployed in healthcare, finance, and personalized assistance,
+they raise critical concerns about data privacy and compli-
+ance, particularly when clients must collaboratively learn
+tool-usage patterns without sharing raw data. In response,
+Federated Learning (FL) (Kairouz et al., 2021) enables col-
+laborative model training across distributed clients with-
+out exchanging raw data, preserving privacy. In parallel,
+Retrieval-Augmented Generation (RAG) (Lewis et al., 2021)
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+enhances LLM outputs through external knowledge re-
+trieval, reducing hallucinations and improving accuracy. At
+the intersection of these paradigms lies Federated RAG (Sho-
+jaee et al., 2025; Zeng et al., 2024; Jung et al., 2025; Addi-
+son et al., 2024; Zhao, 2024), combining privacy-preserving
+federated learning with retrieval-augmented generation, en-
+abling LLMs to access distributed knowledge sources se-
+curely. This integration enables personalized retrieval and
+generation without centralizing sensitive data, while support-
+ing source attribution, local indexing, and model unlearning
+capabilities - features unattainable by either paradigm alone.
+However, current federated methods (Fan et al., 2023;
+Kuang et al., 2023; Qiu et al., 2023) predominantly ex-
+change discrete prompt examples or raw data entries, which
+constrains their ability to represent rich contextual infor-
+mation and adapt dynamically across heterogeneous nodes.
+Text-centric methods like FedTextGrad (Chen et al., 2025)
+and Fed-ICL (Wang et al., 2025) address alignment and
+contextual consistency in federated settings, but face limi-
+tations in balancing privacy and dynamic adaptability; they
+also struggle with maintaining text update integrity, as well
+as privacy and utility evaluation amid client heterogeneity.
+These limitations hinder the development of robust, scal-
+able federated systems capable of complex reasoning and
+generative tasks.
+To address these limitations, we introduce SYNAPSE, a
+novel federated framework inspired by Chakraborty et al.
+(2025) that redefines the federated unit as a “compendium,”
+which is a structured, hierarchical, and compositional repre-
+sentation that encapsulates modular knowledge and contex-
+tual information. This compendium representation moves
+beyond simple prompt-sharing by enabling richer expres-
+sivity, modular updates, and dynamic adaptability across
+federated nodes. SYNAPSE incorporates several key contri-
+butions: (1) A federated tool-routing mechanism that dy-
+namically selects appropriate tools based on user queries and
+compendium contexts; (2) Hierarchical aggregation strate-
+gies that efficiently combine distributed knowledge; and (3)
+TextGrad (Yuksekgonul et al., 2024)-based prompt optimiza-
+tion that refines prompts in a federated, privacy-preserving
+manner during training. Together, these components enable
+SYNAPSE to overcome the scalability and adaptability con-
+straints of existing federated RAG and text-centric federated
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+learning approaches.
+We evaluate SYNAPSE on federated tool-routing tasks using
+reasoning-intensive benchmarks from BBH and GSM8k.
+Our results demonstrate that the compendium represen-
+tation significantly improves routing accuracy, general-
+ization, and robustness compared to baseline prompt-
+sharing methods.
+These findings establish the com-
+pendium as a powerful new federated knowledge-sharing
+paradigm, enabling efficient, dynamic prompt updates
+and enhanced contextualization that traditional feder-
+ated prompt-sharing cannot achieve. Our code is avail-
+able in https://anonymous.4open.science/r/
+FederatedRAG-EE50/README.md for reproducibil-
+ity.
+2. Related Work
+Federated Learning for Large Language Models (LLMs)
+Federated learning enables privacy-preserving distributed
+model training without sharing raw data. OpenFedLLM (Ye
+et al., 2024) and FederatedScope-LLM (Kuang et al., 2023)
+address data heterogeneity and communication challenges
+in LLM training. Methods like FedbiOT (Wu et al., 2024)
+and FFA-LoRA (Sun et al., 2024) enhance privacy under
+differential privacy constraints. However, traditional FL
+approaches using parameter aggregation face communica-
+tion bottlenecks and struggle to represent heterogeneous
+knowledge structures across nodes.
+Retrieval-Augmented Generation (RAG) In Federated set-
+tings RAG methods like GPT-FedRec, FedE4RAG, FRAG,
+C-FedRAG (Zeng et al., 2024; Zhao, 2024; Addison et al.,
+2024; Mao et al., 2025) typically focus on exchanging
+raw data entries or discrete prompt examples to enable
+retrieval-based knowledge sharing. As highlighted in the
+survey (Chakraborty et al., 2025), while this facilitates dis-
+tributed augmentation of language models, the represen-
+tational capacity and adaptability of such frameworks re-
+main limited due to their reliance on simple data exchanges.
+These constraints hinder dynamic prompt refinement and
+modular knowledge updates, reducing system scalability
+and robustness in diverse federated environments.
+Prompt-Sharing and Example-Sharing Approaches
+Prompt-sharing techniques like FedTextGrad (Chen et al.,
+2025), Fed-ICL (Wang et al., 2025) treat prompts or exam-
+ples as federated knowledge units, enabling clients to share
+task-specific information without sharing model parame-
+ters. However, these approaches lack the ability to capture
+hierarchical or compositional knowledge structures, limit-
+ing expressivity and modularity. Additionally, they face
+challenges in dynamically adapting prompts and supporting
+modular updates, which are essential for effective federated
+learning in heterogeneous and evolving settings.
+Tool Augmented methods separate parametric knowledge
+from external memory (Lewis et al., 2021). Tool-augmented
+LLM systems direct queries to specialized tools using
+structured descriptions and retrieval-based selection. Re-
+search shows explicit schemas improve tool choice reliabil-
+ity, while embedding retrieval enables efficient capability
+matching, e.g. Toolformer, Graph RAG-Tool Fusion, Re-
+Act (Schick et al., 2023; Lumer et al., 2025; Yao et al., 2023).
+However, these centralized methods do not address tool
+knowledge federation across privacy-constrained clients.
+Privacy-preserving federated knowledge sharing requires
+security in retrieval and generation within federated RAG
+frameworks.
+Differential privacy (DP) perturbs shared
+data but reduces language data utility (Dwork et al., 2015;
+Abadi et al., 2016). DP in federated learning needs mecha-
+nisms to protect content while maintaining semantics. Sum-
+marization and adaptive masking help mitigate privacy
+risks. Recent approaches show privacy-preserving strate-
+gies: C-FedRAG (Addison et al., 2024) uses SGX enclaves;
+FRAG (Zhao, 2024) employs IND-CPA–secure homomor-
+phic encryption; and FedE4RAG (Mao et al., 2025) uses
+local augmentation. While compliant with regulations, these
+increase latency.
+Knowledge-Centric and Prompt-tuning methods in FL
+Paradigms Knowledge-exchange federated learning meth-
+ods like FedKR (Lomurno & Matteucci, 2024) and KTA
+v2 (Du, 2025) share synthetic data or logits, representing
+unstructured knowledge exchange. While improving com-
+munication efficiency, they face privacy and robustness lim-
+itations. Prompt-tuning methods like FLEST (Wang et al.,
+2023) and FedGKC (Wu et al., 2025) enable knowledge
+transfer without full model weights but struggle to balance
+transfer quality, heterogeneity and privacy.
+SYNAPSE advances federated learning through structured
+artifacts that encapsulate knowledge and context. Beyond
+prompt-sharing, it enables richer expressivity across nodes.
+Through compendium exchange, SYNAPSE reduces com-
+munication costs while improving scalability for LLM tool-
+routing. SYNAPSE uses adaptive text masking and noise
+injection in a decentralized framework to maintain utility
+while reducing information leakage.
+3. SYNAPSE Framework
+SYNAPSE is a framework for federated retrieval-augmented
+generation (RAG) that exchanges structured knowledge
+compendiums instead of model parameters. The system uses
+a three-tier federation of clients, edge aggregators, and a
+central server to create knowledge snapshots for tool-routing
+during inference. Clients create compendiums containing
+tool metadata, capabilities, and usage scenarios. Edge aggre-
+gators collect and refine these compendiums through dedu-
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+plication and summarization, sending results to the central
+server. The server combines edge-level results into a global
+snapshot for federation-wide distribution and inference-time
+query routing. Figure 1 illustrates this tiered architecture:
+Edge 
+Aggregator B
+Local Agent 3
+Local Agent 4
+Edge 
+Aggregator A
+Local Agent 1
+Local Agent 2
+Central 
+Aggregator
+Cluster Compendium
+Global Compendium
+Local Compendium
+Cluster A
+Cluster B
+Figure 1. Tiered architecture of SYNAPSE showing client, edge,
+and central aggregation of compendiums for federated tool routing.
+(i) multiple clients generating compendiums; (ii) an edge
+aggregation layer responsible for combining and filtering
+artifacts; (iii) a central server producing the global snap-
+shot; and (iv) the central server redistributing the global
+compendium to clients to support subsequent inference.
+Tool: A tool is a callable software module addressing spe-
+cific questions, implemented as a component with a single
+entry point. Most tools use prompt templates with lan-
+guage model, while the math tool uses retrieval-augmented
+pipeline to embed queries and generate answers using con-
+text. Tool output is evaluated by comparing answers to
+dataset gold answers.
+Compendium Schema: A compendium is a structured
+JSON document containing (a) Tool Metadata: Contains
+identifier, description, and specifications, (b) Usage Sce-
+narios: Contains natural language examples of usage, (d)
+Precautions: Containing scenarios when not to use the tool,
+(e) Prompt Templates: Parameterized prompts for LLM
+invocation and (f) Structured Annex: Supplementary infor-
+mation that supports tool descriptions and usage scenarios,
+facilitating retrieval and routing within the framework. The
+schema enables privacy transformations in federated envi-
+ronments. As shown in Figure 2, a compendium can include
+multiple tools, each with its description and usage scenarios.
+The routing heuristics considers usage scenarios to deter-
+mine which parent tool to invoke. Compendiums are created
+by converting tool descriptions into JSON templates, with
+similarity checks removing redundant entries. This involves
+accumulating the clients (local artifacts), then aggregated
+by the server/edge during SYNAPSE federated rounds.
+Retrieval-Augmented Generation: (RAG) is a fundamen-
+tal element of SYNAPSE, facilitating the effective utiliza-
+Compendium Schema
+Textual_Compendium:
+Tool_Description:
+- Solves quantitative word problems.
+Usage_Scenarios:
+- scenario: Financial Calculator
+context: Handles interest, profit, loss, and
+investments.
+-
+scenario:
+Algebraic Word Problem Solver
+context:
+Parses and solves word problems.
+Precautions:
+- precaution: Ambiguous Input
+details: Unclear problems may cause incorrect
+results.
+-
+precaution:
+Scope Complexity
+details:
+Not intended for calculus.
+Multi_tool_Coordination:
+Description: Coordinates tools to solve word
+problems.
+Examples:
+- example: Extract formula →calculate →verify
+answer.
+Structured_Annex:
+Entities:
+- Word_Problem_Solver
+- Calculator
+Relations:
+- source: Word_Problem_Solver
+link: extracts
+target: Mathematical_Formula
+-
+source:
+Word_Problem_Solver
+link:
+utilizes
+target:
+Calculator
+Figure 2. Shows an example compendium for a mathematical
+word problem solver. The modular structure maintains semantic
+coherence for retrieval. Yellow highlights indicate newly added
+tool scenarios, while blue highlights indicate updated scenarios
+learned over time.
+tion of external knowledge during inference. RAG orga-
+nizes knowledge into hierarchically structured collections
+across clients, edge aggregators, and a central server, form-
+ing an indexed global knowledge compendium snapshot.
+This method of storage separates knowledge from model
+parameters, thereby addressing communication and privacy
+issues in federated learning. Consequently, RAG serves as
+an internal reasoning aid for tools rather than being part
+of the compendium routing phase. This design enables
+precise tool-selection while allowing for more in-depth
+retrieval-augmented reasoning within individual tools, en-
+hancing both accuracy and scalability. It also facilitates effi-
+cient updates while maintaining retrieval pipelines within
+SYNAPSE’s federated ecosystem.
+Retrieval and Routing Pipeline: The pipeline begins
+with a user query triggering a vector search across usage
+scenarios to retrieve top-k=5 relevant candidates using a
+sentence-level embedding model (G¨unther et al., 2024)
+with cosine similarity. An LLM reranker assesses can-
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+didates for relevance and constraints using llama-3.1-8b-
+instruct (Grattafiori et al., 2024) on Nvidia H200 hardware,
+with batch sizes of 8-32 sequences. Queries are batched over
+10-50 ms intervals with uniform length padding. Mixed pre-
+cision inference and asynchronous processing maintain a
+500 ms latency cap. The system analyzes the scenario to
+determine tool and execution parameters, then invokes the
+tool’s execution method with query, data item, and sce-
+nario, using tool-specific prompts or RAG pipeline. The
+LLM generates the final response. Figure 3 shows the re-
+trieval process in the federated learning system. This routing
+heuristics i.e. “retrieve →LLM rerank →LLM plan” chain
+is triggered for each user query.
+Figure 3. Inference Retrieval and Routing Pipeline in the FL
+system within privacy as described in algorithm 1.
+Generation and Curation of Usage Scenarios on Clients:
+Each client generates usage scenarios locally using domain-
+specific data and expertise. This includes: (a.) Extracting
+representative examples of tool-usage, ranging from several
+to dozens of scenarios per client based on data availability.
+(b.) Applying deduplication heuristics to remove exact or
+similar duplicates, using similarity thresholds and match
+checks at client and edge aggregator levels. (c.) Using
+summarization and filtering heuristics at edge aggregators to
+manage the compendium, including: (i) Length truncation to
+limit scenario text length, (ii) Metadata consistency checks
+for schema alignment, and (iii) Semantic clustering to merge
+similar scenarios while maintaining coverage. This curation
+pipeline ensures the federated compendium maintains utility
+and privacy without excessive communication overhead.
+SYNAPSE Workflow:
+SYNAPSE ’s evaluation through
+federated rounds is designed to closely mirror real-world
+deployment, ensuring system robustness and efficiency by
+leveraging the distinct but interconnected roles of each com-
+ponent:
+Client-Side Preparation: This initial stage is critical as
+clients curate or update compendiums from their local data,
+applying optional controls that safeguard data integrity be-
+fore transmission. By managing data locally, clients reduce
+unnecessary data movement and lay the foundation for se-
+cure and efficient aggregation downstream.
+Edge Aggregation: Acting as an essential intermediary,
+edge aggregators consolidate compendiums from multiple
+clients. Their role in removing duplicates and enforcing
+schema consistency is vital for maintaining data quality and
+coherence, which directly impacts the reliability of the ag-
+gregated information and the overall system performance.
+Server Aggregation: At the core of the workflow, the server
+merges outputs from edge aggregators into a comprehen-
+sive global snapshot. This step is crucial for synthesizing
+distributed insights into a unified model, enabling effective
+downstream routing and ensuring that the system operates
+seamlessly at scale.
+TextGrad Integration: TextGrad (Yuksekgonul et al.,
+2024) optimizes prompt texts used throughout the Synapse
+pipeline, enhancing overall training efficiency and accuracy.
+It refines scenario texts to be cleaner and more discrimina-
+tive, which improves semantic retrieval and reranking. Tool
+prompts are also improved, resulting in higher execution
+accuracy once routed to the appropriate tool. At the edge
+aggregation layer, TextGrad groups prompts by scenario,
+tool, and signature, then applies its summarization method
+to aggregate updates across clients. This aggregated text
+replaces the shared artifact representation in the global com-
+pendium, enabling robust, federated learning while preserv-
+ing client-specific nuances. Each component of TextGrad
+plays a critical role in maintaining SYNAPSE ’s scalability,
+accuracy and efficiency throughout the federated training
+and evaluation process.
+Evaluation of SYNAPSE:
+The federated agent is assessed
+on a global benchmark (e.g., GSM8k, BBH object counting)
+and optionally on individual client datasets. Evaluation
+metrics include global accuracy and client-level statistics
+(macro accuracy, spread, standard deviation), quantifying
+both overall performance and heterogeneity.
+This comprehensive workflow ensures end-to-end evalua-
+tion of federated knowledge exchange, reflecting the in-
+terplay among routing quality, privacy controls, and client
+heterogeneity in practical settings.
+4. Experiments and Analysis
+Datasets and Tasks: We assess SYNAPSE on federated
+tool-routing across three tasks from BBH benchmark (Sri-
+vastava et al., 2023): BBH Object Counting, BBH Multi-Step
+Arithmetic, and GSM8k Math Problem (Cobbe et al., 2021),
+selected for their reasoning complexity. Datasets are pre-
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+processed following (Kohavi, 1995) and split into training,
+validation, and test sets. Training splits enable updates, val-
+idation splits guide prompt selection, and test splits serve
+final evaluation. Splits include labels like (dataset, domain,
+task type) for routing heuristics. Dataset tags only define
+evaluation targets and group metrics, with the router re-
+ceiving no dataset identifiers during inference. All routing
+relies on user queries and retrieved compendium scenarios.
+For GSM8k/BBH, the ‘ground-truth tool’ is an evaluation
+label from dataset provenance, not exposed to the model.
+This synthetic benchmark tests if the router can determine
+the correct tool from queries alone. In realistic scenarios
+without dataset provenance, the routing pipeline remains
+unchanged, using only queries and compendium. We report
+results using query-only routing without dataset tags.
+Algorithm 1 SYNAPSE: Federated Compendium Training
+with TextGrad and LLM Reranking
+Input: Clients {Ck}K
+k=1 with local data; rounds R; retrieval bud-
+get M; tool registry T
+Output: Tool execution output for query q
+Training / Federation: Initialize global compendium S(0) ←∅
+for r = 1 to R do
+foreach client Ck do
+Ak ←collect local artifacts (scenarios + examples) if
+TextGrad enabled then
+// TextGrad optimizes compendium
+text/prompts via textual
+gradients
+Ak ←TextGradOptimize(Ak)
+Ak ←privacy/filtering (optional DP, masking) send Ak
+to edge aggregator
+Edge aggregates {Ak} with deduplication (and TextGrad
+summarization/aggregation of prompt variables) →Ae
+Server merges Ae into global compendium S(r)
+Inference / Routing: foreach query q do
+S ←latest global compendium G ←retrieve top-M artifacts
+from S relevant to q if LLM rerank enabled then
+// LLM rerank improves selection of
+the most relevant scenario/tool
+g⋆←LLM Rerank(q, G) t⋆←g⋆.tool
+else
+t⋆←heuristic or top-1 retrieval tool
+Gt ←{a ∈G : a.tool = t⋆} q′ ←q augmented with
+context snippets from Gt Execute tool t⋆on q′ and return
+output
+Federated Data Partitioning: Under homogeneous feder-
+ated learning conditions, each dataset is partitioned such that
+each client’s data is sampled from the same overall distribu-
+tion as the global dataset, resulting in clients with similar
+data characteristics (IID). In contrast, non-IID partitions
+skew client data distributions by clustering or restricting
+samples to specific categories or ranges, causing clients to
+differ significantly and introducing heterogeneity into train-
+ing and evaluation.
+Model and Training Configuration: SYNAPSE training
+runs with batch size 3 and 3 local steps per round. Prompt
+updates are kept only if performance improves. At inference,
+the system uses the fixed global compendium snapshot, with
+embedding-based retrieval and LLM reranking to select rel-
+evant tools.
+Routing Pipeline Evaluation: Ground truth for tools is
+determined by dataset labels rather than verified annotations.
+Tools are assigned heuristically: GSM8k/BBH routes to
+mathqa, and other types of datasets are routed to scienceqa,
+logically, per router rules. The ground truth is derived from
+labels from the dataset splits that guide the router’s tool-
+selection. Without verification, mislabeled datasets may
+cause misrouting. While the system still retrieves context
+and executes tools, accuracy could decrease. The only mit-
+igation in the code is routing numeric queries to mathqa
+without dataset tags.
+Baselines: We evaluate
+SYNAPSE against baselines to
+assess the benefits of federated compendium exchange, hi-
+erarchical aggregation, and routing.
+Variants of SYNAPSE:
+(a) Centralized- SYNAPSE: Client compendiums are
+combined centrally using the same retrieval and rerank
+pipeline, showing performance differences from federation.
+(b) Centralized-Retrieval Only.
+Uses a centralized
+compendium with embedding retrieval only, isolating the
+reranker’s impact.
+(c) Static-Global Compendium: One-time client com-
+pendium merge without iterations, distinguishing sharing
+from federated refinement.
+(d) Local-Only Compendium: Clients use only local
+compendiums for routing as minimal baseline.
+(e) SYNAPSE-NoRouting: Relying only on decentral-
+ized text-centric aggregation and adaptive communication
+to balance privacy and utility, simplify aggregation, preserve
+client data nuances, and ensure scalable, communication-
+efficient updates without any tool-routing.
+(f) Fed-Compendium-FlatServer: Uses a centralized
+server to aggregate client updates without hierarchical rout-
+ing. It combines decentralized text aggregation with adap-
+tive protocols to balance privacy and utility, enabling effi-
+cient integration while maintaining scalable updates.
+Other baselines:
+(a) BM25 (Robertson & Zaragoza, 2009): Lexical IR
+baseline replacing embedding retrieval.
+(b) ReAct (Yao et al., 2023):The ReAcT agent integrates
+language model reasoning with external tool use to itera-
+tively solve tasks through dynamic loops of reasoning, plan-
+ning, execution, and feedback, enhancing problem-solving
+beyond static prompts..
+(c) Fed-ICL (Wang et al., 2025): Shares ICL examples
+instead of compendiums as text-based federation compari-
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+son.
+(d) FederatedTextGrad (Chen et al., 2025): Shares
+global prompt instead of compendiums as text-based feder-
+ation comparison.
+These baselines match key components individually and
+provide reference points for meaningful comparisons.
+4.1. Evaluation Results
+Performance Analysis Across Client Setups
+Figure 4
+compares SYNAPSE’s performance with federated learning
+and centralized baselines on GSM8k dataset across 5 and
+8 client federations. SYNAPSE achieves strong accuracy
+(92–93%) with low communication rounds and minimal
+latency, demonstrating efficient tool-usage in handling non-
+IID data. SYNAPSE achieves performance comparable to
+the Centralized-RetrievalOnly variant while significantly
+reducing overhead. Baselines without tool-routing or global
+compendiums, like Fed-ICL and ReAct, show lower ac-
+curacy, highlighting SYNAPSE’s advantages. Increasing
+clients from 5 to 8 slightly impacts accuracy, but SYNAPSE
+maintains robust performance. These results validate its
+federated approach with tool-routing and embedding-based
+retrieval as an effective solution for multi-client scenarios.
+Figure 4. Tool-routing accuracy on GSM8K under federated set-
+tings, comparing SYNAPSE with prompt-sharing and retrieval-
+based baselines.
+Table 1. Performance of SYNAPSE under IID and non-IID feder-
+ated splits, reporting global accuracy and client-level dispersion
+metrics (see Figure 5 for trends across training rounds).
+Dataset
+Metric
+IID
+non-IID
+GSM8k
+Global Acc.
+0.96
+0.92
+Macro Acc.
+0.92
+0.89
+Spread
+0.02
+0.4
+Std. Dev.
+0.16
+0.18
+BBH Object Counting
+Global Acc.
+0.99
+0.98
+Macro Acc.
+0.97
+0.73
+Spread
+0.09
+0.42
+Std. Dev.
+0.04
+0.10
+BBH Multi Step Arithmetic
+Global Acc.
+0.94
+0.92
+Macro Acc.
+0.94
+0.97
+Spread
+0.05
+0.1
+Std. Dev.
+0.06
+0.05
+Federated Learning Setup Comparison (IID vs. non-
+IID splits)
+SYNAPSE’s architectural framework effec-
+tively addresses non-IID data distribution challenges. Un-
+like conventional models that show significant performance
+drops due to heterogeneous and imbalanced local datasets,
+Synapse maintains high accuracy by effectively handling
+varied client data distributions. Table 1 and Figure 5 demon-
+strate this advantage: while non-IID conditions typically
+cause increased variability and fairness issues, Synapse mit-
+igates these challenges. It maintains consistent global ac-
+curacy and minimizes macro accuracy drops common in
+non-IID splits. The reduced accuracy variation shown in
+Figure 5 confirms that Synapse’s architecture maintains per-
+formance while enhancing fairness across clients, reducing
+performance disparities caused by data heterogeneity.
+(a) Spread of Client-Level Accuracy Over Rounds
+(b) Macro Accuracy Across Training Rounds
+Figure 5. Fairness and heterogeneity analysis across federated
+rounds: (a) accuracy spread and (b) macro accuracy.
+Scalability Tests
+The figure 6 shows a trade-off between
+routing accuracy (represented by Recall@5 measuring if
+correct scenario/tool is retrieved in top-5 candidates) af-
+fected by compendium size. As the compendium grows,
+routing accuracy improves with better data representa-
+tion, with a slight latency increase.
+While latency in-
+creases with size, it stays within acceptable bounds. This
+demonstrates the system’s scalability without compromis-
+ing efficiency. Synapse’s components maintain this bal-
+ance through: (a) Compendium Size Optimization: The
+compendium affects routing accuracy, with larger com-
+pendiums enabling better data representation, (b) Latency
+Management: Synapse optimizes data access through ef-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+Figure 6. Recall@5 versus communication cost for different compendium structures across federated settings with varying numbers of
+clients.
+ficient indexing, caching, and parallel processing to keep
+latency moderate. and (c) Scalable Communication Pro-
+tocols: The system maintains manageable costs through
+asynchronous communication, batching, or hierarchical
+routing as loads grow.
+4.2. Privacy Analysis
+To assess SYNAPSE’s privacy-preserving capabilities, we
+employ a prompt extraction attack framework based
+on (Zhang et al., 2024b). Clients generate responses to
+server queries using private in-context examples, while an
+adversary model attempts to reconstruct these examples
+from the responses. This evaluation follows studies on lan-
+guage model privacy risks (Duan et al., 2024; Carlini et al.,
+2021; Zhang et al., 2024a). Using GPT-5.1 as the attacker
+model, we compare reconstructed examples with originals
+and provide complete results in Figure 11 in appendix A.
+The findings demonstrate SYNAPSE protects against prompt
+extraction attacks by limiting exposed information without
+raw data transfer.
+4.3. Ablation Study
+Tool Convergence in Federated Routing: Stability un-
+der Stochastic Artifact Perturbations
+Figure 7 evalu-
+ates routing convergence by examining differences between
+rounds in tool-selection (Δ tool) and reranker scores (Δ
+score) under client updates. Routing used Financial Banking
+Calculator and Algebraic Word Problem Solver scenarios
+with Laplace noise and adaptive text masking. ε controls
+Laplace noise scale for differential privacy, with lower val-
+ues indicating stronger privacy. Parameter λ scales token
+masking probability. Fixed noise maintains perturbations
+between rounds, while unfixed noise resamples each round.
+Under stationary conditions, routing stabilizes with Δ tool
+and Δ score approaching zero within initial rounds for all
+parameters (ε ∈{0.5, 1.0, 2.0} and λ ∈{0.5, 1.0, 1.5}).
+Non-stationary updates prevent convergence. Convergence
+criteria are Δ tool < 0.02 and Δ score < 0.01 over two
+rounds. This demonstrates that federated routing achieves
+2
+4
+6
+8
+Round
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+ tool
+Fixed noise (epsilon=0.5)
+2
+4
+6
+8
+Round
+Unfixed noise (epsilon=0.5)
+lambda=0.5
+lambda=1.0
+lambda=1.5
+(a) Routing convergence comparison with fixed versus unfixed
+privacy noise settings (Δ tool).
+2
+4
+6
+8
+Round
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+ score
+Fixed noise (epsilon=0.5)
+2
+4
+6
+8
+Round
+Unfixed noise (epsilon=0.5)
+lambda=0.5
+lambda=1.0
+lambda=1.5
+(b) Routing convergence comparison with fixed versus unfixed
+privacy noise settings (Δ score).
+Figure 7. Routing convergence under stationary (fixed) and non-
+stationary (unfixed) stochastic perturbations. (a) Round-to-round
+changes in selected tools (∆tool) and (b) reranker scores (∆score)
+show rapid stabilization with fixed noise and persistent oscillations
+with unfixed noise.
+stable convergence despite privacy-preserving noise and
+adaptive masking.
+Impact of Distinct Failure Modes on System Accuracy
+and Stability
+The figure 8 evaluates the impact of distinct
+error modes on system accuracy, revealing insights into
+federated routing vulnerabilities. Recall failures, where vec-
+tor search misses relevant scenarios, reduce hit rates from
+92% to 72%, indicating retrieval quality is a key bottleneck.
+Rerank mistakes degrade performance; while the reranker
+matches correct scenarios 92% of the time, mismatches drop
+accuracy to 49%, showing LLM’s contextual understanding
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+Figure 8.
+Routing error analysis on GSM8K showing
+hit/match/stable vs miss/mismatch/flip accuracies per stage
+can select incorrect candidates. Parent-tool misassignment
+during planning results in a 55% mismatch rate, highlighting
+the importance of precise tool mapping. Ambiguity errors
+from queries fitting multiple tools are reflected in prompt
+sensitivity results, where stable matches at 92% drop to 67%
+under phrasing variations. Compendium drift and noise
+bias both retrieval and reranking stages, compounding ac-
+curacy degradation. While individual components achieve
+high nominal accuracy (92%), cumulative errors substan-
+tially reduce system reliability. This error analysis quan-
+tifies accuracy falloffs linked to specific failures, guiding
+improvements. Enhancing embedding robustness, reranker
+discrimination, parent-tool alignment, and reducing prompt
+sensitivity through query normalization are critical. Main-
+taining compendium quality remains essential for routing
+stability.
+Robustness to Adversarial or Noisy Clients The metrics
+Figure 9 quantify system resilience under cross-source, ran-
+dom, and tool confusion adversarial modes. Routing ac-
+curacy serve as key indicators of synapse robustness by
+showing how federated routing and tool-selection maintain
+performance against disruptions. The system maintains ro-
+bustness up to 40% adversarial clients, showing minimal
+accuracy degradation with occasional recall improvements.
+At 60% adversarial presence, both metrics decline sharply,
+indicating a critical robustness boundary. These findings val-
+idate the importance of robust aggregation and anomaly de-
+tection in federated learning frameworks. The results align
+with routing convergence experiments (Figure 7), showing
+how client update quality affects routing decisions and task
+outcomes. The system demonstrates capability in handling
+heterogeneous, partially adversarial environments for reli-
+able federated learning.
+Figure 9. Robustness of SYNAPSE to noisy or adversarial clients,
+showing accuracy and recall degradation beyond a critical adver-
+sarial ratio.
+5. Conclusion
+SYNAPSE introduces a federated framework using tool com-
+pendiums and usage scenarios instead of traditional model
+parameter aggregation. Through text-based communication
+between agents, it effectively addresses heterogeneity in
+federated environments. The framework enables efficient
+tool-selection via compendium routing and summarization,
+optimizing collaboration among diverse agents. Extensive
+evaluations demonstrate that SYNAPSE significantly out-
+performs baseline methods in both accuracy and scalability,
+highlighting its capacity for effective knowledge exchange
+within large language model (LLM) ecosystems. This ap-
+proach not only advances federated learning paradigms but
+also paves the way for more adaptive, interpretable, and
+robust multi-agent systems capable of leveraging special-
+ized tools in dynamic, decentralized settings. The results
+underscore the potential of SYNAPSE to transform collabo-
+rative AI by fostering seamless integration and utilization
+of heterogeneous resources across distributed networks.
+6. Impact Statement
+By enabling communication-efficient, privacy-preserving
+collaboration among LLM agents, SYNAPSE unlocks trans-
+formative deployment opportunities in regulated domains
+where data sharing constraints have historically prevented
+AI adoption. Beyond immediate applications, the com-
+pendium paradigm introduces a fundamentally new ap-
+proach to federated knowledge representation—moving be-
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+yond gradient-based learning to structured, interpretable
+knowledge exchange.
+This architectural innovation ex-
+tends naturally to multi-agent systems, knowledge graphs,
+and retrieval-augmented generation pipelines, establishing a
+blueprint for privacy-aware collaborative intelligence across
+any domain where expertise is distributed, data is sensi-
+tive, and trust boundaries are rigid. As AI systems increas-
+ingly operate in data-constrained environments, SYNAPSE
+demonstrates that maintaining low communication overhead
+can achieve performance close to centralized approaches,
+indicating its potential for practical federated deployment at
+scale.
+7. Limitations
+SYNAPSE assumes honest-but-curious clients and does
+not address Byzantine adversaries who may inject arbi-
+trary malicious content.
+While our adversarial experi-
+ments 4.3 show robustness up to 40% noisy clients, so-
+phisticated attacks remain a threat. Future work should
+integrate Byzantine-robust aggregation (Cajaraville-Aboy
+et al., 2025) and anomaly detection. Our adaptive masking
+(λ) and DP budget (ϵ) provide tunable privacy, but optimal
+settings are task-dependent. Developing automatic privacy
+parameter selection based on differential privacy accoun-
+tants is an important direction. SYNAPSE is evaluated on
+tool-routing tasks. Extending to other federated learning
+scenarios (e.g., multi-modal models, recommender systems)
+requires adapting the compendium schema and may reveal
+new challenges
+References
+Abadi, M., Chu, A., Goodfellow, I., McMahan, H. B.,
+Mironov, I., Talwar, K., and Zhang, L.
+Deep Learn-
+ing with Differential Privacy. In Proceedings of the 2016
+ACM SIGSAC Conference on Computer and Communica-
+tions Security, pp. 308–318, October 2016. doi: 10.1145/
+2976749.2978318. URL http://arxiv.org/abs/
+1607.00133. arXiv:1607.00133 [stat].
+Addison, P., Nguyen, M.-T. H., Medan, T., Shah, J., Man-
+zari, M. T., McElrone, B., Lalwani, L., More, A., Sharma,
+S., Roth, H. R., Yang, I., Chen, C., Xu, D., Cheng, Y.,
+Feng, A., and Xu, Z. C-FedRAG: A Confidential Feder-
+ated Retrieval-Augmented Generation System, Decem-
+ber 2024.
+URL http://arxiv.org/abs/2412.
+13163. arXiv:2412.13163 [cs].
+Cajaraville-Aboy, D., Fern´andez-Vilas, A., D´ıaz-Redondo,
+R. P., and Fern´andez-Veiga, M.
+Byzantine-Robust
+Aggregation for Securing Decentralized Federated
+Learning.
+IEEE Access, 13:190947–190963, 2025.
+ISSN 2169-3536.
+doi:
+10.1109/ACCESS.2025.
+3629864.
+URL http://arxiv.org/abs/2409.
+17754. arXiv:2409.17754 [cs].
+Carlini, N., Tramer, F., Wallace, E., Jagielski, M., Herbert-
+Voss, A., Lee, K., Roberts, A., Brown, T., Song,
+D., Erlingsson, U., Oprea, A., and Raffel, C.
+Ex-
+tracting Training Data from Large Language Models,
+June 2021. URL http://arxiv.org/abs/2012.
+07805. arXiv:2012.07805 [cs].
+Chakraborty, A., Dahal, C., and Gupta, V.
+Federated
+Retrieval-Augmented Generation: A Systematic Map-
+ping Study.
+In Christodoulopoulos, C., Chakraborty,
+T., Rose, C., and Peng, V. (eds.), Findings of the As-
+sociation for Computational Linguistics: EMNLP 2025,
+pp. 7362–7374, Suzhou, China, November 2025. As-
+sociation for Computational Linguistics. ISBN 979-8-
+89176-335-7. doi: 10.18653/v1/2025.findings-emnlp.
+388. URL https://aclanthology.org/2025.
+findings-emnlp.388/.
+Chen, M., Jin, R., Deng, W., Chen, Y., Huang, Z., Yu,
+H., and Li, X. Can Textual Gradient Work in Feder-
+ated Learning?, February 2025. URL http://arxiv.
+org/abs/2502.19980. arXiv:2502.19980 [cs].
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun,
+H., Kaiser, L., Plappert, M., Tworek, J., Hilton, J.,
+Nakano, R., Hesse, C., and Schulman, J.
+Train-
+ing Verifiers to Solve Math Word Problems, Novem-
+ber 2021.
+URL http://arxiv.org/abs/2110.
+14168. arXiv:2110.14168 [cs].
+Du,
+W.
+Prediction-space knowledge markets for
+communication-efficient federated learning on multime-
+dia tasks, November 2025.
+URL http://arxiv.
+org/abs/2512.00841. arXiv:2512.00841 [cs].
+Duan, H., Dziedzic, A., Yaghini, M., Papernot, N., and
+Boenisch, F. On the Privacy Risk of In-context Learning,
+November 2024. URL http://arxiv.org/abs/
+2411.10512. arXiv:2411.10512 [cs].
+Dwork, C., Feldman, V., Hardt, M., Pitassi, T., Reingold, O.,
+and Roth, A. Generalization in Adaptive Data Analysis
+and Holdout Reuse, September 2015. URL http://
+arxiv.org/abs/1506.02629. arXiv:1506.02629
+[cs].
+DworkCynthia and RothAaron. The Algorithmic Founda-
+tions of Differential Privacy. Foundations and Trends®
+in Theoretical Computer Science, August 2014.
+doi:
+10.1561/0400000042. URL https://dl.acm.org/
+doi/10.1561/0400000042.
+Fan, T., Kang, Y., Ma, G., Chen, W., Wei, W., Fan, L.,
+and Yang, Q. FATE-LLM: A Industrial Grade Federated
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+Learning Framework for Large Language Models, Oc-
+tober 2023. URL http://arxiv.org/abs/2310.
+10049. arXiv:2310.10049 [cs].
+Grattafiori, A., Dubey, A., Jauhri, A., Pandey, A.,
+and et al.
+The Llama 3 Herd of Models, Novem-
+ber 2024.
+URL http://arxiv.org/abs/2407.
+21783. arXiv:2407.21783 [cs].
+G¨unther, M., Ong, J., Mohr, I., Abdessalem, A., Abel, T.,
+Akram, M. K., Guzman, S., Mastrapas, G., Sturua, S.,
+Wang, B., Werk, M., Wang, N., and Xiao, H. Jina Embed-
+dings 2: 8192-Token General-Purpose Text Embeddings
+for Long Documents, February 2024. URL http://
+arxiv.org/abs/2310.19923. arXiv:2310.19923
+[cs].
+Jung, J., Jeong, H., and Huh, E.-N. Federated learning and
+RAG integration: a scalable approach for medical large
+language models, 2025. URL https://arxiv.org/
+abs/2412.13720. arXiv: 2412.13720 [cs.CL].
+Kairouz, P., McMahan, H. B., Avent, B., Bellet, A., Ben-
+nis, M., Bhagoji, A. N., Bonawitz, K., Charles, Z., Cor-
+mode, G., Cummings, R., D’Oliveira, R. G. L., Eichner,
+H., Rouayheb, S. E., Evans, D., Gardner, J., Garrett, Z.,
+Gasc´on, A., Ghazi, B., Gibbons, P. B., Gruteser, M., Har-
+chaoui, Z., He, C., He, L., Huo, Z., Hutchinson, B., Hsu,
+J., Jaggi, M., Javidi, T., Joshi, G., Khodak, M., Koneˇcn´y,
+J., Korolova, A., Koushanfar, F., Koyejo, S., Lepoint, T.,
+Liu, Y., Mittal, P., Mohri, M., Nock, R., ¨Ozg¨ur, A., Pagh,
+R., Raykova, M., Qi, H., Ramage, D., Raskar, R., Song,
+D., Song, W., Stich, S. U., Sun, Z., Suresh, A. T., Tram`er,
+F., Vepakomma, P., Wang, J., Xiong, L., Xu, Z., Yang, Q.,
+Yu, F. X., Yu, H., and Zhao, S. Advances and Open Prob-
+lems in Federated Learning, March 2021. URL http://
+arxiv.org/abs/1912.04977. arXiv:1912.04977
+[cs].
+Kohavi, R. A study of cross-validation and bootstrap for
+accuracy estimation and model selection. In Proceedings
+of the 14th international joint conference on Artificial
+intelligence - Volume 2, IJCAI’95, pp. 1137–1143, San
+Francisco, CA, USA, August 1995. Morgan Kaufmann
+Publishers Inc. ISBN 978-1-55860-363-9.
+Kuang, W., Qian, B., Li, Z., Chen, D., Gao, D., Pan, X.,
+Xie, Y., Li, Y., Ding, B., and Zhou, J. FederatedScope-
+LLM: A Comprehensive Package for Fine-tuning Large
+Language Models in Federated Learning, Septem-
+ber 2023.
+URL http://arxiv.org/abs/2309.
+00363. arXiv:2309.00363 [cs].
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin,
+V., Goyal, N., K¨uttler, H., Lewis, M., Yih, W.-t.,
+Rockt¨aschel, T., Riedel, S., and Kiela, D.
+Retrieval-
+Augmented Generation for Knowledge-Intensive NLP
+Tasks, April 2021. URL http://arxiv.org/abs/
+2005.11401. arXiv:2005.11401 [cs].
+Lomurno, E. and Matteucci, M.
+Federated Knowledge
+Recycling: Privacy-Preserving Synthetic Data Sharing,
+July 2024. URL http://arxiv.org/abs/2407.
+20830. arXiv:2407.20830 [cs].
+Lumer, E., Basavaraju, P. H., Mason, M., Burke, J. A.,
+and Subbiah, V. K. Graph RAG-Tool Fusion, Febru-
+ary 2025.
+URL http://arxiv.org/abs/2502.
+07223. arXiv:2502.07223 [cs].
+Mao, Q., Zhang, Q., Hao, H., Han, Z., Xu, R., Jiang, W., Hu,
+Q., Chen, Z., Zhou, T., Li, B., Song, Y., Dong, J., Li, J.,
+and Yu, P. S. Privacy-Preserving Federated Embedding
+Learning for Localized Retrieval-Augmented Generation,
+April 2025. URL http://arxiv.org/abs/2504.
+19101. arXiv:2504.19101 [cs].
+McMahan, H. B., Moore, E., Ramage, D., Hampson, S.,
+and Arcas, B. A. y.
+Communication-Efficient Learn-
+ing of Deep Networks from Decentralized Data, Jan-
+uary 2023. URL http://arxiv.org/abs/1602.
+05629. arXiv:1602.05629 [cs].
+Qiu, C., Li, X., Mummadi, C. K., Ganesh, M. R., Li, Z.,
+Peng, L., and Lin, W.-Y. Text-driven Prompt Generation
+for Vision-Language Models in Federated Learning, Oc-
+tober 2023. URL http://arxiv.org/abs/2310.
+06123. arXiv:2310.06123 [cs].
+Robertson, S. and Zaragoza, H. The Probabilistic Rele-
+vance Framework: BM25 and Beyond. Found. Trends Inf.
+Retr., 3(4):333–389, April 2009. ISSN 1554-0669. doi:
+10.1561/1500000019. URL https://doi.org/10.
+1561/1500000019.
+Schick, T., Dwivedi-Yu, J., Dess`ı, R., Raileanu, R., Lomeli,
+M., Zettlemoyer, L., Cancedda, N., and Scialom, T. Tool-
+former: Language Models Can Teach Themselves to Use
+Tools, February 2023. URL http://arxiv.org/
+abs/2302.04761. arXiv:2302.04761 [cs].
+Shojaee, P., Harsha, S. S., Luo, D., Maharaj, A., Yu, T., and
+Li, Y. Federated retrieval augmented generation for multi-
+product question answering, 2025.
+URL https://
+arxiv.org/abs/2501.14998. arXiv: 2501.14998
+[cs.CL].
+Srivastava, A., Rastogi, A., Rao, A., Shoeb, A. A. M.,
+and et al.
+Beyond the Imitation Game: Quantifying
+and extrapolating the capabilities of language models,
+June 2023. URL http://arxiv.org/abs/2206.
+04615. arXiv:2206.04615 [cs].
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+Sun, Y., Li, Z., Li, Y., and Ding, B.
+Improv-
+ing LoRA in Privacy-preserving Federated Learning,
+March 2024.
+URL http://arxiv.org/abs/
+2403.12313. arXiv:2403.12313 [cs].
+Wang, M., Zeng, D., Xu, Z., Guo, R., and Zhao, X.
+Federated knowledge graph completion via latent em-
+bedding sharing and tensor factorization, 2023. URL
+https://arxiv.org/abs/2311.10341.
+Wang, R., Wang, Z., Huang, C., Wang, R., Yu, T., Yao,
+L., Lui, J. C. S., and Zhou, D. Federated In-Context
+Learning: Iterative Refinement for Improved Answer
+Quality, June 2025. URL http://arxiv.org/abs/
+2506.07440. arXiv:2506.07440 [cs].
+White, C., Dooley, S., Roberts, M., Pal, A., Feuer, B.,
+Jain, S., Shwartz-Ziv, R., Jain, N., Saifullah, K., Dey,
+S., Shubh-Agrawal, Sandha, S. S., Naidu, S., Hegde, C.,
+LeCun, Y., Goldstein, T., Neiswanger, W., and Goldblum,
+M. LiveBench: A Challenging, Contamination-Limited
+LLM Benchmark, April 2025. URL http://arxiv.
+org/abs/2406.19314. arXiv:2406.19314 [cs].
+Wu, F., Li, Z., Li, Y., Ding, B., and Gao, J. FedBiOT: LLM
+Local Fine-tuning in Federated Learning without Full
+Model, June 2024. URL http://arxiv.org/abs/
+2406.17706. arXiv:2406.17706 [cs].
+Wu, Z., Zeng, G., Lai, H., Su, D., Jia, J., Zhu, Y., Li, X., Li,
+R.-H., Wang, G., and Zhou, C. Knowledge-Driven Fed-
+erated Graph Learning on Model Heterogeneity, Decem-
+ber 2025.
+URL http://arxiv.org/abs/2501.
+12624. arXiv:2501.12624 [cs].
+Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan,
+K., and Cao, Y. ReAct: Synergizing reasoning and act-
+ing in language models, 2023. URL https://arxiv.
+org/abs/2210.03629. arXiv: 2210.03629 [cs.CL].
+Ye, R., Wang, W., Chai, J., Li, D., Li, Z., Xu, Y., Du,
+Y., Wang, Y., and Chen, S.
+OpenFedLLM: Training
+Large Language Models on Decentralized Private Data
+via Federated Learning, February 2024. URL http://
+arxiv.org/abs/2402.06954. arXiv:2402.06954
+[cs].
+Yuksekgonul, M., Bianchi, F., Boen, J., Liu, S., Huang, Z.,
+Guestrin, C., and Zou, J. TextGrad: Automatic ”Differ-
+entiation” via Text, June 2024. URL http://arxiv.
+org/abs/2406.07496. arXiv:2406.07496 [cs].
+Zeng, H., Yue, Z., Jiang, Q., and Wang, D. Federated rec-
+ommendation via hybrid retrieval augmented generation.
+In 2024 IEEE international conference on big data (Big-
+Data), pp. 8078–8087. IEEE, 2024.
+Zhang, C., Morris, J. X., and Shmatikov, V.
+Ex-
+tracting Prompts by Inverting LLM Outputs, Octo-
+ber 2024a. URL http://arxiv.org/abs/2405.
+15012. arXiv:2405.15012 [cs].
+Zhang, Y., Carlini, N., and Ippolito, D.
+Effective
+Prompt Extraction from Language Models, August
+2024b.
+URL http://arxiv.org/abs/2307.
+06865. arXiv:2307.06865 [cs].
+Zhao, D.
+FRAG: Toward Federated Vector Database
+Management for Collaborative and Secure Retrieval-
+Augmented Generation, October 2024. URL http://
+arxiv.org/abs/2410.13272. arXiv:2410.13272
+[cs].
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+A. Privacy Analysis of SYNAPSE Framework
+Privacy Controls
+We aim to explore the integration of
+privacy controls within the compendium structure, lever-
+aging the inherent flexibilities and schema design outlined
+in section 3. Given that the compendium is a standardized
+JSON document encapsulating tool metadata, capabilities,
+and usage scenarios, its schema provides natural points of
+intervention for embedding privacy-preserving mechanisms.
+The hierarchical aggregation and structured indexing further
+facilitate applying privacy transformations in a controlled
+and granular manner without compromising retrieval effi-
+ciency or semantic integrity.
+Our approach to incorporating privacy knobs into the com-
+pendium involves the following planned mechanisms:
+Differential Privacy on Numeric Metadata: We apply
+Laplace noise to sensitive numeric fields such as counts,
+scores, and statistics within the compendium metadata. This
+perturbation will be calibrated according to a tunable privacy
+budget (ε), balancing privacy guarantees with information
+utility. Mathematically, this can be represented as follows:
+for numeric metadata (m), we apply Laplace noise: [ ˜m =
+m + Lap!
+  ∆m
+ε
+
+.]
+Adaptive Text Masking in Usage Scenarios: Textual
+fields within usage scenarios modified in selective obfus-
+cation based on token saliency. Tokens identified as sensi-
+tive—such as digits, uppercase patterns, or unique identi-
+fiers, were masked probabilistically, controlled by a masking
+strength parameter (λ). This preserves the structural and
+semantic context necessary for routing while mitigating
+exposure of sensitive details. Mathematically, this can be
+represented as follows: If each token (w) in scenario text (s)
+receives a saliency score (κ(w)). Tokens are masked with
+probability p(w) = min(1, λκ(w)), resulting in masked
+text (˜s).
+Artifact Summarization and Truncation: To further limit
+information leakage, usage scenarios will be subject to sum-
+marization constraints, including caps on character length
+and sentence count. This ensures that only essential se-
+mantic content is shared, reducing the risk of sensitive
+data disclosure. Mathematically, this can be represented
+as follows: A summarizer (Summ) truncates or compresses
+scenarios:[˜s = Summ(s; Lmax, Smax),] where Lmax is a
+character cap and Smax is a sentence cap.
+These privacy controls are designed as modular, config-
+urable components within the compendium generation and
+aggregation pipeline. Clients apply these transformations
+locally before sharing compendiums, and edge aggrega-
+tors enforce consistency and deduplication on the privacy-
+transformed artifacts. This strategy maintains the com-
+pendium’s utility for embedding-based retrieval and LLM
+reranking while providing formal privacy guarantees and
+tunable protection levels aligned with federated learning re-
+quirements. Below, we provide formal theorem statements
+and detailed proof sketches for the key theoretical properties
+of SYNAPSE ’s federated knowledge exchange framework
+under privacy controls.
+A.1. Bounded Embedding Distortion under Privacy
+Transformations
+Theorem A.1.
+Let s be a usage scenario text and ˜s =
+PrivTrans(s) its privacy-transformed version. Let e(·) de-
+note the embedding function. Under privacy budget ε, there
+exists a distortion bound δ(ε) such that:
+E [∥e(s) −e(˜s)∥2] ≤δ(ε).
+Consequently, the similarity score deviation for any query q
+is bounded by:
+|sim(e(q), e(s)) −sim(e(q), e(˜s))| ≤δ′(ε).
+Proof. Let s be an original usage scenario text and
+˜s = PrivTrans(s) be the privacy-transformed text, where
+PrivTrans includes mechanisms such as adaptive token
+masking, Laplace noise on metadata, and artifact summa-
+rization.
+We assume the embedding function e(·) is Lipschitz con-
+tinuous with Lipschitz constant Le, i.e., for any two texts
+s1, s2:
+∥e(s1) −e(s2)∥2 ≤Le · dtext(s1, s2),
+where dtext(·, ·) is a suitable distance metric on text inputs,
+such as edit distance or semantic similarity.
+Privacy transformations introduce randomized perturbations
+to the input text. For example, token masking replaces to-
+kens with a mask token with probability p(w), and summa-
+rization truncates or compresses the text. These operations
+induce a random perturbation ∆s = s −˜s with bounded
+expected magnitude.
+By modeling the privacy transformation as a randomized
+mapping satisfying ε-differential privacy, the expected per-
+turbation magnitude is bounded by a function δs(ε):
+E[dtext(s, ˜s)] ≤δs(ε).
+Combining this with the Lipschitz continuity of e(·):
+E [∥e(s) −e(˜s)∥2] ≤Le·E[dtext(s, ˜s)] ≤Leδs(ε) =: δ(ε).
+For similarity scores defined as inner products or cosine
+similarity, which are Lipschitz continuous with respect to
+the embeddings, we have:
+|sim(e(q), e(s))−sim(e(q), e(˜s))| ≤Lsim ·∥e(s)−e(˜s)∥2,
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+for some constant Lsim.
+Taking expectation:
+E[|sim(e(q), e(s))−sim(e(q), e(˜s))|] ≤Lsimδ(ε) =: δ′(ε).
+Hence, the expected distortion in similarity scores due to
+privacy transformations is bounded by δ′(ε), completing the
+proof.
+A.2. Convergence of Federated Routings
+Theorem A.2.
+Consider the iterative routing process
+tr = R(ζ(r)
+g ) selecting tools based on aggregated com-
+pendiums ζ(r)
+g . Under assumptions of bounded updates and
+Lipschitz continuity of reranking functions, the sequence
+{tr} converges almost surely to a stable tool-selection t∗:
+lim
+r→∞tr = t∗.
+Proof. Consider the routing operator R acting on the global
+compendium embeddings ζ(r)
+g
+at round r, producing tool-
+selections tr = R(ζ(r)
+g ).
+We model R as a mapping on a metric space (T , d), where
+T is the space of routing decisions (e.g., distributions over
+tools), and d is a suitable distance metric (e.g., total variation
+distance).
+Assume the following:
+1. R is Lipschitz continuous with constant L < 1, i.e., a
+contraction:
+d(R(x), R(y)) ≤Ld(x, y),
+∀x, y ∈T .
+2. Updates to ζ(r)
+g
+due to compendium aggregation are
+bounded and diminish over rounds, i.e., ∥ζ(r+1)
+g
+−ζ(r)
+g ∥→
+0.
+By Banach’s fixed-point theorem, any contraction mapping
+on a complete metric space admits a unique fixed point t∗
+such that:
+R(t∗) = t∗.
+The sequence {tr} generated by successive applications of
+R converges to t∗:
+lim
+r→∞tr = t∗.
+Stochastic perturbations introduced by privacy mechanisms
+can be modeled as martingale difference sequences with
+bounded variance. By applying martingale convergence
+theorems, the routing sequence converges almost surely
+despite noise.
+Therefore, the routing process stabilizes to a consistent tool-
+selection t∗, proving the theorem.
+A.3. Differential Privacy Guarantee of Artifact Sharing
+Theorem A.3. The artifact sharing mechanism M apply-
+ing Laplace noise and adaptive masking satisfies (ε, δ)-
+differential privacy. For any neighboring datasets D, D′,
+Pr[M(D) ∈S] ≤eε Pr[M(D′) ∈S] + δ,
+for any measurable set S. Privacy loss composes over R
+rounds as:
+(ε′, δ′) =
+p
+2R log(1/δ)ε + Rε(eε −1), Rδ
+
+.
+Proof. The artifact sharing mechanism M applies standard
+differential privacy mechanisms:
+- Laplace mechanism on numeric metadata:
+˜m = m + Lap
+∆m
+ε
+
+,
+where ∆m is the sensitivity of the metadata.
+- Adaptive text masking modeled as randomized response or
+local differential privacy on tokens.
+By well-known results (DworkCynthia & RothAaron, 2014),
+the Laplace mechanism satisfies ε-differential privacy. Ran-
+domized response mechanisms satisfy ε-local differential
+privacy.
+For multiple rounds R, privacy loss composes. Using ad-
+vanced composition theorems:
+(ε′, δ′) =
+p
+2R log(1/δ)ε + Rε(eε −1), Rδ
+
+.
+Hence, the overall artifact sharing mechanism satisfies
+(ε′, δ′)-differential privacy after R rounds.
+This formalizes privacy guarantees on shared compendiums,
+bounding information leakage.
+A.4. Privacy and Robustness Evaluation Against
+Prompt Extraction Attacks
+To evaluate SYNAPSE’s resilience against prompt extraction
+attacks, we use GPT-5.1 as the adversarial model. Figure 10
+shows the attacker’s instructions for retrieving in-context
+examples, with results in Figure 11. A sample from general-
+client-1 (signature: Work, Rate, and Time Analyzer) shows
+the attacker accessing only client-emitted text and a para-
+phrase of the system prompt. The attacker’s JSON captures
+the prompt template and shared fields but incorrectly identi-
+fies the tool as scienceqa/science instead of mathqa, result-
+ing in low token overlap (0.038) and moderate embedding
+similarity (0.342). In SYNAPSE, clients create compendi-
+ums from private information including tool identity, usage
+scenarios, tags, and prompt variables.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+GPT-5.1 Prompt for Reconstruct attack model Examples
+response = openai.ChatCompletion.create(
+model="gpt-5.1",
+messages=[
+{
+"role": "system",
+"content": "You are an adversarial analyst attempting to reconstruct the
+original prompt or in-context example that produced a public response.Given
+only the observed response, infer the most likely original prompt.Respond with
+your best guess as plain text without extra commentary."
+},
+{
+"role": "user",
+"content": (
+"The observed response may be masked, summarized, or partially
+redacted.Infer the likely tool, domain, scenario, and role implied by the
+text.Reconstruct the original prompt/in-context example in the most plausible
+structured form."
+"Question: XXXXX"
+"Answer: XXXXX"
+)
+}
+]
+)
+Figure 10. Prompt template used by the adversarial analyst model (GPT-5.1) for reconstructing original prompts or in-context examples
+from observed client responses, including handling of masked, summarized, or partially redacted text.
+A PrivacyPolicy applies differential privacy to numeric data
+using the Laplace mechanism and ALT (Adaptive Laplace
+Text Noise) to text fields. ALT creates stable templates,
+masks important text parts with Laplace-driven changes,
+and produces ”hashed” fragments like Work ### Analyzer.
+Edge aggregators group collection of compendiums by meta-
+data, ensure consistency, and combine them using sum -
+uid (Chen et al., 2025). The central aggregator creates
+a global snapshot shared with clients. Despite masking,
+the LLM-based summarizer remains effective as template
+structure and metadata are preserved, supporting accurate
+retrieval and aggregation across the federated system.
+Retrieval Under privacy In our results from experiment
+on privacy and data retrieval shown in figure 12, we tested
+privacy methods using BBH Object Counting queries across
+six scenarios including Financial Calculator, Percentage
+Solver, Geometry, Word Problem Solver, Number Theory,
+and Statistics Solver. Results showed adaptive text masking
+impacts retrieval performance more than differential privacy
+(DP) on metadata. Without privacy measures, retrieval accu-
+racy peaks for Recall@1 and Recall@5. Adaptive masking,
+controlled by λ, reduces Recall@1 from 0.620 at λ = 0.5 to
+0.280 at λ = 1.5, while Recall@5 drops from 0.900 to 0.824.
+Recall@10 remains stable due to data size. Stronger mask-
+ing obscures key information, reducing retrieval accuracy.
+Changes in DP privacy budget (ε) for numeric metadata
+minimally affect recall. Recall@1 remains at 0.433–0.440
+for (ε ∈{0.5, 1.0, 2.0}), with Recall@5 increasing slightly
+at (ε = 2.0) (0.885). Adding noise to metadata maintains
+retrieval effectiveness. Results show increased masking (λ)
+raises distortion and reduces retrieval performance. While
+DP on metadata provides efficient privacy, strong text mask-
+ing requires careful adjustment to maintain retrieval accu-
+racy. This guides system architects in selecting privacy
+settings that balance protection and utility.
+Differential Privacy guarantee of artifact sharing
+The
+experimental results depicted in Figure 12 empirically vali-
+date Theorem A.3 by demonstrating the differential privacy
+guarantees of the artifact sharing mechanism (M) under
+varying privacy budgets (ε) and masking strengths (λ). Pan-
+els (a) and (b) quantify embedding distortion induced by
+privacy-preserving transformations, showing controlled and
+bounded perturbations consistent with theoretical distortion
+bounds δ(ε). Panels (c) and (d) reveal that despite these per-
+turbations, retrieval performance measured by Recall@K
+remains robust across privacy settings, indicating that the
+privacy mechanisms effectively limit information leakage
+while preserving utility. The routing convergence compar-
+ison in panel (e) further supports the theoretical claims by
+illustrating stable federated routing behavior under fixed
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+Server Query
+Question A cat eats nine sausages in 30 minutes. A dog can eat the same number of sausages in 2/3 the amount of time the
+cat takes. Calculate the average time the two take the eat the sausages.
+Client: general-client-1
+Signature: unified::math::scenario::Work, Rate, and Time Analyzer
+Observed Client Output
+Here is the merged prompt:
+"Create a structured system prompt for a ###### QA scenario in the domain of ### #### and ##### Analyzer
+, of medium difficulty, using the ###### tool."
+The last line of your response should be of the following format: ’Answer: $VALUE$’ where VALUE is a
+numerical value.
+Client Private Prompt
+(Ground Truth)
+{"role": "structured system prompt for math QA scenarios",
+"tool": "mathqa",
+"domain": "Work, Rate, and Time Analyzer",
+"scenario": "Work, Rate, and Time Analyzer",
+"type": "usage_scenario",
+"difficulty": "medium"}
+Attacker
+Reconstruction
+{"role":"structured system prompt",
+"tool":"scienceqa",
+"domain":"science",
+"type":"usage_scenario",
+"difficulty":"medium"}
+Attack Summary
+Token overlap: 0.038
+Cosine: 0.342
+Figure 11. Prompt reconstruction example for a single client. The attacker recovers the high-level prompt structure and difficulty but fails
+to recover tool/domain identity.
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+0.6
+0.8
+1.0
+1.2
+1.4
+1.6
+1.8
+2.0
+DP epsilon
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+ Recall@K
+K=1
+K=5
+K=10
+(a) Embedding distortion vs. privacy budget ε
+0.6
+0.8
+1.0
+1.2
+1.4
+1.6
+1.8
+2.0
+DP epsilon
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+ Recall@K
+lambda=0.5
+lambda=1.0
+lambda=1.5
+(b) Embedding distortion vs. masking strength λ
+20
+40
+60
+80
+Composed epsilon (eps')
+0.92
+0.93
+0.94
+0.95
+0.96
+0.97
+0.98
+Recall@5
+(c) Recall@K vs. privacy budget ε
+0.5
+0.6
+0.7
+0.8
+Token overlap
+0.92
+0.93
+0.94
+0.95
+0.96
+0.97
+0.98
+Recall@5
+(d) Recall@K vs. masking strength λ
+Figure 12. Impact of privacy parameters on retrieval performance. Panels (a) and (b) show embedding distortion metrics under varying
+privacy budgets ε and masking strengths λ. Panels (c) and (d) present Recall@K retrieval results across different settings.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+privacy noise, confirming that the privacy-preserving com-
+pendium sharing composes over rounds without compromis-
+ing system stability. Collectively, these results align with
+Theorem’s formal statement that the Laplace noise addi-
+tion and adaptive masking satisfy (ε, δ)-differential privacy
+with compositional privacy loss, empirically demonstrating
+that privacy controls are tunable first-class components that
+maintain retrieval effectiveness and operational reliability.
+Joy Maa Baglamukhi
+B. Data Partitioning and Heterogeneity
+Analysis
+Non-IID Partitioning Method
+Non-IID splits in the ex-
+periments are created by clustering or restricting samples
+based on domain-specific attributes, inducing heterogeneity
+among clients. For instance, in the BBH datasets, non-IID
+splits are generated by sharding data according to question
+length, while for GSM8k, non-IID splits are formed by par-
+titioning data based on numeric answer ranges (fallback
+length). This approach results in clients receiving data bi-
+ased towards particular characteristics, simulating realistic
+heterogeneous federated learning scenarios.
+Dataset-Specific Client Data Splits
+- BBH Multi-Step
+Arithmetic and BBH Object Counting: Data is partitioned
+among 3 clients, each receiving 5 shards. The non-IID split
+shards are organized by question length, leading to clients
+having datasets skewed towards either shorter or longer
+questions.
+- GSM8k: Multiple splits are used: - IID splits with 3, 5,
+or 8 clients, where data is randomly shuffled and evenly
+distributed. - Non-IID split with 3 clients, where data is
+partitioned by numeric answer ranges, causing clients to
+have distinct distributions of problem difficulty or types.
+The per-client data splits provided in table 2.
+Heterogeneity Metrics
+- Divergence Mean and Std.
+Dev. The mean and standard deviation of divergence metrics
+quantify the heterogeneity among client data distributions.
+For example, non-IID splits in BBH and GSM8k show sig-
+nificantly higher divergence means (around 0.489 to 0.600)
+compared to IID splits (around 0.065 to 0.333), reflecting
+increased distribution skew. - Skew Definitions: Skew is
+explicitly defined by shard-based partitioning on question
+length or numeric answer ranges, causing clients to have
+non-overlapping or biased data subsets.
+Summary Table for Reproducibility
+This explicit char-
+acterization of data partitioning, client counts, and hetero-
+geneity metrics enables reproducibility and provides trans-
+parency on the federated learning scenarios evaluated in the
+experiments.
+C. Experimental Setups and Hyperparameters
+We implement SYNAPSE using a local edge tier aggregat-
+ing clients with a central server. Experiments use three
+federated rounds and three default clients, adjustable via
+--client-count.
+SYNAPSE applies heuristic routing
+based on lexical cues, executing selected tools using inter-
+nal prompt templates. For knowledge retrieval, SYNAPSE
+uses token-overlap scoring with symbolic bonuses, retriev-
+ing five artifacts per query. Client artifacts are condensed
+to 280-character sentences with skill tags. Differential pri-
+vacy runs with budget ε = 1.0. The select tool uses RAG
+pipeline with NoSQLDB vector search. Queries embed
+via jina-embeddings-v2-base-en, retrieving three
+examples reranked with llama-3.1-8b-instruct.
+Logic and spatial reasoning tools use prompt-based exe-
+cution without retrieval. GSM8k experiments use 5 and
+8 clients, with 50 and 30 examples per client. Retrieval
+uses top-K = 5, with one federated round. LLM baselines
+use llama-3.1-8b-instruct, while Fed-ICL shares
+eight exemplars per client. BM25 retrieval uses k1 = 1.5
+and b = 0.75, with disabled privacy and TextGrad optimiza-
+tion. TextGrad runs with llama-3.1-8b-instruct,
+using batch size 3, 3 local optimization steps, one feder-
+ated round, and summarization-based aggregation. Privacy
+and robustness tests use budgets ε ∈{0.5, 1.0, 2.0} and
+masking λ ∈{0.5, 1.0, 1.5}, with retrieval k ∈{1, 5, 10}
+in 512-dimension hash embedding space.
+LLM Reranker Prompt Template
+You are an expert tool router.
+Your
+task is to select the single most
+appropriate tool scenario for the
+given user query from the provided
+list of options.
+User Query:
+"{query}"
+Candidate Tool Scenarios:
+- Tool Option 1:
+"{candidate_1}"
+- Tool Option 2:
+"{candidate_2}"
+. . .
+Analyze the query and the tool
+descriptions carefully.
+Respond
+with ONLY the number of the best
+tool option (e.g., "1", "2", "3").
+LLM Planning Prompt Template
+You are an AI mission planner.
+Your
+job is to analyze a user query and a
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+Table 2. Dataset Splits and Client Data Distribution Summary
+Dataset
+Split
+Clients
+Per Client
+Skew Definition
+Divergence Mean
+Divergence Std. Dev.
+BBH Multi-Step
+IID
+3
+60
+IID random shuffle
+0.222
+0.031
+BBH Multi-Step
+Non-IID
+3
+60
+Shard by question length
+0.489
+0.063
+BBH Object Counting
+IID
+3
+60
+IID random shuffle
+0.222
+0.031
+BBH Object Counting
+Non-IID
+3
+60
+Shard by question length
+0.600
+0.054
+GSM8k
+IID
+3
+60
+IID random shuffle
+0.333
+0.054
+GSM8k
+IID
+5
+50
+IID random shuffle
+0.065
+0.017
+GSM8k
+IID
+8
+30
+IID random shuffle
+0.114
+0.045
+GSM8k
+Non-IID
+3
+60
+Shard by numeric answer
+0.600
+0.054
+list of retrieved tool scenarios to
+create a final execution plan.
+User Query:
+"{query}"
+Candidate Tool Scenarios (retrieved
+from a vector search):
+- "{scenario_1}"
+- "{scenario_2}"
+. . .
+Your primary task is to determine
+which main tool, ’mathqa’ or
+’scienceqa’ or ’mmluqa’ or
+’truthfulqa’, is the correct one
+to handle this query, based on which
+tool owns the most relevant scenario
+from the candidate list.
+Then,
+create a JSON object describing
+your plan.
+JSON Response Format:
+{
+"plan_rationale":
+"A brief
+explanation of why you chose the
+parent tool, referencing the most
+relevant candidate scenario.",
+"primary_tool":
+{
+"scenario_name":
+"The full name of
+the best matching tool scenario from
+the candidate list.",
+"parent_tool_name":
+"The final
+parent tool name.
+This value
+MUST be similar to ’mathqa’ or
+’scienceqa’ or ’logicqa’ or
+’spatialqa’."
+}
+}
+Respond with ONLY the valid JSON
+object.
+D. Experiments on more challenging and
+high-complexity tasks with SYNAPSE
+To evaluate the performance of SYNAPSE on tasks with
+higher complexity and reasoning challenges, we conducted
+experiments using GPT-4o on datasets extracted from
+LiveBench (White et al., 2025). These datasets include
+tasks that test logical inference, spatial reasoning, and math-
+ematical abstraction, providing a rigorous benchmark for
+assessing the robustness of our SYNAPSE.
+Experimental Setup. We evaluated SYNAPSE on two
+categories of tasks: reasoning and advanced mathematical
+problems. For reasoning tasks, we utilized Web of Lies
+(Version 2), an enhanced dataset that introduces deductive
+red herrings to challenge logical rigor; Zebra Puzzle, a de-
+ductive reasoning task involving multiple constraints across
+variables like colors and nationalities; and a Spatial Dataset,
+requiring the model to reason about numerical and posi-
+tional attributes of solid, regular heptagons. For mathemati-
+cal tasks, we employed the AMPS Hard Dataset, designed
+to test advanced symbolic manipulation and mathematical
+reasoning through challenging, randomized problem distri-
+butions.
+Results. Table 3 shows centralized configurations outper-
+forming federated approaches on reasoning tasks—Spatial
+(0.53 vs. 0.40), Web of Lies (0.37 vs. 0.30), and Zebra Puz-
+zle (0.33 vs. 0.27). However, for AMPS Hard mathematical
+tasks, federated learning surpasses the centralized baseline
+(0.50 vs. 0.46), indicating better handling of client-specific
+variations in numerical problems. Table 4 shows prompt
+Table 3. Performance of Centralized and Federated Configurations
+on Reasoning and Mathematical Tasks. Best test accuracies are
+reported for each method across the datasets.
+Category
+Dataset
+Central Server
+Federated
+Reasoning
+Spatial
+0.53
+0.40
+Web of Lies
+0.37
+0.30
+Zebra Puzzle
+0.33
+0.27
+Math
+AMPS Hard
+0.46
+0.50
+transfer results from LLaMA 3.2-11B to 3.2-3B. Transferred
+prompts improve performance for Object Counting (+0.03)
+and Multi-step Arithmetic (+0.15), but decrease GSM8k
+performance (-0.08), suggesting task-dependent effective-
+ness.
+These findings reveal trade-offs in federated learning and
+prompt transfer. While federated methods excel in mathe-
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+matical tasks, reasoning tasks remain challenging. Prompt
+transfer can improve efficiency across models but requires
+task-specific optimization to prevent performance losses.
+Table 4. Results of Prompt Transferability from LLaMA 3.2-11B to
+LLaMA 3.2-3B. The table reports the performance of prompts op-
+timized on the larger model and directly transferred to the smaller
+model, compared to initial prompts without optimization. Per-
+formance metrics are prediction accuracy on the task (higher is
+better).
+Task
+Initial
+Prompt
+↑
+Transferred
+Prompt
+↑
+Performance
+Change
+Object Counting
+0.66
+0.69
++0.03
+Multi-step Arithmetic
+0.51
+0.66
++0.15
+GSM8k
+0.80
+0.72
+-0.08
+E. Communication Cost Analysis
+Table 5 summarizes communication costs for experiments
+on GSM8k dataset, comparing SYNAPSE variants with
+prompt-sharing and weight-sharing baselines. The com-
+pendium size per client per round ranges from 1,067 bytes
+for Static-Global Compendium to 5,334 bytes for federated
+compendium methods. The weight-sharing baseline using
+Llama-3.1-8b-instruct model in fp32 precision requires 64
+GB per client per round. This baseline, FedAvg (McMahan
+et al., 2023), aggregates full model weights from clients
+and serves as a comparative benchmark.
+SYNAPSE’s
+compendium-based knowledge exchange demonstrates sig-
+nificant communication efficiency by using compact, struc-
+tured compendiums instead of large model weights, show-
+ing advantages in bandwidth-constrained federated environ-
+ments.
+Discussion Communication volume analysis shows substan-
+tial savings with SYNAPSE. Fed-Compendium-NoRouting
+requires 26.7 MB (5 clients) to 42.7 MB (8 clients), while
+weight-sharing baselines need hundreds of gigabytes (320
+GB for 5 clients, 512 GB for 8 clients). Prompt-sharing
+baselines have intermediate costs but remain significantly
+higher than SYNAPSE compendium exchange. Per-client
+per-round bandwidth requirements are reduced by over
+four orders of magnitude compared to weight-sharing, en-
+abling lower network consumption, reduced latency, and de-
+creased costs. These results show SYNAPSE’s compendium-
+based exchange achieves superior communication efficiency
+without accuracy loss, enabling deployment in bandwidth-
+constrained scenarios.
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+Table 5. Communication Costs of SYNAPSE and Baselines on GSM8k
+Baseline
+Clients
+Avg. Bytes /
+Client / Round
+Total Bytes
+(All Clients)
+Static-Global Compendium
+5
+1,067
+5,334
+Fed-Compendium-NoRouting
+5
+5,334
+26,670
+Fed-Compendium-FlatServer
+5
+5,334
+26,670
+Fed-ICL
+5
+1,104
+5,521
+Weight-Share (Llama-3.1-8b fp32)
+5
+64 × 109
+320 × 109
+Static-Global Compendium
+8
+667
+5,334
+Fed-Compendium-NoRouting
+8
+5,334
+42,672
+Fed-Compendium-FlatServer
+8
+5,334
+42,672
+Fed-ICL
+8
+1,106
+8,848
+Weight-Share (Llama-3.1-8b fp32)
+8
+64 × 109
+512 × 109
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+SYNAPSE : Compendium-Aware Federated Knowledge Exchange for Tool-Routed LLMs
+F. Result Example
+F.1. GSM8k Benchmark Evaluation Using llama-3.1-8b-instruct as the Client Model
+User Query
+If Ann is 9 years old and her brother is twice her age, how old
+will her brother be in 3 years?
+Retrieved SYNAPSE compendium entries
+• Financial and Banking Calculator
+• Percentage and Proportion Solver
+• Geometry:
+Shapes and Measurement
+• General Logic and Counting
+• Work, Rate, and Time Analyzer
+Abridged reasoning
+Brother is twice Ann’s age: 2 × 9 = 18.
+In 3 years: 18 + 3 = 21.
+Final Answer
+21
+Ground Truth
+21
+User Query
+Doctor Jones works 9 hours. Rounds take 20 minutes per inpa-
+tient (9 inpatients) and he has 10 appointments at 30 minutes
+each. How many hours are left to update records?
+Retrieved SYNAPSE compendium entries
+• Work, Rate, and Time Analyzer
+• Financial and Banking Calculator
+• Percentage and Proportion Solver
+• Geometry:
+Shapes and Measurement
+• General Logic and Counting
+Abridged reasoning
+Rounds: 9 × 20 = 180 min.
+Appointments: 10 × 30 = 300 min.
+Total scheduled: 480 min; total available: 9 × 60 = 540 min.
+Remaining: 540 −480 = 60 min = 1 hour.
+Final Answer
+1 hour
+Ground Truth
+1 hour
+User Query
+Jamal’s phone holds 6× Brittany’s capacity. Brittany’s capacity
+is 50× the number of ducks in Jamal’s photo. If Jamal holds
+1800 photos, how many ducks are in the photo?
+Retrieved SYNAPSE compendium entries
+• Work, Rate, and Time Analyzer
+• Financial and Banking Calculator
+• Percentage and Proportion Solver
+• Geometry:
+Shapes and Measurement
+• Algebraic Word Problem Solver
+Abridged reasoning
+Let J=1800 and J=6B ⇒B=300.
+Also B=50D ⇒D=300/50=6.
+Final Answer
+6 ducks
+Ground Truth
+6 ducks
+User Query
+John attends a cooking class 4 times/week for 2 hours each
+time for 6 weeks. He learns one recipe per 1.5 hours. How
+many recipes does he learn?
+Retrieved SYNAPSE compendium entries
+• Work, Rate, and Time Analyzer
+• Financial and Banking Calculator
+• Percentage and Proportion Solver
+• Geometry:
+Shapes and Measurement
+• Algebraic Word Problem Solver
+Abridged reasoning
+Weekly hours: 4 × 2 = 8. Total hours: 8 × 6 = 48.
+Recipes: 48/1.5 = 32.
+Final Answer
+32 recipes
+Ground Truth
+32 recipes
+Figure 13. Qualitative examples of SYNAPSE solving math queries. For each query, SYNAPSE retrieves relevant compendium artifacts,
+reranks candidates for relevance, and synthesizes an answer via an LLM generation step.
+21
