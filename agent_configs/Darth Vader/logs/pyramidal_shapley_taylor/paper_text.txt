@@ -1,0 +1,2429 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via
+Pyramidal Shapley-Taylor Learning
+Anonymous Authors1
+Abstract
+As a foundational task in human-centric cross-
+modal intelligence, motion-language retrieval
+aims to bridge the semantic gap between natural
+language and human motion, enabling intuitive
+motion analysis, yet existing approaches predom-
+inantly focus on aligning entire motion sequences
+with global textual representations. This global-
+centric paradigm overlooks fine-grained interac-
+tions between local motion segments and individ-
+ual body joints and text tokens, inevitably leading
+to suboptimal retrieval performance. To address
+this limitation, we draw inspiration from the pyra-
+midal process of human motion perception (from
+joint dynamics to segment coherence, and finally
+to holistic comprehension) and propose a novel
+Pyramidal Shapley-Taylor (PST) learning frame-
+work for fine-grained motion-language retrieval.
+Specifically, the framework decomposes human
+motion into temporal segments and spatial body
+joints, and learns cross-modal correspondences
+through progressive joint-wise and segment-wise
+alignment in a pyramidal fashion, effectively cap-
+turing both local semantic details and hierarchical
+structural relationships. Extensive experiments on
+multiple public benchmark datasets demonstrate
+that our approach significantly outperforms state-
+of-the-art methods, achieving precise alignment
+between motion segments and body joints and
+their corresponding text tokens. The code of this
+work will be released upon acceptance.
+1. Introduction
+In recent years, motion-language retrieval (Petrovich et al.,
+2023; Yu et al., 2024) has garnered increasing attention in
+the field of human-centric cross-modal intelligence (Oord
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+et al., 2018; Radford et al., 2018), as it holds significant po-
+tential to bridge the semantic gap between natural language
+and human motion (Li et al., 2025; Chen et al., 2025a). As a
+core foundational research topic, motion-language retrieval
+underpins a diverse range of downstream tasks, such as
+human motion understanding (Lyu et al., 2025; Schneider
+et al., 2024; Fang et al., 2025; Chen et al., 2024), motion
+style transfer (Chen et al., 2025b; Kim et al., 2025; Zhong
+et al., 2024), and motion generation (Meng et al., 2025;
+Hong et al., 2025; Chen et al., 2023).
+Despite substantial advancements in this field, a persistent
+and significant semantic gap persists between human motion
+representations and natural language descriptions. A critical
+limitation of existing approaches (Petrovich et al., 2023;
+Yu et al., 2024; Tevet et al., 2022a) is their predominant
+focus on global alignment between entire motion sequences
+and their corresponding textual descriptions. This global-
+centric paradigm overemphasizes holistic correlation mod-
+eling while failing to capture fine-grained local associations.
+This oversight hinders the precise matching of semantic de-
+tails between the two modalities. Consequently, addressing
+this fine-grained alignment challenge becomes imperative
+for advancing motion-language retrieval performance.
+Notably, human perception and understanding of mo-
+tion (Zhong et al., 2023; Zhu et al., 2023) follow an in-
+herent pyramidal process, progressing from low-level joint
+dynamics to high-level holistic sequence comprehension.
+Specifically, this cognitive process unfolds in three sequen-
+tial stages: First, at the joint-wise alignment stage, humans
+perceive the temporal trajectories of individual joints and
+interpret relative movements between joints, laying the foun-
+dation for recognizing short motion segments. Second, at
+the segment-wise alignment stage, by integrating these in-
+dividual joints into meaningful motion segments, dynamic
+relations are established between adjacent motion segments.
+Finally, at the holistic alignment stage, these motion seg-
+ments are synthesized into a unified, holistic model, in
+which localized kinematic features and semantic informa-
+tion are hierarchically integrated to achieve comprehensive
+motion understanding.
+To illustrate this process, consider the textual description “a
+man walks forward then stops”. At the joint-wise alignment
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+stage, we first detect periodic swings of the arms and legs,
+forward translation of the root joint, and the final stationary
+pose. During segment-wise alignment, we identify coordi-
+nated motion patterns corresponding to “walks forward” and
+“stops” by analyzing the temporal synchronization between
+limb movements and root joint trajectories. Ultimately,
+integrating these two sub-sequences enables holistic com-
+prehension of the entire motion described. Inspired by this
+human cognitive mechanism, we introduce this pyramidal
+hierarchical framework into motion-language retrieval, em-
+powering the model to progressively capture cross-modal
+correspondences from fine-grained local details to holistic
+semantic structures.
+Given that human motion inherently exhibits temporal conti-
+nuity and strong contextual dependencies between adjacent
+motion segments as well as body joints, capturing such
+context-aware characteristics is critical for modeling accu-
+rate motion-language correspondence. To address this re-
+quirement, we introduce a Shapley-Taylor Interaction (Sun-
+dararajan et al., 2020) (STI) metric, which quantifies the
+interaction intensity between pairs of cross-modal elements
+across varying contextual scenarios. Specifically, as contex-
+tual information is gradually incorporated, STI measures
+the additional marginal contribution achieved when two el-
+ements co-occur versus when they appear independently,
+with higher STI values indicating stronger semantic cor-
+relations between the corresponding motion and language
+elements. Building on this, we propose a Pyramidal Shapley-
+Taylor (PST) learning framework, which embeds STI within
+the pyramidal modeling scheme to capture joint-wise and
+segment-wise motion-language interactions.
+The proposed PST framework adopts a progressive pyra-
+midal training strategy consisting of three hierarchical lev-
+els: i) Joint-wise alignment, which calculates interaction
+strengths between individual word tokens and joint tokens;
+ii) Segment-wise alignment, which compresses joint tokens
+and word tokens into segment-level and phrase-level tokens
+via dedicated token compressors, then computes their cross-
+modal interactions; iii) Holistic alignment, which treats all
+motion and text tokens as unified global representations and
+quantifies their global-level correspondence. Through this
+PST learning framework, the model effectively captures
+motion-language correspondences at fine-grained scales,
+facilitating more precise motion-language retrieval. Fur-
+thermore, we present joint-wise and segment-wise visual-
+ization analyses that explicitly demonstrate how the model
+aligns motion units with textual descriptions. Extensive
+experiments on public benchmark datasets verify that our
+approach attains state-of-the-art retrieval performance. Our
+contributions can be summarized as follows:
+• We propose a Pyramidal Shapley-Taylor (PST) learn-
+ing framework that performs fine-grained motion-
+language retrieval in a pyramidal fashion via joint-wise,
+segment-wise, and holistic alignment.
+• The visualization results across joint-wise and segment-
+wise alignments demonstrate the effectiveness of our
+method in capturing fine-grained motion-language cor-
+respondences.
+• Extensive experiments across multiple public datasets
+show that our model achieves state-of-the-art re-
+sults with remarkable effectiveness and generalization
+across diverse motion-language tasks.
+2. Related Work
+Motion-Language Learning. Motion-language learning
+has gained substantial attention for narrowing the gap be-
+tween human motion and natural language. Petrovich et al.
+(2023) extends TEMOS (Petrovich et al., 2022) with con-
+trastive learning and introduces TMR, achieving a more
+structured cross-modal latent space for text-motion re-
+trieval. Yu et al. (2024) introduces MotionPatch, which
+slices motion sequences by body parts and encodes them
+with pretrained Vision Transformer (ViT), leading to effec-
+tive motion-language retrieval. However, these approaches
+process motion and text as holistic inputs, which departs
+from a fine-grained human perspective when describing
+motion sequences. To move toward interpretable under-
+standing, Lyu et al. (2025) introduce lexicalized (Shen et al.,
+2022) motion representations that render motion-language
+features more transparent and controllable. Chronologi-
+cally Accurate Retrieval (CAR), proposed by Fujiwara et al.
+(2024), decomposes textual descriptions into several tempo-
+ral elements to improve temporal correspondence between
+language and motion.
+Motion-Language Retrieval for Generation. Motion-
+language learning has been widely applied in human mo-
+tion generation tasks. ReMoDiffuse, proposed by Zhang
+et al. (2023b), enhances the generalizability and diversity
+of motion diffusion models through an integrated motion-
+language retrieval mechanism. Similarly, Yu et al. (2025)
+achieves body-part-level motion retrieval to improve the
+controllability of generated motions. Moreover, MoRAG,
+introduced by Kalakonda et al. (2025), leverages Large
+Language Models (LLMs) to mitigate spelling errors and
+rephrasing issues during motion retrieval, thereby improv-
+ing the robustness and generalization of motion generation.
+These studies collectively demonstrate that motion-language
+retrieval plays a crucial role in advancing motion generation
+and reveal that developing fine-grained motion-language
+retrieval is essential for facilitating controllable and seman-
+tically consistent motion generation.
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+Segment 1
+stepped in 
+something
+walks 
+forward
+person
+walks
+stepped
+some-
+thing
+……
+Joint 1
+Joint 2
+Joint N-1 Joint N
+Motion 
+Encoder
+person casually 
+walks … to a 
+straight walk.
+person walks 
+forward ... stepped-
+in something
+Body 
+Compressor
+……
+……
+batch
+Token 
+Compressor
+……
+Token 
+Compressor
+Token 
+Compressor
+Text 
+Encoder
+𝓛𝓛𝐂𝐂
+𝐣𝐣𝐣𝐣𝐣𝐣
+𝓛𝓛𝐃𝐃
+𝓛𝓛𝐂𝐂
+𝐡𝐡𝐡𝐡𝐡𝐡
+𝓛𝓛𝐒𝐒𝐒𝐒
+𝐣𝐣𝐣𝐣𝐣𝐣
+𝓛𝓛𝐒𝐒𝐒𝐒
+𝐬𝐬𝐬𝐬𝐬𝐬
+Apart
+Closer
+Positives
+Negatives
+……
+……
+……
+Token 
+Compressor
+……
+Joint 1
+Joint 2
+Joint N-1 Joint N
+Segment 1
+person
+casually
+recovers
+walk
+casually 
+walks
+straight 
+walk
+Segment N
+Segment N
+𝓛𝓛𝐂𝐂
+𝐬𝐬𝐬𝐬𝐦𝐦
+Figure 1. Overview of our Pyramidal Shapley-Taylor (PST) learning framework. Our PST learning framework consists of Shapley-Taylor
+Interaction (STI), described in Sec. 3.2, and pyramidal modeling scheme, described in Sec. 3.3. As illustrated in the middle cube, each
+cell represents the interaction strength between a motion token and a text token within a batch, where darker colors indicate stronger
+semantic correlations, and lighter colors represent weaker ones.
+3. Method
+3.1. Preliminary
+Motion-language retrieval can be formulated as a cross-
+modal alignment problem (Radford et al., 2021; Liao et al.,
+2025; Lyu et al., 2025), whose objective is to establish a
+structured cross-modal latent space between the set of text
+descriptions T = {ti}Nt
+i=1 and the set of human motion se-
+quences M = {mj}Nm
+j=1, where Nt and Nm denote the num-
+ber of text descriptions and motion sequences, respectively.
+Specifically, given a text description ti ∈T , the goal is to
+retrieve and rank the motion sequences that best match the
+given text description from a motion database. Conversely,
+given a motion sequence mj ∈M, the goal is also to re-
+trieve the most relevant text description that best matches
+its motion content. A text description ti provides a natural-
+language explanation of either the entire motion sequence
+or specific temporal segments within it (Zhang et al., 2023a;
+Sun et al., 2024; Cen et al., 2024), e.g., “Walk forward and
+stand still” and “Walk forward”. Moreover, the text may
+contain references to specific body parts or global motion
+directions, such as “the left arm waves” or “walk in a circle”.
+The motion sequence mj is a discrete temporal representa-
+tion (Jang et al., 2022; Tevet et al., 2022b; Punnakkal et al.,
+2021) of human motion. It is defined as mj ∈RL×J×C,
+where L, J, and C denote the length of frames, number of
+joints, and the dimension of the input motion, respectively.
+In this paper, we use 3D skeleton joints as the motion repre-
+sentation, where C = 3 denotes the Cartesian coordinates
+(x, y, z) of each joint.
+To achieve motion-language retrieval, we first employ a
+(a)
+(b)
+(c)
+a person swings 
+their arms around
+then walks 
+forward 
+(d)
+Random Permutation
+(b)
+(c)
+(a)
+(d)
+Prefix 
+Subset 𝑆𝑆𝜋𝜋
+Selected pairs
+𝑆𝑆𝜋𝜋∪{(c)}
+𝑆𝑆𝜋𝜋∪{ a , (c)}
+paired
+paired
+score
+𝑆𝑆𝜋𝜋∪{(a)}
+𝑆𝑆𝜋𝜋
+Shapley-Taylor
+Interaction Value
+w {(a),(c)}
+w/o {(a),(c)}
+Figure 2. An intuitive illustration of the STI.
+modality-specific encoder E to project ti and mj into a
+latent space, and then use the cosine similarity function to
+measure the similarity between them. The cosine similarity
+function (Radford et al., 2021) is formulated as:
+s(ti, mj) =
+ET (ti) · EM(mj)
+∥ET (ti)∥∥EM(mj)∥,
+(1)
+where EM and ET denote motion encoder and text encoder,
+respectively, as used in our framework.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+3.2. Shapley-Taylor Interaction
+The Shapley-Taylor Interaction (STI) (Sundararajan et al.,
+2020) extends the Shapley Interaction by taking a Taylor
+expansion truncated at order k, where k = 1 recovers stan-
+dard Shapley attributions and k > 1 quantifies interaction
+among cross-modality features. In our motion-language
+retrieval task, which analyzes pairwise interactions between
+motion and language modalities, we incorporate STI into
+our learning framework and set k = 2. Given a set of text
+tokens and motion tokens, the STI first concatenates the
+two modalities into a unified set and performs a random
+permutation over all tokens. For a selected text token et
+i and
+motion token em
+j , under a random permutation π, let posπ(·)
+denote the position of a token in the permutation. The prefix
+subset Sπ is then composed of all tokens appearing before
+min(posπ(et
+i), posπ(em
+j )). On this Sπ, we compute STI
+value ϕ of the token pair (et
+i, em
+j ) as follows:
+ϕ(et
+i, em
+j ) = Eπ
+h
+F(Sπ ∪{et
+i, em
+j }) −F(Sπ ∪{et
+i})
+−F(Sπ ∪{em
+j }) + F(Sπ)
+i
+,
+(2)
+where F(·) denotes the scoring function, which is defined by
+the similarity score in our retrieval task, and Eπ[·] denotes
+the expectation taken over all random permutations. Fig. 2
+provides an intuitive understanding of the STI. Conceptually,
+under each permutation π, the model first takes Sπ as the
+input to compute scoring function, then compares the score
+changes when et
+i, em
+j , or both are added into Sπ. The change
+in score reflects the marginal contribution of the token pair
+(et
+i, em
+j ) under this permutation, and averaging these scores
+over all permutations yields the final STI value for this pair.
+Since STI explicitly relies on random permutations and
+their corresponding prefix subsets, it can be interpreted as
+follows: starting from an empty subset, the model gradually
+adds tokens into this subset. When the token pair (et
+i, em
+j ) is
+inserted, its STI value measures the additional gain in the
+final retrieval score contributed by this pair conditioned on
+the current prefix subset. Formally, consider a token set of
+size K, we define variable L to denote the length of prefix
+subset. The probability distribution P of L is given by:
+P(L = ℓ) = 2(K −ℓ−1)
+K(K −1) , ℓ= 0, 1, . . . , K −2,
+(3)
+where K ≥2. For the detailed explanation of Equation 3,
+please refer to the Supplementary Material. This distribution
+indicates that shorter prefixes, where ℓis small, occur more
+frequently, while longer prefixes have smaller probabili-
+ties. Consequently, smaller subsets Sπ are assigned larger
+weights in the overall expectation, whereas larger subsets
+contribute less. From a semantic perspective, when Sπ is
+small, the available contextual information is limited, lead-
+ing to substantial improvement in the retrieval score when
+adding the pair (et
+i, em
+j ). Conversely, when Sπ is large, con-
+taining other well-aligned pairs, F(Sπ) may have reached
+near-saturation, causing the marginal contribution gain from
+adding the paired (et
+i, em
+j ) to diminish. This property causes
+STI values exhibit distinctive peaks for genuinely aligned
+motion-language pairs, effectively highlighting the most
+critical motion-language correspondences.
+However, due to the calculation across all possible per-
+mutations, the computational cost of STI is prohibitively
+high during the training stage. To address this issue, we
+construct a lightweight approximation model, named the
+STI Estimation Head H, composed of convolution and
+self-attention (Vaswani et al., 2017) layers, and train it
+using Monte Carlo sampling of STI. Concretely, to inte-
+grate this H into training, we transform STI values into
+token-wise probability distributions of motion-to-text and
+text-to-motion STI values, formulated as follows:
+pϕ
+i,j =
+exp(ϕ(et
+i, em
+j ))
+PNt
+k=1 exp(ϕ(et
+k, em
+j ))
+,
+ˆpϕ
+i,j =
+exp(ϕ(et
+i, em
+j ))
+PNm
+k=1 exp(ϕ(et
+i, em
+k ))
+.
+(4)
+For each motion token em
+j and each text token et
+i, we ob-
+tain the motion-to-text distribution and the text-to-motion
+distribution respectively, formulated as follows:
+Dϕ
+m2t(j) = [pϕ
+1,j, pϕ
+2,j, . . . , pϕ
+Nt,j],
+Dϕ
+t2m(i) = [ˆpϕ
+i,1, ˆpϕ
+i,2, . . . , ˆpϕ
+i,Nm].
+(5)
+Similarly to Equation 4, the STI Estimation Head H takes
+a motion token mj and a text token ti as input and pro-
+duces the estimated STI value pH
+i,j and ˆpH
+i,j, which form
+the motion-to-text and text-to-motion distributions DH
+m2t and
+DH
+t2m analogous to Equation 5. These distributions serve
+as student predictions, trained to match the standard STI
+distributions via our STI distillation loss LSD, defined using
+a Kullback-Leibler (KL) divergence (Kingma & Welling,
+2013; Kullback, 1997) objective. Our LSD is formulated as
+follows:
+LSD = KL
+
+Dϕ
+m2t ∥DH
+m2t
+
++ KL
+
+Dϕ
+t2m ∥DH
+t2m
+
+.
+(6)
+This lightweight model learns to approximate the STI with-
+out enumerating all permutations, enabling efficient integra-
+tion of STI into our motion-language retrieval task while
+maintaining its interpretability and fine-grained interaction
+modeling capabilities.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+3.3. Pyramidal Modeling Scheme
+Traditional retrieval methods often treat text and motion
+sequences as a whole, failing to capture fine-grained cross-
+modal feature interactions. This limitation motivates us to
+introduce a pyramidal modeling scheme that enables the
+model to capture detailed motion-language correspondences
+at multiple scales progressively. We define joint-wise align-
+ment, segment-wise alignment, and holistic alignment as
+key stages in the retrieval process.
+To enhance the ability of the model to capture contextual
+dependencies within motion sequences, we leverage a to-
+ken compression mechanism between adjacent alignment
+stages. Our token compressor consists of convolution, self-
+attention (Vaswani et al., 2017), and a K-Nearest Neighbor-
+based Density Peaks Clustering (KNN-DPC) (Du et al.,
+2016) algorithm, which selects cluster centers based on high
+local density and significant relative distance, and assigns
+each remaining token to its nearest center.
+In joint-wise alignment, the model performs fine-grained
+retrieval between each motion joint and its correspond-
+ing textual tokens over time. Given a text description t
+and a motion sequence m as input, we encode them us-
+ing a text encoder ET and a motion encoder EM, respec-
+tively. To preserve the structural properties of the motion
+sequence, we encode the motion along the joint dimen-
+sion dj and the temporal dt dimension, and then flatten
+them to obtain N jnt
+m = dj × dt. This yields text and mo-
+tion embeddings E*,(jnt) = {e*,(jnt)
+i
+}
+Njnt
+*
+i=1 ∈RNjnt
+* ×D, where
+∗∈[m, t],e*,(jnt)
+i
+and N jnt
+* denote the joint-stage token and
+the number of token, respectively. In segment-wise align-
+ment, joint-stage text embedding Et,(jnt) is passed through
+our token compressor to produce segment-stage text em-
+bedding Et,(sgm) = {et,(sgm)
+i
+}Nsgm
+t
+i=1
+∈RNsgm
+t
+×D with text
+compression ratio of ρt. For the motion modality, we first re-
+shape Em,(jnt) to Rdj×dt×D and apply a body compressor to
+compress along the whole joint axis, and subsequently apply
+the token compressor along the temporal dimension with
+a motion compression ratio of ρm, yielding segment-stage
+motion embedding Em,(sgm) = {em,(sgm)
+j
+}Nsgm
+m
+j=1 ∈RNsgm
+m
+×D.
+The compression ratio, defined as ρ∗= N sgm
+∗
+/N jnt
+∗, where
+∗∈{m, t}, is set to 0.25 in our experiments, and a detailed
+ablation study on the influence of ρ∗is presented in Sec. 4.3.
+In holistic alignment, the segment-stage text embeddings
+Et,(sgm) and motion embeddings Em,(sgm) are each aggre-
+gated into a holistic representation, yielding text and motion
+embeddings Et,(hlt), Em,(hlt) ∈RD.
+3.4. Training Objective
+The training objective of PST framework is defined through
+the contrastive loss LC for each specific alignment stage
+mentioned in Sec. 3.3 and the STI distillation loss LSD
+described in Sec. 3.2 for the joint-wise and segment-wise
+alignment stage. Since the text and motion embeddings Et,
+Em are token-wise representations, we first use a projection
+head PH(·) to remove the feature dimension and modify
+the similarity function defined in Equation 1:
+s(ti, mj) =
+PH(ET (ti)) · PH(EM(mj))
+∥PH(ET (ti))∥∥PH(EM(mj))∥.
+(7)
+Given a batch size of B, the contrastive loss LC is defined as
+Information Noise-Contrastive Estimation (InfoNCE) loss
+and formulated as follows:
+Lt2m = −1
+B
+B
+X
+i=1
+log
+exp(s(ti, mi)/τ)
+PB
+j=1 exp(s(ti, mj)/τ)
+,
+Lm2t = −1
+B
+B
+X
+i=1
+log
+exp(s(ti, mi)/τ)
+PB
+j=1 exp(s(tj, mi)/τ)
+,
+LC = Lt2m + Lm2t,
+(8)
+where τ denotes the temperature hyperparameter. Although
+our PST learning framework enables joint-wise, segment-
+wise, and holistic alignment, we observe an inherent incon-
+sistency during training: the similarity distributions across
+different semantic levels do not converge synchronously,
+leading to suboptimal alignment quality. We attribute this is-
+sue to the differences in similarity distributions across align-
+ment stages. To address this, we introduce a self-distillation
+loss based on KL divergence, where the similarity distribu-
+tions at the joint-wise alignment stage are used as teacher
+signals to guide the similarities at the segment-wise align-
+ment stage. Specifically, we compute similarity distribu-
+tions for motion-text and text-motion pairs at joint-wise and
+segment-wise alignment stages, and encourage the model
+to preserve the semantic consistency learned at the joint-
+wise alignment stage when training at the segment-wise
+alignment stage through KL loss, defined as follows:
+LD = KL(Dsgm
+m2t ∥Djnt
+m2t) + KL(Dsgm
+t2m ∥Djnt
+t2m).
+(9)
+Consequently, the overall loss function of our PST learning
+framework is formulated as follows:
+L = Ljnt
+C + Lsgm
+C
++ Lhlt
+C + λS(Ljnt
+SD + Lsgm
+SD ) + λDLD, (10)
+where λ∗denotes the weight of each loss. The losses Ljnt
+C ,
+Lsgm
+C
+and Lhlt
+C represent the contrastive loss in joint-wise,
+segment-wise and holistic alignment stages, respectively,
+while Ljnt
+SD and Lsgm
+SD denote the STI distillation loss at the
+joint-wise and segment-wise alignment stages, respectively.
+We set the hyperparameters λS = 1 and λD = 1 in experi-
+ments, and provide a detailed ablation study in Sec. 4.3.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+Table 1. Motion-to-text and text-to-motion retrieval results on HumanML3D.
+Protocol
+Methods
+Text-to-motion retrieval
+Motion-to-text retrieval
+R@1↑R@2↑R@3↑R@5↑R@10↑MedR↓R@1↑R@2↑R@3↑R@5↑R@10↑MedR↓
+All
+TEMOS(Petrovich et al., 2022) 2.12
+4.09
+5.87
+8.26
+13.52
+173
+3.86
+4.54
+6.94
+9.38
+14.00 183.25
+T2M(Guo et al., 2022)
+1.80
+3.42
+4.79
+7.12
+12.47
+81.00
+2.92
+3.74
+6.00
+8.36
+12.95
+81.50
+TMR(Petrovich et al., 2023)
+8.92
+12.04 16.33 22.06
+33.37
+25.00
+9.44
+11.84 16.90 22.92
+32.21
+26.00
+MotionPatch(Yu et al., 2024)
+10.80 14.98 20.00 26.72
+38.02
+19.00 11.25 13.86 19.98 26.86
+37.40
+20.50
+Lyu et al. (2025)
+11.80 17.11 23.25 30.81
+43.36
+14.00 12.39 15.55 22.17 29.25
+40.34
+17.00
+Ours
+12.45 19.02 26.50 33.65
+48.22
+10.00 13.59 17.11 24.42 31.88
+42.68
+15.00
+Small batches
+TEMOS(Petrovich et al., 2022) 40.49 53.52 61.14 70.96
+84.15
+2.33
+39.96 53.49 61.79 72.40
+85.89
+2.33
+T2M(Guo et al., 2022)
+52.48 71.05 80.65 89.66
+96.58
+1.39
+52.00 71.21 81.11 89.87
+96.78
+1.38
+TMR(Petrovich et al., 2023)
+67.45 80.98 86.22 91.56
+95.46
+1.03
+68.59 81.73 86.75 91.10
+95.39
+1.02
+MotionPatch(Yu et al., 2024)
+71.61 85.81 90.02 94.35
+97.69
+1.00
+72.11 85.26 90.21 94.44
+97.76
+1.00
+Ours
+76.15 89.31 94.12 96.35
+98.71
+1.00
+75.12 88.79 93.58 96.64
+98.46
+1.00
+Table 2. Motion-to-text and text-to-motion retrieval results on KIT-ML.
+Protocol
+Methods
+Text-to-motion retrieval
+Motion-to-text retrieval
+R@1↑R@2↑R@3↑R@5↑R@10↑MedR↓R@1↑R@2↑R@3↑R@5↑R@10↑MedR↓
+All
+TEMOS(Petrovich et al., 2022) 7.11
+13.25 17.59 24.10
+35.66
+24.00 11.69 15.30 20.12 26.63
+36.39
+26.50
+T2M(Guo et al., 2022)
+3.37
+6.99
+10.84 16.87
+27.71
+28.00
+4.94
+6.51
+10.72 16.14
+25.30
+28.50
+TMR(Petrovich et al., 2023)
+10.05 13.87 20.74 30.03
+44.66
+14.00 11.83 13.74 22.14 29.39
+38.55
+16.00
+MotionPatch(Yu et al., 2024)
+14.02 21.08 28.91 34.10
+50.00
+10.50 13.61 17.26 27.54 33.33
+44.77
+13.00
+Lyu et al. (2025)
+15.13 23.74 31.61 36.81
+54.12
+8.00
+15.01 19.47 30.06 35.63
+47.53
+10.50
+Ours
+16.01 25.37 34.21 38.36
+57.87
+7.00
+16.76 20.97 32.15 37.54
+50.17
+8.00
+Small batches
+TEMOS(Petrovich et al., 2022) 43.88 58.25 67.00 74.00
+84.75
+2.06
+41.88 55.88 65.62 75.25
+85.75
+2.25
+T2M(Guo et al., 2022)
+42.25 62.62 75.12 87.50
+96.12
+1.88
+39.75 62.75 73.62 86.88
+95.88
+1.95
+TMR(Petrovich et al., 2023)
+50.00 64.14 78.02 87.97
+94.87
+1.50
+51.21 69.53 78.64 89.00
+95.31
+1.50
+MotionPatch(Yu et al., 2024)
+53.55 71.30 79.82 88.92
+96.29
+1.36
+54.54 72.15 79.68 89.35
+96.11
+1.31
+Ours
+56.83 75.69 81.64 89.84
+97.94
+1.28
+57.14 74.53 80.76 90.15
+97.58
+1.26
+4. Experiments
+4.1. Experimental Settings
+Experimental Implementation. For a fair comparison,
+we follow MotionPatch (Yu et al., 2024) and take text-to-
+motion retrieval and motion-to-text retrieval to analyze the
+performance of our method. We train our models on a single
+NVIDIA A6000 48 GB GPU. We optimize our STI Esti-
+mation Head and retrieval model separately using Adam
+optimizers (Kingma & Ba, 2014) with the same β1 = 0.9
+and β2 = 0.99, and different learning rates of 1 × 10−3
+and 1 × 10−4, respectively. We set the batch size as 128
+and trained for 100 epoch. Moreover, inspired by Motion-
+Patch (Yu et al., 2024), which applies spatial structuring to
+motion inputs and captures spatio-temporal dependencies
+through a Vision Transformer (ViT) (Dosovitskiy, 2020),
+we incorporate a similar motion representation and adopt
+ViT as our motion encoder. Besides, DistilBERT (Sanh
+et al., 2019) is also adopted as our text encoder.
+Datasets. We evaluate our PST framework on two com-
+monly used public motion-language datasets, the Hu-
+manML3D dataset (Guo et al., 2022) and KIT Motion-
+Language (KIT-ML) dataset (Plappert et al., 2016). The Hu-
+manML3D dataset is constructed from the AMASS (Mah-
+mood et al., 2019) and HumanAct12 (Guo et al., 2020) mo-
+tion capture datasets. In total, the dataset contains 14,616
+motion sequences and 44,970 text descriptions, comprising
+23,384 motions for training, 1,460 for validation, and 4,380
+for testing. The KIT-ML dataset, which primarily focuses
+on locomotion, is a dataset where each motion clip is paired
+with one to four short natural language descriptions. It is
+partitioned into training, validation, and test sets, consisting
+of 4,888, 300, and 830 motions, respectively.
+Evaluation Metrics. To effectively demonstrate the ro-
+bustness of our proposed method, we follow previous
+works (Petrovich et al., 2023; Yu et al., 2024) to adopt recall
+at several ranks (R@k) and Median Rank (MedR). R@k
+measures the proportion of queries for which the correct
+item appears within the top-k results, where a higher value
+indicates better performance. In our experiments, we report
+R@1, R@2, R@3, R@5 and R@10. Additionally, MedR,
+where a lower value indicates better retrieval performance,
+is calculated to evaluate our model.
+Evaluation Protocol To ensure a reliable and comparable
+evaluation, we follow previous works (Petrovich et al., 2023;
+Yu et al., 2024) that modified the construction of the retrieval
+gallery and conduct experiments under two different eval-
+uation protocols, namely All and Small Batch. In the All
+protocol , the entire test set is used as the retrieval gallery.
+However, this configuration often includes a large number
+of highly similar motion-language samples, which may lead
+to unreliable evaluation results. Therefore, the Small Batch
+protocol is also adopted. Specifically, we randomly partition
+the test set into multiple batches, each containing 32 sam-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+ples, and compute the retrieval metrics within each batch.
+The final performance is then obtained by averaging the met-
+rics across all sampled batches, thereby providing a more
+robust and reliable set of evaluation results.
+4.2. Experimental Results
+Quantitative Results. Comprehensive evaluations are con-
+ducted for both text-to-motion and motion-to-text retrieval
+tasks on the HumanML3D and KIT-ML datasets under
+all evaluation protocols. We compare our method against
+several approaches, including TEMOS (Petrovich et al.,
+2022), T2M (Guo et al., 2022), TMR (Petrovich et al.,
+2023), MotionPatch (Yu et al., 2024), and Lyu et al. (2025).
+Since TEMOS (Petrovich et al., 2022) and T2M (Guo
+et al., 2022) were originally designed for motion gener-
+ation rather than retrieval, we adopt the retrieval metrics
+reported TMR (Petrovich et al., 2023), which retrained and
+evaluated these models under a retrieval setting, for a fair
+comparison. Evaluation results on HumanML3D and KIT-
+ML are summarized in Table 1 and Table 2, respectively.
+As shown in Table 1 and Table 2, TEMOS (Petrovich et al.,
+2022) and T2M (Guo et al., 2022) perform poorly in the
+retrieval task, while TMR (Petrovich et al., 2023), which
+extends TEMOS (Petrovich et al., 2022) by incorporating
+a contrastive learning objective, achieves better retrieval
+performance. MotionPatch (Yu et al., 2024) further im-
+proves retrieval accuracy by capturing spatiotemporal fea-
+tures using a ViT (Dosovitskiy, 2020), and Lyu et al. (2025)
+enhance performance by integrating a lexical representa-
+tion paradigm into the motion-language learning framework.
+Nevertheless, our method, which introduces fine-grained
+motion-language alignment into the retrieval process, out-
+performs all prior methods across both datasets, achieving
+state-of-the-art performance.
+Qualitative Results. To better demonstrate the advantages
+of our method in fine-grained retrieval, we visualize the
+retrieval results at both the joint-wise and segment-wise
+alignment stages in Fig. 4 and Fig. 3, respectively. Since
+our approach adopts the motion representation from Motion-
+Patch and employs a ViT to model both spatial and temporal
+dependencies, the motion tokens at the joint-wise stage ef-
+fectively encode spatial as well as temporal characteristics.
+As a result, the examples shown in Fig. 4 exhibit strong
+semantic correlations between text descriptions and joint
+tokens. Additionally, in the segment-wise stage, we employ
+the KNN-DPC algorithm, which not only clusters tokens
+at the segment-level but also preserves token provenance
+information, to perform token compression, allowing us to
+trace back which joint tokens are aggregated into each com-
+pressed segment token. Segment-wise alignment results in
+Fig. 3 clearly indicate that our method achieves coherent
+retrieval performance between motion segments and textual
+descriptions. Additionally, we display the top-3 retrieved
+motions that were unseen during training in Fig. 5, where the
+first two examples are from the dataset and the last example
+is queried using a free-form prompt.
+Table 3. Ablation on HumanML3D.
+Methods
+Text-to-motion retrieval
+Motion-to-text retrieval
+R@1↑R@5↑R@10↑MedR↓R@1↑R@5↑R@10↑MedR↓
+λS = 0
+10.97 27.79 39.12
+18.00 11.98 27.67 38.56
+19.50
+λS = 2
+11.94 30.97 45.54
+17.00 12.45 30.21 41.48
+17.00
+λS = 3
+11.23 28.17 39.94
+18.00 12.36 28.66 39.44
+18.00
+λD = 0
+8.75 21.75 32.41
+27.00
+9.01 21.45 30.76
+27.00
+λD = 2
+11.07 27.52 39.76
+18.00 11.40 27.23 38.01
+20.00
+λD = 3
+9.54 24.45 35.49
+24.00 10.16 24.81 34.13
+24.00
+ρ* = 0.1
+8.69 21.04 31.67
+28.00
+8.47 21.24 30.49
+28.00
+ρ* = 0.5
+10.15 25.92 36.68
+20.00 10.84 25.90 36.22
+22.00
+ρ* = 0.75
+8.42 20.87 31.76
+28.00
+8.13 20.79 28.13
+29.00
+Guo feature 8.04 19.73 30.14
+30.00
+7.94 19.46 26.80
+30.00
+Full Model 12.45 33.65 48.22
+10.00 13.59 31.88 42.68
+15.00
+Table 4. Ablation on KIT-ML.
+Methods
+Text-to-motion retrieval
+Motion-to-text retrieval
+R@1↑R@5↑R@10↑MedR↓R@1↑R@5↑R@10↑MedR↓
+λS = 0
+14.21 34.87 51.18
+10.00 13.74 33.73 45.31
+13.00
+λS = 2
+15.20 37.55 55.79
+10.50 15.66 36.40 48.21
+10.00
+λS = 3
+14.98 35.56 52.23
+9.50
+14.08 34.64 46.51
+12.50
+λD = 0
+9.12 28.59 42.10
+16.00 10.35 27.96 36.06
+17.00
+λD = 2
+13.36 33.28 48.36
+13.00 13.34 32.83 44.29
+13.00
+λD = 3
+9.84 29.41 43.24
+15.00 11.25 28.64 37.45
+17.00
+ρ* = 0.1
+9.05 28.12 41.81
+16.00 10.11 27.44 35.41
+17.00
+ρ* = 0.5
+12.54 32.41 47.29
+12.00 12.57 31.63 42.93
+14.00
+ρ* = 0.75
+8.64 28.01 41.89
+17.00
+9.98 27.01 35.85
+17.00
+Guo feature 8.11 27.15 39.89
+18.00
+9.64 26.31 34.55
+17.00
+Full Model 16.01 38.36 57.87
+7.00
+16.76 37.54 50.17
+8.00
+4.3. Abaltion Study
+To validate the necessity of key components in our PST
+learning framework, we conduct ablation experiments fo-
+cusing on four critical factors: (1) the STI distillation loss
+LSD and its hyperparameter λS, (2) the self-distillation loss
+LD and its hyperparameter λD, (3) the compression ratios in
+both motion and text modalities, and (4) the representation
+of input motion data. To comprehensively assess the con-
+tribution of each component, all ablation experiments are
+performed on both the HumanML3D (Guo et al., 2022) and
+KIT-ML (Plappert et al., 2016) datasets. As summarized in
+Table 3 and Table 4, each of these elements exerts a signif-
+icant influence on the performance of both text-to-motion
+and motion-to-text retrieval tasks, clearly demonstrating
+their importance within our PST learning framework.
+The impact of LSD and λS. We evaluate the impact of LSD
+by setting λS to different values. The results show that incor-
+porating LSD consistently improves retrieval performance,
+confirming its positive contribution to motion-language re-
+trieval. However, an increase in λS leads to degraded per-
+formance, which can be attributed to the overfitting to the
+distillation signal.
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+Figure 3. Visualization results of segment-wise alignment. We omit <EOS> for clarity and use commas to separate each individual word.
+Figure 4. Visualization results of joint-wise alignment. Darker
+colors indicate higher similarity scores.
+The impact of LD and λD. To test the critical role of LD,
+we first remove it by setting λD = 0, and then vary λD to
+explore its effect on training. Consistent with the ablation
+results on LSD and λS, incorporating LD enhances both text-
+to-motion and motion-to-text retrieval accuracy while a high
+λD leads to diminished performance.
+The impact of compression ratios. We further investigate
+the effect of the compression ratios of motion and text tokens
+ρ* with default settings of ρ* = 0.25 in the full model.
+The ablation results show that both overly low and high
+compression ratios degrade retrieval performance, as low
+ratios cause information loss while high ratios introduce
+redundancy and background noise.
+The impact of motion representation. We replace our mo-
+tion representation with the feature representation proposed
+by Guo et al. (2022), denoted as the Guo feature. Com-
+pared with the MotionPatch representation, the Guo feature
+results in noticeably lower recall scores. This decline can be
+attributed to the Guo feature’s less structured representation
+compared with MotionPatch representation.
+a person jogs diagonally
+ to his left and then 
+slows down to a walk.
+Rank 1
+a person kicking a ball
+a person who seems to 
+evade something from 
+their left side and run 
+at an insane pace.
+Rank 2
+Rank 3
+a person jogs diagonally to his left 
+and then slows down to a walk.
+a person jogs for a few steps, then 
+slows to a walk for a few more steps.
+a person runs forward and stops 
+short.
+a person who seems to evade 
+something from their left side 
+and run at an insane pace.
+the person was taking a left 
+drive and then to the right.
+person runs in a zigzag motion and
+ducks under an invisible object 
+through then returns to full height.
+a person passing a ball or 
+just kicking the ground twice.
+a man kicks with his left leg and 
+then kicks with his right leg.
+a person lightly kicks an object 
+on the ground.
+S=0.91
+S=0.85
+S=0.79
+S=0.94
+S=0.87
+S=0.82
+S=0.89
+S=0.87
+S=0.82
+Figure 5. Qualitative results of text-to-motion retrieval.
+5. Conclusion
+In this paper, we presented Pyramidal Shapley-Taylor (PST),
+a novel learning framework that goes beyond global align-
+ment for fine-grained motion-language retrieval. Draw-
+ing inspiration from human perceptual process, PST pro-
+gressively aligns motion and language through joint-wise,
+segment-wise, and holistic alignment stages by incorporat-
+ing Shapley-Taylor Interaction (STI) and contrastive learn-
+ing into training. Extensive experiments on HumanML3D
+and KIT-ML datasets demonstrate that PST significantly out-
+performs existing state-of-the-art methods on both motion-
+to-text and text-to-motion tasks. However, retrieval results
+at the joint-wise and segment-wise stages may exhibit a
+local bias, where the model performs particularly well on
+common poses or frequent poses but struggles with complex
+or rare motion cases. In future work, we plan to mitigate
+this issue and extend PST toward open-vocabulary motion-
+language understanding.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+References
+Cen, Z., Pi, H., Peng, S., Shen, Z., Yang, M., Zhu, S., Bao,
+H., and Zhou, X. Generating human motion in 3d scenes
+from text descriptions. In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition,
+pp. 1855–1866, 2024.
+Chen, C., Zhang, J., Lakshmikanth, S. K., Fang, Y., Shao,
+R., Wetzstein, G., Fei-Fei, L., and Adeli, E. The language
+of motion: Unifying verbal and non-verbal language of
+3d human motion. In Proceedings of the Computer Vi-
+sion and Pattern Recognition Conference, pp. 6200–6211,
+2025a.
+Chen, H., Xu, C., Yan, J., and Deng, C. Astf: Motion style
+tranfer via adaptive statistics fusor. In Proceedings of the
+33rd ACM International Conference on Multimedia, pp.
+5557–5566, 2025b.
+Chen, L.-H., Lu, S., Zeng, A., Zhang, H., Wang, B., Zhang,
+R., and Zhang, L. Motionllm: Understanding human
+behaviors from human motions and videos. arXiv preprint
+arXiv:2405.20340, 2024.
+Chen, X., Jiang, B., Liu, W., Huang, Z., Fu, B., Chen, T., and
+Yu, G. Executing your commands via motion diffusion in
+latent space. In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pp. 18000–
+18010, 2023.
+Dosovitskiy, A. An image is worth 16x16 words: Trans-
+formers for image recognition at scale. arXiv preprint
+arXiv:2010.11929, 2020.
+Du, M., Ding, S., and Jia, H. Study on density peaks clus-
+tering based on k-nearest neighbors and principal compo-
+nent analysis. Knowledge-Based Systems, 99:135–145,
+2016.
+Fang, Q., Tang, C., Tekin, B., Ma, S., and Yang, Y. Humo-
+con: Concept discovery for human motion understand-
+ing. In Proceedings of the Computer Vision and Pattern
+Recognition Conference, pp. 7179–7190, 2025.
+Fujiwara, K., Tanaka, M., and Yu, Q. Chronologically accu-
+rate retrieval for temporal grounding of motion-language
+models. In European Conference on Computer Vision,
+pp. 323–339. Springer, 2024.
+Guo, C., Zuo, X., Wang, S., Zou, S., Sun, Q., Deng, A.,
+Gong, M., and Cheng, L. Action2motion: Conditioned
+generation of 3d human motions. In Proceedings of the
+28th ACM international conference on multimedia, pp.
+2021–2029, 2020.
+Guo, C., Zou, S., Zuo, X., Wang, S., Ji, W., Li, X., and
+Cheng, L. Generating diverse and natural 3d human
+motions from text. In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition,
+pp. 5152–5161, 2022.
+Hong, S., Kim, C., Yoon, S., Nam, J., Cha, S., and Noh,
+J. Salad: Skeleton-aware latent diffusion for text-driven
+motion generation and editing. In Proceedings of the
+Computer Vision and Pattern Recognition Conference, pp.
+7158–7168, 2025.
+Jang, D.-K., Park, S., and Lee, S.-H. Motion puzzle: Arbi-
+trary motion style transfer by body part. ACM Transac-
+tions on Graphics (TOG), 41(3):1–16, 2022.
+Kalakonda, S. S., Maheshwari, S., and Sarvadevabhatla,
+R. K. Morag-multi-fusion retrieval augmented generation
+for human motion. In 2025 IEEE/CVF Winter Conference
+on Applications of Computer Vision (WACV), pp. 4564–
+4573. IEEE, 2025.
+Kim, B., Jeong, H. I., Sung, J., Cheng, Y., Lee, J., Chang,
+J. Y., Choi, S.-I., Choi, Y., Shin, S., Kim, J., et al. Per-
+sonabooth: Personalized text-to-motion generation. In
+Proceedings of the Computer Vision and Pattern Recog-
+nition Conference, pp. 22756–22765, 2025.
+Kingma, D. P. and Ba, J. Adam: A method for stochastic
+optimization. arXiv preprint arXiv:1412.6980, 2014.
+Kingma, D. P. and Welling, M. Auto-encoding variational
+bayes. arXiv preprint arXiv:1312.6114, 2013.
+Kullback, S. Information theory and statistics. Courier
+Corporation, 1997.
+Langley, P. Crafting papers on machine learning. In Langley,
+P. (ed.), Proceedings of the 17th International Conference
+on Machine Learning (ICML 2000), pp. 1207–1216, Stan-
+ford, CA, 2000. Morgan Kaufmann.
+Li, Y., Hou, R., Chang, H., Shan, S., and Chen, X. Unipose:
+A unified multimodal framework for human pose com-
+prehension, generation and editing. In Proceedings of the
+Computer Vision and Pattern Recognition Conference, pp.
+27805–27815, 2025.
+Liao, T.-H., Zhou, Y., Shen, Y., Huang, C.-H. P., Mitra, S.,
+Huang, J.-B., and Bhattacharya, U. Shape my moves:
+Text-driven shape-aware synthesis of human motions. In
+Proceedings of the Computer Vision and Pattern Recog-
+nition Conference, pp. 1917–1928, 2025.
+Lyu, G., Xu, C., Yan, J., Yang, M., and Deng, C. Towards
+unified human motion-language understanding via sparse
+interpretable characterization. In The Thirteenth Interna-
+tional Conference on Learning Representations, 2025.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+Mahmood, N., Ghorbani, N., Troje, N. F., Pons-Moll, G.,
+and Black, M. J. Amass: Archive of motion capture as
+surface shapes. In Proceedings of the IEEE/CVF inter-
+national conference on computer vision, pp. 5442–5451,
+2019.
+Meng, Z., Xie, Y., Peng, X., Han, Z., and Jiang, H. Rethink-
+ing diffusion for text-driven human motion generation:
+Redundant representations, evaluation, and masked au-
+toregression. In Proceedings of the Computer Vision and
+Pattern Recognition Conference, pp. 27859–27871, 2025.
+Oord, A. v. d., Li, Y., and Vinyals, O. Representation learn-
+ing with contrastive predictive coding. arXiv preprint
+arXiv:1807.03748, 2018.
+Petrovich, M., Black, M. J., and Varol, G. Temos: Generat-
+ing diverse human motions from textual descriptions. In
+European Conference on Computer Vision, pp. 480–497.
+Springer, 2022.
+Petrovich, M., Black, M. J., and Varol, G. Tmr: Text-
+to-motion retrieval using contrastive 3d human motion
+synthesis. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pp. 9488–9497, 2023.
+Plappert, M., Mandery, C., and Asfour, T. The kit motion-
+language dataset. Big data, 4(4):236–252, 2016.
+Punnakkal, A. R., Chandrasekaran, A., Athanasiou, N.,
+Quiros-Ramirez, A., and Black, M. J. Babel: Bodies,
+action and behavior with english labels. In Proceedings
+of the IEEE/CVF conference on computer vision and pat-
+tern recognition, pp. 722–731, 2021.
+Radford, A., Narasimhan, K., Salimans, T., Sutskever, I.,
+et al. Improving language understanding by generative
+pre-training. 2018.
+Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G.,
+Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J.,
+et al. Learning transferable visual models from natural
+language supervision. In International conference on
+machine learning, pp. 8748–8763. PmLR, 2021.
+Sanh, V., Debut, L., Chaumond, J., and Wolf, T. Distilbert,
+a distilled version of bert: smaller, faster, cheaper and
+lighter. arXiv preprint arXiv:1910.01108, 2019.
+Schneider, D., Reiß, S., Kugler, M., Jaus, A., Peng, K.,
+Sutschet, S., Sarfraz, M. S., Matthiesen, S., and Stiefelha-
+gen, R. Muscles in time: Learning to understand human
+motion in-depth by simulating muscle activations. Ad-
+vances in Neural Information Processing Systems, 37:
+67251–67281, 2024.
+Shen, T., Geng, X., Tao, C., Xu, C., Huang, X., Jiao, B.,
+Yang, L., and Jiang, D. Lexmae: Lexicon-bottlenecked
+pretraining for large-scale retrieval.
+arXiv preprint
+arXiv:2208.14754, 2022.
+Sun, H., Zheng, R., Huang, H., Ma, C., Huang, H., and
+Hu, R. Lgtm: Local-to-global text-driven human motion
+diffusion model. In ACM SIGGRAPH 2024 Conference
+Papers, pp. 1–9, 2024.
+Sundararajan, M., Dhamdhere, K., and Agarwal, A. The
+shapley taylor interaction index. In International confer-
+ence on machine learning, pp. 9259–9268. PMLR, 2020.
+Tevet, G., Gordon, B., Hertz, A., Bermano, A. H., and
+Cohen-Or, D. Motionclip: Exposing human motion gener-
+ation to clip space. In European Conference on Computer
+Vision, pp. 358–374. Springer, 2022a.
+Tevet, G., Raab, S., Gordon, B., Shafir, Y., Cohen-Or, D.,
+and Bermano, A. H. Human motion diffusion model.
+arXiv preprint arXiv:2209.14916, 2022b.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-
+tention is all you need. Advances in neural information
+processing systems, 30, 2017.
+Yu, Q., Tanaka, M., and Fujiwara, K. Exploring vision
+transformers for 3d human motion-language models with
+motion patches. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pp.
+937–946, 2024.
+Yu, Q., Tanaka, M., and Fujiwara, K. Remogpt: Part-level
+retrieval-augmented motion-language models. In Pro-
+ceedings of the AAAI Conference on Artificial Intelli-
+gence, volume 39, pp. 9635–9643, 2025.
+Zhang, J., Lin, L., Yang, S., and Liu, J. Sgar: Structural
+generative augmentation for 3d human motion retrieval.
+In The Thirty-ninth Annual Conference on Neural Infor-
+mation Processing Systems.
+Zhang, J., Zhang, Y., Cun, X., Zhang, Y., Zhao, H., Lu,
+H., Shen, X., and Shan, Y. Generating human motion
+from textual descriptions with discrete representations.
+In Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pp. 14730–14740, 2023a.
+Zhang, M., Guo, X., Pan, L., Cai, Z., Hong, F., Li, H.,
+Yang, L., and Liu, Z. Remodiffuse: Retrieval-augmented
+motion diffusion model. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pp. 364–
+373, 2023b.
+Zhong, C., Hu, L., Zhang, Z., and Xia, S. Attt2m: Text-
+driven human motion generation with multi-perspective
+attention mechanism. In Proceedings of the IEEE/CVF
+international conference on computer vision, pp. 509–
+519, 2023.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+Zhong, L., Xie, Y., Jampani, V., Sun, D., and Jiang, H.
+Smoodi: Stylized motion diffusion model. In European
+Conference on Computer Vision, pp. 405–421. Springer,
+2024.
+Zhu, W., Ma, X., Liu, Z., Liu, L., Wu, W., and Wang, Y.
+Motionbert: A unified perspective on learning human
+motion representations. In Proceedings of the IEEE/CVF
+international conference on computer vision, pp. 15085–
+15099, 2023.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+a. STI Estimation Head
+Conv
+ReLU
+Self Attention
+Conv
+ReLU
+Input
+Output
+Conv
+Norm
+Self Attention
+KNN-DPC
+Norm
+Self Attention
+b. Token Compressor
+Input
+Output
+Figure 6. Detailed architecture. (a) Structure of the STI Estimation Head. (b) Structure of the Token Compressor.
+A. Representation of MotionPatch
+In this paper, we directly utilize the representation proposed in MotionPatch (Yu et al., 2024). Specifically, to convert a raw
+3D motion sequence into a unified representation compatible with Vision Transformers, we construct motion patches by
+extracting spatiotemporal slices from skeleton data. Given a motion sequence m ∈RL×J×3, we first partition the skeleton
+joints into five body parts: torso, left arm, right arm, left leg and right leg, according to the human kinematic chain. Within
+each part, the joints are ordered by their distance to the torso to preserve structural continuity. Since different skeletons
+contain different numbers of joints, we apply linear interpolation along each kinematic chain to standardize each body part
+to Np sample points. The resulting points are normalized using z-score statistics computed over the dataset. To encode
+temporal information, we then take Np consecutive frames using a sliding window and stack the interpolated sample-point
+coordinates across these Np frames, producing an Np × Np spatiotemporal block. Repeating this process yields a sequence
+of motion patches, each analogous to an image patch, enabling motion data from diverse skeleton structures to be processed
+directly by ViT-based encoders.
+B. Detailed Model Architecture
+Our STI Estimation Head integrates local convolutional encoding with a global self-attention mechanism to enhance feature
+interactions across the spatiotemporal domain. Specifically, as illustrated in Fig. 6 (a), given an input tensor, this module
+first applies a 3 × 3 convolution followed by a ReLU activation to extract local representations. A self-attention layer is then
+applied, after which a residual connection is added between the features before and after the self-attention operation. Finally,
+a second 3 × 3 convolution is applied to refine the aggregated features.
+Our Token Compressor acts as an attention-guided token compression block that performs token reduction through a
+combination of convolution, self-attention, and clustering. As shown in Fig. 6 (b), the Token Compressor first applies
+a convolutional layer with a 3 × 1 kernel to enrich local token interactions, followed by LayerNorm and a multi-head
+self-attention layer. Subsequently, each token is assigned a score via a linear projection, which is used by the KNN-DPC
+clustering algorithm. The resulting compressed tokens are then processed with LayerNorm and an additional self-attention
+layer equipped with a residual connection.
+Given input embeddings E ∈RB×T ×D, where T and D denote the number of tokens and the feature dimension, respectively,
+our projection head operates along the feature dimension while preserving the token dimension. Specifically, the projection
+head is implemented as a two-layer feed-forward module with a GeLU, where the hidden dimension is expanded from D to
+2 × D before being projected down to a scalar output. This design follows common practice in modern Transformer-based
+architectures, where a lightweight MLP head is used to map high-dimensional token embeddings into scalar scores.
+C. Additional Experimental Results
+To better demonstrate the fine-grained retrieval capability of our method, we provide additional qualitative results at both
+the joint-wise and segment-wise alignment stages. Concretely, we use four different text descriptions and generate four
+corresponding visualization results, as shown in Fig. 7, Fig. 8, Fig. 9, and Fig. 10. In each visualization, sub-figure (a)
+shows the joint-wise alignment results, while sub-figure (b) shows the segment-wise alignment results. Consistent with the
+visualizations in Sec. 4.2, sub-figure (a) in each visualization result use color intensity to represent similarity scores, where
+darker colors correspond to higher scores. For sub-figure (b) in each visualization, we additionally employ heatmap coloring
+to illustrate the similarity between each phrase and its corresponding motion segment.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+Figure 7. Visualization results for text description “a person jogs forward, stops and gets into a sideways fighting stance.”.
+Figure 8. Visualization results for text description “a person steps to their left, runs forward, and then back-peddles to their origin.”.
+D. Detailed Explanation of Equation 3
+In this section, our goal is to compute the probability of different prefix subset sizes occurring under the random permutation.
+The Shapley-Taylor marginal contribution is computed over random permutations of all tokens in a motion-language
+pair. Concretely, given N motion tokens and M text tokens, we first concatenate them into a single unified set of size
+K = N + M. We then sample a uniformly random permutation of these K tokens. For a specific motion token mi and a
+text token tj, we denote their positions in the sampled permutation by k and p, respectively, where k ̸= p. We define the
+length L of prefix subset Sπ for this pair as the number of the tokens that appear before the earliest of the motion-language
+pair:
+L = min(k, p) −1.
+(11)
+In other words, instead of directly reasoning about the probability of different prefix subset sizes, we reduce this problem to
+studying the probability distribution of the random variable L induced by two positions (k, p) in a random permutation.
+Since the permutation is uniformly random and mi, tj are statistically independent, the joint distribution of their positions
+(k, p) is uniform over all ordered pairs of distinct positions, indicating that there are K(K −1) ordered pairs, each with
+probability 1/(K(K −1)). We additionally define R = min(k, p), L = R −1 and r ∈{1, . . . , K −1}, leading us to
+further reformulate the problem as probability distribution of R. For R = r to hold, one of the tokens must appear at
+position r, and the other must appear at a position strictly after r. This leads to two symmetric cases:
+1. k = r and p ∈{r + 1, . . . , K}, which yields K −r valid ordered pairs.
+2. p = r and k ∈{r + 1, . . . , K}, which also yields K −r valid ordered pairs.
+Therefore, the total number of ordered pairs (k, p) in case of R = r is 2(K −r), and the probability that the minimum of
+the two positions equals r is formulated as follows:
+P(R = r) = 2(K −r)
+K(K −1),
+r = 1, . . . , T −1.
+(12)
+Finally, substituting R = L + 1 yields Equation 3
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+Figure 9. Visualization results for text description “person stumbles forward and bends over to pick something up.”.
+Figure 10. Visualization results for text description “a seated person gets up, takes two steps and a half turn and stops.”.
+P(L = ℓ) = P(R = ℓ+ 1)
+= 2(K −ℓ−1)
+K(K −1) .
+(13)
+E. LLM-Driven Text Enhancement
+During the evaluation, we found that our framework struggles to achieve precise fine-grained retrieval in more complex
+cases, which in turn limits the contribution of fine-grained alignment to the overall retrieval performance. A primary reason
+lies in the characteristics of the dataset: its textual annotations primarily describe holistic actions and lack explicit part-level
+descriptions of human body movements, which limits the model’s ability to perform precise fine-grained retrieval. In our PST
+learning framework, the input motion is represented using MotionPatch (Yu et al., 2024), which provides part-level motion
+features, whereas the corresponding textual descriptions remain holistic, leading to a structural misalignment between the
+motion and text modalities. This misalignment indicates that what PST fundamentally lacks for fine-grained retrieval is an
+appropriate structural prior on the text modality.
+In recent years, with the rapid advancement of Large Language Models (LLMs), these models have acquired rich common-
+sense knowledge about both human actions and their semantic descriptions. Previous work (Zhang et al.) introduces LLMs
+into motion-language retrieval to enrich the textual descriptions in the datasets, thereby improving the model’s retrieval
+performance. Motivated by this observation, we attempt to enhance the textual descriptions in HumanML3D using LLMs,
+transforming each holistic motion description into a set of explicit, fine-grained part-level descriptions. Specifically, building
+upon the MotionPatch (Yu et al., 2024) representation used in our PST learning framework, we decompose the textual
+descriptions into five localized body parts (torso, left arm, right arm, left leg, and right leg). To generate fine-grained textual
+descriptions for each body part, we employ Qwen2.5-7B-Instruct as our LLM. The prompt design used for generating these
+part-level descriptions is illustrated in Fig. 11. Our prompt follows a progressive instruction organization. Specifically, we
+begin by defining the task objective, followed by explicit instructions detailing five target body parts and the constraints on
+wording, granularity, and sentence structure. We then specify a strict output format and provide a concrete, high-quality
+example demonstrating the expected reasoning process and output style to stabilize the generation process of the LLM. In
+addition, all textual description of the same motion are concatenated as the input of the LLM.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+HumanML3D provides multiple diverse text descriptions for each motion, offering substantially rich semantic information
+and allowing LLMs to generate meaningful fine-grained part-level descriptions. In contrast, the descriptions in KIT-ML
+are relatively simple, limiting the potential benefit of LLM-based enhancement. Therefore, in our experiments, we apply
+LLM-driven text enhancement only to HumanML3D. Using this enriched dataset, we retrain our model under the proposed
+PST learning framework and refer to this LLM-enhanced variant as PST++. During evaluation, we continue to use the
+original textual descriptions from HumanML3D for testing to ensure a fair and consistent comparison. Consequently, the
+LLM is used only for data augmentation in training stage, and the inference stage does not depend on any LLM. The
+quantitative results compared with previous work (Zhang et al.) on HumanML3D are demonstrated in Table 5. We directly
+adopt the retrieval metrics reported from SGAR (Zhang et al.). The experiment results show that enhancing the textual
+descriptions with LLM enables the model to learn more fine-grained motion-language correspondences, which in turn
+further strengthens the overall retrieval performance. The experimental results highlight the effectiveness of incorporating
+LLM-enhanced textual descriptions into the training process.
+Table 5. Motion-to-text and text-to-motion retrieval results on HumanML3D with LLM-driven text enhancement.
+Protocol
+Methods
+Text-to-motion retrieval
+Motion-to-text retrieval
+R@1↑R@2↑R@3↑R@5↑R@10↑MedR↓R@1↑R@2↑R@3↑R@5↑R@10↑MedR↓
+All
+SGAR (Zhang et al.) 12.86
+-
+23.52 30.75
+43.00
+15.00
+13.82
+-
+23.38 30.09
+41.83
+16.00
+PST
+12.45 19.02 26.50 33.65
+48.22
+10.00
+13.59 17.11 24.42 31.88
+42.68
+15.00
+PST++
+13.83 20.82 27.91 34.82
+49.15
+10.00
+14.81 18.63 25.72 33.26
+44.61
+14.00
+Small batches
+SGAR (Zhang et al.) 75.66
+-
+92.11 95.55
+98.06
+1.00
+76.35
+-
+92.38 95.69
+98.02
+1.00
+PST
+76.15 89.31 94.12 96.35
+98.71
+1.00
+75.12 88.79 93.58 96.64
+98.46
+1.00
+PST++
+78.21 90.15 95.09 96.71
+98.82
+1.00
+76.73 89.11 94.25 97.18
+98.51
+1.00
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Beyond Global Alignment: Fine-Grained Motion-Language Retrieval via Pyramidal Shapley-Taylor Learning
+Figure 11. Text prompt for generating part-level descriptions.
+16

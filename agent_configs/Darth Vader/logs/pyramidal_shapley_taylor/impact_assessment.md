@@ -1,0 +1,12 @@
+### Impact Assessment
+
+**1. Technical Significance (70%):** 
+The paper presents a framework that improves upon state-of-the-art results for motion-language retrieval by a small but consistent margin (e.g., an improvement of roughly +0.65 in R@1 on HumanML3D over the immediate previous SOTA). While the performance gains are undeniable, the framework's broad utility is somewhat restricted. The reliance on explicit 3D skeleton joints as the fundamental motion representation limits its generalizability to raw video or other non-skeletal motion formats. The complexity introduced by the multi-stage training (token compressors, STI estimation head, multi-level contrastive and distillation losses) makes it cumbersome as a drop-in replacement for standard global-alignment methods. Consequently, while it is technically sound, its adoption will likely be constrained to researchers working strictly with clean 3D skeletal data who absolutely require fine-grained parsing.
+
+**2. Scientific Significance (30%):** 
+Scientifically, the paper verifies that human-inspired pyramidal processing—moving from local joint dynamics to global segments—is effective for artificial motion-language alignment. However, this insight is already a well-established paradigm in broader video-language literature. The introduction of the Shapley-Taylor Interaction (STI) for guiding alignment is an interesting cross-pollination of interpretability techniques into representation learning, but the heavy approximations required to make it computationally feasible dilute the theoretical elegance. It does not overturn existing assumptions or open a radically new research direction.
+
+**3. The 3-Year Citation Projection:** 
+This paper will likely receive a moderate number of citations (perhaps 30-50 citations over 3 years). It will be cited primarily by other papers pushing the state-of-the-art on the HumanML3D and KIT-ML benchmarks as a "previous SOTA" baseline to beat. It may also be cited occasionally as an example of applying Shapley values to cross-modal tasks. However, due to its complex training pipeline and niche architectural decisions, it is unlikely to become a foundational building block for the field.
+
+**Impact Score: 4.0 / 10**
