@@ -1,0 +1,792 @@
+        000
+        001
+        002     VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos
+        003                                       via Multimodal Large Language Model
+        004
+        005
+        006
+        007                       1                  2                    1                    1                     3                4                5
+        008     HanqingWang            MingyuLiu          XiaoyuChen           ChengweiMa           YimingZhong           WentiYin         YuhaoLiu
+                                                    1                   1            1,6                  4,†                1,6,†
+        009                           Zhiqing Cui        Jiahao Yuan         LuDai          ZhiyuanMa            HuiXiong
+        010                                     1HKUST-GZ 2ZJU 3ShanghaiTech              4HUST      5SDU      6HKUST
+        011
+        012
+        013
+        014                                                                                   Extract Dynamic Interaction Priors and Transfer into Affordance Grounding
+        015                                                                             HOI Videos                                        Affordance Mask
+        016
+        017
+        018                                                                                                           VideoAfford
+        019
+        020
+        021                  a) Video-based Affordance Grounding Dataset: VIDA                              b) Overview of VideoAfford
+        022     Figure 1. We introduce the task of grounding 3D affordance from human-object-interaction (HOI) videos, and collect a large-scale dataset
+        023     VIDA(left), which contains 38K HOI videos spanning 16 affordance categories and 22K 3D point clouds. Based on this, we proposed the
+        024     VideoAfford (right), which can transfer the HOI interaction priors into 3D affordance grounding.
+        025                                Abstract                                          established methods and exhibits strong open-
+        026                                                                                 world generalization with affordance reasoning
+        027           3D affordance grounding aims to highlight the                          abilities. All datasets and code will be publicly
+        028           actionable regions on 3D objects, which is cru-                        released to advance research in this area.
+        029           cial for robotic manipulation. Previous research
+        030           primarily focused on learning affordance knowl-
+        031           edge from static cues such as language and im-                   1. Introduction
+        032           ages, whichstruggletoprovidesufficientdynamic
+        033           interaction context that can reveal temporal and                 Recent years have witnessed the remarkable success of af-
+        034           causal cues. To alleviate this predicament, we col-              fordance (Gibson, 1977) grounding, particularly in a wide
+        035           lect a comprehensive video-based 3D affordance                   variety of embodied intelligence applications. Affordance
+        036           dataset, VIDA, which contains 38K human-object-                  grounding aims to identify and locate the operable areas
+        037           interaction videos covering 16 affordance types,                 of an object to bridge visual perception and robotic ma-
+        038           38objectcategories, and 22K point clouds. Based                  nipulation, in response to human commands or demonstra-
+        039           on VIDA, we propose a strong baseline: VideoAf-                  tions. Previous studies have focused primarily on 2D af-
+        040           ford, which activates multimodal large language                  fordance segmentation from visual modalities, including
+        041           models with additional affordance segmentation                   images (Thermos et al., 2020; Do et al., 2018; Luo et al.,
+        042           capabilities, enabling both world knowledge rea-                 2024; Zhao et al., 2020) and videos (Bahl et al., 2023; Luo
+        043           soning and fine-grained affordance grounding                     et al., 2023; Chen et al., 2023). To enhance open-vocabulary
+        044           within a unified framework. To enhance action                    capabilities, subsequent studies (Nguyen et al., 2023; Tang
+        045           understanding capability, we leverage a latent ac-               et al., 2025b; Jiang et al., 2025; ?) have leveraged foun-
+        046           tion encoder to extract dynamic interaction pri-                 dation models such as CLIP (Radford et al., 2021) to in-
+        047           ors from HOI videos. Moreover, we introduce a                    corporate linguistic information into the affordance ground-
+        048           spatial-awarelossfunctiontoenableVideoAfford                     ing pipeline. More recently, AffordanceLLM (Qian et al.,
+        049           to obtain comprehensive 3D spatial knowledge.                    2024) has advanced this direction by harnessing the world
+        050           Extensive experimental evaluations demonstrate                   knowledge encoded in multimodal large language mod-
+        051           that our model significantly outperforms well-                   els for affordance reasoning. Motivated by learning-from-
+        052        .Preliminary work. Under review by the International Confer-        demonstration paradigms, another line of research (Tang
+        053     ence on Machine Learning (ICML). Do not distribute.                    et al., 2025a; Luo et al., 2022; Xu & Yadong; Li et al.,
+        054
+                                                                                    1
+                  VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+       055     2023; Wang et al., 2025f; Moon et al., 2025) has exploited         action information. Subsequently, VLMs analyze the cor-
+       056     human-object-interaction (HOI) images as interaction priors        respondence between video actions and affordance cate-
+       057     to facilitate affordance localization. While 2D affordance         gories. The resulting annotations undergo rigorous manual
+       058     representations provide valuable visual cues suggesting po-        verification and correction to ensure quality. Motivated by
+       059     tential actions for embodied systems, 3D affordance offers         the remarkable comprehension capabilities of Multimodal
+       060     a more precise and intuitive guidance for task execution           Large Language Models (MLLMs) in visual understanding,
+       061     in realistic physical environments, thereby establishing a         weobservethat video MLLMs possess the inherent ability
+       062     robust foundation for a wide range of downstream embod-            to recognize interactions and localize affordance regions
+       063     ied AI applications, including robotic grasping (Wei et al.,       within videos, reflecting their extensive world knowledge.
+       064     2025; Zhao et al., 2025b; Zhang et al., 2023b; Chen et al.,        This observation inspires us to unlock and transfer the af-
+       065     2022) and manipulation (Wu et al., 2023b;a; 2025; Xu et al.,       fordance reasoning capabilities embedded in video MLLMs
+       066     2024a). Despite these advances, existing approaches still          to the 3D affordance grounding domain. Building upon
+       067     significantly rely on static information sources such as HOI       VIDA, we propose VideoAfford, a strong baseline that
+       068     images (Shao et al., 2025; Yang et al., 2023b; Gao et al.,         leverages the world knowledge inherent in video MLLMs.
+       069     2024; Yang et al., 2024b) or linguistic instructions (Zhu          Toendowourmodelwithdynamicactioncomprehension,
+       070     et al., 2025b; Yu et al., 2025; Chu et al., 2025; Delitzas         weincorporate a latent action encoder that extracts action
+       071     et al., 2024; wei et al., 2025; Li et al., 2025) for 3D affor-     embeddings from HOI videos. Furthermore, we introduce
+       072     dance learning. Such static modalities inherently lack the         a spatial-aware loss mechanism to enhance the model’s
+       073     temporal dynamics required to capture interaction patterns         spatial reasoning capabilities, enabling VideoAfford to ac-
+       074     Ðacritical element for understanding the causal mecha-             quire comprehensive 3D spatial knowledge. The synergistic
+       075     nisms underlying affordance. Several recent efforts have           integration of these components enables VideoAfford to
+       076     explored learning from HOI videos (Bahl et al., 2023; Luo          achieve superior performance on both in-distribution and
+       077     et al., 2023; Chen et al., 2023; Fang et al., 2018; Heidinger      out-of-distribution data, a critical requirement for practical
+       078     et al., 2025; Liu et al., 2024) to alleviate this predicament.     deployment in embodied perception systems. Our contribu-
+       079     Specifically, OPPA (Fang et al., 2018) curates a diverse           tions can be summarized:
+       080     collection of internet videos and establishes a benchmark
+       081     for 2D affordance perception. VRB (Bahl et al., 2023) ex-             • Weformulate the task of video-based 3D object affor-
+       082     ploits the rich representational capacity of HOI videos to              dance grounding, which aims to unleash the potential
+       083     enhance affordance-driven robotic manipulation. Similarly,              within human-object-interaction videos and transfer
+       084     2HandedAfforder (Heidinger et al., 2025) develops an auto-              rich interaction priors for 3D affordance grounding.
+       085     mated annotation system for video-based affordance labels
+       086     and their subsequent transfer to dual-arm robotic systems.            • To support this task, we present VIDA, the first large-
+       087     Nevertheless, these methods either demand labor-intensive               scale video-based affordance grounding benchmark
+       088     manual annotations or remain confined to 2D representa-                 comprising 38K HOI videos spanning 16 affordance
+       089     tions.  More recently, EGO-SAG (Liu et al., 2024) has                   categories and 22K annotated affordance point clouds.
+       090     pioneered the learning of 3D affordance from unlabeled                  VIDAwillbemadepubliclyavailabletofacilitate fu-
+       091     egocentric video data. However, its focus on scene-level                ture research in this domain.
+       092     coarse-grained masks falls short of the object-centric fine-          • We propose VideoAfford, a robust baseline designed
+       093     grainedaffordancesegmentationrequiredforpreciserobotic                  to effectively exploit the affordance knowledge embed-
+       094     manipulation and grasping.                                              ded in video data through the seamless integration of
+       095     Toaddress the above limitations, we formulate a novel task:             spatial-aware loss functions and latent action encoding
+       096     Grounding 3D object affordance from human-object inter-                 mechanisms.
+       097     action demonstration videos, which aims to harness large-
+       098     scale demonstration video corpora for object-centric 3D               • Extensive experimental results demonstrate substan-
+       099     affordance reasoning. To this end, we collect and construct             tial performance gains of our method over existing
+       100     VIDA, a large-scale video-point cloud pair dataset. Our                 baselines while exhibiting robust open-vocabulary gen-
+       101     data collection pipeline aggregates HOI videos from di-                 eralization, thereby confirming the practical viability
+       102     verse sources, including internet repositories like YouTube,            of our method for real-world deployment.
+       103     HOIGEN-1M(Liuetal.,2025a),andTASTE-RoB(Zhao
+       104     et al., 2025a). As depicted in Fig. 2, we employ state-            2. Related Works
+       105     of-the-art Vision-Language Models (VLMs), specifically
+       106     GPT-4o(Achiametal., 2023), to generate descriptive cap-            Affordance Learning.       Affordance is a critical point for
+       107     tions for internet videos, from which we extract object and        linking perception, reasoning, and manipulation in the real
+       108                                                                        physical world. Some works are devoted to detecting the
+       109
+                                                                               2
+                               VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+            110
+            111                                                                    Now that you are                           This video shows…… 
+                                                                                   an expert……Please                           a man holding the                      Now that you are an                        Mug: Grasp
+            112                                 Public Dataset                                                                     handle of a                        expert in robotics, You                    Microwave: Open
+                                                                                   focus on describing                         hammer…….and ……                        will receive an                            Chair: Sit
+                                                                                   how the person              Captions                                               affordance list and a 
+            113                                                                                                                                                       caption of the video,       Affordance  …………
+                                                                                   interact with the                                                                  Select the most suitable                   Mug: Drink
+            114                                                                    object …… actions                                                                  affordance from the list                   Hammer：Grasp
+                                                                                   of the interaction,                                                                for the given video. The 
+            115                                      Internet Videos               such as open, grass,                       This video shows…… 
+                                                                                                                                a woman grasping                      List are [……], and the 
+            116                                                                    etc……                                         the handle of a                      caption is [……]                                  Human 
+            117                                                                         VLMs                                     mug…….and ……                                  VLMs                                Verification
+            118          Figure 2. Data Collection Pipeline. We show the whole data collection and verification pipeline here. First, we utilize VLMs to caption
+            119           each video and extract keywords about action and objects. We then utilize the VLMs to pair the video to an affordance type. Finally, we
+            120           manually check the results to ensure correctness.
+            121
+            122
+            123           affordance region from 2D sources, i.e., images (Thermos                                                         web data, MLLMs exhibit human-like reasoning and per-
+            124           et al., 2020; Do et al., 2018; Luo et al., 2024; Zhao et al.,                                                     ception across diverse modalities. However, their potential
+            125           2020; Wang et al., 2025a) and videos (Bahl et al., 2023;                                                          for embodied perceptionÐespecially in affordance reason-
+            126           Luo et al., 2023; Chen et al., 2023), and there are also                                                          ingÐremainslargelyuntapped. RecenteffortssuchasAffor-
+            127           somestudies that accomplish this task with the assistance                                                         danceLLM(Qianetal.,2024)and3DAffordanceLLM(Chu
+            128           of natural language (Chen et al., 2024). They seek to bring                                                       et al., 2025) have begun to explore affordance grounding
+            129           a leap to locate the affordance region of objects from 2D                                                         utilizing MLLMs, but most rely on static images or text and
+            130           sources. However, the affordance knowledge derived from                                                           overlookdynamicinteractioncuescrucialforreal-worldma-
+            131           2Dsourcesis difficult to transfer to specific interactive lo-                                                     nipulation. To address this issue, our work aims to endow
+            132           cations of objects in the 3D environment. To address this                                                         MLLMswithaffordance-aware perception and reasoning
+            133           gap, 3D AffordanceNet (Deng et al., 2021b) first proposed                                                         abilities by learning from video-based human±object inter-
+            134           a large-scale fine-grained 3D affordance dataset, which has                                                       actions, enabling them to interpret and act upon 3D objects
+            135           greatly promoted the advancement in 3D affordance learn-                                                          in context-sensitive scenarios.
+            136           ing. Based on this, many researchers have further explored
+            137           methods for learning universal affordance knowledge from
+            138           HOIimages(Shaoetal.,2025;Yangetal.,2023b;Gaoetal.,
+            139           2024; Yang et al., 2024b) and language instructions (Tian
+            140           et al., 2025; Zhu et al., 2025b; Yu et al., 2025; Chu et al.,
+            141           2025; Delitzas et al., 2024; wei et al., 2025; Li et al., 2025;                                                   3D Spatial Reasoning.                           Recently, 3D spatial reasoning
+            142          Wangetal., 2025e; Liu et al., 2025d). Some research has                                                            has attracted extensive attention from both academic and
+            143           also proposed utilizing the rich world knowledge within                                                           industrial communities, serving as a critical driver for ad-
+            144           foundation models, such as vision language models (Yu                                                             vancing the capabilities of Embodied AI in perceiving and
+            145           et al., 2025; Chu et al., 2025) or diffusion models (Wang                                                         understanding the physical world. Existing studies have ex-
+            146           et al., 2025b; Ju et al., 2024), to assist 3D affordance learn-                                                   plored multiple avenues to enhance models’ comprehension
+            147           ing. However, these works overlook the dynamic interaction                                                        of 3D objects: one line of research (Zhang et al., 2023a;
+            148           ofinformation, whichiscrucialforaffordancereasoning. To                                                          Wanget al., 2025d; Zhou et al., 2024; Yang et al., 2024a;
+            149           overcome this, EGO-SAG (Liu et al., 2024) proposed learn-                                                         2023a) improves the understanding of 3D objects within
+            150           ing interaction affordance knowledge from egocentric views,                                                       specific semantic categories by segmenting their semantic
+            151           but it mainly focuses on scene affordance and does not pro-                                                       parts, yet they struggle to generalize to unseen categories;
+            152          vide rich affordance prior knowledge for object-centric ma-                                                        another line of research (Hong et al., 2023; Qu et al., 2025;
+            153           nipulation. To fill this gap, we collect a large number of                                                        Maetal., 2025; Wang et al., 2025c; Liu et al., 2025b) lever-
+            154           HOIvideosandpaired3Dpointcloudstoconstruct the first                                                              ages large language models (LLMs) to map rich semantic
+            155          video-based object-centric 3D affordance learning dataset                                                          features to 3D objects, thereby enabling agents to grasp
+            156          VIDA. VIDA aims to advance 3D affordance research to                                                               object functions and geometric structures. However, a no-
+            157           better promote embodied intelligence.                                                                             table limitation of these methods lies in their primary focus
+            158                                                                                                                             on static mappingÐthey largely neglect the interactivity
+            159           Multimodal Large Language Model.                                         Multimodal Large                         inherent in real-world environments, failing to capture the
+            160           Language Models (MLLMs) have demonstrated impressive                                                              dynamic interaction affordances of 3D objects. To address
+            161           abilities in 2D (Achiam et al., 2023; Yang et al., 2025; Zhu                                                      this gap between static perception and dynamic interaction,
+            162           et al., 2023b) and 3D understanding (Xu et al., 2024b; Qi                                                         this paper proposes a novel approach that grounds object
+            163           et al., 2024; Hong et al., 2023). Trained on large-scale                                                          affordances in 3D spaces through HOI videos.
+            164
+                                                                                                                                      3
+                       VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+                   Table 1. Comparison of Existing 3D Affordance Datasets with Ours. #Point Cloud, #Aff, and #Classes denote the number of point
+         165       clouds, affordance types, and objects, respectively. #Dynamic Information means if the dataset can provide the dynamic interaction
+         166       information to assist affordance grounding. ✓/× indicates that if the dataset can possess this attribute.
+         167
+         168         Dataset                               #Publication Year   #DynamicInformation      #Granularity           #Input Source           #Classes   #Aff    #Point Cloud
+         169         3DAffordanceNet (Deng et al., 2021a)     CVPR2021                   ×                  Object              Point Cloud               23       18          23k
+         170         O2O-Afford (Mo et al., 2021)              CoRL2021                  ×                  Object              Point Cloud               18        ±         1.7k
+                     PartAfford (Xu et al., 2022)            ECCVW2022                   ×                  Object              Point Cloud               23       24          25k
+         171         IAGNet(Yangetal., 2023b)                  ICCV2023                  ×                  Object           Image, Point Cloud           23       17          7k
+                     LASO(Zhuetal.,2025b)                     CVPR2025                   ×                  Object         Language, Point Cloud          23       17         8.4k
+         172         SceneFun3D(Delitzas et al., 2024)        CVPR2024                   ×                  Scene          Language, Point Cloud          ±         9          710
+         173         SeqAfford (Yu et al., 2025)              CVPR2025                   ×                  Object         Language, Point Cloud          23       28         180k
+                     3DAffordSplat (wei et al., 2025)        ACMMM2025                   ×                  Object         Language, 3D Gaussian          21       18          24k
+         174         SeqAffordSplat (Li et al., 2025)          Arxiv 2025                ×                  Object         Language, 3D Gaussian          21       18          14k
+                     GREAT(Shaoetal.,2025)                    CVPR2025                   ×                  Object      Language,Image, Point Cloud       43       24          39k
+         175         AGPIL(Zhuetal.,2025a)                    CVPR2025                   ×                  Object      Language,Image, Point Cloud       23       17          31k
+         176         Affogato (Lee et al., 2025)               Arxiv 2025                ×                  Object      Language,Image, Point Cloud     >450      >350        150k
+         177         VSAD(Liuetal.,2024)                       Arxiv 2024                ✓                  Scene            Videos, Point Cloud          16       17          2k
+                     VIDA(Ours)                                   2025                   ✓                  Object      Language, Videos, Point Cloud     38       16          22k
+         178
+         179
+         180
+         181
+         182
+         183
+         184
+         185
+         186
+         187                              Object: “Microwave”
+         188                              Affordance: ”Open” 
+         189
+         190                    a) Data Examples                                           b) Data Radios                                   c) Category Distribution
+         191
+         192       Figure 3. VIDA Dataset. Here we illustrate the detailed information of VIDA. a) shows the examples of the video and corresponding
+         193       affordance point clouds. b) shows the videos and point clouds radios, and c) shows the category distributions of VIDA.
+         194
+         195       3. Datasets                                                                           from PIADv1 (Yang et al., 2023c) and PIADv2 (Shao et al.,
+         196                                                                                             2025), then we solely selected those point cloud objects that
+         197       Previous affordance datasets mainly focus on static images                            can be paired with the HOI videos for dataset construction
+         198       or texts, and fail to provide complex dynamic interaction                             and experiments.
+         199       priors. The pre-contact, contact, and post-contact frames
+         200       in HOI videos can provide rich temporal information about                             3.2. Statistic and Analysis
+         201       the intention of the interaction and the causal relationship
+         202       of the contact. To the best of our knowledge, VIDA is the                             As illustrated in Fig. 3, VIDA dataset covers over 38.1k
+         203       first large benchmark designed to unleash the potential of                            videos and 21.9k object point clouds, which encompasses
+         204       HOIvideosforthe 3D object-centric affordance grounding.                               38object categories and 16 affordance types. Since videos
+         205                                                                                             and point clouds are sampled from different instances, for
+         206       3.1. Collection Details                                                               training, they do not need a fixed one-to-one pairing; one
+         207       Videos and Point Clouds.               TheVIDAdatasetcontains ap-                     video could be paired with multiple point clouds, and the
+         208       proximately 38K HOI videos collected from public data                                 numberofthemisnotstrictlyconsistent. Anexamplecanbe
+         209       sources like HOIGEN-1M (Liu et al., 2025a), TASTE-                                    seen in Fig. 3 (a), a video can correspond to multiple point
+         210       Rob(Zhaoetal., 2025a), and the Internet resources, cover-                             clouds. While for evaluation, we strictly select videos and
+         211       ing 38 object categories and 16 affordance types (e.g., open,                         point clouds one-on-one to ensure the rigor and reproducibil-
+         212       push). Wefirst filter the captions of each video by extracting                        ity of the evaluation results. Fig. 3 (b) illustrates the ratio of
+         213       thecorrespondingobjectsandactions. TheGPT-4o(Achiam                                   videos and point clouds in each affordance category. Fig. 3
+         214       et al., 2023) is exploited to further analyze which affordance                        (c) shows the count and distribution of affordances in videos
+         215       corresponds to the current action for each video. Finally,                            and point clouds. Following PIADv1 (Yang et al., 2023c)
+         216       wemanuallychecktheresults to ensure the correctness of                                and PIADv2(Shaoetal., 2025), we divide the VIDA into
+         217       each video. Moreover, we further collected the point clouds                           seen and unseen settings. In the seen setting, both objects
+         218                                                                                             andaffordancesinthetrainingandtestingsetsareconsistent,
+         219
+                                                                                                     4
+                  VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+       220     while in the unseen setting, some objects or affordances in        Spatial Constraints.     Mostofprevious works only focus
+       221     the testing set do not exist in the training set.                  on: ªwhether the predicted category for each point is ac-
+       222                                                                        curate,º whereas lack constraints on ªspatial continuity
+       223     4. Methods                                                         and regional overlapping.º To address this limitation, we
+       224                                                                        introduce the spatial loss, whose core mechanism incorpo-
+       225     In this section, we give the details of our proposed frame-        rates spatial neighborhood information of point clouds to
+       226     work: VideoAfford. We first give an overview in Sec. 4.1,          assign adaptive weights, thereby supporting the training of
+       227     giving the definition of the proposed task. We then detail         the spatial continuity. Specifically, we modified the Dice
+       228     our network architecture in Sec. 4.2. Finally, we provide the      loss, utilizing point coordinates xi ∈ R3 (with all point co-
+       229     training objectives in Sec. 4.3.                                   ordinates denoted as X = {x ,x ,...,x } ∈ RN×3) and a
+                                                                                                                1   2       N
+       230                                                                        predefined radius Rp to identify neighboring points within
+       231     4.1. Architecture Overview                                         the specified spatial range. Then we assign higher weights
+       232     WeprovideanoverviewofourproposedmethodVideoAf-                     to spatially adjacent points, emphasizing the contribution of
+       233     ford. Wereformulatetheaffordancegroundingtaskaslearn-              clustered positive samples during loss calculation:
+       234
+       235     ing affordances from HOI video demonstrations, where the                                 X                       2
+                                                                                                    1                 ∥xi −xj∥
+               modelaimstolocalize actionable areas on 3D objects based                     ω =              exp −               2   ,       (4)
+       236                                                                                    i   |N |                    2σ2
+               onthe given HOI videos. Formally, given an HOI video V                                i  j∈N
+       237     and a text instruction T , the model g is expected to output                                 i
+       238                                                                        where: N = {j | ∥x −x ∥ ≤ R ,j ̸= i} represents the
+               the affordance mask A , defined as:                                          i           i     j 2      p
+       239                             f                                          spatial neighborhood of the i-th point, consisting of all
+       240                                                                        points within a Euclidean distance R from x ; |N | denotes
+       241                                                                                                              p        i    i
+       242                            Af =g(T,V).                         (1)     the number of points in the neighborhood Ni; σ is a hyper-
+                                                                                  parameter controlling the decay rate of weight with spatial
+       243                                                                                                                             +
+                                                                                  distance (typically set as σ = 0.1R ); ω ∈ R            is the
+       244     As shown in Fig.4, VideoAfford mainly consists of four                                                     p     i
+               components: 1) a 3D vision encoder benefited from large-           adaptive spatial weight for the i-th point. By integrating
+       245     scale 3D representation learning, which provides solid foun-       the spatial weight ωi into the traditional Dice loss, where
+       246                                                                        y ∈ [0,1] is the ground-truth label and yˆ ∈ [0,1] is the
+       247     dations for dense prediction tasks; 2) a pre-trained latent         i                                           i
+               action encoder, which provides rich action priors; 3) a video      predicted probability for the i-th point, we can derive:
+       248     multimodal large language model g that exhibits affordance                                      PN
+                                                                                                             2        (ω ·y ·yˆ )
+       249     reasoning ability with the aid of internalized world knowl-         L         =1−                  i=1   i   i   i            (5)
+                                                                                     spatial        P                  P
+       250                                                                                             N          2       N          2
+                                                                                                           (ω ·y )+           (ω ·yˆ ) + ϵ
+       251     edge; 4) A transformer-based lightweight affordance de-                                 i=1    i   i       i=1    i   i
+       252     coder that integrates affordance embeddings into point em-         where ϵ is a small constant to avoid division by zero. By
+       253     beddings to predict affordance masks, thereby enabling fine-       introducing the aforementioned spatial loss, we compel the
+       254     grained and spatially consistent affordance understanding.         model to learn spatially continuous target regions, thus pre-
+       255                                                                        venting fragmented predictions of intra-object points, which
+       256     4.2. Network Architecture                                          ensures that segmented targets maintain spatial compact-
+       257     Point Encoder.     Inspired by the previous works, we adopt        ness, aligning with the morphological characteristics of real-
+       258     a pre-trained 3D encoder, which has been trained on large          world objects.
+       259     text-image-point paired data, as our 3D point cloud back-          Action Encoder.      To enhance the action understanding
+       260     bone. Given the point cloud Pc ∈ RN×3, the 3D point                capability, inspired by Richard Feynman’s saying: What
+       261     cloud encoder f encodes the point cloud into semantic-             we observe as static is merely dynamic equilibrium, we
+       262     rich point embeddings Ps. Then, following Point-Bert (Yu           introduce the latent action encoder m to learn generaliz-
+       263     et al., 2022), we perform geometric guided up-sampling to          able human object interaction motions from a compact
+       264     propagate the semantics features into dense point features         state representation. Specifically, given an HOI video, we
+       265     P ∈RN×2048×3,whichcanbeformulatedas:
+                 d                                                                sample N frames and use the action encoder to extract la-
+       266                                                                        tent action embeddings and compress them into two tokens
+       267                             P =f(P ),                          (2)
+                                         s        c                                        N×2×1024
+                                                                                  A ∈R               , which can be formulated as follows:
+       268                                                                          c
+       269                                                                                                A =m(V).                           (6)
+                                   P =Up(P ,o(P )),                       (3)                               c
+       270                          d          s      c
+       271     where o represents geometric guided propagation. More              Video MLLMBackbone. WechooseVideo-LLaVA(Lin
+       272     details about the point encoder and upsample can be seen in        et al., 2023) as our backbone video multimodal large lan-
+       273     our supplementary materials.                                       guage model. Briefly, Video-LLaVA has both an image
+       274
+                                                                               5
+                                         VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+                                                                                                                                                                                                                                                              spatial: Spatial Continuity Constraint
+                275                                                                                                                                           It is ………… …………  <Aff>
+                276                                                       ····                                         CE Loss                                                     ····                    Decoder                                                                            low density low weight
+                277                                           GT tokens                                                                                               Predicted tokens
+                                                                                                                                                                                                                         Affordance                                                                ������������������������������������������������ = ������ −
+                                                                                                                                                                                                                                                                                                   σ             ෞ
+                                                                                                                                                                                                                                                                                                …      ������ ∙ ������ ∙ ������   …
+                278                                                                                                                                                                                                           Mask                                                                       ������   ������   ������
+                279                                                                Large Language Model                                                                         LoRA                                                                                                                       …
+                280                                                                                                                                                                                        Propagation                               ������������                                     high density high weight
+                                                                                                                                                                                                                                                        (a) Point
+                281                                                                                                                                                                                                                                  coordinates              (b) Spatial Weight Assignment
+                282                                                                                                                                                                                                                                                              Decoder                           Affordance
+                                                                                                                                                                                                             Point               bce +      iou                  Q                                                   Mask
+                283                                      Video Encoder                              Action Encoder                                       Text Tokenizer                                   Encoder                     spatial      Affordance Token      ntetatorC  roNAdd     waorFFee    MLP
+                284                                                                                                                                                                                                               GT                              K,V     ion ss     m  &       rd d 
+                285                                                                                                                                  Where is the affordance                                                                        Point Embeddings
+                286                                                                                                                                   area shown in the video?
+                                                                                                                                                                                                                                                         : Trainable              : Frozen                : Text Tokens
+                287                                                                                                                                                                                                                                      : Video Tokens           : Action Tokens          : Point Tokens
+                288               Figure 4. Overview of VideoAfford. Given an HOI video and a corresponding point cloud, VideoAfford adopts the LanguageBind as
+                289               the video encoder and RenderNet as the action encoder to obtain the video embeddings and latent action embeddings. Then the video
+                290               embeddings and latent action embeddings are fed into the Large Language Model to predict the language tokens and the affordance token.
+                291               Ontheother hand, VideoAfford utilizes a pre-trained 3D encoder to extract the semantic-rich point embeddings, which are then fed into a
+                292               geometric guided upsample and propagation module to obtain dense point features. Finally, the affordance token and the point features
+                293               are fed into the affordance decoder to obtain the affordance masks. More details about the propagation process can be seen in appendix.
+                294
+                295               encoder and a video encoder, a text tokenizer, and a large                                                                                               4.3. Training objectives.
+                296               language model LLM. The image encoder and the video
+                297               encoder align images and videos before projection, allow-                                                                                                Ourstrategy seeks to extract the rich affordance knowledge
+                298               ing LLMtolearnfromaunifiedvisual representation and                                                                                                      within HOI videos and transfer the rich priors into 3D af-
+                299               endowing LLMwiththeability to comprehend both images                                                                                                     fordance grounding in an end-to-end framework. Thus, we
+                300               and videos simultaneously. When inputting a video V and a                                                                                                employbinary cross-entropy (BCE) and IOU loss to guide
+                301               text T , we use the video encoder e and action encoder m to                                                                                              the segmentation mask prediction, and we also introduce a
+                302               encode the video sparsely to obtain video tokens and action                                                                                              spatial loss to enhance the spatial understanding capability
+                303               tokens, and then concatenate them as the input for LLM.                                                                                                  and ensure segmented targets maintain spatial compactness,
+                304               ThenVideoAffordg output the understanding text J as:                                                                                                     consistent with the morphological characteristics of real-
+                305                                                                                                                                                                        world objects. For the text output of language models, we
+                306                                                        J =g(m(V),e(V),T).                                                                            (7)               follow the standard cross-entropy loss. To summarize, our
+                307               Following LISA (Lai et al., 2024), we expand the vocab-                                                                                                  final loss function is as follows:
+                308               ulary table of Video-LLaVA to inject the special token of
+                                                                                                                                                                                                         L=λ L +λ L +λ                                                                        L
+                309                                                                                                                                                                                                      ce       ce             bce        bce               spatial             spatial                      (11)
+                310               <AFF >torepresent the affordance world knowledge,                                                                                                                                                                                                   +λ L
+                                  the hidden state of which is first projected into a query em-                                                                                                                                                                                               iou iou
+                311               bedding A                         and then fed into a lightweight decoder as
+                                                             m                                                                                                                             where the weights λ ,λ                                               , λ                   , λ             are utilized to
+                312               the affordance condition to generate a dense 3D affordance                                                                                                                                                  ce         bce           spatial              iou
+                313                                                                                                                                                                        balance the different loss items.
+                314               mask.
+                                                                                  A =proj(H ).                                                                           (8)
+                315                                                                    m                               aff                                                                 5. Experiments
+                316               AffordanceDecoder.                                        Togetdenseaffordancepredictions,
+                317                                                                                                                                                                        5.1. Benchmark Setting
+                318               weproposeatransformer-basedlight-weightdecoder,which                                                                                                     Baselines.                     Asthis is a newly introduced task that targets
+                                  utilizes the affordance embedding A                                                         andthepointfeatures
+                319                                                                                                     m                                                                  extracting affordance knowledge within HOI videos and
+                                  P toobtaintheaffordancemaskA                                                                    . Wefirst fuse them
+                320                   d                                                                               mask                                                                 transferring it for 3D affordance grounding, there are no
+                                  byacross-attention module to get A :
+                321                                                                                                       f                                                                previous works. The most related work to ours is EGO-
+                322                                                                                    Q·KT                                                                              SAG,whilethecodehasnotbeenreleased. For a thorough
+                                                                   A =softmax                                    √                    · V,                               (9)
+                323                                                    f                                               d                                                                   comparison of our method, we select several advanced HOI
+                324                                                                                                                                                                        images based on 3D affordance grounding methods (e.g.,
+                                  where Q represents the affordance embedding A , K, V
+                325                                                                                                                                         m                              IAGNet (Yang et al., 2023b), GREAT (Shao et al., 2025),
+                                  representthepointfeaturesP . Wefinallygettheaffordance
+                326                                                                                    d                                                                                   AGILE(Zhuetal., 2025a)) as modular baselines. We apply
+                                  maskA                            byinputting A into an MLP network.
+                327                                  mask                                              f                                                                                   the same frames sampling strategy to get N frames, and
+                328                                                             A                  =mlp(A ).                                                          (10)                 wethenutilize the image encoder used in these methods to
+                329                                                                  mask                                  f
+                                                                                                                                                                                    6
+                    VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+                Table 2. Main Results. The overall results of all comparative            Table3. WeinvestigatetheimprovementoftheActionEncoderand
+        330     methods. AUC and mIoU are shown in percentage. The best                  the proposed Spatial Constraint Loss on the model performance
+        331     results are in bold and the second results are in underline.* means      based on the baseline.
+        332     that we reproduce the code of the method.
+        333                                                                                    Action Encoder   Spatial Loss mIOU↑ AUC↑ SIM↑ MAE↓
+        334               Method          mIoU↑       AUC↑ SIM↑ MAE↓                                 ×              ×         20.16    79.23  44.95   0.227
+        335           Non-MLLM-basedMethods                                                 Seen     ✓              ×         21.49    80.73  49.97   0.175
+        336                                                                                          ×              ✓         24.58    82.71  51.44   0.164
+        337                XMF             14.41      71.47      41.10     0.281                     ✓              ✓         28.20    83.64  58.80   0.157
+        338               PFusion          16.33      78.43      46.28     0.264                     ×              ×         7.120    66.35  32.11   0.301
+                          IAGNet           20.39      80.22      50.11     0.188                     ✓              ×         8.010    69.13  33.26   0.295
+        339                LASO            18.65      78.44      49.46     0.257            Unseen   ×              ✓         9.520    70.11  36.46   0.273
+        340                                                                                          ✓              ✓         10.95    72.86  40.08   0.255
+        341        SeenMLLM-basedMethods
+        342               GREAT            23.62      81.41      51.25     0.173         Table 4. We conduct the experiments to figure out the influence of
+        343              Seqafford         23.03      81.17      47.71     0.227         different sampled video frames. The best results are in bold and
+        344           LMAfford3D*          22.74      80.74      47.28     0.234         the second results are in underline.
+        345                 Ours           28.20      83.64      58.80     0.157               Metric     2 frames     4 frames     8 frames     16 frames
+        346           Non-MLLM-basedMethods                                                    mIoU↑        22.30        24.22        28.20         18.53
+        347                XMF             6.010      53.41      31.53     0.388               AUC↑         80.12        82.61        83.64         77.48
+        348               PFusion          7.270      56.69      34.05     0.371           Seen SIM↑        50.74        51.96        58.80         41.93
+        349               IAGNet           7.970      68.97      34.85     0.277               MAE↓         0.183        0.185        0.157         0.197
+        350                LASO            7.410      69.21      33.77     0.288               mIoU↑        8.510        9.770        10.95         6.720
+        351        UnseenMLLM-basedMethods                                                     AUC↑         69.50        71.19        72.86         69.24
+        352               GREAT            8.220      70.19      35.08     0.269                SIM↑        36.17        39.82        40.08         37.12
+        353              Seqafford         8.070      65.53      32.40     0.286           UnseenMAE↓       0.260        0.258        0.255         0.275
+        354           LMAfford3D*          8.110      66.42      33.61     0.278
+        355                 Ours           10.95      72.86      40.08     0.255
+        356                                                                              ing. The training is done on four H200 GPUs for 10 epochs
+        357                                                                              for the main experiments, and during training, the overall
+        358     encode each frame and finally fuse the embeddings.                       training process takes nearly 11 hours. More details can be
+        359                                                                              seen in the Appendix.
+        360     EvaluationMetrics.         Following previous works, we chose
+        361     fourevaluationmetrics: AreaUndertheCurve(AUC)(Lobo
+        362                                                                              5.3. Comparisoni Results
+        363     et al., 2008), Mean Intersection Over Union (mIOU) (Rah-                 Table 2 shows the results of different affordance grounding
+        364     man&Wang,2016),SIMilarity (SIM) (Swain & Ballard,                        approaches on the proposed dataset VIDA, which demon-
+        365     1991), and Mean Absolute Error (MAE) (Willmott & Mat-                    strate that our method consistently outperforms all other ap-
+        366     suura, 2005).                                                            proaches across all evaluated metrics. The baseline model,
+        367                                                                              which produces poor results, suggests that simply encoding
+        368     5.2. Implementation Details.                                             the frames of the video is insufficient to capture the dynamic
+        369     Following VideoLLaVA (Lin et al., 2023), we utilize                      interaction and intricate correlations between videos and 3D
+        370     LanguageBind (Zhu et al., 2023a) as the video encoder,                   sources. Thanks to the powerful video understanding and la-
+        371     Llama(Touvron et al., 2023) as the large language model.                 tent action modeling capabilities of VideoAfford, our model
+        372     For the action encoder, we employ RenderNet (Liu et al.,                 is able to capture dynamic information in HOI videos, show-
+        373     2025c)asthelatentactionencoderduetoitspowerfulworld                      ing strong generalization, and extract the general affordance
+        374     modeling capability, and we adopt Uni3D (Zhang et al.,                   knowledge within HOI videos. In the Seen setting, all the
+        375     2023a) as the 3D vision encoder to enhance the 3D under-                 objects and affordance types are ªseenº by our model, and
+        376     standing ability. All the encoders are frozen. We employ                 in the Unseen setting, the training set does not include some
+        377     LoRA(Huetal.,2021)forefficient fine-tuning and set the                   objects, which causes a huge challenge for the grounding
+        378     rank of LoRA to 128 by default. Additionally, we utilize                 models to predict the affordance area. All the baselines fail
+        379     AdamW(Loshchilov,2017)optimizerwiththelearningrate                       to predict good results, while our method anticipates precise
+        380     and weight decay set to 0.0002 and 0, respectively. We                   results by mining affordance clues provided by dynamic
+        381     adopt a cosine learning rate scheduler, with the warm-up                 interactions. Additionally, the visual qualitative compara-
+        382     iteration ratio set to 0.03. All attentions in our model are             tive results of our method and other baselines are shown
+        383     replaced by flash-attention (Dao et al., 2022) during train-             in Fig.5. As can be seen, the comparative baselines could
+        384
+                                                                                      7
+                   VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+                                                                                  SeqAfford     LMAffordance VideoAfford
+       385                  HOI Videos                IAGNet          GREAT                                                     Ground Truth
+       386
+       387
+       388
+       389
+       390
+       391
+       392
+       393
+       394
+       395
+       396
+       397
+       398
+       399
+       400
+       401
+       402
+       403
+       404
+       405
+       406
+       407
+       408     Figure 5. Visualization Results. The first column is the HOI videos, and the last column is the ground truth of 3D object affordance in
+       409     the point cloud. The depth of red represents the affordance probability. Refer to our supplementary materials for more results.
+       410
+       411
+       412     anticipate some 3D object affordance under our setting, but         the predicted class for each point is accurate,º but lacks
+       413     in comparison, our method obviously achieves better results,        constraints on ªspatial continuity and regional overlap.º,
+       414     which validates the rationality of our setting. When pro-           resulting in a noticeable drop in the IOU metrics.
+       415     vided with an HOI video, our model can understand how
+       416     the HOI video is connected with actionable affordances and          Choice of Sampled Frames.         Weconductedanablation
+       417     accurately extract the dynamic interaction knowledge from           study to systematically investigate the impact of sampled
+       418     the video. This ability is not only attributed to the challeng-     frames on model performance. As presented in Table 4,
+       419     ing benchmarkcollectedfromdiversesourcesbutalsotothe                whenonly2or4framesaresampled,themodelstruggles
+       420     powerful world knowledge internalized in video MLLMs.               to capture the complete interaction dynamics, leading to
+       421                                                                         suboptimal results across key metrics. Conversely, an exces-
+       422     5.4. Ablation Study                                                 sive number of sampled frames (e.g., 16 frames) not only
+       423                                                                         introduces redundant, cluttered information that interferes
+       424     In this section, we conduct a comprehensive ablation study          with effective feature learning but also incurs higher com-
+       425     to investigate the effect of different framework designs, loss      putational overhead. Sampling 8 frames achieves a balance
+       426     function design, and hyperparameter settings.                       between capturing sufficient temporal context and avoid-
+       427                                                                         ing information overload; thus, we adopt this as the default
+       428     Effectiveness of Action Encoder and Spatial Loss.           As      configuration for both seen and unseen experiments.
+       429     showninTable3,it reports the impact of the action encoder
+       430     and spatial loss. Introducing these modules results in a sub-       6. Conclusion and Future Works
+       431     stantial improvement over the baseline, which underscores
+       432     that our method enables deep integration of rich dynamic            In this paper, we introduce the task Grounding 3D object
+       433     interaction priors within HOI videos, rich affordance world         affordance from human-object interaction demonstration
+       434     knowledge within the video LLM. Without the action en-              videos, which aims to harness large-scale demonstration
+       435     coder, the model fails to capture the latent actions, resulting     video corpora to advance object-centric 3D affordance rea-
+       436     in incorrect predictions in irrelevant areas and a marked           soning from static interaction knowledge to complex, dy-
+       437     decline in both performance and efficiency. Without Spatial         namic interaction priors. We collect and construct the first
+       438     Loss constraints, the model only focuses solely on ªwhether         large-scale video-based 3D object affordance dataset VIDA,
+       439
+                                                                                8
+                 VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+       440    andbasedonthisstrongdataset, we introduce VideoAfford,        Delitzas, A., Takmaz, A., Tombari, F., Sumner, R., Polle-
+       441    the first MLLM to reason fine-grained 3D affordance for          feys, M., and Engelmann, F. Scenefun3d: fine-grained
+       442    this new paradigm. Bolstered by novel Spatial Constraint         functionality and affordance understanding in 3d scenes.
+       443    Loss and the powerful world knowledge within MLLM, our           In Proceedings of the IEEE/CVF Conference on Com-
+       444    method establishes a strong baseline for this new but mean-      puter Vision and Pattern Recognition, pp. 14531±14542,
+       445    ingful task, and we will continue to explore how to unleash      2024.
+       446    the huge potential of unlabeled HOI videos for embodied       Deng, S., Xu, X., Wu, C., Chen, K., and Jia, K. 3d affor-
+       447    perception.                                                      dancenet: A benchmark for visual object affordance un-
+       448                                                                     derstanding. In Proceedings of the IEEE/CVF Conference
+       449    ImpactStatement                                                  onComputerVisionandPattern Recognition (CVPR), pp.
+       450                                                                     1778±1787, 2021a.
+       451    This paper presents work whose goal is to advance the field
+       452    of Machine Learning. There are many potential societal        Deng, S., Xu, X., Wu, C., Chen, K., and Jia, K. 3d af-
+       453    consequences of our work, none of which we feel must be          fordancenet: A benchmark for visual object affordance
+       454    specifically highlighted here.                                   understanding. In proceedings of the IEEE/CVF con-
+       455                                                                     ference on computer vision and pattern recognition, pp.
+       456    References                                                       1778±1787, 2021b.
+       457
+       458    Achiam, J., Adler, S., Agarwal, S., Ahmad, L., Akkaya, I.,    Do, T.-T., Nguyen, A., and Reid, I. Affordancenet: An
+       459       Aleman, F. L., Almeida, D., Altenschmidt, J., Altman, S.,     end-to-end deep learning approach for object affordance
+       460       Anadkat, S., et al. Gpt-4 technical report. arXiv preprint    detection. In 2018 IEEE international conference on
+       461       arXiv:2303.08774, 2023.                                       robotics and automation (ICRA), pp. 5882±5889. IEEE,
+       462                                                                     2018.
+       463    Bahl, S., Mendonca, R., Chen, L., Jain, U., and Pathak,       Fang, K., Wu, T.-L., Yang, D., Savarese, S., and Lim, J. J.
+       464       D. Affordances from human videos as a versatile repre-        Demo2vec: Reasoning object affordances from online
+       465       sentation for robotics. In Proceedings of the IEEE/CVF        videos. In Proceedings of the IEEE Conference on Com-
+       466       Conference on Computer Vision and Pattern Recognition,        puter Vision and Pattern Recognition, pp. 2139±2147,
+       467       pp. 13778±13790, 2023.                                        2018.
+       468    Chen, C., Cong, Y., and Kan, Z. Worldafford: Affordance
+       469       grounding based on natural language instructions. In       Gao, X., Zhang, P., Qu, D., Wang, D., Wang, Z., Ding, Y.,
+       470       2024IEEE36thInternational Conference on Tools with            Zhao, B., and Li, X. Learning 2d invariant affordance
+       471      Artificial Intelligence (ICTAI), pp. 822±828. IEEE, 2024.      knowledge for 3d affordance grounding. arXiv preprint
+       472                                                                     arXiv:2408.13024, 2024.
+       473    Chen, J., Gao, D., Lin, K. Q., and Shou, M. Z. Affordance
+       474                                                                  Gibson, J. J. The theory of affordances. Hilldale, USA, 1
+       475       grounding from demonstration video to target image. In        (2):67±82, 1977.
+       476       Proceedings of the IEEE/CVF Conference on Computer
+       477      Vision and Pattern Recognition, pp. 6799±6808, 2023.        Heidinger, M., Jauhri, S., Prasad, V., and Chalvatzaki,
+       478                                                                     G. 2handedafforder: Learning precise actionable bi-
+       479    Chen, W., Liang, H., Chen, Z., Sun, F., and Zhang, J. Learn-     manual affordances from human videos. arXiv preprint
+       480       ing 6-dof task-oriented grasp detection via implicit esti-    arXiv:2503.09320, 2025.
+       481       mation and visual affordance. In 2022 IEEE/RSJ Inter-      Hong, Y., Zhen, H., Chen, P., Zheng, S., Du, Y., Chen,
+       482       national Conference on Intelligent Robots and Systems         Z., and Gan, C. 3d-llm: Injecting the 3d world into
+       483      (IROS), pp. 762±769, 2022. doi: 10.1109/IROS47612.             large language models. Advances in Neural Information
+       484       2022.9981900.                                                 Processing Systems, 36:20482±20494, 2023.
+       485    Chu, H., Deng, X., Chen, X., Li, Y., Hao, J., and Nie, L.
+       486       3d-affordancellm: Harnessing large language models for     Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang,
+       487       open-vocabularyaffordancedetectionin3dworlds. arXiv           S., Wang, L., and Chen, W. Lora: Low-rank adaptation of
+       488       preprint arXiv:2502.20041, 2025.                              large language models. arXiv preprint arXiv:2106.09685,
+       489                                                                     2021.
+       490                                                 Â
+       491    Dao, T., Fu, D., Ermon, S., Rudra, A., and Re, C. Flashat-    Jiang, D., Wang, Z., Li, H., Dang, S., Ma, T., Wei, W.,
+       492       tention: Fast and memory-efficient exact attention with       Dai, G., Zhang, L., and Wang, M. Affordancesam: Seg-
+       493       io-awareness. Advances in Neural Information Process-         ment anything once more in affordance grounding. arXiv
+       494       ing Systems, 35:16344±16359, 2022.                            preprint arXiv:2504.15650, 2025.
+                                                                          9
+                 VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+       495    Ju, Y., Hu, K., Zhang, G., Zhang, G., Jiang, M., and Xu, H.     Liu, S.-C., Chen, W., Cheng, W.-L., Huang, Y.-L., Liao,
+       496       Robo-abc: Affordance generalization beyond categories          I.-B., Li, Y.-H., Zhang, J., et al.  Pavlm: Advancing
+       497       via semantic correspondence for robot manipulation. In         point cloud based affordance understanding via vision-
+       498       European Conference on Computer Vision, pp. 222±239.           language model. In 2025 IEEE/RSJ International Con-
+       499       Springer, 2024.                                                ference on Intelligent Robots and Systems (IROS), pp.
+       500    Lai, X., Tian, Z., Chen, Y., Li, Y., Yuan, Y., Liu, S., and       4299±4306. IEEE, 2025d.
+       501       Jia, J. Lisa: Reasoning segmentation via large language                       Â
+       502                                                                    Lobo, J. M., Jimenez-Valverde, A., and Real, R. Auc: a
+       503       model. In Proceedings of the IEEE/CVF Conference               misleading measure of the performance of predictive dis-
+       504       onComputerVisionandPatternRecognition, pp. 9579±               tribution models. Global ecology and Biogeography, 17
+       505       9589, 2024.                                                    (2):145±151, 2008.
+       506    Langley, P. Crafting papers on machine learning. In Langley,    Loshchilov, I. Decoupledweightdecayregularization. arXiv
+       507       P. (ed.), Proceedings of the 17th International Conference     preprint arXiv:1711.05101, 2017.
+       508       onMachineLearning(ICML2000),pp.1207±1216,Stan-
+       509       ford, CA, 2000. Morgan Kaufmann.                             Luo, H., Zhai, W., Zhang, J., Cao, Y., and Tao, D. Learning
+       510                                                                      affordance grounding from exocentric images. In Pro-
+       511    Lee, J., Park, E., Park, C., Kang, D., and Cho, M. Af-            ceedings of the IEEE/CVF conference on computer vision
+       512       fogato: Learning open-vocabulary affordance grounding          andpattern recognition, pp. 2252±2261, 2022.
+       513       with automated data generation at scale. arXiv preprint
+       514       arXiv:2506.12009, 2025.                                      Luo, H., Zhai, W., Zhang, J., Cao, Y., and Tao, D. Learning
+       515                                                                      visual affordance grounding from demonstration videos.
+       516    Li, D., Feng, J., Chen, J., Dong, W., Li, G., Zheng, Y., Feng,    IEEE Transactions on Neural Networks and Learning
+       517       M., and Shi, G. Seqaffordsplat: Scene-level sequential         Systems, 2023.
+       518       affordance reasoning on 3d gaussian splatting. arXiv
+       519       preprint arXiv:2507.23772, 2025.                             Luo, H., Zhai, W., Wang, J., Cao, Y., and Zha, Z.-J. Visual-
+       520                                                                      geometric collaborative guidance for affordance learning.
+              Li, G., Jampani, V., Sun, D., and Sevilla-Lara, L. Locate:        arXiv preprint arXiv:2410.11363, 2024.
+       521       Localize and transfer object parts for weakly supervised
+       522       affordance grounding. In Proceedings of the IEEE/CVF         Ma, W., Ye, L., de Melo, C. M., Yuille, A., and Chen, J.
+       523       Conference on Computer Vision and Pattern Recognition,         Spatialllm: A compound 3d-informed design towards
+       524       pp. 10922±10931, 2023.                                         spatially-intelligent large multimodal models. In Pro-
+       525                                                                      ceedings of the Computer Vision and Pattern Recognition
+       526    Lin, B., Ye, Y., Zhu, B., Cui, J., Ning, M., Jin, P., and         Conference, pp. 17249±17260, 2025.
+       527       Yuan, L. Video-llava: Learning united visual represen-
+       528       tation by alignment before projection. arXiv preprint        Mo,K.,Qin, Y., Xiang, F., Su, H., and Guibas, L. J. O2o-
+       529       arXiv:2311.10122, 2023.                                        afford: Annotation-free large-scale object-object affor-
+       530                                                                      dance learning. In Proceedings of the Conference on
+       531    Liu, C., Zhai, W., Yang, Y., Luo, H., Liang, S., Cao, Y., and     Robot Learning (CoRL), pp. 1654±1667, 2021.
+       532       Zha,Z.-J. Grounding3dsceneaffordancefromegocentric
+       533       interactions. arXiv preprint arXiv:2409.19650, 2024.         Moon,W.,Seong,H.S.,andHeo,J.-P. Selectivecontrastive
+       534    Liu, K., Liu, Q., Liu, X., Li, J., Zhang, Y., Luo, J., He, X.,    learning for weakly supervised affordance grounding. In
+       535       andLiu, W. Hoigen-1m: A large-scale dataset for human-         Proceedings of the IEEE/CVF International Conference
+       536       object interaction video generation. In Proceedings of the     onComputerVision, pp. 5210±5220, 2025.
+       537       ComputerVisionandPatternRecognitionConference,pp.            Nguyen, T., Vu, M. N., Vuong, A., Nguyen, D., Vo, T., Le,
+       538       24001±24010, 2025a.                                            N., and Nguyen, A. Open-vocabulary affordance detec-
+       539                                                                      tion in 3d point clouds. In 2023 IEEE/RSJ International
+       540    Liu, M., Huang, Z., Lin, X., Zhu, M., Zhao, C., Du, Z.,           Conference on Intelligent Robots and Systems (IROS), pp.
+       541       Wang, Y., Zhu, H., Chen, H., and Shen, C. Bridge               5692±5698. IEEE, 2023.
+       542       thinking and acting: Unleashing physical potential of
+       543       vlm with generalizable action expert. arXiv preprint         Qi,Z.,Dong,R.,Zhang,S.,Geng,H.,Han,C.,Ge,Z.,Yi,L.,
+       544       arXiv:2510.03896, 2025b.                                       and Ma, K. Shapellm: Universal 3d object understanding
+       545    Liu, M., Shu, J., Chen, H., Li, Z., Zhao, C., Yang, J., Gao,      for embodied interaction. In European Conference on
+       546       S., Chen, H., and Shen, C. Stamo: Unsupervised learn-          ComputerVision, pp. 214±238. Springer, 2024.
+       547       ing of generalizable robot motion from compact state         Qian, S., Chen, W., Bai, M., Zhou, X., Tu, Z., and Li,
+       548       representation. arXiv preprint arXiv:2510.05057, 2025c.        L. E. Affordancellm: Grounding affordance from vision
+       549
+                                                                          10
+                  VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+       550       language models. In Proceedings of the IEEE/CVF Con-          Wang, H., Wang, S., Zhong, Y., Yang, Z., Wang, J., Cui,
+       551       ference on Computer Vision and Pattern Recognition, pp.          Z., Yuan, J., Han, Y., Liu, M., and Ma, Y. Affordance-
+       552       7587±7597, 2024.                                                 r1: Reinforcement learning for generalizable affordance
+       553                                                                        reasoning in multimodal large language model. arXiv
+       554     Qu, D., Song, H., Chen, Q., Yao, Y., Ye, X., Ding, Y., Wang,       preprint arXiv:2508.06206, 2025a.
+       555       Z., Gu, J., Zhao, B., Wang, D., et al. Spatialvla: Exploring
+       556       spatial representations for visual-language-action model.     Wang, H., Zhang, Z., Ji, K., Liu, M., Yin, W., Chen, Y.,
+       557       arXiv preprint arXiv:2501.15830, 2025.                           Liu, Z., Zeng, X., Gui, T., and Zhang, H. Dag: Unleash
+       558                                                                        the potential of diffusion model for open-vocabulary 3d
+       559     Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G.,         affordance grounding. arXiv preprint arXiv:2508.01651,
+       560       Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J.,     2025b.
+       561       et al. Learning transferable visual models from natural
+       562       language supervision. In International conference on          Wang, K., Lu, L., Liu, M., Jiang, J., Li, Z., Zhang, B.,
+       563       machine learning, pp. 8748±8763. PmLR, 2021.                     Zheng, W., Yu, X., Chen, H., and Shen, C. Odyssey:
+       564                                                                        Open-world quadrupeds exploration and manipulation
+       565     Rahman,M.A.andWang,Y. Optimizingintersection-over-                 for long-horizon tasks. arXiv preprint arXiv:2508.08240,
+       566       union in deep neural networks for image segmentation.            2025c.
+       567       InInternationalsymposiumonvisualcomputing,pp.234±
+       568       244. Springer, 2016.                                          Wang, P., He, Y., Lv, X., Zhou, Y., Xu, L., Yu, J., and Gu,
+       569                                                                        J. Partnext: A next-generation dataset for fine-grained
+       570     Shao, Y., Zhai, W., Yang, Y., Luo, H., Cao, Y., and Zha,           and hierarchical 3d part understanding. arXiv preprint
+       571       Z. Great: Geometry-intention collaborative inference for         arXiv:2510.20155, 2025d.
+       572       open-vocabulary 3d object affordance grounding. In Pro-
+       573       ceedings of the IEEE/CVF Conference on Computer Vi-           Wang, X., Yang, X., Xu, Y., Wu, Y., Li, Z., and Zhao,
+       574       sion and Pattern Recognition (CVPR), pp. 17326±17336,            N.   Affordbot: 3d fine-grained embodied reasoning
+       575       2025.                                                            via multimodal large language models. arXiv preprint
+       576                                                                        arXiv:2511.10017, 2025e.
+       577     Swain, M. J. and Ballard, D. H. Color indexing. Interna-
+       578       tional journal of computer vision, 7(1):11±32, 1991.          Wang,Y., Wu, A., Yang, M., Min, Y., Zhu, Y., and Deng, C.
+       579                                                                        Reasoning mamba: Hypergraph-guided region relation
+       580     Tang, J., Wei, Z., Zheng, G., and Yang, S. Closed-loop             calculating for weakly supervised affordance grounding.
+       581       transfer for weakly-supervised affordance grounding. In          InProceedingsoftheComputerVisionandPatternRecog-
+       582       Proceedings of the IEEE/CVF International Conference             nition Conference, pp. 27618±27627, 2025f.
+       583       onComputerVision, pp. 9530±9539, 2025a.
+       584                                                                     Wei, Y.-L., Lin, M., Lin, Y., Jiang, J.-J., Wu, X.-M.,
+       585     Tang, Y., Huang, W., Wang, Y., Li, C., Yuan, R., Zhang, R.,        Zeng, L.-A., and Zheng, W.-S. Afforddexgrasp: Open-
+       586       Wu,J., and Fei-Fei, L. Uad: Unsupervised affordance dis-         set language-guided dexterous grasp with generalizable-
+       587       tillation for generalization in robotic manipulation. arXiv      instructive affordance. arXiv preprint arXiv:2503.07360,
+       588       preprint arXiv:2506.09284, 2025b.                                2025.
+       589     Thermos, S., Daras, P., and Potamianos, G. A deep learning      wei, Z., Lin, J., Liu, Y., Chen, W., Luo, J., Li, G., and Lin,
+       590       approach to object affordance segmentation. In ICASSP            L. 3daffordsplat: Efficient affordance reasoning with 3d
+       591       2020-2020 IEEE International Conference on Acoustics,            gaussians, 2025. URL https://arxiv.org/abs/
+       592       Speech and Signal Processing (ICASSP), pp. 2358±2362.            2504.11218.
+       593       IEEE, 2020.
+       594                                                                     Willmott, C.J.andMatsuura,K. Advantagesofthemeanab-
+       595                                           3
+       596     Tian, T., Kang, X., and Kuo, Y.-L. O afford: One-shot 3d           solute error (mae) over the root mean square error (rmse)
+       597       object-to-object affordance grounding for generalizable          in assessing average model performance. Climate re-
+       598       robotic manipulation. arXiv preprint arXiv:2509.06233,           search, 30(1):79±82, 2005.
+       599       2025.
+       600                                                                     Wu,R.,Cheng,K.,Zhao,Y., Ning, C., Zhan, G., and Dong,
+       601     Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux,       H. Learning environment-aware affordance for 3d artic-
+                                           `
+       602       M.-A., Lacroix, T., Roziere, B., Goyal, N., Hambro, E.,          ulated object manipulation under occlusions. Advances
+       603       Azhar, F., et al. Llama: Open and efficient foundation lan-      in Neural Information Processing Systems, 36:60966±
+       604       guage models. arXiv preprint arXiv:2302.13971, 2023.             60983, 2023a.
+                                                                            11
+                 VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+       605    Wu,R., Zhu, Z., Wang, Y., Chen, Y., Wang, J., and Dong,         Yu, C., Wang, H., Shi, Y., Luo, H., Yang, S., Yu, J., and
+       606       H. Garmentpile: Point-level visual affordance guided           Wang,J. Seqafford: Sequential 3d affordance reasoning
+       607       retrieval and adaptation for cluttered garments manipula-      via multimodal large language model. In Proceedings
+       608       tion. In Proceedings of the Computer Vision and Pattern        of the IEEE/CVF Conference on Computer Vision and
+       609       Recognition Conference, pp. 6950±6959, 2025.                   Pattern Recognition (CVPR), pp. 1691±1701, 2025.
+       610    Wu,Y.-H., Wang, J., and Wang, X. Learning generalizable         Yu, X., Tang, L., Rao, Y., Huang, T., Zhou, J., and Lu, J.
+       611       dexterous manipulation from human grasp affordance.            Point-bert: Pre-training 3d point cloud transformers with
+       612       In Conference on Robot Learning, pp. 618±629. PMLR,            maskedpointmodeling. InProceedingsoftheIEEE/CVF
+       613       2023b.                                                         conference on computer vision and pattern recognition,
+       614                                                                      pp. 19313±19322, 2022.
+       615    Xu, C., Chen, Y., Wang, H., Zhu, S.-C., Zhu, Y., and Huang,
+       616       S. Partafford: Part-level affordance discovery from 3d       Zhang, B., Yuan, J., Shi, B., Chen, T., Li, Y., and Qiao,
+       617       objects. arXiv preprint arXiv:2202.13519, 2022.                Y. Uni3d: A unified baseline for multi-dataset 3d object
+       618                                                                      detection. In Proceedings of the IEEE/CVF Conference
+       619    Xu, P. and Yadong, M. Weakly-supervised affordance                onComputerVisionandPatternRecognition, pp. 9253±
+       620       grounding guided by part-level semantic priors. In The         9262, 2023a.
+       621       Thirteenth International Conference on Learning Repre-       Zhang, X., Wang, D., Han, S., Li, W., Zhao, B., Wang, Z.,
+       622       sentations.                                                    Duan, X., Fang, C., Li, X., and He, J. Affordance-driven
+       623    Xu, R., Shen, Y., Li, X., Wu, R., and Dong, H. Naturalvlm:        next-best-view planning for robotic grasping.      arXiv
+       624       Leveraging fine-grained natural language for affordance-       preprint arXiv:2309.09556, 2023b.
+       625       guided visual manipulation. IEEE Robotics and Automa-
+       626       tion Letters, 2024a.                                         Zhao, H., Liu, X., Xu, M., Hao, Y., Chen, W., and Han, X.
+       627                                                                      Taste-rob: Advancing video generation of task-oriented
+       628    Xu, R., Wang, X., Wang, T., Chen, Y., Pang, J., and Lin,          hand-object interaction for generalizable robotic manipu-
+       629       D. Pointllm: Empowering large language models to               lation. In Proceedings of the Computer Vision and Pattern
+       630       understand point clouds. In European Conference on             Recognition Conference, pp. 27683±27693, 2025a.
+       631       ComputerVision, pp. 131±147. Springer, 2024b.                Zhao, H., Zhuang, L., Zhao, X., Zeng, C., Xu, H., Jiang,
+       632                                                                      Y., Cen, J., Wang, K., Guo, J., Huang, S., et al. Towards
+       633    Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B.,        affordance-aware robotic dexterous grasping with human-
+       634       Yu, B., Gao, C., Huang, C., Lv, C., et al. Qwen3 technical     like priors. arXiv preprint arXiv:2508.08896, 2025b.
+       635       report. arXiv preprint arXiv:2505.09388, 2025.
+       636    Yang, Y., Wu, X., He, T., Zhao, H., and Liu, X.                 Zhao, X., Cao, Y., and Kang, Y. Object affordance detection
+       637       Sam3d: Segment anything in 3d scenes. arXiv preprint           with relationship-aware network. Neural Computing and
+       638       arXiv:2306.03908, 2023a.                                       Applications, 32(18):14321±14333, 2020.
+       639
+       640    Yang, Y., Zhai, W., Luo, H., Cao, Y., Luo, J., and Zha, Z.-     Zhou, Y., Gu, J., Chiang, T. Y., Xiang, F., and Su, H. Point-
+       641       J. Grounding 3d object affordance from 2d interactions         sam: Promptable 3d segmentation model for point clouds.
+       642       in images. In Proceedings of the IEEE/CVF Interna-             arXiv preprint arXiv:2406.17741, 2024.
+       643       tional Conference on Computer Vision, pp. 10905±10915,       Zhu, B., Lin, B., Ning, M., Yan, Y., Cui, J., Wang, H.,
+       644       2023b.                                                         Pang, Y., Jiang, W., Zhang, J., Li, Z., et al. Language-
+       645                                                                      bind: Extendingvideo-languagepretrainington-modality
+       646    Yang, Y., Zhai, W., Luo, H., Cao, Y., Luo, J., and Zha, Z.-       by language-based semantic alignment. arXiv preprint
+       647       J. Grounding 3d object affordance from 2d interactions         arXiv:2310.01852, 2023a.
+       648       in images, 2023c. URL https://arxiv.org/abs/
+       649       2303.10437.                                                  Zhu, D., Chen, J., Shen, X., Li, X., and Elhoseiny, M.
+       650                                                                      Minigpt-4: Enhancing vision-language understanding
+       651    Yang, Y., Huang, Y., Guo, Y.-C., Lu, L., Wu, X., Lam, E. Y.,      with advanced large language models. arXiv preprint
+       652       Cao, Y.-P., and Liu, X. Sampart3d: Segment any part in         arXiv:2304.10592, 2023b.
+       653       3dobjects. arXiv preprint arXiv:2411.07184, 2024a.           Zhu, H., Kong, Q., Xu, K., Xia, X., Deng, B., Ye, J., Xiong,
+       654    Yang, Y., Zhai, W., Luo, H., Cao, Y., and Zha, Z.-J. Lemon:       R., and Wang, Y. Grounding 3d object affordance with
+       655       Learning 3d human-object interaction relation from 2d          language instructions, visual observations and interac-
+       656       images. In Proceedings of the IEEE/CVF conference              tions. In Proceedings of the IEEE/CVF Conference on
+       657       oncomputervision and pattern recognition, pp. 16284±           Computer Vision and Pattern Recognition (CVPR), pp.
+       658       16295, 2024b.                                                  17337±17346, 2025a.
+       659
+                                                                          12
+              VideoAfford: Grounding 3D Affordance from Human-Object-Interaction Videos via Multimodal Large Language Model
+      660   Zhu, H., Kong, Q., Xu, K., Xia, X., Deng, B., Ye, J., Xiong,
+      661     R., and Wang, Y. Grounding 3d object affordance with
+      662     language instructions, visual observations and interac-
+      663     tions. In Proceedings of the IEEE/CVF Conference on
+      664     Computer Vision and Pattern Recognition (CVPR), pp.
+      665    17337±17346, 2025b.
+      666
+      667
+      668
+      669
+      670
+      671
+      672
+      673
+      674
+      675
+      676
+      677
+      678
+      679
+      680
+      681
+      682
+      683
+      684
+      685
+      686
+      687
+      688
+      689
+      690
+      691
+      692
+      693
+      694
+      695
+      696
+      697
+      698
+      699
+      700
+      701
+      702
+      703
+      704
+      705
+      706
+      707
+      708
+      709
+      710
+      711
+      712
+      713
+      714
+                                                           13

@@ -1,0 +1,849 @@
+    %%%%%%%% ICML 2026 EXAMPLE LATEX SUBMISSION FILE %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+% Recommended, but optional, packages for figures and better typesetting:
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs} % for professional tables
+\usepackage{placeins}
+% hyperref makes hyperlinks in the resulting PDF.
+% If your build breaks (sometimes temporarily if a hyperlink spans a page)
+% please comment out the following usepackage line and replace
+% \usepackage{icml2026} with \usepackage[nohyperref]{icml2026} above.
+\usepackage{hyperref}
+\usepackage{svg}
+
+% Attempt to make hyperref and algorithmic work together better:
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+
+% Use the following line for the initial blind version submitted for review:
+% \usepackage{icml2026}
+
+% For preprint, use
+\usepackage{icml2026}
+
+% If accepted, instead use the following line for the camera-ready submission:
+% \usepackage[accepted]
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+\usepackage{multirow}
+\usepackage{wasysym}
+% if you use cleveref..
+\usepackage[capitalize,noabbrev]{cleveref}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+\newcommand{\emily}[1]{\textcolor{red}{//EC: #1//}}
+\newcommand{\rj}[1]{\textcolor{blue}{//RJ: #1//}}
+
+\newcommand{\mypar}[1]{\textbf{#1}\quad}
+\usepackage{float}
+\usepackage{siunitx}
+
+% The \icmltitle you define below is probably too long as a header.
+% Therefore, a short form for the running title is supplied here:
+\icmltitlerunning{Abstraction Induces the Brain Alignment of Language and Speech Models} % TODO: change to match title
+
+\begin{document}
+
+\twocolumn[
+  \icmltitle{Abstraction Induces the Brain Alignment of Language and Speech Models
+  }
+  %\icmltitle{Abstraction Induces Brain Predictivity in Language and Speech Models}
+  %
+
+  % It is OKAY to include author information, even for blind submissions: the
+  % style file will automatically remove it for you unless you've provided
+  % the [accepted] option to the icml2026 package.
+
+  % List of affiliations: The first argument should be a (short) identifier you
+  % will use later to specify author affiliations Academic affiliations
+  % should list Department, University, City, Region, Country Industry
+  % affiliations should list Company, City, Region, Country
+
+  % You can specify symbols, otherwise they are numbered in order. Ideally, you
+  % should not use this facility. Affiliations will be numbered in order of
+  % appearance and this is the preferred way.
+  \icmlsetsymbol{equal}{*}
+
+  \begin{icmlauthorlist}\icmlauthor{Anonymous}{anon}\end{icmlauthorlist}
+
+  \icmlaffiliation{anon}{Anonymous Institution}
+  
+  
+
+  \icmlcorrespondingauthor{Anonymous}{anonymous@anonymous.invalid}
+
+  % You may provide any keywords that you find helpful for describing your
+  % paper; these are used to populate the "keywords" metadata in the PDF but
+  % will not be shown in the document
+  \icmlkeywords{NeuroAI}
+
+  \vskip 0.3in
+]
+
+% this must go after the closing bracket ] following \twocolumn[ ...
+
+% This command actually creates the footnote in the first column listing the
+% affiliations and the copyright notice. The command takes one argument, which
+% is text to display at the start of the footnote. The \icmlEqualContribution
+% command is standard text for equal contribution. Remove it (just {}) if you
+% do not need this facility.
+
+% Use ONE of the following lines. DO NOT remove the command.
+% If you have no special notice, KEEP empty braces:
+\printAffiliationsAndNotice{}  % no special notice (required even if empty)
+% Or, if applicable, use the standard equal contribution text:
+% \printAffiliationsAndNotice{\icmlEqualContribution}
+
+\begin{abstract}
+  Research has repeatedly demonstrated that intermediate hidden states extracted from large language models and speech audio models predict measured brain response to natural language stimuli. Yet, very little is known about the representation properties that enable this high prediction performance. Why is it the intermediate layers, and not the output layers, that are most effective for this unique and highly general transfer task? 
+  We give evidence that the correspondence between speech and language models and the brain derives from shared meaning abstraction and not their next-word prediction properties. 
+  In particular, models construct higher-order linguistic features in their middle layers, cued by a peak in the layerwise \emph{intrinsic dimension}, a measure of feature complexity. We show that a layer's intrinsic dimension strongly predicts how well it explains fMRI and ECoG signals; that the relation between intrinsic dimension and brain predictivity arises over model pre-training; and finetuning models to better predict the brain causally increases both representations' intrinsic dimension and their semantic content. Results suggest that semantic richness, high intrinsic dimension, and brain predictivity mirror each other, and that the key driver of model-brain similarity is \emph{rich meaning abstraction} of the inputs, where language modeling is a task sufficiently complex (but perhaps not the only) to require it.
+\end{abstract}
+
+\section{Introduction}
+How do brains and machines take low-level information, such as a collection of sounds or words, and compose it into the rich tapestry of ideas and concepts that can be expressed in natural language? This question of meaning abstraction is at the heart of most studies of human language comprehension. Recent work has shown that representations from contemporary language models (LMs) and speech models are able to successfully model human brain activity at varying spatial and temporal resolutions with only a linear transformation~\cite{goldstein2022shared, vaidya2022self,jain2023computational, antonello2023scaling,tuckute2023driving, NEURIPS2023_3a0e2de2,mischler2024contextual}. This has led to questions about the reason for this brain-model similarity. Do models and brains possess similar representations because they have similar learning properties or objectives?~\cite{caucheteux2023evidence,schrimpf2021neural, goldstein2022shared} Or is the similarity merely a consequence of shared abstraction, the ability to represent features not derivable from the surface properties of language alone?~\cite{antonello2022predictive} 
+
+In this work, we present new evidence that it is the abstractive properties of LLMs and speech models that drive predictivity between models and brains. We do this by examining an underexplored and unexplained phenomenon of the similarity---the tendency for intermediate hidden layers of language and speech models to be optimal for this linear transfer task. We show that a hidden layer's performance at predicting brain activity is strongly related to \emph{intrinsic dimension} of that layer relative to other layers in the same network. 
+% Furthermore, we demonstrate that this relationship is itself an indicator that pretrained LLMs naturally split into an early \emph{abstraction}, or composition, phase, and a later \emph{prediction}, or extraction, phase, a result independently suggested in the LM interpretability literature \citep{valeriani2023,cheng2025emergence}. 
+Prior work has found a peak in layerwise intrinsic dimension of LLMs to mark a phase of abstract linguistic feature building \citep{cheng2025emergence}, which we confirm for language and speech models; in the latter half of LLMs, these features are gradually refined towards predicting the next token \citep{lad2025remarkable,skean2025layer}. We suggest that it is \emph{meaning abstraction} at the dimensionality peak, rather than prediction, that primarily drives the observed correspondence between brains and language-audio models.
+% the first abstraction phase, rather than the latter prediction phase, that primarily drives the observed correspondence between brains and LLMs. 
+This hypothesis is supported with three pieces of evidence: (1) layerwise processing, where the abstractive $I_d$-peak layers are also the ones that best predict the brain; (2) language model pre-training, where intrinsic dimension and encoding performance grow in tandem with linguistic abilities; and (3) finetuning models directly to predict the brain, which increases both the intrinsic dimension and semantic content of representations. Results point to an intricate relationship between a linguistic representation's semantic richness, its geometric properties, and its similarity to the brain. 
+
+\section{Related Work}
+
+\mypar{Encoding models of the brain} 
+Representational alignment between the brain and modern foundation models for language and audio has been well established. Early language encoding models were designed as linear probes that mapped the representations from simple lexical word embedding models such as GloVe and English1000~\cite{huth2016natural} to activations in the brain. Later work demonstrated that contextual language models~\cite{JAINNEURIPS2018} and audio models~\cite{vaidya2022self, millet2022toward} were more effective at predicting brain response. \citeauthor{antonello2023scaling} showed that encoding model performance, like many other machine learning tasks, scales with the size of the underlying language or speech model. Recent work~\cite{vattikonda2025brainwavlmfinetuningspeechrepresentations, moussa2025brain} demonstrated that it is even possible to finetune the nonlinear weights of audio models directly on brain responses. These ``brain-tuned" models have been shown to have representations that align more
+% are more aligned 
+to higher-level regions in the brain outside of auditory cortex when compared to their pretrained alternatives.
+
+\mypar{Reasons for model-brain alignment} While brain-model alignment across varied modalities is a well-established phenomenon, the underlying reasons for this relationship remain unclear. Some works~\cite{schrimpf2018brain, caucheteux2023evidence, Goldstein2020.12.02.403477} have suggested that the reason that brains and models are similar is because they share a \emph{predictive coding} learning objective, that is, that brains and models both learn by updating predictions via error signals, and so their representations are similar due to this similar objective. Other works~\cite{antonello2022predictive, schonmann2025stimulus} have claimed that model-brain alignment is merely a side-effect of the highly general representations that models and brains learn from exposure to similar naturalistic input statistics. In this way, any sufficiently capable model trained on rich real-world data will necessarily capture structure that is present in neural responses, even if the mechanistic implementation of these models differs substantially from biological computation. It remains an open question whether alignment reflects a shared predictive objective or simply the convergence of complex learning systems exposed to the same naturalistic structure \citep{huhplatonic}.
+
+\mypar{Dimensionality and meaning abstraction in neural networks} 
+To understand how contemporary deep neural networks process their inputs, several works have studied how the geometry of representations evolve over network layers \citep{Ansuini_Laio_Macke_Zoccolan_2019,valeriani2023,Doimo_Serra_Ansuini_Cazzaniga_2024,lee2025shared}. Across vision, language, and protein models, the representations' intrinsic dimension ($I_d$) over layers is characterized by a central high-dimensional peak \citep{Ansuini_Laio_Macke_Zoccolan_2019,valeriani2023,cheng2025emergence}, where the $I_d$ is computed on a general slice of the model's in-distribution data (e.g., The Pile for LLMs). 
+In the language domain, \citet{cheng2025emergence} showed that LLMS' $I_d$-peak layers coincide with a locus of rich and abstract feature building; \citet{baroni2026tracingcomplexityprofilesdifferent} showed the $I_d$ peak to demarcate when LLMs start to distinguish between inputs with near-identical surface properties but different syntactic structure. These results corroborate other studies showing that language model processing can be broken down into several stages \citep{tenney-etal-2019-bert}, where models first build up complex features of inputs by the intermediate layers, then resolve towards a next-token distribution \citep{skean2025layer,lad2025remarkable,acevedo2025quantitativeanalysissemanticinformation}. Overall, the $I_d$ of representations has shown itself to be a useful indicator of when (over training) and where (over layers) LLMs construct rich, higher-order linguistic features \citep{chen2024sudden,lee-etal-2025-geometric}. We extend this finding to speech audio models, which are also known to process their inputs along an acoustic to semantic linguistic hierarchy \citep{pasad2021layerwise,pasad2023comparativelayerwiseanalysisselfsupervised,he-etal-2025-layer}.
+
+\section{Data and Methods}
+
+\subsection{Neural response data} 
+\mypar{fMRI}
+We used data from two subjects, UTS02 and UTS03, from \citet{LeBel_Wagner_Jain_Adhikari-Desai_Gupta_Morgenthal_Tang_Xu_Huth_2023}'s open functional magnetic resonance imaging (fMRI) dataset, where subjects listened to English podcast stories.
+% over Sensimetrics S14 headphones. 
+% Subjects were not asked to make any responses, but simply to listen attentively to the stories. 
+For encoding model training, each subject listened to at approximately 20 hours of data. For model testing, the subjects listened to three test stories (one of them 10 times, 2 of them 5 times each). These responses were then averaged across repetitions. Training and test stimuli are listed in Appendix \ref{app:stimuli}. Only voxels within 8 mm of the mid-cortical surface were analyzed, yielding roughly 90,000 voxels per subject. See \citet{LeBel_Wagner_Jain_Adhikari-Desai_Gupta_Morgenthal_Tang_Xu_Huth_2023} for more details.
+
+% MRI data were collected on a 3T Siemens Skyra scanner at the University of Texas at Austin Biomedical Imaging Center using a 64-channel Siemens volume coil. Functional scans were collected using a gradient echo EPI sequence with repetition time (TR) = 2.00 s, echo time (TE) = 30.8 ms, flip angle = 71°, multi-band factor (simultaneous multi-slice) = 2, voxel size = 2.6mm x 2.6mm x 2.6mm (slice thickness = 2.6mm), matrix size = 84x84, and field of view = 220 mm. Anatomical data were collected using a T1-weighted multi-echo MP-RAGE sequence with voxel size = 1mm x 1mm x 1mm following the Freesurfer \cite{fischl2012freesurfer} morphometry protocol. All MRI experiments were approved by the University of Texas at Austin IRB.
+
+\mypar{ECoG} Electrocorticography data were sourced from the open-source Podcast dataset~\cite{zada2025podcast}, which consists of a single 30 minute podcast collected across 9 subjects. The signal was first rereferenced with common average referencing. A notch filter was then used to remove line noise at 60Hz and its harmonics. Finally, a Butterworth filter was used to extract the high-gamma frequency band from 70Hz to 200Hz. Bad channels were excluded from the data via an analysis of their power spectrum. Full details can be found in the original paper~\cite{zada2025podcast}.
+
+\subsection{Methods}
+We test the hypothesis that feature richness, is the primary driver brain-model similarity. To do so requires several observables. First, we measure the dependent variable, \textbf{(1)} model-to-brain encoding performance, by scoring the predictions of a learned affine map from LLM or speech model representations to brain activity. Then, we compute the \textbf{(2)} $I_d$ of representations to measure feature complexity over the LLM or speech model's layers. \textbf{(3)} To link $I_d$ to the linguistic features expressed at each layer, we conduct layerwise probing experiments. Finally, to test the alternate hypothesis that next-token prediction drives brain-model similarity~\cite{schrimpf2018brain, caucheteux2023evidence,goldstein2022shared}, we compute the \textbf{(3)} \emph{surprisal}, or next-token prediction error, from each layer. In all cases, we use the last-token residual stream representation, as it is the only one to attend to the entire sequence.
+
+\mypar{Encoding performance}
+To train \textbf{fMRI} encoding models, we use the method described in \citet{antonello2023scaling}. For LLM-based encoding models, the procedure is as follows. For each word in the stimulus set, activations were extracted by feeding that word and its  preceding context into the LLM. A sliding window was used to ensure each word received a minimum of 256 tokens of context. Activations were then downsampled using a Lanczos filter and FIR delays of 1,2,3 and 4 TRs were added to account for the hemodynamic lag in the BOLD signal. For speech models, we segment the audio stimuli into 16s chunks with a stride of 100ms, feed the chunks into the model, and extract the last token representation. We then similarly downsample the representations using the Lanczos filter. Finally, we train a ridge regression from the downsampled, time-delayed features. \textbf{ECoG} encoding models are trained similarly, via linear models to predict the electrodes' high-gamma response. For 128 evenly spaced lags between -2 and +2 seconds, a separate model is trained to predict the response offset by that lag from word onset. The encoding performance for a model is chosen as the best predicted lag among this set of 128 lags. In all cases, encoding performance is evaluated using the Pearson correlation coefficient $R$ on the validation set.
+
+% While the Pearson correlation measures \emph{linear} representational similarity between model layers and the brain, we also test a \emph{nonlinear} similarity measure, the intrinsic dimension correlation, which measures the fraction of shared nonlinear dimensions that explain both layer and brain representations \citep{basile2025intrinsic}, see \Cref{app:id_corr} for details. As results were qualitatively very similar, we focus on the Pearson correlation for the rest of the paper.
+
+
+\mypar{Dimensionality of representational manifolds} 
+A key ingredient in our analysis is the feature richness at LLM and speech layers. We operationalize feature richness by the layers' representational \emph{dimensionality}, which measures the number of (nonlinear) axes that scaffold the feature space. In particular, since LM representations tend to lie near \emph{nonlinear} manifolds with dimensionality much lower than the ambient dimension \citep{cai2021isotropy,Cheng:etal:2023}, we focus on the nonlinear \emph{intrinsic dimension} $I_d$ of the manifold, though we also tested linear estimators which yielded weaker results, see \Cref{app:id_estimation}.
+
+We estimated the $I_d$ of activations at each layer using GRIDE \citep{Denti_Doimo_Laio_Mira_2022}, a state-of-the-art $I_d$ estimator (details in \Cref{app:id_estimation}). We are interested in an LLM or speech model's behavior on a representative sample of its training data, so that the computed dimensionality is informative about the layer's role in general linguistic processing. For LLMs, we compute the $I_d$ on the layerwise representations of $N=10000$ random 20-word contexts from Pythia's training data,\footnote{The training data for OPT are not publicly downloadable.} The Pile \citep{gao2020pile}. 
+For speech models, we compute the $I_d$ on $N=10000$ random audio chunks of at most 20 seconds from LibriSpeech \citep{librispeech}, an audiobook dataset WavLM and Whisper are trained on. We repeat this for 5 bootstraps and report the average $I_d$ over splits.
+
+\mypar{Layerwise probing} To ascertain what kind of linguistic information (surface-level vs.~higher order) each layer contains, we conduct layerwise linear probing experiments using \citet{conneau-etal-2018-cram}'s SentEval dataset for LLMs, and the acoustic and semantic features in \citep{vattikonda2025brainwavlmfinetuningspeechrepresentations} for speech models. We evaluate whether a certain feature is more or less represented at a layer by the probing test performance (accuracy for SentEval, $R^2$ for speech). For task and implementation details, see \Cref{app:probing}.
+
+\mypar{Surprisal} 
+To test whether predictive coding explains model-brain predictivity in the intermediate layers, we computed the next token's surprisal from the models' intermediate layers via an affine mapping to the vocabulary space \citep{Belrose2023ElicitingLP}. We used The Pile for LLMs and LibriSpeech for speech models. See \Cref{app:tunedlens} for details.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[trim={1mm 2mm 2mm 0mm}, clip, width=0.9\linewidth]{images/fig_surprisal_icml.pdf}
+    \caption{\textbf{LLM surprisal and encoding performance.} \textbf{(A)} \textbf{Surprisal over LLM layers.} For each LLM, the next-token surprisal from a given layer (y-axis), fit with an affine map \citep{Belrose2023ElicitingLP}, decreases monotonically over processing (x-axis). The lowest surprisal layer is always the last one, while the layer most predictive of the brain ($\circ$) occurs between 40-70\% of processing. \textbf{(B)} \textbf{Layerwise encoding performance vs.~layerwise surprisal.} For each LLM, processing trajectories through the (encoding performance, surprisal) plane are shown, where surprisals are normalized by the $\log$-vocabulary size for comparability between models. The global Spearman correlation across models is $\rho=-0.57$ for fMRI and $\rho=-0.31$ for ECoG, significant at a $p$-value cutoff of $0.01$ (*).}
+    \label{fig:surprisal}
+\end{figure*}
+
+
+\subsection{Deep language and speech models}
+\textbf{Language} \quad We use six mid-sized LMs: OPT (125m, 1.3b, and 13b) \citep{zhang2022opt} and Pythia (160m, 410m, and 6.9b)~\citep{biderman2023pythia}, chosen due to the wide range of sizes and training checkpoints for analysis of training dynamics. All are causal, Transformer-based language models trained on large-scale text corpora to minimize the \emph{surprisal}, or negative log-likelihood, of the next token given context. 
+
+\textbf{Speech} \quad We use three state-of-the-art audio models, WavLM (base-plus and large) \citep{chen2022wavlm} and Whisper (large) \citep{whisper}. WavLM is a Transformer-based model trained on masked speech prediction and denoising, and Whisper is an encoder-decoder model trained on automatic speech recognition, both on large-scale speech corpora. In this work, we only consider Whisper's encoder, as it serves as the model's speech featurizer. 
+
+\mypar{Random baseline} As a baseline, we generate Random Fourier Features (RFF) \citep{Rahimi_Recht_2007} to align both fMRI and ECoG datasets to a shared, model-agnostic representation space that has not learned to efficiently embed the structure of language. We construct RFF maps of increasing extrinsic dimension (128, 256, 512, 1024, 2048) by drawing a Gaussian random projection and applying sinusoidal nonlinearities to approximate an RBF kernel. For each word we assign a random input vector, transform it through the feature map, then resample to the appropriate frequency according to whether we predict fMRI or ECoG.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[trim={4mm 0mm 1mm 1mm}, clip, width=0.9\linewidth]{images/encoding_vs_id.pdf}
+\caption{\textbf{Intrinsic dimension and encoding performance.}  \textbf{(A)} \textbf{Layerwise $I_d$ accounts for layerwise encoding performance.} In LLMs and audio models, $I_d$ peaks in the deep layers, indicating a phase of high feature richness (left). This peak tracks the maximal layerwise encoding performance of both  fMRI (middle) and ECoG (right). \textbf{(B)} \textbf{Global correlation between $I_d$ and encoding performance across model layers}. For fMRI (top) and ECoG (bottom), each model layer's encoding performance (y-axis) is shown against the $I_d$ (normalized by the $\log$ hidden dimension for comparison between models) (x-axis). The global correlation between the encoding performance and $I_d$ is $\rho=0.76$ (fMRI) and $\rho=0.43$ (ECoG), both significant at $\alpha=0.05$. \textbf{(Bottom row)} \textbf{Encoding performance and $I_d$ peaks manifest concurrently over training}: \textbf{(C)} Pythia-6.9b's layerwise $I_d$ $\pm$1SD is shown over training, where an $I_d$ peak at layer 13 manifests over time. Curves correspond to training checkpoints 1K, 2K, 4K, 8K, 16K, 32K, 64K, and 143K (final checkpoint). \textbf{(D)} Training dynamics of layerwise encoding performance of the fMRI BOLD signal. A peak is reached at layer 13. \textbf{(E)} Training dynamics of layerwise ECoG encoding performance, where a peak is reached at layer 12. Red dots in each plot show maximal layers for the respective metric. }
+    \label{fig:claim1}
+\end{figure*}
+\begin{table*}
+    \caption{For fMRI and ECoG, the Spearman correlations between layerwise surprisal and layerwise encoding performance averaged over voxels/electrodes is in the top row, and correlations between $I_d$ and encoding performance in the bottom row. In all models, Spearman $\rho$ between surprisal and encoding performance varies by model family (negative is better), while $\rho$ between $I_d$ and encoding performance is significantly positive (more positive is better). The positive correlation magnitude between $I_d$ and encoding performance is \textbf{higher} than the negative correlation magnitude between surprisal and encoding performance, showing that $I_d$ better explains layerwise encoding performance than surprisal. Values significant at $\alpha=0.05$, as determined by a permutation test, are marked with *.}
+    \centering
+    \scalebox{0.85}{
+\begin{tabular}{l r||ccc|ccc|cc|c||ccc}
+    & & \multicolumn{3}{c|}{OPT} 
+    & \multicolumn{3}{c|}{Pythia} 
+    & \multicolumn{2}{c|}{WavLM} 
+    & \multicolumn{1}{c||}{Whisper} & \multicolumn{1}{c}{LLMs} & \multicolumn{1}{c}{Speech} &\multicolumn{1}{c}{All}\\
+    & & 125m & 1.3b & 13b 
+    & 140m & 410m & 6.9b 
+    & base & large 
+    & large \\
+    \hline
+    \multirow{2}{*}{fMRI}
+        &  Surprisal $\downarrow$
+        & -0.66* & -0.80* & -0.80* 
+        & -0.04 & -0.39 & -0.17 
+        % & -- & -- & -- 
+        & 0.82* & 0.76* & \textbf{-0.99}* 
+        & -0.57* & 0.66* & -0.51*
+        \\
+        & $I_d$ $\uparrow$   
+        & \textbf{0.92}* & \textbf{0.86}* & \textbf{0.88}* 
+        & \textbf{0.49} & \textbf{0.90}* & \textbf{0.95}*
+        & -0.09 & \textbf{0.90}* & 0.98* & \textbf{0.90}* & \textbf{0.51}* & \textbf{0.76}*\\
+    \hline
+    \multirow{2}{*}{ECoG}
+        & Surprisal $\downarrow$
+        & -0.15 & -0.41* & -0.53* 
+        & -0.61* & -0.60* & 0.33 
+        % & -- & -- & -- 
+        & -0.09 & 0.60* & \textbf{-0.64}* 
+        % & -0.31* & -- & -- \\
+        & -0.31* & 0.10 & 0.21* \\
+        & $I_d$ $\uparrow$   
+        & \textbf{0.97}* & \textbf{0.97}* & \textbf{0.82}* 
+        & \textbf{0.83}* & \textbf{0.88}* & \textbf{0.88}* 
+        & \textbf{0.21} & \textbf{0.42}* & \textbf{0.64}* & \textbf{0.83}* & \textbf{0.29}* & \textbf{0.43}*\\
+        \hline 
+\end{tabular}}
+    \label{tab:correlation_dim_ep}
+\end{table*}
+
+\section{Results}
+Across language and speech models, subjects, and imaging modalities, experiments evidenced a strong relationship between feature richness ($I_d$), linguistic meaning abstraction, and encoding performance. Since results generalized over fMRI subjects, we highlight ECoG and fMRI subject UTS03 here, with fMRI subject UTS02 in \Cref{app:subj_2}.
+% \subsection{Feature richness accounts for encoding performance explained by next-token predictivity in LLMs}
+
+\subsection{Next-token predictivity does not account for layerwise encoding performance} 
+Several studies \citep{schrimpf2021neural,Caucheteux2020.07.03.186288} have found language model surprisal to predict language encoding performance. We first asked whether surprisal (1) predicts the best performing layer, and more generally, (2) accounts for layerwise variation in encoding performance, finding neither hypothesis to hold across models.
+
+The best layer for next-token prediction does not predict the best encoding performance layer. \Cref{fig:surprisal}A shows for LLMs that next-token predictivity monotonically decreases over layers (see \Cref{fig:audio_surprisal} for speech models), where the most predictive layer is always the \emph{last} one; instead, encoding performance peaks for some \emph{intermediate} layer (solid dots in \Cref{fig:surprisal}A). Nor does layerwise surprisal account for layerwise variation in encoding performance: across models, \Cref{fig:surprisal}B plots each LLM layer's surprisal against its encoding performance for fMRI subject UTS03 and ECoG (see \Cref{fig:audio_surprisal} for speech models). If layerwise surprisal predicted layerwise encoding performance, the Spearman $\rho$ should be near $-1$; instead, across all models, the global $\rho$ between surprisal and encoding performance is $-0.51$ (fMRI) and $0.21$ (ECoG), see \Cref{tab:correlation_dim_ep} right. \emph{Within} each model, \Cref{tab:correlation_dim_ep} rows 1 and 3 show the layerwise $\rho$ between surprisal and encoding performance. Results varied widely between models: $\rho$ was negative for OPT and Whisper ($p<0.05$), not significant for Pythia, and positive for WavLM. Results were similar for subject UTS02; see \Cref{tab:app_correlation_dim_ep}. We conclude that in the general case, layerwise surprisal does not predict layerwise encoding performance nor the best performing layer; this rules out next-token predictivity as a driver of layerwise encoding performance.
+
+\subsection{Linguistic feature abstraction drives encoding performance} 
+We now consider the alternate hypothesis: deep speech and language model layers predict neural responses to language because LMs and speech models learn a rich feature space of language \citep{antonello2022predictive}. The link between high $I_d$ at a layer and its role in constructing syntactic and semantic features has been demonstrated in LLMs \citep{cheng2025emergence,lee-etal-2025-geometric,baroni2026tracingcomplexityprofilesdifferent}, and here we also show this applies to speech models. If our hypothesis holds, then we would expect to see a positive relationship between layerwise $I_d$ and layerwise encoding performance. In what follows, we indeed find a \textbf{strong correspondence between $I_d$ and encoding performance} as evidenced by the evolution of $I_d$ and encoding performance over layers, over language model pre-training, and after finetuning model layers directly on neural responses. 
+
+\mypar{$I_d$ tracks linguistic abstraction in the deep layers of LLMs and speech models} We first confirm the link between an $I_d$ peak and the construction of higher-order linguistic features in the deep layers of LLMs and speech models. \Cref{fig:claim1}A shows, for LLMs (top left) and speech models (bottom left), that the $I_d$ tends to peak in the middle layers. Then, \Cref{fig:semantics} shows that for LLMs (top two rows), semantic decodability (purple) reaches a maximum around the $I_d$-peak layers, while surface feature decodability (pink) does not relate to the $I_d$ peak. Similarly, in speech audio models (bottom row), acoustics are more linearly represented in the early layers, while semantics are most decodable in late layers coinciding with high $I_d$. 
+\begin{figure}[h]
+    \centering
+    \includegraphics[trim={2.8mm 2mm 3mm 2mm}, clip, width=\linewidth]{images/semantics_condensed.pdf}
+    \caption{\textbf{Semantic decodability coalesces near the $I_d$ peak.} For LLMs (top rows) and speech models (bottom), higher-order feature decodability (purple) peaks in the deep layers near the $I_d$ peak (dashed line); superficial text or acoustic feature decodability (pink) drops over the layers. Task details in \Cref{app:probing}.}
+    \label{fig:semantics}
+    \vspace{-2ex}
+\end{figure}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[trim={4mm 0mm 1mm 4mm}, clip, width=0.9\linewidth]{images/encoding_vs_id_fmri_flatmap_ecog_v2.pdf}
+    \caption{\textbf{How $\rho(I_d, \text{encoding performance})$ distributes on the brain (OPT-1.3b).} \textbf{(A, C)} The Spearman $\rho(\text{EP}, I_d)$ between layerwise encoding performance (EP) and $I_d$ (y-axis) is plotted against encoding performance (x-axis) for (\textbf{A}) fMRI Subject UTS03 and (\textbf{C}) ECoG. Each point in the plot is a single voxel or electrode ($95556$ voxels, $1268$ electrodes across subjects), where encoding performance is discretized into buckets for legibility. There is an increasing trend,  $\rho=0.58$ for fMRI and $\rho=0.56$ for ECoG, $p<$1e-3), where voxels and electrodes that are better predicted by OPT-1.3b also have a stronger correlation between layerwise $I_d$ and encoding performance. \textbf{(B)} For fMRI subject UTS03, we show, for voxels with sufficiently high encoding performance ($r\geq0.2$), the Spearman $\rho$ between layerwise $I_d$ and encoding performance (red is higher). For these well-predicted voxels, layerwise $I_d$ correlates highly with encoding performance, $\rho=0.73$. 
+    \textbf{(D)} For electrodes across subjects with high encoding performance ($r\geq0.1$, roughly top $25\%$ of electrodes), we plot the Spearman $\rho$ between layerwise $I_d$ and encoding performance (red is higher). For these electrodes, layerwise $I_d$ correlates positively to encoding performance, $\rho=0.63$ on average. Correlations are highest in fronto-temporal language processing areas for both fMRI and ECoG. Several example voxels and electrodes' layerwise $I_d$ and encoding performance (EP) are shown (small plots).}
+    \label{fig:brainmaps}
+\end{figure*}
+
+\mypar{$I_d$ accounts for layerwise brain encoding performance} \Cref{fig:claim1}A shows the evolution of $I_d$ over the layers for LLMs and speech models (left) and the layerwise encoding performance for fMRI subject UTS03 (middle) and ECoG (right). There is a striking resemblance between layerwise $I_d$ and encoding performance for all models, subjects, and imaging modalities. Notably, for every combination, the $I_d$-peak layers are the ones that best predict neural responses to language, where over all models, the worst case distance between the max-$I_d$ and max-encoding performance layer was only 3 layers (WavLM-large, total 24 layers), and usually 0-1 layers (see \Cref{tab:best_layers_abs}). 
+\begin{figure*}[t]
+    \centering
+    \includegraphics[trim={2mm 2mm 2mm 1mm}, clip, width=\linewidth]{images/wavlm-finetuned_UTS03.pdf}
+    \caption{\textbf{Increasing encoding performance by finetuning increases semantic content and $I_d$.} Finetuning WavLM layer 9 on voxelwise responses to speech increases encoding performance (left), as well as semantic content (middle) and $I_d$ (right, light to dark green).}
+    \label{fig:finetuning}
+\end{figure*}
+Furthermore, layerwise $I_d$ correlates highly to encoding performance globally across the models---$\rho=0.76$ for fMRI and $\rho=0.43$ for ECoG ($p<1$e-2)---where $I_d$ here is normalized by the $\log$-hidden dimension for comparability across models, see \Cref{fig:claim1}B. Within each model, the layerwise $I_d$ correlates highly to layerwise encoding performance in all cases, where the correlation is notably much higher than the alternative hypothesis (surprisal), see \Cref{tab:correlation_dim_ep} for fMRI Subject UTS03 and ECoG, and \Cref{tab:app_correlation_dim_ep} for Subject UTS02. This is true for virtually every combination of language or speech model, imaging modality, and subject. A lone exception is WavLM-base-plus, whose encoding performance we found to be driven by low-level similarity to the auditory cortex, see \Cref{fig:app_flatmaps_wavlm-base-plus}; this can occur in speech models in particular \citep{oota-etal-2024-speech}. Still, results overwhelmingly show the $I_d$ peak in language-audio models to cue a phase of rich linguistic representation that best predicts brain responses to speech.
+
+\mypar{Intrinsic dimension and encoding performance grow in tandem over pre-training} The relationship between encoding performance and $I_d$ arises nontrivially from learning. \Cref{fig:claim1} (bottom) plots Pythia 6.9b's $I_d$ (\textbf{C}), encoding performance for fMRI Subject UTS03 (\textbf{D}) and for ECoG (\textbf{E}), across layers over the course of training (fMRI subject UTS02 looks similar, see \Cref{fig:pythia_evol_app}). 
+
+\Cref{fig:claim1} replicates two results from the literature: first, the $I_d$ peak emerges and $I_d$ generally grows for all layers over training \citep{cheng2025emergence}; second, ECoG and fMRI encoding performance grow over training \citep{alkhamissi-etal-2025-language}. Now considering the relationship between the two, across modalities, encoding performance and $I_d$ increase at similar rates over training, seen by similar positions of the checkpoint curves in the plots. fMRI encoding performance and $I_d$ are highly globally correlated with $\rho = 0.96$, and ECoG encoding performance and $I_d$ with $\rho=0.64$ (both $p$-values $<$1e-3). Lastly, the location of the $I_d$ peak (red dots, \Cref{fig:claim1}C) changes over training, eventually settling at the same layers for peak encoding performance (red dots, \Cref{fig:claim1}D and E). This rules out that the $I_d$ peak trivially reflects the Transformer architecture, e.g., layer index. Results suggest that the relationship between feature complexity, linguistic knowledge and brain predictivity emerges from exposure to language training data.
+
+\mypar{Better predicted voxels and electrodes show a stronger relationship between $I_d$ and encoding performance} 
+\Cref{fig:brainmaps} shows, for subject UTS03, the voxels and electrodes that were predicted above a threshold of $R=0.2$ (top 33\%) by some OPT-1.3b layer (see \Cref{fig:app_flatmaps_opt_1.3b} for flatmaps of voxelwise encoding performance). These ``well-predicted" voxels and electrodes largely fall in fronto-temporal regions shown to process language \citep{Fedorenko_Ivanova_Regev_2024}; in contrast, voxels for which encoding performance was low ($R<0.2$) largely fall outside of conventional language areas, for instance, in low-level visual areas. 
+
+Each voxel and electrode in \Cref{fig:brainmaps}B,D is colored by the correlation between layerwise $I_d$ and encoding performance (dark red is better) for OPT-1.3b; we also show several highly-correlated example trajectories. For each model and subject, the encoding performance of well-predicted voxels grows with layerwise $I_d$ ($\rho=0.73$ for OPT-1.3b fMRI Subject UTS03 and $\rho=0.63$ for ECoG, see \Cref{tab:app_well_predicted_subset} for other subjects and models). An exception is voxels near the primary auditory cortex (white and blue dots in \Cref{fig:brainmaps}B), which process low-level auditory information; these voxels are predicted above $R=0.2$ by LLMs and much better by speech model layers, but, they do not make use of abstract linguistic features in the high-$I_d$ middle layers. Still, in the vast majority of well-predicted voxels, $I_d$ correlates highly positively to encoding performance (much more red than blue in \Cref{fig:brainmaps}B); further, the better-predicted a voxel or electrode is from language or speech models, the higher the correlation between layerwise encoding performance and $I_d$, see \Cref{fig:brainmaps}A, where $\rho=0.58$ for fMRI Subj.~UTS03, ($p<$1e-3), and \Cref{fig:brainmaps}C, where $\rho=0.56$ for ECoG ($p<$1e-3); see \Cref{tab:app_higher_ep_higher_ep_id} for all subjects, modalities, and models. In sum, we see that in most voxels and electrodes, higher encoding performance tracks a stronger relationship to \emph{abstraction} in the middle layers. 
+% That is, higher-order linguistic features drive high predictivity in individual voxels and electrodes.
+
+% Overall, results indicate that the relationship between layerwise $I_d$ and encoding performance \emph{strengthens} the more language-relevant (or well-predicted) a voxel or electrode is.
+
+% Taken together, results show that a layer's intrinsic dimension acts as a cue for higher-order linguistic feature building. Not only is this a useful criterion for layer selection when building neural encoding models from deep model activations, but it also implies higher-dimensional, higher-order features are more brain-like. 
+% Results corroborate evidence in the literature that the mid-layer $I_d$ peak corresponds to the extraction of higher-order linguistic features, where these layers are the most useful ones for downstream transfer \citep{cheng2025emergence}---the transfer task being neural response prediction in our case. 
+
+\subsection{Increasing encoding performance causally increases intrinsic dimension and semantic content
+} Up to this point, our analyses linking $I_d$, feature richness, and encoding performance have been largely correlational. Now, as in \citet{vattikonda2025brainwavlmfinetuningspeechrepresentations}, we causally manipulate the layerwise encoding performance by directly finetuning WavLM-base-plus---the model whose encoding performance was most driven by low-level input properties---on fMRI for each subject. See \Cref{app:finetuning} for details.
+
+\Cref{fig:finetuning} shows that directly finetuning the best-performing WavLM layer (9) to better predict fMRI responses not only increases the encoding performance (left), but also increases the semantic content (middle) and the representational $I_d$ (right), where the original and braintuned versions are shown in light and dark green, respectively. Results generalize for Subject UTS02, see \Cref{fig:finetuning_app}. Our findings align with \citet{vattikonda2025brainwavlmfinetuningspeechrepresentations,moussa2025brain}, who found brain-tuning speech model representations to increase their semantic content; here, we add $I_d$ to the equation, having demonstrated a causal link in which higher overall similarity to the brain requires richer semantic content, which entails higher dimensional representations of language.
+
+
+\subsection{Dimensionality and encoding performance: mechanism or symptom?}
+We just saw that in language-audio models, encoding performance, $I_d$, and meaning abstraction are causally related. But is $I_d$ a \emph{mechanism} or \emph{symptom} in this relationship? Manipulating the $I_d$ of random feature spaces reveals that high $I_d$ is likely an epiphenomenon of learning rich features of language, some of which are useful for predicting the brain, rather than a reason for high predictivity in-and-of-itself. 
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[trim={3mm 3mm 3mm 4mm}, clip, width=\linewidth]{images/rff_fmri.pdf}
+    \caption{\textbf{Feature richness alone does not explain LLM and speech model encoding performance.} For the best LLM and speech layers (colors) as well as RFF feature spaces (gray) of increasing extrinsic dimension ($\circ$ size), we show the growth in $I_d$ (x-axis) with the corresponding growth in encoding performance averaged across fMRI subjects (y-axis).
+    }
+    \label{fig:rff}
+\end{figure}
+
+\mypar{High-$I_d$ random features of linguistic inputs poorly predict the brain} To test whether layer $I_d$ \emph{per-se} influences model-brain predictivity, we constructed Random Fourier Feature spaces of increasing $I_d$, measured on The Pile for comparison to language-audio models. 
+% To compare previous sections' LLM and speech model $I_d$s to the RFF spaces, we measure the $I_d$ of the RFF-embedded Pile. 
+Using these feature maps, we embedded the same stimuli to the human subjects, learning an encoding model from RFF space to brain responses. 
+If $I_d$ alone causally drives encoding performance, then the RFF map should predict brain responses as well as an LLM or speech model layer with the same $I_d$. 
+
+\Cref{fig:rff} shows how fMRI encoding performance (y-axis) grows with $I_d$ (x-axis) for RFF features and the best-performing language-audio model layers. There is a perfect correlation, $\rho=1$, between RFF-$I_d$ and encoding performance, but the effect is small: \Cref{fig:rff} shows significant diminishing returns to increasing the RFF-$I_d$ beyond $150$, where final encoding performances plateau at $R\approx0.04$. Meanwhile, an LLM or speech model layer with lower $I_d$ achieves encoding performances of $R>0.1$ (figure top left). Findings hold for ECoG, see \Cref{fig:rff_ecog}. Results show that $I_d$ does not \emph{cause} model-brain predictivity. Instead, it is the other way around: the high $I_d$ of the best encoding layers arises from learning rich abstractions of language.
+
+
+\section{Discussion} 
+
+Recent studies on language encoding models have observed that the intermediate layers of speech models and LLMs, rather than the output layers, are most linearly similar to measured brain activity~\cite{antonello2022predictive,Hong_2024,caucheteux2023evidence}. 
+Despite this frequently observed trend, little research has been dedicated to explaining it. 
+LLM and speech model layers are invariant to many variables: each layer was trained on the same data and downstream objective, and has the same architecture. Then, layer-wise differences can only arise either due to the abstractive nature of the transition from earlier to later layers, or due to the ``time pressure" exerted by the loss term on later layers. These competing pressures, to first build up a comprehensive representation of the input text, and to then resolve this representation towards a distribution over predicted next token outputs, have opposite effects, as we demonstrate here. Meaning abstraction leads to an increase in encoding performance and dimensionality, whereas prediction narrows dimensionality to the detriment of encoding. 
+
+What conclusions should we draw from this? First, that it is unlikely  that the autoregressive nature of language models directly drives brain-model similarity~\cite{schrimpf2021neural, goldstein2022shared, antonello2022predictive}. As models become more potent at prediction, their most predictive and most descriptive layers drift apart. Secondly, our results seems to support the claim from other works~\cite{cheng2025emergence,skean2025layer,lad2025remarkable} that LLMs have an intrinsic two-phase process, specifically, a first phase that supports composition and abstraction, followed by a second ``output'' phase that focuses on prediction.%\footnote{We note that it is inherently challenging to draw affirmative conclusions about underlying mechanisms in the brain from from brain-model similarity alone. See \citet{guest_martin_2021,antonello2022predictive} for further details.}  
+
+Putting these conclusions together with the existing literature, we can update the story of the reasons for model-brain alignment. Contemporary LLMs trained on next-token prediction better predict neural responses than static embedding models like Word2Vec \citep{Caucheteux2020.07.03.186288,schrimpf2021neural,goldstein2022shared}. In these performant models, the high-$I_d$ intermediate layers, not the final predictive layers, best predict the brain; these high-$I_d$ layers correspond to a phase of higher-order linguistic feature-building about the inputs. In language models, these feature-rich layers do eventually serve next-token prediction, once they are processed by the final output layers after this abstraction peak. 
+
+Finally, we observe that representations' $I_d$ explains their encoding performance \emph{in the context of} deep models trained to embed the structure of text or speech. As our random Fourier feature analysis demonstrates, high $I_d$ in-and-of-itself is necessary but not sufficient for high neural predictivity. But the observation that brain-tuning an autoregressive speech model directly increases its $I_d$ implies that, although prediction objectives can learn some of the structure that contributes to neural alignment, they still leave out readily learnable nonlinear features that are useful for predicting brain activity. This heavily implies that the nonlinearities learned by LLMs through autoregressive loss provide only an incomplete picture of the nature of learning and intelligence. Therefore, developing better methods for extracting task-relevant structure from naturalistic data may be key to advancing encoding models beyond their current limits and, in turn, improving  what these models can tell us about the underlying mechanisms of the brain.
+\section*{Impact Statement}
+This paper addresses the reasons for predictivity of neural responses from deep neural network representations. The insights can be used to better understand how relatively opaque systems like deep neural nets and the brain process language.
+
+\subsection*{Acknowledgements} This project has received funding from the European Research Council (ERC) under the European Union’s Horizon 2020 research and innovation programme (grant agreement No. 101019291) and was additionally supported by NIDCD grant R01DC014279. Computing resources were provided by the Zuckerman Institute at Columbia University. This paper reflects the authors’ view only, and the funding agency is not responsible for any use that may be made of the information it contains.
+
+We would like to thank the Center for Brains, Minds, and Machines for hosting the collaboration, and Marco Baroni, Alex Huth, Nima Mesgarani, Alessandro Laio, and members of the UPF linguistics department for feedback. 
+
+\bibliography{example_paper}
+\bibliographystyle{icml2026}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% APPENDIX
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\appendix
+\crefalias{section}{appendix}
+
+\renewcommand\thefigure{\thesection.\arabic{figure}}    
+\renewcommand\thetable{\thesection.\arabic{table}}
+\renewcommand\theequation{\thesection.\arabic{equation}}
+\onecolumn
+
+\section{Data, Code, and Computational Resources}
+\label{app:data_code}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+
+\subsection{Code} We will paste the Github link upon deanonymization.
+\begin{description}
+    \item[DadaPy] \url{https://github.com/sissa-data-science/DADApy}; license: apache-2.0
+    \item[Patchscopes] \url{https://pair-code.github.io/interpretability/patchscopes/}; license: apache-2.0
+    \item[Surprisal] \url{https://github.com/aalok-sathe/surprisal}; license: MIT
+    \item[Encoding models] \url{https://github.com/HuthLab/encoding-model-scaling-laws}; license: Unknown
+\end{description}
+
+\subsection{Models}
+\begin{description}
+    \item[WavLM] e.g., \url{https://huggingface.co/microsoft/wavlm-large}; license: cc
+    \item[Whisper] e.g., \url{https://huggingface.co/openai/whisper-large}; license: apache-2.0
+    \item[OPT] e.g., \url{https://huggingface.co/facebook/opt-13b}; license: OPT-175B
+    \item[Pythia] e.g., \url{https://huggingface.co/EleutherAI/pythia-6.9b-deduped}; license: apache-2.0
+\end{description}
+
+\subsection{Data} Data were derived from the following open-source datasets.
+
+\begin{description}
+    \item[The Pile sample] \url{https://huggingface.co/datasets/NeelNanda/pile-10k}; license: bigscience-bloom-rail-1.0
+    \item[LibriSpeech ASR] \url{https://huggingface.co/datasets/openslr/librispeech_asr}; license: cc by 4.0
+    \item[Probing tasks \citep{conneau-etal-2018-cram}] \url{https://github.com/facebookresearch/SentEval/tree/main/data/probing}; license: bsd
+    \item[fMRI \citep{LeBel_Wagner_Jain_Adhikari-Desai_Gupta_Morgenthal_Tang_Xu_Huth_2023}] \url{https://openneuro.org/datasets/ds003020/versions/2.0.0}; license: cc0
+    \item[ECoG \citep{zada2025podcast}] \url{https://openneuro.org/datasets/ds005574}; license: cc0
+\end{description}
+
+\subsection{Compute}
+Ridge regression was performed using compute nodes with 128 cores (2 AMD EPYC 7763 64-core processors) and 256GB of RAM. In total, roughly 1,000 node-hours of compute was expended for these models. Feature extraction for language models was performed on specialized GPU nodes similar to the AMD compute nodes but with 3 NVIDIA A100 40GB cards. Feature extraction required roughly 300 node-hours of compute on these GPU nodes. 
+
+Dimensionality and surprisal computation were run on a cluster with 12 nodes with 5 NVIDIA A30 GPUs and 48 CPUs each. Extracting and computing dimensionality on LM representations took a few wall-clock hours per model. Training TunedLens took around 15 minutes per layer, so overall 30 wall-clock hours. Training the layerwise linguistic feature probes took around 1 hour per model per task, so a total of around 60 hours. We parallelized all computation, and estimate the overall parallelized runtime, including preliminary experiments and failed runs to be around 40 days.
+
+\mypar{AI Disclosure} ChatGPT was used for minor coding assistance. AI was not used in any capacity in writing.
+
+\newpage 
+\FloatBarrier
+\section{fMRI Stimuli}
+\label{app:stimuli}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+We list all the names of the stimuli used for training (95 stories) and testing (3 stories) the fMRI encoding models. The complete list can be found in \citep{LeBel_Wagner_Jain_Adhikari-Desai_Gupta_Morgenthal_Tang_Xu_Huth_2023}.
+
+\begin{description}
+    \item[Train stories (N=95)] itsabox, odetostepfather, inamoment, afearstrippedbare, findingmyownrescuer, hangtime, ifthishaircouldtalk, goingthelibertyway, golfclubbing, thetriangleshirtwaistconnection, igrewupinthewestborobaptistchurch, tetris, becomingindian, thetiniestbouquet, swimmingwithastronauts, lifereimagined, forgettingfear, stumblinginthedark, backsideofthestorm, food, theclosetthatateeverything, escapingfromadirediagnosis, notontheusualtour, exorcism, adventuresinsayingyes, thefreedomridersandme, cocoonoflove, waitingtogo, thepostmanalwayscalls, googlingstrangersandkentuckybluegrass, mayorofthefreaks, learninghumanityfromdogs, shoppinginchina, souls, cautioneating, comingofageondeathrow, breakingupintheageofgoogle, gpsformylostidentity, marryamanwholoveshismother, eyespy, treasureisland, thesurprisingthingilearnedsailingsoloaroundtheworld, theadvancedbeginner, goldiethegoldfish, life, thumbsup, seedpotatoesofleningrad, theshower, adollshouse, sloth, howtodraw, quietfire, metsmagic, penpal, thecurse, canadageeseandddp, thatthingonmyarm, buck, thesecrettomarriage, wildwomenanddancingqueens, againstthewind, indianapolis, alternateithicatom, bluehope, kiksuya, afatherscover, haveyoumethimyet, firetestforlove, catfishingstrangerstofindmyself, christmas1940, tildeath, lifeanddeathontheoregontrail, vixenandtheussr, undertheinfluence, beneaththemushroomcloud, jugglingandjesus, superheroesjustforeachother, sweetaspie, naked, singlewomanseekingmanwich, avatar, whenmothersbullyback, myfathershands, reachingoutbetweenthebars, theinterview, stagefright, legacy, listo, gangstersandcookies, birthofanation, mybackseatviewofagreatromance, lawsthatchokecreativity, threemonths, whyimustspeakoutaboutclimatechange, leavingbaghdad
+    \item[Test stories (N=3)] wheretheressmoke, fromboyhoodtofatherhood, onapproachtopluto
+\end{description}
+
+\section{ID Estimation}
+\label{app:id_estimation}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+
+\subsection{Nonlinear intrinsic dimension}
+We use a state-of-the-art $I_d$ estimator, the Generalized Ratios Intrinsic Dimension Estimator (GRIDE) \citep{Denti_Doimo_Laio_Mira_2022}. GRIDE highly correlates to other estimators \citep{Binnie2025ASO} such as TwoNN \citep{Facco_d’Errico_Rodriguez_Laio_2017} and the Maximum Likelihood Estimator (MLE) \citep{Levina_Bickel_2004} while relaxing their assumptions on local uniformity. 
+
+In brief, manifold dimension estimators like GRIDE, TwoNN, and MLE rely on the fact that manifolds are locally Euclidean \citep{Campadelli_Casiraghi_Ceruti_Rozza_2015}. This permits estimating the intrinsic dimension of the manifold based on local neighborhoods. Estimators such as TwoNN \citep{Facco_d’Errico_Rodriguez_Laio_2017}, local Principal Component Analysis \citep{fukunaga}, and the Maximum Likelihood Estimator \citep{Levina_Bickel_2004} are sensitive to \emph{scale}, i.e. how ``local" those neighborhoods are \citep{Facco_d’Errico_Rodriguez_Laio_2017,Denti_Doimo_Laio_Mira_2022}. Imposing certain locality assumptions such as uniform density up to the second nearest neighbor \citep{Facco_d’Errico_Rodriguez_Laio_2017}, it is then possible to derive a theoretical distribution over local distances, volumes, or angles. Then, the $I_d$ can be recovered via maximum likelihood estimation. 
+
+The Generalized Ratios Intrinsic Dimension Estimator (GRIDE) is a methodological successor to the TwoNN estimator \citep{Facco_d’Errico_Rodriguez_Laio_2017} that relaxes TwoNN's assumption of uniformity up to the second nearest neighbor. GRIDE instead produces unbiased estimates up to the $2k^{th}$ nearest neighbor. This permits an analysis of the $I_d$'s dependence on the scale $k$.
+
+In particular, GRIDE operates on ratios $\mu_{i, 2k, k} := r_{i, 2k} / r_{i,k}$, where $r_{i,j}$ is the Euclidean distance between point $i$ and its $j^{th}$ neighbor. Assuming local uniform density up to the $2k^{th}$ neighbor, the ratios $\mu_{i, 2k, k}$ follow a generalized Pareto distribution 
+\begin{equation}
+f_{\mu_i, 2k, k}(\mu) = \frac{I_d(\mu^{I_d} - 1)^{k-1}}{B(k,k)\mu^{I_d(2k-1)+1}},
+\end{equation}
+where $B(\cdot, \cdot)$ is the beta function. The $I_d$ is then recovered by maximizing this likelihood over points $i$ for several candidate scales $k$. Finally, in order to choose the proper $I_d$, a scale analysis over $k$, which controls the neighborhood size, is necessary: if $k$ is too small, the $I_d$ likely describes local noise, and if $k$ is too large, the curvature of the manifold will produce a faulty estimate. Instead, it is recommended to choose a $k$ for which the $I_d$ is stable \citep{Denti_Doimo_Laio_Mira_2022}.
+
+For $I_d$ estimation using GRIDE, we reproduce the setup in \citet{cheng2025emergence}. For each model, checkpoint, and layer, we perform a scale analysis. \Cref{fig:scale_analysis} shows an example, where the GRIDE scale $k$ varies from $2^0$ to $2^{12}$. As recommended in \citet{Denti_Doimo_Laio_Mira_2022}, we choose a scale $k$ corresponding in a range where the intrinsic dimension is stable, or plateaus, by visual inspection. For simplicity, we choose one scale $k$ per model, for instance, in the particular example in \Cref{fig:scale_analysis}, we choose $k=2^4$, where the derivative of the curve is closest to 0 for as many layers as possible. 
+WavLM had a notable shift in scaling behavior between early and late layers; for WavLM (base and large), we choose one scale $2^1$ for the first third of model layers, and $2^0$ for the rest. Scales chosen for all models are in \Cref{tab:scales}. 
+
+\begin{table}[]    
+\caption{Selected GRIDE scales $k$ after performing a scale analysis for intrinsic dimension estimation, for all models and checkpoints tested.}
+    \centering
+    \begin{tabular}{l|l}
+        Model & GRIDE $k$ \\
+        \hline 
+        OPT-125m & 64 \\
+        OPT-1.3b & 32 \\
+        OPT-13b & 32 \\
+        Pythia-410m & 128 \\
+        Pythia-160m & 128 \\
+        Pythia-6.9B & 16 \\
+        Pythia-6.9B ($t=$64000) & 16 \\
+        Pythia-6.9B ($t=$32000) & 32 \\
+        Pythia-6.9B ($t=$16000) & 32 \\
+        Pythia-6.9B ($t=$8000) & 32 \\
+        Pythia-6.9B ($t=$4000) & 64 \\
+        Pythia-6.9B ($t=$2000) & 16 \\
+        Pythia-6.9B ($t=$1000) & 16 \\
+        WavLM-base-plus & 2 (first 5 layers), 1 after \\
+        WavLM-base-plus (finetuned on fMRI subj.~UTS02) & 2 (first 5 layers), 1 after\\
+        WavLM-base-plus (finetuned on fMRI subj.~UTS03) & 2 (first 5 layers), 1 after\\
+        WavLM-large & 2 (first 8 layers), 1 after \\
+        Whisper-large & 16 \\
+    \end{tabular}
+    \label{tab:scales}
+\end{table}
+
+\begin{figure}
+    \centering
+    \includegraphics[trim={2mm 2mm 2mm 9mm}, clip, width=0.5\linewidth]{pythia_pile_RS_0_STEP143000_ids.pdf}
+    \caption{GRIDE scale analysis for Pythia-6.9b. The estimated intrinsic dimension (y axis) varies according to the chosen scale $k$ (x axis). It is recommended to choose a scale where the local change is minimal, in this case, $k=2^4$.}
+    \label{fig:scale_analysis}
+\end{figure}
+
+\subsection{Linear dimensionality}
+
+We computed the linear dimension two ways: PCA with a variance cutoff of 0.99, and the Participation Ratio. After centering representations, we compute the eigenspectrum $\lambda_1 \geq \lambda_2 \geq \cdots \lambda_D$ of its representations' covariance matrix. 
+The dimensionality given by PCA with a threshold of $0.99$ is given by the minimal number of principal components that explain at least $99\%$ of the variance. The Participation Ratio (PR), a non-integer measure of the effective dimension, is given by
+\begin{equation}
+    d_{PR}(X) = (\sum_j \lambda_j)^2 / (\sum_j \lambda_j ^2).
+\end{equation}
+The PR is designed to smoothly interpolate between $1$ and $D$: one can verify that when $\lambda_{i \neq 1} = 0$, then $d_{PR}(X) = 1$, and when data are isotropic, that is, $\lambda_{i} = \lambda_{j}$ $\forall i\neq j$, then $d_{PR}(X) = D$ \citep{Gao2017ATO}.
+
+\subsection{Results using linear dimensionality}
+\Cref{tab:pca} shows the correlation between linear dimension computed with PCA and PR to the fMRI encoding performance for subject UTS03. In general, the correlations were high, and comparable to the correlations between $I_d$ and layerwise encoding performance. However, the dimensionalities themselves, especially when using the Participation Ratio, were quite low ($d\approx$1-2), and we found their evolution over layers to poorly correlate to semantic probing tasks. We found that this was due to massive activations in the residual stream, which $I_d$, a local measure, should be robust to so some extent. For this reason, we focused on the $I_d$ and will leave linear dimension to future work. \citet{tuckute2022many} found a weak positive correlation between the linear effective dimension (PR) of the embedded training set stimuli and their encoding performance in audio models. This, however, is different from our setting as we use the dimensionality on \emph{generic stimuli} as a way to localize abstract processing stages in deep language-audio models.
+
+\begin{table}[h!]
+    \label{tab:pca}
+    \caption{The average voxelwise product-moment correlations between representational dimensionality and encoding performance are shown for PCA-$d$ (variance threshold of $0.99$), and PR-$d$. Across models, the correlation is generally high no matter the dimensionality measure. All values, except those marked with (*), are significant to $p < 10^{-3}$, as computed by a permutation test.}
+    \centering
+    \begin{tabular}{r|cccc}
+            & OPT-125m & OPT-1.3b & OPT-13b & Pythia-6.9b \\
+        PCA $d$ &  0.91 & 0.93 & 0.96 & 0.86\\ 
+        PR $d$ & 0.94 & 0.82 & 0.85 & -0.05* \\
+    \end{tabular}
+\end{table}
+
+\section{Layerwise Probing Experiments}
+\label{app:probing}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+
+\subsection{LLM probing experiments using SentEval, \citet{conneau-etal-2018-cram}}
+Like \citet{cheng2025emergence,baroni2026tracingcomplexityprofilesdifferent}, we use the SentEval dataset \citep{conneau-etal-2018-cram} for layerwise probing experiments. SentEval consists of a number of classification tasks given sentence representations. Tasks in SentEval span from surface-level (e.g., selecting whether a word appears in the input) to higher-order (e.g., choosing whether the two coordinate clauses in a sentence are inverted). The list of tasks we use and their description are given in the below table with their categorizations into whether they require surface-level or potentially higher-order interpretations (labeled ``semantic" in \Cref{fig:semantics}) of the inputs.
+
+\begin{table}[h!]
+\centering 
+\begin{tabular}{r|c|p{8cm}}
+       Task & Category & Description \\
+       \hline
+    Word Content & Surface & Selecting whether a word appears in the sentence via 1000-way classification, where the 1000 indices correspond each to a word. \\ 
+    Sentence Length & Surface & A 3-way classification into short, medium, or long sentences.  \\
+    \hline 
+    Bigram Shift & Higher-order & Binary classification of whether two consecutive tokens in the sentence were inverted. \\
+    Odd Man Out & Higher-order & Binary classification of whether a noun in the original sentence has been replaced by a random other noun. \\
+    Coordination Inversion & Higher-order & Binary classification of whether two coordinate clauses were inverted. 
+\end{tabular}
+\end{table}
+
+We use the last token residual stream representation for decoding, consistent with the rest of the experiments. Each task is trained using 100k examples, a validation set of 10k examples, and tested on a test set of 10k datapoints. Linear probes are trained using Adam (default Pytorch parameters), with a learning rate of $5e$-$3$, over $15$ epochs. The best linear probe by validation accuracy over the 15 epochs is selected as the final model, which is then evaluated on the test set.
+
+\subsection{Speech audio model probing using the features in \citet{vattikonda2025brainwavlmfinetuningspeechrepresentations}}
+We replicate the linguistic probing setup of \citet{vattikonda2025brainwavlmfinetuningspeechrepresentations}, probing layerwise along each speech model for acoustic and semantic representations \citep{pasad2021layerwise, vaidya2022self}. For acoustic content, we filter the audio waveform with a Mel filterbank, and predicted it with ridge regression from the intermediate layer representations. To probe semantic content at each layer, we predicted, also using ridge regression, the 300-dimensional GloVe embeddings \citep{pennington2014glove} of the current word being spoken. The current word was extracted using the timestamped transcripts from the original \citet{LeBel_Wagner_Jain_Adhikari-Desai_Gupta_Morgenthal_Tang_Xu_Huth_2023} dataset. Probes were evaluated using variance explained ($R^2$).
+
+% We first extracted layer-wise features of an audio stimulus using the sliding window approach from
+% Section 2.2, without downsampling. To probe acoustic content, we filtered the stimulus waveform
+% with a filterbank [Povey et al., 2011, Yang et al., 2022], and we used ridge regression to linearly
+% predict the resulting features.
+% We used GloVe embeddings [Pennington et al., 2014] to probe for word-level semantic content
+% following Vaidya et al. [2022]. With the time-aligned transcripts from the original dataset, we aligned
+% the features extracted from the BrainWavLM model to the words being spoken. We then used ridge
+% regression to predict the 300-D GloVe embedding of the word being spoken. We measured the
+% performance of both probes with variance explained (R2
+% ).
+
+
+\section{Layerwise Surprisal Estimation}
+\label{app:tunedlens}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+
+\mypar{LLMs} For LLMs, we used the TunedLens \citep{Belrose2023ElicitingLP} implementation by \citet{ghandeharioun_patchscope}. TunedLens ascertains the amount of information (linearly) encoded in hidden layer $t$ about the next token. To do so, an affine mapping is learned from the last-token hidden representation at layer $t$ to the last hidden representation. In the provided code \citep{ghandeharioun_patchscope}, TunedLens is implemented using a direct solver $\texttt{numpy.linalg.lstsq}$ on the training set. Finally, we compute the next-token surprisals on a validation set drawn from the same distribution. The training set is $N=8000$ randomly sampled sequences from The Pile dataset \citep{gao2020pile}, and the test set $N=2000$ sequences from The Pile. 
+
+\mypar{Speech audio models} For speech audio models, we had to construct our own train and test sets using Librispeech \citep{librispeech}. We used the \texttt{train.clean.360} subset from HuggingFace and Whisper-small automatic speech recognizer to transcribe each audio chunk ($N=140$k, ranging from $1$-$20$ seconds) to text with word timestamps. For each audio chunk, we randomly selected a word index between $1$ and $5$ from the end to truncate the audio for next-token prediction. We then tokenized the next word using the Whisper tokenizer and took the first token (using the Whisper tokenizer for WavLM, as WavLM does not have a native tokenizer). Finally, using the $N=140$k (audio chunk, next token) pairs, we trained affine maps to the Whisper vocabulary space. We evaluate the trained maps on the \texttt{test.clean} subset from HuggingFace, $N\approx2000$. The maps were trained via Adam (default Pytorch hyperparameters) with a learning rate of $1$e-4. We reported the best test loss (the average surprisal over tokens) over 10 epochs of training.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[trim={3mm 1mm 1mm 1mm}, clip, width=0.33\linewidth]{images/surprisal_decreases_audio.pdf}
+    \includegraphics[trim={2mm 1mm 1mm 1mm}, clip, width=0.65\linewidth]{images/encoding_vs_surprisal_UTS03_ecog_app.pdf}
+    \caption{\textbf{Surprisal and Encoding Performance for Audio Models.} Companion to \Cref{fig:surprisal}. The next-token prediction error on LibriSpeech for WavLM and Whisper models. There is a general decreasing trend where deeper layers predict the next token slightly better, but an exception is WavLM-large (dark green). 
+    % The trend is most pronounced for Whisper-large, likely because we used Whisper's tokenizer for next-token prediction. 
+    \textbf{(Middle, Right)} The encoding performance for fMRI subject UTS03 (middle) and ECoG (right) is plotted against normalized surprisal (surprisal divided by $\log$ Whisper's vocab size). There is a positive correlation in both cases between encoding performance and normalized surprisal, which provides evidence against the hypothesis that representations that are more predictive of the next token are also more predictive of the brain.}
+    \label{fig:audio_surprisal}
+\end{figure}
+
+
+\FloatBarrier
+\section{Finetuning WavLM on brain responses}
+\label{app:finetuning}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+
+We follow the procedure of \cite{vattikonda2025brainwavlmfinetuningspeechrepresentations} to finetune WavLM models on an fMRI encoding task through the 9th layer of the models. Starting from the wavlm-base-plus checkpoint, we finetuned separate models for subjects UTS02 and UTS03, and we extend the finetuning context from the original implementation of \SI{2}{\second} of audio to \SI{4}{\second}.
+
+
+% \section{Intrinsic Dimension Correlation}
+% \label{app:id_corr}
+% \setcounter{figure}{0}    
+% \setcounter{table}{0} 
+
+% \subsection{Method}
+% In addition to measuring linear representational similarity between model layers and brain responses using the Pearson correlation coefficient, we also conducted preliminary experiments using a \emph{nonlinear} measure, the Intrinsic Dimension Correlation ($I_d$Corr) \citep{basile2025intrinsic}. In brief, given an $I_d$ estimator and representations $X \in \mathbb R^{N\times D_1}$, $Y \in \mathbb R^{N\times D_2}$, the $I_d$Corr is given by
+% \begin{equation}
+%     \text{$I_d$Corr} \triangleq \frac{I_d(X) + I_d(Y) - I_d(X\oplus Y)}{\max(I_d(X), I_d(Y))},
+% \end{equation}
+% where the $\oplus$ indicates row-wise concatenation, producing representations with feature dimension $D_1 + D_2$. Intuitively, the measure captures the number of \emph{shared} nonlinear degrees of freedom underlying $X$ and $Y$, normalized to $(0,1]$ by dividing by $\max(I_d(X), I_d(Y))$. 
+
+% \subsection{$I_d$Corr between language and speech model layers and the brain}
+% For all models, we computed the \emily{This is really the last thing to add}
+
+
+% \FloatBarrier
+% \section{Intrinsic Dimension of the fMRI BOLD Signal of Local Cortical Patches}
+% \label{app:id_brain}
+% \setcounter{figure}{0}    
+% \setcounter{table}{0} 
+
+% As a byproduct of our analysis, we computed the $I_d$ of continuous ``spotlights" moving over the brain. Each spotlight consisted of roughly XX voxels, and the linguistic inputs were the combined train and test sets in \Cref{tab:moth_radio}. Then, for each voxel, we computed the average $I_d$ over the spotlights it was a part of. \Cref{fig:app_brain_id} shows the $I_d$ of every other voxel (for readability) on Subjects UTS02 and UTS03. Intriguingly, the $I_d$ is lower (blue) in conventional fronto-temporal language areas. We suspect the dimensionality of the fMRI BOLD signal to proxy a measure of local functional ``coherence" 
+
+% \begin{figure}[h]
+%     \centering
+%     \includesvg[width=0.47\linewidth]{images/local_id_brain.svg}
+%     \includesvg[width=0.50\linewidth]{images/local_id_brain_SUBJECT3.svg}
+%     \caption{\textbf{Intrinsic Dimension of local cortical patches on fMRI subjects UTS02 and UTS03.} We computed the intrinsic dimension of the voxelwise BOLD signal on contiguous patches of cortex, for fMRI subject UTS02 (left) and UTS03 (right). Across subjects, a striking pattern emerges where voxels belonging to conventional fronto-temporal language areas have a \emph{lower} $I_d$ (blue), in addition to voxels in low-level visual areas (V1-V3). We plot every other voxel for better readability.}
+%     \label{fig:app_brain_id}
+% \end{figure}
+
+\FloatBarrier 
+\section{Additional Results $I_d$ and Encoding Performance}
+\label{app:id_corr}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+
+\begin{table}[H]
+\caption{\textbf{Max layer index} for $I_d$, fMRI encoding performance (average across subjects UTS02 and UTS03), and ECoG encoding. The layers around the $I_d$ peak are the best for encoding, as seen by the small distance between the first column and next two columns.}
+\label{tab:best_layers_abs}
+\centering 
+\scalebox{0.9}{\begin{tabular}{lcccc}
+\toprule
+Model & $I_d$ peak & fMRI & ECoG & N layers\\
+\midrule
+opt-125m & 9 & 8 & 9 & 12\\
+opt-1.3b & 15 & 16 & 16 & 24\\
+opt-13b & 25 & 27 & 25 & 40\\
+pythia-160m & 7 & 6 & 7 & 12\\
+pythia-410m & 12 & 13 & 12 & 24\\
+pythia-6.9b & 13 & 13 & 12 & 32\\
+wavlm-base-plus & 9 & 9 & 8 & 12\\
+wavlm-large & 20 & 18 & 23 & 24\\
+whisper-large (encoder only) & 30 & 31 & 32 & 36\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\FloatBarrier 
+\section{Additional Results fMRI Subject UTS02}
+\label{app:subj_2}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+
+\begin{table}[H]
+    \caption{\textbf{Correlations between surprisal, $I_d$, and encoding performance for fMRI subject UTS02} The average voxelwise product-moment correlations between representational dimensionality and encoding performance are shown for layerwise surprisal computed with the TunedLens (top row) and for $I_d$ (bottom row). For all models, the Spearman correlation between surprisal and encoding performance is generally not significant or negative, while the correlation between $I_d$ and encoding performance is significantly positive. Values significant with a $p$-value cutoff of $0.05$, as determined by a permutation test, are marked with *.}
+    \centering
+    \scalebox{0.9}{
+\begin{tabular}{r||ccc|ccc|cc|c||ccc}
+    & \multicolumn{3}{c|}{OPT} 
+    & \multicolumn{3}{c|}{Pythia} 
+    & \multicolumn{2}{c|}{WavLM} 
+    & \multicolumn{1}{c||}{Whisper} & \multicolumn{1}{c}{LLMs} & \multicolumn{1}{c}{Speech} &\multicolumn{1}{c}{All}\\
+    & 125m & 1.3b & 13b 
+    & 140m & 410m & 6.9b 
+    & base & large 
+    &  large \\
+    \hline
+    Surprisal & $-0.76^*$ & $-0.88^*$ & $-0.85^*$ & -0.47 & $-0.48^*$ & $-0.33^*$ & 0.84* & 0.83* & \textbf{-0.99}
+    & -0.69* & 0.66 & -0.32* \\
+    $I_d$  & \textbf{0.98}* & \textbf{0.81}* & \textbf{0.83}* & \textbf{0.48} & \textbf{0.86}* & \textbf{0.85}* & -0.04 & \textbf{0.88}* & \textbf{0.99} & \textbf{0.88}* & \textbf{0.45}* & \textbf{0.73}*\\
+\end{tabular}}
+    \label{tab:app_correlation_dim_ep}
+\end{table}
+
+    % \begin{figure}
+    %         \centering
+    %         \includegraphics[trim={1mm 1mm 75mm 12mm}, clip, width=0.3\linewidth]{images/encoding_id_subj_2.pdf}
+    %         \caption{\textbf{Encoding performance over layers, fMRI Subject UTS02.}
+    %         The trajectories of encoding performance over layers are nearly identical to those in \Cref{fig:claim1}A, peaking in the middle layers.}
+    %         \label{fig:app_fmri_uts02}
+    % \end{figure}
+
+\begin{figure}
+\vspace{-20ex}
+    \centering
+    \begin{minipage}{0.48\linewidth}
+        \centering
+        \includegraphics[trim={1mm 1mm 75mm 12mm}, clip, width=0.6\linewidth]{images/encoding_id_subj_2.pdf}
+        \caption{\textbf{Encoding performance over layers, fMRI Subject UTS02.}
+        The trajectories of encoding performance over layers are nearly identical to those in \Cref{fig:claim1}A, peaking in the middle layers.}
+        \label{fig:app_fmri_uts02}
+    \end{minipage}\hfill
+    \begin{minipage}{0.48\linewidth}
+        \centering
+        \includegraphics[trim={2mm 1mm 1mm 10mm}, clip,width=\linewidth]{images/normalized_surprisal_app.pdf}
+        \caption{\textbf{Encoding performance vs.~normalized surprisal, fMRI Subject UTS02.}
+        Companion to \Cref{fig:surprisal} and \Cref{fig:audio_surprisal}. The top row shows LLMs and the bottom row shows audio models. Results corroborate those for UTS03.}
+        \label{fig:app_fmri_uts02_all_together}
+    \end{minipage}
+\end{figure}
+
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[trim={2mm 2mm 2mm 2mm}, clip, width=0.35\linewidth]{images/normalized_id_app.pdf}
+    \caption{\textbf{Encoding performance vs.~normalized $I_d$, fMRI Subject UTS02.} UTS02 encoding performance highly correlates to normalized $I_d$ across all model layers, similar to \Cref{fig:claim1}B in the main paper.}
+    \label{fig:app_fmri_uts02_all_together}
+\end{figure}
+
+
+\begin{figure}
+    \centering
+    \includegraphics[trim={3mm 3mm 3mm 3mm}, clip, width=0.7\linewidth]{images/pythia_evol_app.pdf}
+    \caption{\textbf{Training dynamics of layerwise encoding performance and $I_d$, Pythia-6.9b (Subject UTS02)}.}
+    \label{fig:pythia_evol_app}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[trim={2mm 2mm 2mm 1mm}, clip, width=\linewidth]{images/wavlm-finetuned_UTS02.pdf}
+    \caption{\textbf{Increasing encoding performance by finetuning increases $I_d$ (Subject UTS02).} Companion to \Cref{fig:finetuning}. After finetuning WavLM-base-plus on voxelwise responses to speech on layer 9, the semantic content of representations (middle) and layerwise intrinsic dimension (right) increase.}
+    \label{fig:finetuning_app}
+\end{figure}
+
+
+\FloatBarrier
+\section{Distribution of Encoding Performance and its correlation to $I_d$ on the brain}
+\label{app:flatmaps}
+
+\begin{table}[h]
+    \caption{\textbf{Correlation between $I_d$ and encoding performance in well-predicted voxels/electrodes.} In the well-predicted voxel/electrode subset ($R>0.2$ for fMRI, $R>0.1$ for ECoG), we show the mean $\rho(I_d, \text{encoding performance})$. The correlation is much higher for LLMs than for speech models, similar to the correlation on the non-filtered set of voxels/electrodes. There is a slight trend in which larger models show a stronger correlation between encoding performance and $\rho(I_d, \text{encoding performance})$.}
+    \label{tab:app_well_predicted_subset}
+    \centering
+    \begin{tabular}{r|ccc|ccc|cc|c}
+    & \multicolumn{3}{c|}{OPT} 
+    & \multicolumn{3}{c|}{Pythia} 
+    & \multicolumn{2}{c|}{WavLM} 
+    & \multicolumn{1}{c}{Whisper} \\
+    & 125m & 1.3b & 13b 
+    & 160m & 410m & 6.9b 
+    & base & large 
+    & large \\
+    \hline
+        fMRI Subj.~UTS02   
+        & 0.65 & 0.70 & 0.71 % opt
+        & 0.33 & 0.59 & 0.57 % pythia
+        & -0.06 & 0.41 & 0.86 \\ % speech
+        fMRI Subj.~UTS03  
+        & 0.71 & 0.73 & 0.75 % opt
+        & 0.28 & 0.65 & 0.66 % pythia
+        & -0.08 & 0.49 & 0.85 \\  %speech
+        ECoG   
+        & 0.55 & 0.63 & 0.55
+        & 0.32 & 0.49 & 0.40
+        & 0.02 & 0.17 & 0.38\\
+        \hline 
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[h]
+    \caption{\textbf{In voxels and electrodes with higher encoding performance, encoding performance is better predicted by layerwise $I_d$ in LLMs, and less so in speech models}. The table shows $\rho(\text{EP}, \rho(I_d, \text{EP}))$, where EP is the encoding performance; the equivalent graph is the box-and-whisker plots in the appendix flatmaps. All correlations are significant with $p<$1e-2.}
+    \label{tab:app_higher_ep_higher_ep_id}
+    \centering
+    \begin{tabular}{r|ccc|ccc|cc|c}
+    & \multicolumn{3}{c|}{OPT} 
+    & \multicolumn{3}{c|}{Pythia} 
+    & \multicolumn{2}{c|}{WavLM} 
+    & \multicolumn{1}{c}{Whisper} \\
+    & 125m & 1.3b & 13b 
+    & 160m & 410m & 6.9b 
+    & base & large 
+    & large \\
+    \hline
+        fMRI Subj.~UTS02   
+        & 0.45 & 0.53 & 0.56 
+        & 0.33 & 0.51 &  0.47
+        & -0.10 & 0.37 & 0.64 \\
+        fMRI Subj.~UTS03  
+        & 0.52 & 0.58 &  0.64
+        & 0.30 & 0.57 & 0.55
+        & -0.18 & 0.45 & 0.68 \\
+        ECoG   
+        & 0.36 & 0.56 & 0.44
+        & 0.38 & 0.45 & 0.39
+        & 0.07 & 0.07 & 0.25 \\
+        \hline 
+\end{tabular}
+\end{table}
+
+\FloatBarrier
+\subsection{Encoding performance and $I_d$ flatmaps}
+The following plots \Cref{fig:app_flatmaps_opt_125m}-\Cref{fig:app_flatmaps_whisper-large} supplement \Cref{fig:brainmaps} in the main manuscript. In each plot, the first row \textbf{(A, B, C)} respectively shows the encoding performances per-voxel and per-electrode for fMRI subjects UTS02, UTS03, and ECoG (redder is higher). The second row shows, for the same subjects, the Spearman correlations $\rho$ between the layerwise encoding performance and layerwise $I_d$ (redder is higher). It is evident, comparing the top and bottom rows, that the voxels and electrodes with higher encoding performance also have a stronger relationship between layerwise $I_d$ and layerwise encoding performance. This is seen by redder regions in the top row matching redder regions in the bottom row. In the bottom row, box-and-whisker plots show the growth in $\rho(\text{EP}, I_d)$, EP being encoding performance, is plotted with respect to encoding performance. This growth is consistent across subjects and imaging modalities for LLMs. For speech models, some of the best-predicted voxels are in the auditory cortex, which privileges low-level acoustic representation. For this reason, there is a inverse ``U-shaped" trend in which the highest encoding performance voxels and electrodes may be less correlated with $I_d$ than voxels and electrodes that are slightly worse predicted. 
+
+\begin{figure}
+    \centering
+    \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_opt125m_compressed.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, OPT-125m.}}
+    \label{fig:app_flatmaps_opt_125m}
+\end{figure}
+
+
+\begin{figure}
+    \centering
+    \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_opt1.3b_compressed.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, OPT-1.3b.}}
+    \label{fig:app_flatmaps_opt_1.3b}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_opt-13b_compressed.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, OPT-13b.}}
+    \label{fig:app_flatmaps_opt_13b}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_pythia-160m_compressed.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, Pythia-160m.}}
+    \label{fig:app_flatmaps_pythia_160m}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_pythia-410m_compressed.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, Pythia-410m.}}
+    \label{fig:app_flatmaps_pythia_410m}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_pythia-6.9b_compressed.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, Pythia-6.9b.}}
+    \label{fig:app_flatmaps_pythia_6.9b}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_wavlm-base-plus_compressed.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, WavLM-base-plus.}}
+    \label{fig:app_flatmaps_wavlm-base-plus}
+\end{figure}
+
+\begin{figure}
+    \centering
+        \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_wavlm-large_compressed.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, WavLM-large.}}
+    \label{fig:app_flatmaps_wavlm-large}
+\end{figure}
+
+\begin{figure}
+    \centering
+    \includegraphics[clip, width=\linewidth]{images/appendix_flatmaps_whisper-large.pdf}
+    \caption{\textbf{Encoding performance and $I_d$, Whisper-large.}}
+    \label{fig:app_flatmaps_whisper-large}
+\end{figure}
+
+\FloatBarrier
+\section{Random Fourier Feature Results for ECoG}
+\setcounter{figure}{0}    
+\setcounter{table}{0} 
+
+\FloatBarrier
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.4\linewidth]{images/rff_ecog.pdf}
+    \caption{\textbf{RFF Experiment, ECoG}. Companion to \Cref{fig:rff}. For the best LLM and speech layers (colors) as well as RFF feature spaces (gray) of increasing extrinsic dimension ($\circ$ size), we show the growth in $I_d$ (x-axis) with the corresponding growth in encoding performance averaged across ECoG subjects (y-axis).}
+    \label{fig:rff_ecog}
+\end{figure}
+
+\end{document}
+
+% This document was modified from the file originally made available by
+% Pat Langley and Andrea Danyluk for ICML-2K. This version was created
+% by Iain Murray in 2018, and modified by Alexandre Bouchard in
+% 2019 and 2021 and by Csaba Szepesvari, Gang Niu and Sivan Sabato in 2022.
+% Modified again in 2023 and 2024 by Sivan Sabato and Jonathan Scarlett.
+% Previous contributors include Dan Roy, Lise Getoor and Tobias
+% Scheffer, which was slightly modified from the 2010 version by
+% Thorsten Joachims & Johannes Fuernkranz, slightly modified from the
+% 2009 version by Kiri Wagstaff and Sam Roweis's 2008 version, which is
+% slightly modified from Prasad Tadepalli's 2007 version which is a
+% lightly changed version of the previous year's version by Andrew
+% Moore, which was in turn edited from those of Kristian Kersting and
+% Codrina Lauth. Alex Smola contributed to the algorithmic style files.

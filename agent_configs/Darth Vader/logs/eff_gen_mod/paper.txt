@@ -1,0 +1,2291 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Efficient Generative Modeling beyond Memoryless Diffusion via
+Adjoint Schr¨odinger Bridge Matching
+Anonymous Authors1
+Abstract
+Diffusion models often yield highly curved trajec-
+tories and noisy score targets due to an uninfor-
+mative, memoryless forward process that induces
+independent data-noise coupling. We proposeAd-
+joint Schr¨odinger Bridge Matching (ASBM), a
+generative modeling framework that recovers opti-
+mal trajectories in high dimensions via two stages.
+First, we view the Schr ¨odinger Bridge (SB) for-
+ward dynamic as a coupling construction problem
+and learn it through a data-to-energy sampling per-
+spective that transports data to an energy-defined
+prior. Then, we learn the backward generative dy-
+namic with a simple matching loss supervised by
+the induced optimal coupling. By operating in
+a non-memoryless regime, ASBM produces sig-
+nificantly straighter and more efficient sampling
+paths. Compared to prior works, ASBM scales
+to high-dimensional data with notably improved
+stability and efficiency. Extensive experiments on
+image generation show that ASBM improves fi-
+delity with fewer sampling steps. We further show-
+case the effectiveness of our optimal trajectory via
+distillation to a one-step generator.
+1. Introduction
+Generative modeling aims to sample from a data distribution
+pdata by transforming a simple prior distribution pprior (e.g.,
+Gaussian). Diffusion models achieve this by learning con-
+tinuous dynamic based on Stochastic Differential Equation
+(SDE) that connect pprior and pdata (Song et al., 2020b; Ho
+et al., 2020; Song et al., 2020a). While highly successful,
+these methods face two significant limitations (Song et al.,
+2020b; Karras et al., 2022). First, the learned trajectories
+are often highly curved, requiring a large Number of Func-
+tion Evaluations (NFEs) at sample generation. Second, their
+1Anonymous Institution, Anonymous City, Anonymous Re-
+gion, Anonymous Country. Correspondence to: Anonymous Au-
+thor<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Score Matching ASBM (Ours)
+-10 -5 0 5 10 -10
+-5
+0
+5
+10
+-10
+-5
+0
+5
+10
+-10 -5 0 5 10 -10
+-5
+0
+5
+10
+-10
+-5
+0
+5
+10
+ASB S
+Figure 1.Generation trajectory of score matching and ASBM.
+Top: Backward drift accumulated over time in pixel level.Bottom:
+Denoising path in image level. ASBM shows significantly smaller
+transport cost with straighter path, leading to efficient generation.
+training objectives typically rely on independent endpoint
+pairing (X0, X1)∼p data×pprior, which yields noisy training
+targets and slow convergence. This independent coupling
+is induced by thememoryless forward process(Domingo-
+Enrich et al., 2024) (cf. Eq. (8)).
+Optimal Transport (OT) (Villani et al., 2008; Peyr ´e et al.,
+2019) provides a powerful alternative by seeking anoptimal
+couplingbetween X0 ∼p data and X1 ∼p prior that min-
+imizes a transport cost. Among various OT formulations,
+the Schr¨odinger Bridge (SB) problem (Schr¨odinger, 1931;
+L´eonard, 2013; Chen et al., 2016; 2021b; De Bortoli et al.,
+2021) is particularly relevant to diffusion models, because
+the optimal coupling is represented by a pair of consistent
+forward-backward SDE dynamics. Unlike the trivial inde-
+pendent coupling in standard diffusion, the cost-minimizing
+principle of SB induces the shortest path between pdata and
+pprior. By generalizing the memoryless forward process into
+thenon-memorylessregime, SB can achieve optimal trajec-
+tories that are straighter than those obtained from indepen-
+dent endpoint pairing, leading to less NFEs for generation.
+However, realizing the non-memoryless SB in high-
+dimensional settings, such as images, remains challeng-
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+ing. Existing SB-inspired generative methods (Chen et al.,
+2021a; Deng et al., 2024) often resort to independent pairing
+(X0, X1)∼p data ×p prior, or perform auxiliary pretraining
+with empirical bridge matching (Shi et al., 2023), limiting
+primary benefits of the optimal trajectories. Furthermore,
+they typically use forward–backward alternating training,
+requiring bidirectional trajectory rollouts to supervise each
+other. In practice, this bidirectional supervision is noisy
+and often leads to inconsistent dynamics that do not corre-
+spond to a single optimal path measure, which weakens the
+intended OT property and reduces sampling efficiency.
+In this paper, we introduceAdjoint Schr ¨odinger Bridge
+Matching (ASBM), an SB-based generative modeling
+framework that efficiently learns organized trajectories un-
+der the informative endpoint couplings with highly sta-
+ble convergence. We decompose generative modeling via
+Schr¨odinger Bridges into two simple subproblems: (i) con-
+structing the endpoint optimal coupling using data-to-prior
+forward dynamic, and (ii) optimizing the backward dynamic
+with a simple matching loss supervised by the resulting op-
+timal coupling. At stage (i), we view the SB problem as
+a Stochastic Optimal Control (SOC)-based sampling prob-
+lem (Zhang & Chen, 2021; Vargas et al., 2023; Havens et al.,
+2025; Liu et al., 2025), which learns the optimal control that
+transports initial data pdata to desired Boltzmann distribution,
+i.e., unnormalized density with a known energy function.
+Since forward dynamic in SB is the transport from sam-
+plable distribution,i.e., pdata, to energy-known pprior,e.g.,
+Gaussian, the problem can be reformulated as a data-to-
+energy sampling problem and efficiently solved. At stage
+(ii), we use the learned forward process to obtain the opti-
+mal SB coupling (X0, X1) and train the backward dynamic
+with a simple matching loss. Interestingly, our approach
+also recovers the standard diffusion model as a special case
+with a specific forward dynamic which yields independent
+endpoint coupling without training (See Sec. 3.1).
+Our design brings three key advantages. First, ASBM re-
+quires only the forward simulation at training. Since it
+transports from data to a simple prior, it yields stable and
+fast optimization, requiring dramatically fewer NFEs (e.g.,
+20 vs. 100–200 in prior work) to construct endpoint cou-
+plings, sufficiently with a lighter network. This stable for-
+ward training produces higher-quality optimal couplings,
+enabling more informative supervision for backward dy-
+namic. Second, since optimal coupling is induced by learned
+forward dynamic, we can optimize backward dynamic via
+simple matching loss which converges fast with high stabil-
+ity. Third, ASBM’s straighter trajectory results in improved
+generative performance with lower NFE compared to prior
+SB-based generative models and diffusion model. We fur-
+ther showcase the effectiveness of our efficient trajectory via
+distillation to one-step generator, with better performance
+and mode coverage.
+Our contributions are three-fold:
+• We proposeAdjoint Schr ¨odinger Bridge Matching
+(ASBM), which learnsoptimal trajectoryin significantly
+efficient and stablemanner through our novel perspec-
+tive on Schr¨odinger Bridge optimization.
+• ASBM achieves superior performance over diffusion
+model and prior SB methods on image generation with
+faster sampling (low NFE) and better fidelity.
+• Leveraging the efficient trajectory of ASBM, we im-
+prove the sample quality andmode coveragein distilla-
+tion task, compared to score-based distillation.
+2. Background
+Diffusion Models (DMs)(Song et al., 2020b; Ho et al.,
+2020) learn to sample from a target data distribution pdata
+by reversing a fixed forward noising process. This forward
+process is designed to describe the stochastic dynamic from
+the data distribution pdata to the prior distribution pprior, typi-
+cally a Gaussian. Specifically, consider a forward Stochastic
+Differential Equation (SDE) forX t ∈R d:
+dXt =f DM
+t (Xt) dt+σ DM
+t dWt, X 0 ∼p data,(1)
+where f DM : [0,1]×R d →R d is the base drift and σDM :
+[0,1]→R >0 is the noise schedule. This forward SDE has
+a corresponding reverse-time SDE (Song et al., 2020b) that
+follows the same stochastic dynamic backward in time:
+dXt =
+
+f DM
+t (Xt)−σ DM
+t
+2
+∇logp t(Xt)
+
+dt+σ DM
+t dWt,
+for X1 ∼p 1, where ∇x logp t(x) is a marginal score and
+p1 ≈p prior under a proper noise schedule in Eq. (1). DMs
+estimate this marginal score via conditional score match-
+ing (Song et al., 2020b; Ho et al., 2020) and generate sam-
+ples by simulating the reverse SDE with an approximate
+scores t starting fromp prior:
+min
+s
+E pt|0, X0∼pdata
+hst(Xt)− ∇ xt logp(X t |X 0)
+2i
+, (2)
+where s: [0,1]×R d →R d is a score function to approxi-
+mate the marginal score.
+Schr¨odinger Bridge.Consider a controlled SDE as
+dXt =ft(Xt) +σtuθ
+t(Xt)dt+σ t dWt, X 0 ∼p data, (3)
+where uθ : [0,1]×R d →R d is a parameterized forward
+control. pu is the path measure induced by controlled SDE
+in Eq. (3), and the base path measure pbase is induced by the
+uncontrolled base SDE,i.e., by settingu≡0in Eq. (3).
+Schr¨odinger Bridge (SB) problem finds a path measure pu
+that matches both endpoint marginals, pdata and pprior, while
+minimizing the KL divergence relative to a reference base
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+processp base (Schr¨odinger, 1931; L´eonard, 2013):
+min
+u
+DKL
+ 
+pu ∥p base
+=E pu
+Z 1
+0
+1
+2 ∥uθ
+t (Xt)∥2 dt
+
+,(4)
+subject to Eq. (3) and X1 ∼p prior. The optimal bridge
+admits a reverse-time SDE representation with the same
+boundary constraints:
+dXt =
+
+ft(Xt)−σ tvϕ
+t (Xt)
+
+dt+σ t dWt, X 1 ∼p prior,(5)
+where vϕ
+t (x) : [0,1]×R d →R d is a parameterized back-
+ward control. Optimal path measure p⋆ can be induced by
+both direction with optimal controlsu ⋆
+t orv ⋆
+t .
+Reciprocal Property of SB.Optimal path measure p⋆ fol-
+lows areciprocal process(L ´eonard et al., 2014):
+p⋆(Xt) =p base(Xt|X0, X1)p ⋆(X0, X1).(6)
+This representation indicates that the optimal path measure
+is characterized by the optimal coupling p⋆(X0, X1). Given
+the coupling of two terminal distributions, the intermediate
+distribution can be constructed from the base process.
+3. Method
+We introduce a generative model that generalizes the stan-
+dardDiffusion Models (DMs)into anon-memoryless
+regimeby leveraging the Schr ¨odinger Bridge (SB) problem.
+Our approach addresses the fundamental inefficiencies of
+diffusion models,i.e., curved trajectories and noisy training
+targets, by explicitly recovering optimal transport couplings.
+3.1. Diffusion Models as Memoryless SB
+Bridge Matching.As shown in Shi et al. (2023), given
+the optimal coupling (X0, X1)∼p ⋆
+0,1, we could obtain the
+optimal backward controlv ⋆
+t by solving
+min
+ϕ
+E pbase
+t|0,1 p⋆
+0,1
+hvϕ
+t (Xt)−σ t∇logp base
+t|0 (Xt |X 0)2i
+.(7)
+This property implies that if the optimal joint distribution
+p⋆(X0, X1) is accessible, we can optimize the backward
+controlv ϕ
+t via bridge matching (Liu et al., 2023b).
+Connection between DMs and SB.In DMs, we set the base
+drift and diffusion term (f DM, σDM) so that the X1 sampled
+fromp base
+1|0 (·|X0)is almost independent toX 0,i.e.,
+pbase
+0,1 (X0, X1)
+memoryless
+:=p base
+0 (X0)p base
+1 (X1).(8)
+We denote this condition as amemoryless condition, and
+underlying dynamics as amemoryless dynamics. Then, the
+following theorem holds:
+Proposition 3.1.If the base path measure pbase is memory-
+less, then the optimal path measure p⋆ of the SB problem is
+also memoryless, i.e.,
+p⋆(X0, X1)
+memoryless
+=p data(X0)p prior(X1).(9)
+Consequently, under the memoryless condition, the expecta-
+tion in Eq. (7) reduces to
+pbase
+t|0,1 ·p ⋆
+0,1 ⇔p base
+t|0,1 ·p prior ·p data ⇔p base
+t|0 ·p data,(10)
+which is exactly the same form as the score matching objec-
+tive in Eq. (2). This indicates that the diffusion model is a
+special case of SB, where the forward dynamic in Eq. (1) is
+a fixed memoryless base dynamic.
+Limitation of Memoryless Base SDE.This interpretation
+shows the fundamental inefficiency of the score matching.
+In the memoryless regime, the injection ofmassivenoise
+makes the matching target ∇xt logp base(Xt |X 0) highly
+stochastic. This leads to a slow convergence and highly
+curved backward path, leading to numerous function evalua-
+tions for generating high-quality samples (Lipman et al.,
+2022; Karras et al., 2022). In other words, as endpoint
+couplings are independent from each other, it is not infor-
+mative to learn effective generation path. Therefore, we
+propose a method to obtain an informative optimal cou-
+pling p⋆(X0, X1) to more efficiently supervise our back-
+ward bridge matching to learn straighter generation path.
+3.2. Adjoint Schr¨odinger Bridge Matching
+To break through the limitations of the memoryless dy-
+namics, we adopt anon-memorylessbase SDE to induce
+informative optimal couplings, and thereby learn efficient
+generation trajectory. Our core contribution is adecoupled
+optimization of forward-backward dynamicsin a two-stage
+process: 1)Optimal Coupling Constructionfor the for-
+ward process by a novel interpretation of it as adata-to-
+energysampling problem, and 2)Backward Dynamic Opti-
+mizationvia simple matching loss usingreciprocal process
+under optimal couplingp ⋆(X0, X1).
+Optimal Coupling Construction.Since non-memoryless
+base SDE no longer transports X0 to pprior on its own, we
+need to optimize additional forward control uθ
+t in Eq. (3)
+to enforce the terminal marginal pprior. Stochastic Optimal
+Control (SOC)-based sampling problem (Zhang & Chen,
+2021; Vargas et al., 2023; Havens et al., 2025; Liu et al.,
+2025) finds the optimal control which tilts the base SDE
+to transport a samplable distribution to a target Boltzmann
+distribution, which is known up to its energy function.
+Ournovel perspectiveis that, within the generative model-
+ing framework, the forward dynamic in the SB problem (3)
+can be seen as adata-to-energysampling problem. In this
+viewpoint, the forward process transports from an empiri-
+cal distribution pdata to an energy-known distribution pprior,
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+e.g., Gaussian. This is highly beneficial because the energy
+gradient provides a dense, point-wise characterization of
+pprior, whereas empirical supervision relies on finite sam-
+ples and can only specify the target distribution through
+sparse Monte Carlo estimates. This reformulation allows us
+to isolate the coupling construction part from the unstable
+alternating optimization of forward-backward system.
+Then, our first goal is finding theoptimal control u⋆
+t of sam-
+pling problem. Under the SB optimality (Pavon & Wakol-
+binger, 1991; Chen et al., 2021c; Caluya & Halder, 2021),
+the optimal controls can be characterized by
+u⋆
+t(x) =σ t∇x logφ t(x), v ⋆
+t (x) =σ t∇x log ˆφt(x), (11)
+where φt,ˆφt ∈C 1,2([0,1],R d) are SB potentials satisfying
+φt(x) =
+Z
+pbase
+1|t (y|x)φ 1(y)dy, φ 0(x) ˆφ0(x) =p prior(x),
+ˆφt(x) =
+Z
+pbase
+t|0 (x|y) ˆφ0(y)dy, φ 1(x) ˆφ1(x) =p data(x).
+Optimal controls in Eq. (11) are typically obtained by al-
+ternating optimization of φt and ˆφt (Fortet, 1940; Kull-
+back, 1968; Cuturi, 2013; Shi et al., 2023). However, since
+we focus ondata-to-energy samplingframework, weonly
+need the forward optimal control u⋆
+t , which can be learned
+by alternating Adjoint Matching (AM) (12) and Corrector
+Matching (CM) (13) (Liu et al., 2025):
+min
+θ
+E pbase
+t|0,1, p¯uθ
+0,1
+ uθ
+t(Xt) + σt∇E+ ¯vϕ
+1
+(X1)
+
+2
+, (12)
+min
+ϕ
+Ep¯uθ
+0,1
+vϕ
+1(X1)−σ 1∇x1 logpbase(X1 |X 0)
+
+2
+, (13)
+where ¯u= stopgrad(u) and ¯v= stopgrad(v) , and we
+define the energyE by pprior ∝exp (−E(x)) . Note that CM
+is same as bridge matching only at t= 1 . See Appendix B
+for more details.
+By training forward dynamic via SOC framework without
+any reliance on backward dynamic, we can optimize the
+forward control to approximate the optimal coupling with
+high stability. This also allows us to simulate endpoint pairs
+via only the forward dynamic, which has various advantages.
+Since forward control learns dynamic from complicated data
+space to simple prior, it is mucheasier to learncompared
+to backward dynamic, leading tolighter model capacity
+(Appendix D) withfast convergence(Sec. 4.5). Most impor-
+tantly, this high stability of our optimization scheme allows
+us to adoptnon-memorylessbase SDE which requires more
+complicated training compared to the memoryless one.
+Upon convergence, our forward dynamic (3) approximates
+optimal couplings p⋆(X0, X1). It is important to note that
+our p⋆(X0, X1) isoptimal coupling, since our framework
+minimizes the transport cost (4) while considering the
+non-trivial correlation between X0 and X1 via the non-
+memoryless condition. Intuitively, since non-memoryless
+Algorithm 1ASBM optimization with VP base SDE
+Require:X 0 ∼p data; pprior(x)∝e −E(x); forward control
+uθ
+t (·), backward controlv ϕ
+t (·); stepsN 1, N2.
+1:Base SDE:f t(x) :=− 1
+2 βtx, σ t := √βt,
+withβ t := (1−t)β max +tβ min.
+2:Reciprocal sampler:Given
+κt := exp
+ 
+− 1
+2
+R 1
+t βτ dτ
+
+,¯κt := exp
+ 
+− 1
+2
+R t
+0 βτ dτ
+
+,
+Xt ∼p base
+t|0,1(· |X 0, X1) =N(µ t,Σ tI)where,
+µt = ¯κt(1−κ 2
+t )
+1−¯κ2
+1
+X0 + κt(1−¯κ2
+t )
+1−¯κ2
+1
+X1,
+Σt = (1−κ 2
+t )(1−¯κ2
+t )
+1−¯κ2
+1
+.
+3:Stage 1:optimizeu θ
+t via SOC.
+4:fori= 1toN 1 do
+5: Updateθvia Eq. (12).
+6: Updateϕatt=1via Eq. (13).
+7:end for
+8:Stage 2:optimizev ϕ
+t via BM with reciprocal sampler,
+underp ¯uθ
+0,1(X0, X1)≈p ⋆
+0,1(X0, X1).
+9:fori= 1toN 2 do
+10: Updateϕvia Eq. (14).
+11:end for
+base SDE injects smaller noise compared to the forward
+process in standard diffusion,i.e., σt ≪σ DM
+t , transport cost
+minimization leads to significantly straighter trajectories,
+allowing considerablylow NFEs(Sec. 4.4) for simulating
+endpoint pair. This property is fundamentally unattainable
+under the standard memoryless forward dynamic in diffu-
+sion models, relying on independent endpoint pairings.
+Backward Dynamic Optimization.Given the optimal
+joint puθ
+(X0, X1) induced by the optimized forward dy-
+namic (3), we supervise our backward dynamic by bridge
+matching in Eq. (7) under these couplings:
+min
+ϕ
+Epbase
+t|0,1, p¯uθ
+0,1
+hvϕ
+t (Xt)−σ t∇xt logpbase(Xt |X 0)2i
+. (14)
+With direct supervision under an optimal coupling, back-
+ward training converges much faster than memoryless dif-
+fusion baselines. Moreover, the two-stage design enables
+principled use of thereciprocal process, which is exact only
+when the optimal endpoint coupling p⋆(X0, X1) is avail-
+able. In contrast, prior methods typically lack in optimal
+coupling and thus rely on alternating forward-backward op-
+timization with reciprocal process of imperfect endpoints.
+Our full algorithm is described in Algorithm 1.
+Advantages of ASBM.Previous methods (De Bortoli et al.,
+2021; Chen et al., 2021a; Shi et al., 2023; Liu et al., 2022a;
+2023a; Chen et al., 2023) address the SB problem by al-
+ternating the optimization of forward and backward dy-
+namics, repeatedly generating trajectories using the current
+forward (resp. backward) model to provide supervision for
+updating the backward (resp. forward) dynamic. Despite
+extensive prior work, scaling such alternating schemes to
+high-dimensional settings remains challenging. These ap-
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+proaches implicitly assume that trajectories generated by
+one direction provide sufficiently informative supervision
+for optimizing the opposite direction. However, in genera-
+tive modeling, learning the backward dynamic, from a sim-
+ple prior to a complex data distribution, is particularly diffi-
+cult. As a result, inaccurate trajectories learned at training
+can destabilize the optimization of the counterpart dynamic
+and lead to error accumulation, ultimately yielding mis-
+matched forward and backward processes and non-optimal
+couplings (see Sec. 4.2). To mitigate this, prior methods
+either resort to memoryless base dynamics, which dimin-
+ishes the benefits of SBs, or rely on pretraining stages using
+independent couplings, which do not fully align with the
+theoretical formulation and may lead to practical instability.
+In summary, our two-stage optimization completely resolves
+these issues. By isolating the forward optimization as data-
+to-energy sampling problem, we obtain optimal coupling
+with (i) high stability, (ii) low NFEs, and (iii) light model
+capacity under (iv) non-memoryless condition. Our back-
+ward optimization also becomes considerably simpler and
+more stable through the bridge matching loss with exact
+reciprocal process under optimal coupling.
+3.3. Distillation to One-Step Generator
+To further verify the effectiveness of the optimal trajectory
+of our method, we introduce adata-freedistillation method
+for one-step generator within the SB framework. This part
+demonstrates the inherent strengths of our approach: since
+the learned generative paths are significantly more organized
+than those in standard diffusion models, ASBM provides a
+more suitable and efficient foundation for distillation.
+Distillation in Control Space.We aim to distill our learned
+backward control vϕ
+t to a one-step generatorGψ :R d →R d.
+Upon successful training, we are given the learned back-
+ward controlled SDE (5), which approximately reaches the
+data marginal pdata at t= 0 . We denote the path measure
+induced from the backward dynamic asp ϕ. Let
+pψ
+0,1 := Law
+ 
+(Gψ(X1), X1)
+
+(15)
+denote the joint distribution induced by X1 ∼p prior and
+z∼ N(0, I) , where Gψ is a one-step generator mapping
+the prior sampleX 1 to a data sampleX 0 =G ψ(X1).
+We further extend the notation pψ
+0,1 to a full path measure
+pψ on [0,1]×R d, which represents an (implicit) stochastic
+process whose endpoint coupling is given by pψ
+0,1. Our goal
+is to match this path measure with a target path measure pϕ,
+by minimizing the path-space KL divergenceDKL(pψ ∥p ϕ).
+In particular, achieving pψ ≈p ϕ ensures that the induced
+marginal satisfies pψ
+0 =p data,i.e., Gψ successfully trans-
+ports the prior distribution to the data distribution.
+Since the path measure pψ induced by Gψ is not explic-
+CIFAR-10 (32 x 32) FFHQ (256 x 256)
+Figure 2.Generated samples from ASBM on pixel space (CIFAR-
+10) and on latent space (FFHQ).
+itly tractable, we introduce a control-based parametrization
+to approximate it. Specifically, we consider a controlled
+diffusion whose path measurep ξ is induced by
+dXt=ft(Xt)−σ tvξ
+t (Xt)dt+σ tdWt, X 1 ∼pprior, (16)
+where vξ : [0,1]×R d →R d is a parameterized control.
+The role of vξ is to parameterize pξ that approximates the
+implicit path measure pψ. As a result, we need to alternately
+optimizeG ψ andv ξ to reflect continuously changingp ψ
+0,1.
+Given the current one-step generator Gψ, we aim to learn
+control vξ, such that the corresponding path measure pξ
+correctly estimates pψ. Given endpoint pairs (X0, X1)∼
+pψ
+0,1, we utilize bridge matching to updatev ξ:
+min
+ξ
+Epbase
+t|0,1, pψ
+0,1
+hvξ
+t(Xt)−σ t∇logp base
+t|0 (Xt |X 0)2i
+. (17)
+This objective encourages vξ to approximate the score of
+the base bridge conditioned on X0, thereby matching the
+induced path measurep ξ top ψ.
+Finally, we update the generator Gψ by minimizing the
+discrepancy between the learned control vξ and the target
+controlv ϕ. Concretely, we solve
+min
+ψ
+Epbase
+t|0,1, pψ
+0,1
+¯vξ
+t (Xt)−¯vϕ
+t (Xt)
+2
+,(18)
+which can be derived from a KL minimization that aligns
+the pξ to pψ by Girsanov’s theorem (S¨arkk¨a & Solin, 2019)
+(See Appendix C for detailed derivation). With memoryless
+forward base process, our SB distillation recovers the score
+distillation (Poole et al., 2022), following Eq. (10).
+Initialization of Gψ.Following the score distillation (Yin
+et al., 2024b), we initialize Gψ from pretrained backward
+controlv ϕ
+t via Tweedie’s formula (Efron, 2011) att= 1:
+Gψ(x) = x+ (1−¯κ 2
+1)vϕ
+1 (x)/σ1
+¯κ1
+,(19)
+with notation as in Algorithm 1. For diffusion score models,
+this one-step estimate often produces noisy images due to its
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+Method OC No PT FB FID↓
+Refinement method
+DOT (Tanaka, 2019)✓ ✗– 15.78
+DGFLOW (Ansari et al., 2020)✓ ✗– 9.63
+Memoryless SDE
+Score SDE (Song et al., 2020b)✗ ✓ ✓4.61
+SB-FBSDE (Chen et al., 2021a)✗ ✗ ✗5.26
+VSDM (Deng et al., 2024)✗ ✗ ✗4.24
+Non-Memoryless SDE
+DSBM (Shi et al., 2023)✓ ✗ ✗9.68
+ASBM (Ours)✓ ✓ ✓3.16
+Table 1.FID evaluation on CIFAR-10.ASBM shows superior
+generative performance by achieving all three key advantages:
+optimal coupling (OC), no reliance on pre-training (No PT), and
+consistent forward–backward dynamics (FB).
+highly stochastic trajectory, typically mitigated by timestep
+shifting (Yin et al., 2023), which introduces bias. In contrast,
+ASBM’s straighter path makes this initialization reliable
+without timestep shifting. See Appendix C for illustration.
+Advantages of ASBM Distillation.ASBM not only yields
+a straighter path, but also constructshighly organized trajec-
+toriesconnectingadjacentpairs (X0, X1). This is a special
+characteristic of non-memoryless SB originated from its
+non-memoryless optimal coupling(Proposition 3.1). Specif-
+ically, covering the entire prior space with non-memoryless
+trajectories leads to a more efficient connection from the spe-
+cific mode in data space to the specificnearbyarea in pprior.
+In other words, both puθ
+1 (X1 |X 0) and pvϕ
+0 (X0 |X 1) have
+lower variance than the case of memoryless process (See
+Sec. 4.2 for demonstrations). Together with straightness, it
+has strong benefits to distillation in the aspect oflearning
+difficultyandmode coveragecompared to the memoryless
+trajectory of diffusion models.
+4. Experiments
+We validate the generative performance and efficiency of
+ASBM in Sec. 4.1, and analyze its optimal trajectory in
+Sec. 4.2. Then, we verify effective distillation of ASBM
+in Sec. 4.3. Finally, we explore the main hyperparameters
+through the ablation study in Sec. 4.4 and compare the
+training cost to score matching in Sec. 4.5.
+Dataset & Baselines.We compare our ASBM against Score
+SDE (Song et al., 2020b) as a representative instantiation of
+memoryless diffusion and prior SB-based frameworks on
+the pixel space of CIFAR-10 (Krizhevsky et al., 2009) with
+FID (Heusel et al., 2017) metric. Then, we further verify
+ASBM in the LDM (Rombach et al., 2022) framework using
+the Stable Diffusion 3 autoencoder (Esser et al., 2024) on
+FFHQ (Karras et al., 2019). For distillation task, we report
+recall and precision metrics (Kynk¨a¨anniemi et al., 2019) to
+evaluate mode coverage, together with FID.
+2 5 5 0 1 0 0 2 5 0 5 0 0 1 0 0 0
+N F E
+3
+5
+1 0
+2 0
+5 0
+1 0 0
+2 0 0
+5 0 0F I D
+7 7 . 2 8 3 0 . 3 5
+1 0 . 8 0
+3 . 6 4 3 . 4 7 3 . 2 3
+2 3 7 . 7 1
+2 8 . 0 9
+5 . 2 6 3 . 6 9 4 . 1 5 4 . 7 4
+1 1 7 . 8 8
+7 5 . 2 3
+5 2 . 1 8 4 1 . 6 9 4 0 . 0 7 3 7 . 3 3
+3 7 . 6 6
+3 1 . 0 6
+9 . 6 8
+8 . 7 5
+6 . 8 6 8 . 3 4
+4 3 6 . 1 1 4 3 6 . 0 3 4 3 6 . 0 0 4 3 5 . 9 5 4 3 6 . 0 8 4 3 6 . 1 1
+2 0 . 8 3
+5 . 3 9
+3 . 0 5 2 . 9 1 2 . 8 7 2 . 7 4
+S c o r e  S D E
+S B - F B S D E  ( M )
+S B - F B S D E  ( N M )
+D S B M  ( B M )
+D S B M  ( N o  B M )
+A S B M  ( O u r s )
+Figure 3.FID comparison along the NFE.We use M and NM
+to denote the memoryless and non-memoryless condition, respec-
+tively. BM denotes empirical bridge-matching pretraining.
+NFE 25 50 100 250 500 1000
+Score SDE 52.08 19.02 9.84 7.79 6.88 6.63
+ASBM (Ours) 8.85 7.64 6.85 6.47 6.38 6.27
+Table 2.FID evaluation on latent space of FFHQ.
+Experimental Setup.We adopt the Variance Preserving
+(VP) path (Song et al., 2020b) with non-memoryless setting
+as the base SDE for ASBM. For coupling generation at
+training, we use the Euler-Maruyama solver (Kloeden, 2011)
+with 20 NFE for CIFAR-10 and 50 NFE for FFHQ. More
+details can be found in Appendix D.
+4.1. Image Generation Performance
+Generation on Pixel Space.Tab. 1 reports FID on CIFAR-
+10 at 100 NFE using each method’s reported solver. ASBM
+significantly outperforms all baselines by achieving the ef-
+ficient and straight trajectory under optimal coupling. As
+discussed in Sec. 3.1, memoryless base SDEs (Score SDE,
+SB-FBSDE and VSDM) induce independent coupling at
+optimal state and thus fail to yield an informative optimal
+coupling. While DSBM relaxes this via a non-memoryless
+condition, it remains difficult to scale to high-dimensional
+data even with an additional pretraining stage.
+We ablate SB-FBSDE with non-memoryless process and
+DSBM without pretraining to evidently show these limita-
+tions in Fig. 3. (i) SB-FBSDE performs well only in the
+memoryless regime but substantially degrades under the
+non-memoryless setting, suggesting it cannot yield optimal
+coupling in high dimensions. (ii) DSBM works well only
+with empirical bridge matching pretraining, incorrectly as-
+suming independent endpoint coupling as optimal one with
+the non-memoryless settings. Even with pretraining, DSBM
+shows unstable and inferior FID scores across various NFEs.
+In contrast, our ASBM achieves significantly lower FID
+with low NFE (20-100), implying its efficient trajectory.
+Generation in LDM Framework.We verify generalizabil-
+ity of ASBM on latent space of FFHQ in Tab. 2. Consistent
+with the pixel-space results, ASBM achieves substantially
+lower FID at small NFE and maintains superior FID across
+the entire NFE range compared to Score SDE.
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+C o u n t
+0 1 0 1 5 2 0 2 5 3 0
+T r a j e c t o r y  s t r a i g h t n e s s
+8 0 0
+7 0 0
+6 0 0
+5 0 0
+4 0 0
+3 0 0
+2 0 0
+1 0 0
+/ /
+S c o r e  S D E
+A S B M  ( O u r s )
+C o u n t
+T r a j e c t o r y  v a r i a n c e
+4 0 0
+3 5 0
+3 0 0
+2 5 0
+2 0 0
+1 5 0
+1 0 0
+5 0
+0 2 . 5 3 . 53 . 0 4 . 0 4 . 5 5 . 0 5 . 5
+S c o r e  S D E
+A S B M  ( O u r s )
+Figure 4.Trajectory efficiency.Left: Ours shows significantly
+straighter trajectory, leading to low NFE at generation.Right: Ours
+has lower trajectory variance, implying its better organized path.
+Method Score SDE SB-FBSDE DSBMASBM
+FID 6.72 285.77 39.843.74
+Table 3.FID at 25 steps with Heun solver on CIFAR-10.
+4.2. Optimal Trajectory of ASBM
+We further analyze strength of our trajectory through path
+straightness/variance, and forward-backward consistency.
+Trajectory Straightness.We measure the path straightness
+via the trajectory functional
+S(X0:1) :=
+PT−1
+i=0 ∥X(i+1)/T −X i/T ∥2
+2
+∥X1 −X 0∥2
+2
+,(20)
+from a T -step trajectory {Xi/T }T
+i=0. We use 10K trajec-
+tories generated with T= 100 steps. As shown in Fig. 4
+(left), ASBM yields substantially smaller S than Score SDE,
+confirming that our non-memoryless coupling produces
+straighter generation trajectories.
+Trajectory Variance.As discussed in Sec. 3.3, non-
+memoryless SB is expected to havelocalized coupling,
+which can be demonstrated by low trajectory variance where
+most mass of pvϕ
+0 (X0|X1 =x 1) concentrates more on its
+centroid. To verify this property, for each of 10K initial
+noises, we generate 10 images and compute the average
+ℓ2 distance of these images to their centroid. As shown in
+Fig. 4 (right), ASBM exhibits a notably stronger concentra-
+tion, indicating its stronglyorganizedtrajectory.
+We verify this property by inversion test for further intuition.
+Starting from a fixed image X0, we sample X1 ∼p uθ
+(· |
+X0) using our forward SDE in Eq. (3), then reconstruct bX0
+by running the backward SDE in Eq. (5) fromX1. As shown
+in Fig. 5, ASBM recovers bX0 that remains highly similar to
+original X0, whereas Score SDE produces a random recon-
+struction, consistent with its memoryless dynamic. These
+results clearly indicate that ASBM’s trajectory is not only
+straighter but also highly organized under non-memoryless
+process, which in turn simplifies distillation.
+Forward-Backward Consistency.Finally, we evaluate the
+consistency of forward-backward dynamics. For an exact
+Imag ASBM (OursScore SD
+Figure 5.Localized prior-data coupling.ASBM trajectories pre-
+serve information: reversing from a noised image produces samples
+similar to the original. In contrast, memoryless dynamics yield
+completely random samples due to highly noisy trajectories.
+Method FID↓Recall↑Precision↑
+SDS (Poole et al., 2022) 9.36 0.504 0.706
+DMD (Yin et al., 2024b) 8.25 0.513 0.715
+Ours 6.68 0.5420.702
+Table 4.Result of distillation to one-step generator on CIFAR-10.
+SB solution, the optimal bridge is unique, implying compat-
+ible forward-backward dynamics that share the same time
+marginals. We quantitatively evaluate this property through
+generation via the Heun’s method (Ascher & Petzold, 1998;
+Karras et al., 2022), based on probability flow ODE (Song
+et al., 2020b) requiring precisely coupled forward-backward
+dynamics. Tab. 3 verifies the limitation of prior works
+by showing notable degradation of these baselines with
+Heun’s method, whereas ASBM remains robust with a few
+steps, highlighting the benefit of our two-stage optimiza-
+tion. This is because, in practice, alternating optimization in
+SB-FBSDE and DSBM can be unstable in high dimensions
+and each direction provides inconsistent trajectory supervi-
+sion to its counterpart optimization, eventually producing
+mismatched forward-backward systems.
+4.3. Distillation to One-Step Generator
+We showcase the ASBM’s efficient trajectory via distillation
+to one-step generator (Sec. 3.3) on CIFAR-10, comparing
+it to score-based distillation baselines: Score Distillation
+Sampling (SDS) (Poole et al., 2022) and Diffusion Matching
+Distillation (DMD) (Yin et al., 2024b), which augments SDS
+with a regression loss to mitigate mode collapse.
+As shown in Tab. 4, ASBM outperforms prior score-
+distillation models. Notably, the improved recall indicates
+substantiallyreduced mode collapse, avoiding the need of
+costly regression loss employed in DMD. This regression
+loss requires a large number of noise-image pairs gener-
+ated from the original score model (e.g., 500K pairs). We
+attribute the superiority of ASBM’s distillation to the local-
+ized prior–data coupling,i.e., efficiently organized trajectory
+induced by our optimal coupling, which provides more in-
+formative guidance and better covers diverse data modes.
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+B a c k w a r d  N F E
+2 5 5 0 1 0 0 2 5 0 5 0 0 1 0 0 0
+3
+5
+1 0
+2 0
+5 0
+F I D 1 3 . 0 1
+1 1 . 9 1 1 1 . 6 8 1 1 . 5 2 1 1 . 4 3 1 1 . 3 9
+1 5 . 7 1
+7 . 2 3 6 . 9 8
+5 . 8 4 5 . 6 9 5 . 5 2
+2 0 . 8 3
+5 . 3 9
+3 . 0 5 2 . 9 1 2 . 8 7 2 . 7 4
+5 0 . 7 9
+1 6 . 8 8
+5 . 6 5 3 . 5 7 3 . 5 4 3 . 4 9
+Figure 6.Ablation on different degree of memorylessness.
+4.4. Ablation Study
+We investigate the degree of memorylessness and the effects
+of forward NFE on CIFAR-10.
+Memorylessness.For the VP base process (Algorithm 1),
+a larger βmax injects more noise, and pushes the base SDE
+toward the memoryless process; for example, βmax = 20
+recovers the standard memoryless diffusion setting. We ab-
+late memorylessness by varying βmax. As shown in Fig. 6,
+βmax controls the trade-off between training efficiency and
+prior coverage. When βmax is too small (e.g., βmax = 1 ),
+the path becomes straighter and training is efficient, but the
+terminal distribution puθ
+1 under-covers pprior even after suc-
+cessful optimization, becausepbase
+1 is too different frompprior.
+This eventually leaves low-density holes in puθ
+1 , resulting
+in worse FID with fine-grained NFE. Conversely, a larger
+βmax (e.g., βmax = 8) improves coverage of the prior space,
+but the increased noise injection leads to more curved paths,
+making accurate simulation difficult with limited NFEs. We
+therefore use βmax = 4 by default as a favorable trade-off
+between informative coupling and robust prior matching.
+Forward NFE.Forward NFE largely determines the train-
+ing cost. Prior SB methods (Chen et al., 2021a; Shi et al.,
+2023) typically require 100–200 NFEs to alternately sim-
+ulate forward-backward dynamics, which dominates run-
+time, while ASBM only uses lightweight forward simula-
+tion, achieving strong performance with just 20 NFEs. As
+shown in Tab. 5, ASBM remains strong even with 10 NFEs,
+and the negligible gap between 20 and 50 NFEs supports
+our hypothesis that the data-to-energy forward optimization
+is easier, enabling accurate couplings with fewer NFEs.
+4.5. Training Efficiency
+Our backward optimization converges significantly faster,
+i.e., 600 epochs for ASBM and 3300 epochs for Score SDE,
+due to its supervision underoptimal coupling. As discussed
+in Sec. 3.2, our forward dynamic is also lightweight due to
+its data-to-energy direction, converging with the cost same
+as 150 backward epochs. Considering the cost of coupling
+construction, the total training cost of ASBM is equivalent
+to 2100 Score SDE epochs, yielding a 0.64× reduced com-
+putation relative to Score SDE.
+Forward Backward NFE
+NFE 25 50 100 250 500 1000
+10 23.62 8.03 3.58 3.40 3.28 3.05
+20 20.83 5.39 3.05 2.91 2.87 2.74
+5020.735.87 3.16 3.01 2.94 2.77
+Table 5.Ablation on different forward NFE.
+5. Related Work
+Generative Models.Dynamic-based generative models
+have become a major paradigm in generative tasks (Ho
+et al., 2020; Song et al., 2020a;b; Lipman et al., 2022; Liu
+et al., 2022b; Albergo et al., 2023; De Bortoli et al., 2021).
+In order to improve the efficiency of these models, research
+efforts devoted to reducing the NFE of these models,e.g.,
+different dynamic solvers (Lu et al., 2022; 2025; Zhang &
+Chen, 2022; Karras et al., 2022), or rectifying the trajec-
+tories (Liu et al., 2022b; 2024). However, these works are
+based on post-refinement on the top of the noisy diffusion
+path. To obtain the optimal trajectory, study on dynamic
+optimal transport has been urged.
+Dynamic Optimal Transport (OT).OT-based genera-
+tive models range from Wasserstein objectives (Arjovsky
+et al., 2017) to entropy-regularized OT,i.e., Schr ¨odinger
+Bridges (SB) (L ´eonard, 2013; Chen et al., 2016; 2021b;
+Caluya & Halder, 2021). Scalable SB solvers typically al-
+ternate forward-backward updates,e.g., Iterative Propor-
+tional Fitting/Sinkhorn-style methods (Fortet, 1940; Kull-
+back, 1968; R ¨uschendorf, 1995; De Bortoli et al., 2021;
+Chen et al., 2021a) and recent matching-based variants im-
+proving practicality (Shi et al., 2023; Chen et al., 2023;
+Peluchetti, 2023). SB has been applied to image genera-
+tion (De Bortoli et al., 2021; Chen et al., 2021a; Deng et al.,
+2024) and image-to-image translation (Liu et al., 2023b;
+Theodoropoulos et al., 2024; Gushchin et al., 2024). Our
+approach is fundamentally different, as we first formulate
+generative modeling as finding optimal coupling and then
+supervise the generation path under this coupling to learn
+efficient trajectory.
+6. Conclusion
+We present ASBM, a two-stage SB framework that learns
+informativeoptimal couplings. The key idea is to decou-
+ple forward and backward optimization: we first learn the
+forward dynamic as a controlled sampling problem under
+anon-memorylessbase process, then train the backward
+dynamic using the optimal couplings induced by the learned
+forward transport. This avoids unstable bidirectional alter-
+nating training, yielding an efficient trajectory. While our ex-
+tensive experiments thoroughly validate ASBM on standard
+benchmarks (pixel space, LDM framework, distillation), we
+leave large-scale high-resolution and conditional generation
+evaluations to future work, expecting the natural transfer.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+Impact Statement
+Our work focuses on developing computational methods for
+image generation with optimal trajectory. The techniques
+are purely theoretical and computational, relying exclusively
+on public image dataset. No personal data, or sensitive con-
+tents are involved. We therefore identify no ethical concerns
+arising from this research. For this framework, there are
+many possible societal impacts, none of which need specific
+highlighting.
+References
+Albergo, M. S., Boffi, N. M., and Vanden-Eijnden, E.
+Stochastic interpolants: A unifying framework for flows
+and diffusions.arXiv preprint arXiv:2303.08797, 2023.
+Ansari, A. F., Ang, M. L., and Soh, H. Refining deep gen-
+erative models via discriminator gradient flow.arXiv
+preprint arXiv:2012.00780, 2020.
+Arjovsky, M., Chintala, S., and Bottou, L. Wasserstein gen-
+erative adversarial networks. InInternational conference
+on machine learning, pp. 214–223. PMLR, 2017.
+Ascher, U. M. and Petzold, L. R.Computer methods for
+ordinary differential equations and differential-algebraic
+equations. SIAM, 1998.
+Bellman, R. The theory of dynamic programming.Bulletin
+of the American Mathematical Society, 60(6):503–515,
+1954.
+Caluya, K. F. and Halder, A. Wasserstein proximal algo-
+rithms for the schr¨odinger bridge problem: Density con-
+trol with nonlinear drift.IEEE Transactions on Automatic
+Control, 67(3):1163–1178, 2021.
+Chen, T., Liu, G.-H., and Theodorou, E. A. Likelihood
+training of schr¨odinger bridge using forward-backward
+sdes theory.arXiv preprint arXiv:2110.11291, 2021a.
+Chen, T., Liu, G.-H., Tao, M., and Theodorou, E. Deep
+momentum multi-marginal schr¨odinger bridge.Advances
+in Neural Information Processing Systems, 36:57058–
+57086, 2023.
+Chen, Y ., Georgiou, T. T., and Pavon, M. On the relation
+between optimal transport and schr ¨odinger bridges: A
+stochastic control viewpoint.Journal of Optimization
+Theory and Applications, 169(2):671–691, 2016.
+Chen, Y ., Georgiou, T. T., and Pavon, M. Stochastic control
+liaisons: Richard sinkhorn meets gaspard monge on a
+schr¨odinger bridge.Siam Review, 63(2):249–313, 2021b.
+Chen, Y ., Georgiou, T. T., and Pavon, M. Stochastic control
+liaisons: Richard sinkhorn meets gaspard monge on a
+schr¨odinger bridge.Siam Review, 63(2):249–313, 2021c.
+Cuturi, M. Sinkhorn distances: Lightspeed computation
+of optimal transport.Advances in neural information
+processing systems, 26, 2013.
+De Bortoli, V ., Thornton, J., Heng, J., and Doucet, A. Diffu-
+sion schr¨odinger bridge with applications to score-based
+generative modeling.Advances in neural information
+processing systems, 34:17695–17709, 2021.
+Deng, W., Luo, W., Tan, Y ., Biloˇs, M., Chen, Y ., Nevmyvaka,
+Y ., and Chen, R. T. Variational schr ¨odinger diffusion
+models.arXiv preprint arXiv:2405.04795, 2024.
+Domingo-Enrich, C., Drozdzal, M., Karrer, B., and Chen,
+R. T. Adjoint matching: Fine-tuning flow and diffusion
+generative models with memoryless stochastic optimal
+control.arXiv preprint arXiv:2409.08861, 2024.
+Efron, B. Tweedie’s formula and selection bias.Journal
+of the American Statistical Association, 106(496):1602–
+1614, 2011.
+Esser, P., Kulal, S., Blattmann, A., Entezari, R., M¨uller, J.,
+Saini, H., Levi, Y ., Lorenz, D., Sauer, A., Boesel, F., et al.
+Scaling rectified flow transformers for high-resolution
+image synthesis. InForty-first international conference
+on machine learning, 2024.
+Fortet, R. R ´esolution d’un syst `eme d’´equations de m.
+schr¨odinger.Journal de math ´ematiques pures et ap-
+pliqu´ees, 19(1-4):83–105, 1940.
+Gushchin, N., Kholkin, S., Burnaev, E., and Korotin, A.
+Light and optimal schr ¨odinger bridge matching. In
+Forty-first International Conference on Machine Learn-
+ing, 2024.
+Havens, A., Miller, B. K., Yan, B., Domingo-Enrich, C.,
+Sriram, A., Wood, B., Levine, D., Hu, B., Amos, B.,
+Karrer, B., et al. Adjoint sampling: Highly scalable dif-
+fusion samplers via adjoint matching.arXiv preprint
+arXiv:2504.11713, 2025.
+Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., and
+Hochreiter, S. Gans trained by a two time-scale update
+rule converge to a local nash equilibrium.Advances in
+neural information processing systems, 30, 2017.
+Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-
+bilistic models.Advances in neural information process-
+ing systems, 33:6840–6851, 2020.
+Karras, T., Laine, S., and Aila, T. A style-based generator
+architecture for generative adversarial networks. InPro-
+ceedings of the IEEE/CVF conference on computer vision
+and pattern recognition, pp. 4401–4410, 2019.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating
+the design space of diffusion-based generative models.
+Advances in neural information processing systems, 35:
+26565–26577, 2022.
+Kloeden, P. E. Stochastic differential equations. InInterna-
+tional Encyclopedia of Statistical Science, pp. 1520–1521.
+Springer, 2011.
+Krizhevsky, A., Hinton, G., et al. Learning multiple layers
+of features from tiny images. 2009.
+Kullback, S. Probability densities with given marginals.
+The Annals of Mathematical Statistics, 39(4):1236–1243,
+1968.
+Kynk¨a¨anniemi, T., Karras, T., Laine, S., Lehtinen, J., and
+Aila, T. Improved precision and recall metric for assess-
+ing generative models.Advances in neural information
+processing systems, 32, 2019.
+L´eonard, C. A survey of the schr ¨odinger problem and some
+of its connections with optimal transport.arXiv preprint
+arXiv:1308.0215, 2013.
+L´eonard, C., Rœlly, S., and Zambrini, J.-C. Reciprocal
+processes. a measure-theoretical point of view. 2014.
+Lipman, Y ., Chen, R. T., Ben-Hamu, H., Nickel, M., and
+Le, M. Flow matching for generative modeling.arXiv
+preprint arXiv:2210.02747, 2022.
+Liu, G.-H., Chen, T., So, O., and Theodorou, E. Deep
+generalized schr¨odinger bridge.Advances in Neural In-
+formation Processing Systems, 35:9374–9388, 2022a.
+Liu, G.-H., Lipman, Y ., Nickel, M., Karrer, B., Theodorou,
+E. A., and Chen, R. T. Generalized schr ¨odinger bridge
+matching.arXiv preprint arXiv:2310.02233, 2023a.
+Liu, G.-H., Vahdat, A., Huang, D.-A., Theodorou, E. A.,
+Nie, W., and Anandkumar, A. I2SB: Image-to-image
+schr¨odinger bridge.arXiv:2302.05872, 2023b.
+Liu, G.-H., Choi, J., Chen, Y ., Miller, B. K., and Chen,
+R. T. Adjoint schr ¨odinger bridge sampler.arXiv preprint
+arXiv:2506.22565, 2025.
+Liu, X., Gong, C., and Liu, Q. Flow straight and fast: Learn-
+ing to generate and transfer data with rectified flow.arXiv
+preprint arXiv:2209.03003, 2022b.
+Liu, X., Zhang, X., Ma, J., Peng, J., et al. Instaflow: One step
+is enough for high-quality diffusion-based text-to-image
+generation. InThe Twelfth International Conference on
+Learning Representations, 2024.
+Lu, C., Zhou, Y ., Bao, F., Chen, J., Li, C., and Zhu, J. Dpm-
+solver: A fast ode solver for diffusion probabilistic model
+sampling in around 10 steps.Advances in neural infor-
+mation processing systems, 35:5775–5787, 2022.
+Lu, C., Zhou, Y ., Bao, F., Chen, J., Li, C., and Zhu, J. Dpm-
+solver++: Fast solver for guided sampling of diffusion
+probabilistic models.Machine Intelligence Research, pp.
+1–22, 2025.
+Pavon, M. and Wakolbinger, A. On free energy, stochastic
+control, and schr¨odinger processes. InModeling, Estima-
+tion and Control of Systems with Uncertainty: Proceed-
+ings of a Conference held in Sopron, Hungary, September
+1990, pp. 334–348. Springer, 1991.
+Peluchetti, S. Diffusion bridge mixture transports,
+schr¨odinger bridge problems and generative modeling.
+Journal of Machine Learning Research, 24(374):1–51,
+2023.
+Peyr´e, G., Cuturi, M., et al. Computational optimal trans-
+port: With applications to data science.Foundations and
+Trends® in Machine Learning, 11(5-6):355–607, 2019.
+Poole, B., Jain, A., Barron, J. T., and Mildenhall, B. Dream-
+fusion: Text-to-3d using 2d diffusion.arXiv preprint
+arXiv:2209.14988, 2022.
+Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and
+Ommer, B. High-resolution image synthesis with latent
+diffusion models. InProceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition, pp.
+10684–10695, 2022.
+Ronneberger, O., Fischer, P., and Brox, T. U-net: Convolu-
+tional networks for biomedical image segmentation. InIn-
+ternational Conference on Medical image computing and
+computer-assisted intervention, pp. 234–241. Springer,
+2015.
+R¨uschendorf, L. Convergence of the iterative proportional
+fitting procedure.The Annals of Statistics, pp. 1160–1174,
+1995.
+S¨arkk¨a, S. and Solin, A.Applied stochastic differential
+equations, volume 10. Cambridge University Press, 2019.
+Schr¨odinger, E. ¨Uber die umkehrung der naturgesetze. Ver-
+lag der Akademie der Wissenschaften in Kommission bei
+Walter De Gruyter u . . . , 1931.
+Shi, Y ., De Bortoli, V ., Campbell, A., and Doucet, A. Diffu-
+sion schr¨odinger bridge matching.Advances in Neural
+Information Processing Systems, 36:62183–62223, 2023.
+Song, J., Meng, C., and Ermon, S. Denoising diffusion im-
+plicit models.arXiv preprint arXiv:2010.02502, 2020a.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+Song, Y ., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-
+mon, S., and Poole, B. Score-based generative modeling
+through stochastic differential equations.arXiv preprint
+arXiv:2011.13456, 2020b.
+Tanaka, A. Discriminator optimal transport.Advances in
+Neural Information Processing Systems, 32, 2019.
+Theodoropoulos, P., Komianos, N., Pacelli, V ., Liu, G.-
+H., and Theodorou, E. A. Feedback schr ¨odinger bridge
+matching.arXiv preprint arXiv:2410.14055, 2024.
+Tong, A., Fatras, K., Malkin, N., Huguet, G., Zhang, Y .,
+Rector-Brooks, J., Wolf, G., and Bengio, Y . Improving
+and generalizing flow-based generative models with mini-
+batch optimal transport.arXiv preprint arXiv:2302.00482,
+2023.
+Vargas, F., Grathwohl, W., and Doucet, A. Denoising diffu-
+sion samplers.arXiv preprint arXiv:2302.13834, 2023.
+Villani, C. et al.Optimal transport: old and new, volume
+338. Springer, 2008.
+Yin, T., Gharbi, M., Zhang, R., Shechtman, E., Durand,
+F., Freeman, W. T., and Park, T. One-step diffusion
+with distribution matching distillation.arXiv preprint
+arXiv:2311.18828, 2023.
+Yin, T., Gharbi, M., Park, T., Zhang, R., Shechtman, E., Du-
+rand, F., and Freeman, B. Improved distribution matching
+distillation for fast image synthesis.Advances in neural
+information processing systems, 37:47455–47487, 2024a.
+Yin, T., Gharbi, M., Zhang, R., Shechtman, E., Durand, F.,
+Freeman, W. T., and Park, T. One-step diffusion with
+distribution matching distillation. InProceedings of the
+IEEE/CVF conference on computer vision and pattern
+recognition, pp. 6613–6623, 2024b.
+Zhang, Q. and Chen, Y . Path integral sampler: a stochas-
+tic control approach for sampling.arXiv preprint
+arXiv:2111.15141, 2021.
+Zhang, Q. and Chen, Y . Fast sampling of diffusion
+models with exponential integrator.arXiv preprint
+arXiv:2204.13902, 2022.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+Appendix
+A. Proofs
+Stochastic Optimal Control (SOC).In our framework (in general, SOC transports from samplable distribution to Boltzmann
+distribution), SOC-based sampling problem finds a control that transports pdata to a prescribed prior pprior ∼exp(−E(x))
+under cost minimization:
+min
+u
+EX∼p u
+Z 1
+0
+1
+2 ∥ut(Xt)∥2 dt+g(X 1)
+
+(21)
+s.t.dX t =
+
+ft(Xt) +σ tut(Xt)
+
+dt+σ t dWt, X 0 ∼p data,(22)
+where g(x) :R d →R is a terminal cost and SDE is constrained only by data distribution X0 ∼p data. Note that the terminal
+constraint onp prior is implicitly enforced by the terminal costg(x).
+Under the SOC optimality, optimal control can be analytically derived through Hamilton-Jacobi-Bellman (HJB) equa-
+tion (Bellman, 1954).
+Theorem A.1.(SOC optimality) Under the SOC optimality, the optimal control is − →u ⋆
+t (x) =−σ t∇Vt(x), where Vt(x) :
+[0,1]×R d →R d is a value function,
+Vt(x) =−logE X∼pbase[exp(−g(X1))|X t =x].(23)
+The optimal joint distribution can also be characterized as
+p⋆(X0, X1) =p base(X0, X1)exp(−g(X 1) +V 0(X0)).(24)
+Proof of Proposition 3.1.
+Proof.Consider the memoryless condition
+pbase
+0,1 (X0, X1)
+memoryless
+:=p base
+0 (X0)p base
+1 (X1).(25)
+Under the memoryless condition (8), the initial value function (23) becomes:
+V0(X0)
+memoryless
+=−log
+Z
+pbase(X1) exp(−g(X1)) dX1.(26)
+Note that right-hand side is constant toX 0. Substituting (26) and (25) into (24) yields the factorization
+p⋆(X0, X1) =p base(X0) pbase(X1) exp(−g(X1))R
+pbase(X1) exp(−g(X1)) dX1
+.(27)
+As a result, X0 and X1 are independent under p⋆, directly indicating thatnon-independentoptimal couplings cannot be
+recovered under the memoryless condition.
+B. Terminal Cost in SOC-based Sampling Problem
+Case of Memoryless Base SDE.To remove the bias introduced by V0(X0) in Eq. (24), a common approach is the adoption
+of memoryless condition (25). Starting from Eq. (24),
+p∗(X1) =
+Z
+p∗(X0, X1) dX0 =
+Z
+pbase(X0, X1)exp(−g(X 1) +V 0(X0))dX0 (28)
+=
+Z
+pbase(X0)p base(X1)exp(−g(X 1) +V 0(X0)) dX0 (29)
+∝p base(X1)exp(−g(X 1)) =p prior(X1),(30)
+i
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+where second equality holds for memoryless condition (25). As a result, we can set terminal cost as
+g(x) = log pbase
+1 (x)
+pprior(x) (31)
+for SOC-based sampling problem with memoryless base SDE (Zhang & Chen, 2021; Peluchetti, 2023; Havens et al., 2025).
+Case of Non-Memoryless Base SDE.ASBS (Liu et al., 2025) generalize the sampling problem to non-memoryless dynamic.
+To resolve the bias by initial value function V0(X0) in Eq. (28) without reliance on memoryless condition Eq. (25), they
+further deploy the SB optimality.
+Theorem B.1.(Optimal control in SB problem) Under the SB optimality (Pavon & Wakolbinger, 1991; Chen et al., 2021c;
+Caluya & Halder, 2021), the optimal control is
+u⋆
+t(x) =σ t∇x logφ t(x), v ⋆
+t (x) =σ t∇x log ˆφt(x) (32)
+whereφ t,ˆφt ∈C 1,2([0,1],R d)are SB potentials satisfying
+φt(x) =
+Z
+pbase
+1|t (y|x)φ 1(y)dy, φ 0(x) ˆφ0(x) =p prior(x),
+ˆφt(x) =
+Z
+pbase
+t|0 (x|y) ˆφ0(y)dy, φ 1(x) ˆφ1(x) =p data(x).
+Under the SOC optimality Theorem A.1 and SB optimality Theorem B.1, we can obtain the transform
+φt(x) =exp(−V t(x)),ˆφ t(x) =exp(V t(x))p ⋆
+t (x),(33)
+which connects between SOC value function and SB potentials. This leads to setting terminal cost as
+g(x) = log ˆφ1(x)
+pprior(x) .(34)
+Applying Adjoint Matching (AM) (Domingo-Enrich et al., 2024) to SOC objective (21) with this terminal cost (34) under
+VP base SDE yields
+u∗ = arg min
+u
+Ep¯u
+
+∥ut(Xt) +κ tσt(∇E(X1) +∇log ˆφ1(X1))∥2
+,(35)
+where we use the notation in Algorithm 1. However, we need an access to v∇log ˆφ1(x)) to make this objective feasible. To
+resolve this problem, Corrector Matching (CM) is introduced, which can be derived by variational form of∇log ˆφ1(x):
+∇log ˆφ1 = arg min
+h
+Ep∗
+0,1
+hh(X1)− ∇ x1 logp base(X1|X0)
+2i
+.(36)
+Finally, following the adoption of reciprocal projection (Havens et al., 2025), we can alternately train these two objectives
+with parameterized models as
+min
+θ
+E pbase
+t|0,1, p¯uθ
+0,1
+ uθ
+t (Xt) +
+ 
+σt∇E+ ¯vϕ
+1
+
+(X1)
+
+2
+,(37)
+min
+ϕ
+E p¯uθ
+0,1
+ vϕ
+1 (X1)−σ 1∇x1 logp base(X1 |X 0)
+
+2
+.(38)
+C. Distillation
+Derivation for SB Distillation Framework.Upon successful training, we are given the pretrained backward dynamic,
+dXt =
+
+ft(Xt)−σ tvϕ
+t (Xt)
+
+dt+σ t dWt, X 1 ∼p prior,(39)
+which approximately transports prior distribution to data distribution pdata. Denote the path measure induced by backward
+dynamic (39) asp ϕ.
+ii
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+A S B M  ( O u r s ) ,  1 K  e p o c h sA S B M  ( O u r s ) ,  I n i t i a l i z a t i o nS D S ,  I n i t i a l i z a t i o n
+Figure I.Initialization of one-step generator (Uncurated generation).As discussed in Sec. 3.3, ASBM shows clear initialization for
+one-step generator, indicating its straighter and more organized trajectory. On the other hand, score-based initialization gives much more
+noisy initialization even with timestep shifting (Yin et al., 2024b).
+Now consider the one-step generatorG ψ :R d ×R d →R d, which defines the output distribution,
+pψ
+0 :=Law
+ 
+Gψ(X1, z)
+
+,(40)
+where X1 ∼p prior, z∼ N(0, I) . Although we define the one-step generator as Gψ :R d →R d which only takes X1 in
+main paper for simplicity, it is more general to define it as Eq. (40) to consider the stochasticity via noisez.
+The most straightforward way is to minimize the KL divergence between pϕ
+0 and pψ
+0 , which is infeasible. Instead, we distill
+our learned backward controlv ϕ
+t in continuous-time control space.
+Assume an optimal backward controlv ξ : [0,1]×R d →R d such that its corresponding controlled SDE
+dXt =
+
+(ft(Xt)−σ tvξ
+t (Xt)
+
+) dt+σ t dWt, X 1 ∼p prior,(41)
+induces the terminal marginal X0 ∼p ξ
+0 ≡p ψ
+0 . Let pξ denote its path measure. Then, by data processing inequality, KL
+divergence between terminal distributions is bounded by
+DKL
+ 
+pξ
+0 ∥p ϕ
+0
+
+≤D KL
+ 
+pξ ∥p ϕ
+.(42)
+Girsanov’s theorem (S¨arkk¨a & Solin, 2019) turns the path-space KL divergence (42) into a tractable drift-matching loss that
+can be estimated from sampled trajectories:
+1
+2 Epξ
+Z 1
+0
+vξ
+t (Xt)−v ϕ
+t (Xt)
+2
+dt
+
+.(43)
+Since we assumev ξ
+t to be optimal,p ξ follows reciprocal process, leading to,
+min
+ψ
+Epbase
+t|0,1, X0, X1
+¯vξ
+t (Xt)−¯vϕ
+t (Xt)
+2
+,(44)
+whereX 0 ∼G ψ(X1, z), X 1 ∼p prior.
+Then, inspired by the distillation frameworks in DMs (Poole et al., 2022; Yin et al., 2024b), we initialize vξ
+t from the
+pretrainedv ϕ
+t and dynamically update it with bridge matching loss to reflect the continuously changingp ψ
+0 :
+min
+ξ
+Epbase
+t|0,1, X0, X1
+vξ
+t (Xt)−σ t∇xt logpbase(Xt |X 0)
+2, (45)
+where X0 ∼G ψ(X1, z), X 1 ∼p prior. As a result, we mainly optimize Gψ via Eq. (44) while dynamically updating vξ
+t via
+Eq. (45).
+iii
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Efficient Generative Modeling beyond Memoryless Diffusion via Adjoint Schr¨odinger Bridge Matching
+SDS DMD (SDS + Reg. loss) ASBM (Ours)
+Figure II.Mode collapse in distillation (Uncurated generation).ASBM shows strong mode coverage in distillation task while the score
+distillation models still suffer from mode collapse even with costly regression loss.
+With memoryless condition (25), reciprocal process in Eq. (44) and Eq. (45) collapses to conditional path in standard
+diffusion model, and our distillation framework becomes exactly same as score distillation framework (Poole et al., 2022;
+Yin et al., 2024b).
+Initialization for One-Step Generator.As discussed in Sec. 3.3, ASBM provides strong initialization for one-step generator
+Gψ with Tweedie’s formula(19) due to its significantly straighter and efficiently organized trajectory. As shown in Fig. I,
+ASBM yields clearly better one-step estimate than score-based initialization, which makes the distillation easier than that
+from memoryless diffusion.
+Better Mode Coverage of ASBM.Score-distillation models suffer from mode collapse problem (Yin et al., 2024b) which
+inevitably requires further refinement through regression loss (Yin et al., 2024b) or adversarial loss (Yin et al., 2024a).
+Especially, regression loss requires generation of huge amount of noise-image pairs from original score model which is
+highly costly. As shown in Fig. II, pure score distillation (SDS) (Poole et al., 2022) exhibits severe mode collapse. Even with
+an additional heavy regression loss, DMD (Yin et al., 2024b) can still collapse. In contrast, ASBM substantially mitigates
+mode collapse, which we attribute to its organized and efficient trajectories, as demonstrated in Sec. 4.3.
+D. Experiment Settings
+Model Architecture.We use UNet (Ronneberger et al., 2015) architecture following the hyperparameters in (Tong et al.,
+2023). For backward dynamic, we use 4 residual blocks for each channel following the Score SDE (Song et al., 2020b)
+and 2 residual blocks for our forward dynamic which significantly reduces the computation cost. For LDM experiment, we
+employ Stable Diffusion 3 (Esser et al., 2024) autoencoder. We set batch size as 128.
+Training Environment.We conduct all the experiments with a single NVIDIA A100 40 GB.
+Training Time.It takes about 4 days for ASBM (2100 epochs) and 6 days for Score SDE (3300 epochs) on single A100.
+iv

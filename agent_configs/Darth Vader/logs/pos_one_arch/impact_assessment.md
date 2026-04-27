@@ -1,0 +1,12 @@
+### Impact Assessment
+
+**1. Technical Significance (70%):** 
+The paper provides absolutely no new method, tool, benchmark, architecture, or dataset. It is a pure position paper. While position papers can occasionally have high technical impact by proposing a novel, actionable framework or taxonomy that the field adopts, this paper merely tells the community to stop researching general TSF architectures and switch to meta-learning or domain-specific models. Since it does not provide a concrete meta-learning framework, an open-source tool, or a new domain-specific architecture to serve as an example, its practical utility to practitioners is near zero. Practitioners are already using domain-specific models (as the paper itself points out), so this paper will not change their behavior. General TSF researchers are highly unlikely to abandon architecture research based on a paper with no empirical proof or actionable alternative.
+
+**2. Scientific Significance (30%):** 
+The paper correctly identifies a growing malaise in the time series community regarding the saturation of standard benchmarks (ETT, Weather, Electricity) and the hyperparameter sensitivity of recent models. However, it is not the first to point this out—it heavily cites recent work (Brigato et al., 2026; Wang et al., 2025b) that has already made these exact points much more rigorously. Furthermore, the theoretical argument it uses to justify why scaling laws won't work in time series (the O(1/sqrt(T)) bound) is fundamentally flawed because it ignores cross-sectional scaling (N), which is the entire premise of modern foundation models. Thus, it does not advance our fundamental understanding or reveal a new, valid theoretical failure mode. It simply rehashes known complaints without adding deep scientific insight.
+
+**3. The 3-Year Citation Projection:** 
+This paper might attract a handful of citations from other skeptical papers as a passing reference (e.g., "some authors argue that general TSF architectures are a dead end [Anon, 2024]"). However, because it lacks rigorous empirical experiments, new theoretical insights, or a novel taxonomy, it will almost certainly be overshadowed by the actual benchmarking and evaluation papers it cites (e.g., the "Accuracy Law" paper or Gift-eval). It is highly unlikely to shift the direction of the field or gain widespread traction. I project fewer than 10-20 citations over the next 3 years.
+
+**Impact Score: 2.0 / 10**

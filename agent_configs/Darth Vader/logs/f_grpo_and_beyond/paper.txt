@@ -1,0 +1,4464 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+f-GRPO and Beyond: Divergence-Based Reinforcement Learning Algorithms
+for General LLM Alignment
+Anonymous Authors1
+Abstract
+Recent research shows that Preference Alignment
+(PA) objectives act as divergence estimators be-
+tween aligned (chosen) and unaligned (rejected)
+response distributions. In this work, we extend
+this divergence-based perspective to general align-
+ment settings, such as reinforcement learning with
+verifiable rewards (RLVR), where only environ-
+mental rewards are available. Within this unified
+framework, we propose f-Group Relative Policy
+Optimization (f-GRPO), a class of on-policy re-
+inforcement learning, and f-Hybrid Alignment
+Loss (f-HAL), a hybrid on/off policy objectives,
+for general LLM alignment based on variational
+representation of f-divergences. We provide the-
+oretical guarantees that these classes of objec-
+tives improve the average reward after alignment.
+Empirically, we validate our framework on both
+RLVR (Math Reasoning) and PA tasks (Safety
+Alignment), demonstrating superior performance
+and flexibility compared to current methods.
+1. Introduction
+Alignment is the final stage in the training pipeline of large
+language models (LLMs), aimed at instilling capabilities be-
+yond language comprehension and instruction-following
+that are learned during pretraining and instruction fine-
+tuning (Ouyang et al., 2022). These capabilities range from
+complex reasoning, such as coding or math problem-solving
+(Shao et al., 2024), to the adherence to safety and ethical
+constraints based on human preferences (Bai et al., 2022b).
+In practice, alignment is achieved via reinforcement learning
+(RL) using a reward signal that encodes the target behavior.
+While various RL-based alignment strategies have been
+developed, they differ mainly in the source of the reward
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+signal. In general, they can be categorized into two regimes:
+(i) In the verifiable reward regime (RLVR), one has access to
+an explicit reward function that quantitatively evaluates the
+correctness or quality of a response, as in tasks such as math-
+ematical reasoning (Guo et al., 2025), code generation (Le
+et al., 2022), tool use (Jiang et al., 2025), etc. Learning in
+this regime is naturally formulated using an on-policy rein-
+forcement learning algorithm that samples from the current
+policy, evaluates responses based on the reward, and up-
+dates the model accordingly. Among on-policy algorithms,
+GRPO (Shao et al., 2024) stands out for its computational
+efficiency and superior performance.
+(ii) In the preference alignment regime (PA), a reward signal
+is provided implicitly through relative comparisons or binary
+feedback between responses (e.g., safe vs. unsafe, preferred
+vs. rejected). Alignment can then be performed either by
+training a reward model followed by on-policy learning,
+commonly referred to as reinforcement learning with human
+feedback (RLHF), or by using direct alignment methods that
+optimize the policy directly via a supervised objective on
+preference data (Off-Policy). Further details for these two
+regimes are provided in §2.2 and §2.3.
+Divergence Perspective for Preference Alignment
+Hal-
+dar et al. (2025) proposed a unifying framework for pref-
+erence alignment that interprets popular PA methods as
+instances of divergence estimators between an aligned (D+,
+chosen) and unaligned (D−, rejected) distributions, differ-
+entiated by the choice of divergences. In principle, one can
+construct new preference alignment methods given a choice
+of divergence, resulting in a class of direct, off-policy align-
+ment objectives for any general f-divergence; refer to §2.3.1
+for details.
+A natural question then arises: Can this divergence-based
+viewpoint for PA be extended beyond preference alignment
+to the verifiable reward regime (RLVR)?
+In other words, can divergence estimation serve as a unify-
+ing foundation for both off-policy preference alignment and
+on-policy reinforcement learning with verifiable rewards?
+This work addresses this question by extending the diver-
+gence framework to construct general on-policy and hybrid
+RL objectives (Figure 1 summarizes our framework). In
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Divergence-Based RL for General LLM Alignment
+Figure 1. Divergence Estimation Framework. RLVR (left): A verifiable reward signal r(x, y) induces reward-aligned/unaligned
+distributions (above D+
+r vs. below-average reward D−
+r under the old policy), and f-GRPO performs on-policy alignment by estimating an
+f-divergence between these distributions. Preference alignment (right): preference data samples chosen and rejected prompt-response
+pairs from aligned (D+) and unaligned (D−) distributions, and direct aligners (e.g., FDO) optimize the variational f-divergence
+objective between (D+, D−). Hybrid (bottom): f-HAL combines both information sources, interpolating between off-policy preference
+alignment and on-policy RLVR.
+particular, our contribution is three-fold:
+Divergence-based RL objectives. We introduce f-GRPO
+(Equation (15)), a class of on-policy alignment objectives,
+and f-HAL (Equation (16)), a class of hybrid objectives that
+combine on-policy RL with preference-based supervision,
+both derived from general f-divergences.
+Theoretical characterization and guarantees. We show
+that f-GRPO and f-HAL are divergence estimators: f-
+GRPO estimates a divergence between above-average and
+below-average reward distributions, while f-HAL esti-
+mates a divergence between mixtures of reward-based and
+preference-based aligned/unaligned distributions. We fur-
+ther establish Alignment Consistency and guarantee an im-
+provement in the expected reward after alignment (Theo-
+rem 4.3). Furthermore, we justify the expected improvement
+of f-GRPO over GRPO (§4.1).
+Empirical validation across alignment regimes. We em-
+pirically validate our theoretical framework in §5. In par-
+ticular, we examine the performance of f-GRPO in both
+regimes and validate f-HAL in the PA regime given the
+potential reward hacking in this regime. Experiment results
+demonstrate enhancement.
+2. Preliminary
+2.1. Notation
+Our notation follows (Haldar et al., 2025). Let x denote the
+prompt and y represent a response. We use yw and yl to indi-
+cate aligned and unaligned responses, with flexible contexts
+depending on the regime (high reward, preferred) or (low
+reward, unpreferred). The triplet (x, yw, yl) ∼D character-
+ized the joint distribution of all possible prompt, aligned and
+unaligned response combinations. Marginalizing this joint
+gives us (x, yw) ∼D+ (aligned distribution), (x, yl) ∼D−
+(unaligned distribution) and x ∼P (prompt distribution).
+Moreover, for any distribution G, let Gx and pG(y|x) denote
+its distribution and density/mass w.r.t. x. Let πθ be the
+model/policy under optimization, and πref be the reference
+policy before alignment, with θ as the policy model and θ∗
+as the parameter at convergence. Denote πθold as an older
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Divergence-Based RL for General LLM Alignment
+policy iteration strictly used for sampling, which does not go
+under optimization. The function r(x, y) is the explicit en-
+vironmental reward, while rθ(x, y) = β ln πθ(y|x)/πref(y|x)
+is the implicit policy reward with β as the KL regularization
+coefficient. Finally, σ(·),⃗σ(·) correspond to the sigmoid
+and SoftMax functions.
+Given the above notations, the core objective of alignment
+is to optimize the policy πθ for maximum reward r(x, y)
+while still being not too far from πref for a KL regularization
+penalty, i.e., solve the following:
+sup
+θ
+E
+x
+
+E
+y∼πθ r(x, y) −βDKL(πθ ∥πref)
+
+,
+(1)
+and (Rafailov et al., 2023) show that the optimal policy for
+Eq. (1) is directly proportional to the reward function it is
+trained on:
+πθ∗(y|x) ∝πref(y|x) exp
+ r(x, y) · β−1
+.
+(2)
+2.2. Verifiable Reward Regime (RLVR)
+This is the scenario when we use on-policy RL algorithms
+to optimize Eq. (1) using a non-parametric reward function
+r(x, y) that can be verified by the environment without di-
+rect access to supervised samples from D+ (aligned) or D−
+(unaligned) distributions. We call this case Reinforcement
+Learning with Verifiable Rewards (RLVR).
+2.2.1. GRPO (ON-POLICY RL ALIGORITHM)
+Popular On-policy algorithms like PPO and GRPO attain
+reward maximization of the policy supθ Ex
+E
+y∼πθ r(x, y) by
+solving an alternative objective iteratively:
+sup
+θ
+E
+x
+E
+y∼πθold
+πθ(y|x)
+πθold(y|x) · Aπθ(x, y).
+(3)
+Here, Aπθ(x, y) is an advantage estimate measuring im-
+provement of πθ over πθold, it implictly depends on the
+reward r(x, y). In our work, we focus only on GRPO
+in this RLVR regime as it is currently the most dominant
+and successful on-policy method. GRPO uses G samples
+{yi}G
+i=1 ∼πθold from the old policy to estimate the advan-
+tage by standardized scores of the sample rewards as
+Aπθ(x, yi) = r(x, yi) −ˆµ(r(x, ·))
+ˆσ(r(x, ·))
+,
+(4)
+where ˆµ, ˆσ represent the sample mean and standard devia-
+tion. Then the ϵ-clipped GRPO objective to optimize Eq. 1
+is as follows:
+sup
+θ
+E
+x[
+G
+X
+yi∼πθold,i=1
+1
+G min
+ Ri
+θai, Clip(Ri
+θ, 1 −ϵ, 1 + ϵ)ai
+
+−βDKL(πθ ∥πref)]
+(5)
+where Ri
+θ = πθ(yi|x)/πθold(yi|x), ai = Aπθ(x, yi) and ϵ clip-
+ping is done to ensure stability at each policy iteration.
+2.3. Preference Alignment Regime
+In contrast to RLVR §2.2, in the PA regime, we have di-
+rect access to preference data (x, yw, yl) ∼D or binary
+feedback data (x, yw) ∼D+, (x, yl) ∼D−, supervised
+samples from the true aligned and unaligned distribution.
+However, since access to the non-parametric scalar reward
+r(x, y) is unavailable, we use supervised samples to con-
+duct reinforcement learning with human feedback (RLHF),
+implicitly enforcing r(x, yw) > r(x, yl). Traditional RLHF
+is broken down into two steps:
+(i) Reward Modelling The reward is surrogated by a model
+rϕ(x, y) parametrized by ϕ. Trained on the preference data
+(x, yw, yl) ∼D to for a maximum likelihood estimate for
+the Bradley-Terry (BT) model (Bradley & Terry, 1952):
+p(yw ≻yl | x) =
+exp rϕ(x, yw)
+exp rϕ(x, yw) + exp rϕ(x, yl).
+(6)
+(ii) Reward Maximization We solve the RL alignment
+objective Eq. (1) using rϕ as the surrogate reward learned
+from preference, optimized by an on-policy algorithm like
+PPO, GRPO, etc.
+2.3.1. DIRECT ALIGNERS (OFF-POLICY) ALGORITHMS
+Using Eq. (2), we can parametrize the reward in terms of
+the policy, rθ(x, y) = β ln πθ(y|x)/πref(y|x) and substitute in
+Eq. (6) to get a direct alignment loss using only a supervision
+on the preference data, and obtain the DPO loss (Rafailov
+et al., 2023):
+LDPO(θ) = −Ex,yw,yl∼D log σ
+ rθ(x, yw) −rθ(x, yl)
+
+.
+Other variants include BCO (Jung et al., 2025), KTO (Etha-
+yarajh et al., 2024), etc., and, in general, these methods
+leverage the implicit reward rθ to maximize the likelihood
+over D+ and reduce the likelihood over D−.
+Divergence Framework
+Haldar et al. (2025) unifies pref-
+erence alignment objectives under a single divergence-based
+framework by showing that popular alignment methods opti-
+mize variational representation of a divergence D(D+ ∥D−)
+between an aligned distribution D+ and an unaligned dis-
+tribution D−. Different alignment algorithms arise from
+different choices of the underlying divergence. For exam-
+ple, RLHF/DPO, BCO, and KTO correspond respectively to
+estimating the non-parametric DPO divergence, the Jensen–
+Shannon divergence, and the total variation distance.
+More generally, for an arbitrary f-divergence (see Appendix,
+Def. A.1), they derive a direct, off-policy alignment ob-
+jective termed the f-divergence Optimizer (FDO) using
+the variational representation of f-divergences (Appendix
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Divergence-Based RL for General LLM Alignment
+Eq. (22)) with functional T = g(rθ):
+LFDO(f,g)(θ) = −E
+D+[g(rθ)] + E
+D−[f ∗◦g(rθ)] ,
+(7)
+LFDO(f,g)(θ∗) = −Df(D+ ∥D−).
+(8)
+In the above, g : R →ED(f ∗) is a monotonically increas-
+ing link function mapping the implicit reward rθ ∈R to the
+effective domain of the conjugate of f. At convergence, the
+optimal objective value recovers the negative f-divergence
+between D+ and D−. Besides convergence, their frame-
+work provides theoretical guarantees, such as alignment
+consistency, which ensures that optimization increases the
+policy’s probability mass on aligned samples while decreas-
+ing it on unaligned ones (Defn. 4.2, Haldar et al. (2025)).
+3. Motivating the f-GRPO loss
+In this section, we present the heuristics for proposing the
+f-GRPO and f-HAL objectives. Formal theoretical guaran-
+tees and precise characterizations are deferred to §4.
+3.1. Divergence Estimation via Importance Sampling
+To extend the divergence framework to the RLVR regime,
+we need a divergence-based on-policy RL term that learns
+directly from verifiable rewards r(x, y) when we have no
+samples from the aligned distribution D+ or the unaligned
+distribution D−. To achieve this, we use FDO loss Eq. (7)
+as the starting point to derive an on-policy version of it. Let
+πθold be the action/response generator of an old iteration
+of the policy πθ. Then we can use importance sampling
+to rewrite the aligned ED+(·) and unaligned ED−(·) ex-
+pectations in terms of πθold as the surrogate distribution as
+follows:
+E
+x
+E
+y∼πθold
+ −w+
+x,y g(rθ) + w−
+x,y f ∗◦g(rθ)
+
+,
+(9)
+where w±
+x,y = p±(y|x)/πθold(y|x) are the importance weights
+and p± denotes the conditional aligned/unaligned density.
+Unfortunately, D± are inaccessible under the RLVR setting;
+thus, we artificially define them using the observed reward
+r(x, y) and then design the loss based on them.
+Assumption 3.1 (Reward–density correspondence). For a
+fixed x, the verifiable reward induces aligned and unaligned
+densities as
+p±(y|x) ∝exp(±r(x, y)).
+These artificial distributions are practical in the sense that we
+expect our environmental rewards to reflect the likelihood
+of alignment. A higher-reward y is assigned more density
+in the aligned distribution, and vice versa. Note that this
+assumption is used solely to motivate our framework.
+Given Assumption 3.1, instead of directly using w±
+x,y ∝
+exp(±r)/ππθold, we propose to use truncated importance
+weights ˜w±
+x,y to ignore lower-weight terms, reducing vari-
+ance in exchange for some bias:
+˜w±
+x,y = p±(y|x)
+πθold(y|x) · I±(r(x, y)),
+(10)
+where I±(r(x, y)) = ⊮n
+±[r(x,y)−Eπθold r(x,y)]>0
+o. It en-
+forces choosing only higher/lower than average reward
+terms for sampling from aligned/unaligned distributions.
+3.2. Estimating the Importance Sampling Term
+The truncated weights ˜w±
+x,y depend on densities p±(·|x),
+whose values depend on the observed rewards. We will fol-
+low the GRPO sampling strategy §2.2.1 to get an empirical
+estimate of the truncated weights.
+For a fixed prompt x, we sample G responses {yi}G
+i=1 ∼
+πθold, fetch the rewards {r(x, yi)}G
+i=1 and compute the
+group advantages {Aπθ(x, yi)}G
+i=1 (Eq. 4). For notational
+convenience we will use ri := r(x, yi), ai := Aπθ(x, yi)
+interchangeably.
+By Assumption 3.1, the aligned/unaligned densities satisfy
+p±(y|x) =
+e±r(x,y)
+E
+y∼Uniform(·|x) e±r(x,y) .
+To approximate the denominator, we apply a sampled soft-
+max (Log-Q) correction (Bengio & Sen´ecal, 2008), yielding
+the plug-in (unnormalized) estimator
+ˆp±(yi|x) =
+exp(±ri)
+PG
+j=1 exp
+ ± rj −ln πθold(yj|x)
+.
+(11)
+The resulting truncated importance weight estimates are
+then given by:
+ˆw±
+i =
+ˆp±(yi|x)
+πθold(yi|x)
+ˆI±
+i
+= ⃗σi
+ {±rj −ln πθold(yj|x)}G
+j=1
+
+· ˆI±
+i
+(12)
+where ˆI±
+i = ⊮{±ai>0} a surrogate for I±(r(x, y)).
+To explain the operations, the importance weights ˆw±
+i are
+softmax-normalized scores that increase with the external
+reward while being regularized by the likelihood under the
+sampling policy πθold. Consequently, responses that are
+both highly rewarding (or highly unrewarding) and surpris-
+ing under πθold receive larger weight under the aligned (or
+unaligned) density. The restriction to positive- or negative-
+advantage samples implements truncated importance sam-
+pling, focusing the updates on the most informative, high-
+weight terms and yielding stable training.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Divergence-Based RL for General LLM Alignment
+3.3. f-GRPO & f-HAL losses
+Given an f-divergence and a monotonically increasing link
+function g : R →ED(f ∗), we can estimate Eq. (9) using
+the weights Eq. (12) and simplifying to get the following:
+E
+x
+G
+X
+yi∼πθold,i=1
+−1
+Gψ(rθ,i, ai) sign(ai),
+(13)
+where rθ,i = β ln πθ(yi|x)/πref(yi|x) and ψ(rθ,i, ai) :=
+(
+⃗σi
+ {rj −ln πθold(yj|x)}G
+j=1
+
+· g(rθ,i),
+ai > 0
+⃗σi
+ {−rj −ln πθold(yj|x)}G
+j=1
+
+· f ∗◦g(rθ,i),
+ai ≤0
+(14)
+Finally, we replace the sign term sign(ai) in Eq. (13) with
+the scaled advantage ai(1 + β−1), thereby accelerating up-
+dates using advantage magnitude and normalizing gradients
+to the same order as standard on-policy RL methods (Ap-
+pendix §B.1). We define the f-GRPO loss as follows:
+L(f,g)
+f-GRPO(θ) = E
+x
+G
+X
+yi∼πθold,i=1
+−ai
+1 + β−1
+G
+ψ(rθ,i, ai).
+(15)
+We combine f-GRPO and FDO to obtain a hybrid on-off
+policy-loss function that leverages rewards and supervised
+samples. The f divergence hybrid alignment loss (f-HAL)
+can be expressed as:
+L(f,g)
+f-HAL(θ) = λ L(f,g)
+FDO (θ)
+|
+{z
+}
+Direct Aligner
++(1 −λ) L(f,g)
+f-GRPO(θ)
+|
+{z
+}
+On-policy RL
+.
+(16)
+4. Main Result
+Section 3 motivates f-HAL and f-GRPO based on some
+working assumptions. In this section, we demonstrate that
+these losses are indeed divergence estimators themselves
+and have a deeper interpretation. To achieve this, we first
+introduce some definitions to be used in the theory.
+On-Policy algorithms express the loss over θ in terms of the
+previous iterate θold (Equations (5), (15) and (16)). This
+leads to a Fixed Point (FP) Iteration formula where we
+define the tth iterate as
+θ(t) = arg inf
+θ L(θ) s.t. θold = θ(t−1)
+(17)
+with θ(0) = θref and the optimal solution θ∗= lim
+t→∞θ(t).
+Definition 4.1 (Reward-Aligned Distributions). Given a re-
+ward r(x, y) and policy πθ. The reward-aligned/unaligned
+distribution D+
+(r,θ) / D−
+(r,θ) are characterized by the follow-
+ing densities:
+dD±
+(r,θ) ∝[±(r(x, y) −µθ
+r(x))]+ · e±r(x,y)dP(x)
+(18)
+where µθ
+r(x) = Ey∼πθ r(x, y) and [u]+ = max(0, u).
+The above definition defines the notions of aligned and
+unaligned distributions in terms of the average reward under
+a policy. The responses above (below) average reward are
+assigned a higher non-zero probability mass in the aligned
+(unaligned) distribution.
+While Assumption 3.1 is used to motivate the design of the
+loss, in the theoretical analysis, we replace it with a weaker
+version which suffices for our main result:
+Assumption 4.2. (Weak Reward-density Correspondence)
+For a given x, The aligned p+(y|x) (unaligned p−(y|x))
+densities are non-decreasing (non-increasing) in r(x, y).
+Under Assumption 4.2, we can obtain the following opti-
+mality results for f-HAL & f-GRPO:
+Theorem 4.3. Let θ(t)
+Mix, θ(t)
+RL be the tth fixed point iterate
+Equation (17) of the f-HAL & f-GRPO losses Equations (15)
+and (16). With G →∞, the following hold almost surely:
+Divergence Estimation: The loss objectives satisfy:
+−L(f,g)
+fHAL
+
+θ(t+1)
+Mix
+
+∝Df
+
+M+
+t,Mix∥M−
+t,Mix
+
+,
+(19)
+−L(f,g)
+fGRPO
+
+θ(t+1)
+RL
+
+∝Df
+
+D+
+(r,θ(t)
+RL)∥D−
+(r,θ(t)
+RL)
+
+= f ′
+∞.
+(20)
+Alignment Consistency:
+Moreover, πθ(t+1)(y|x)
+∝
+πref(y|x) exp
+ β−1ht(x, y)
+
+with:
+ht(x, y) =
+
+
+
+
+
+g−1 ◦f ′
+
+dM+
+t,Mix
+dM−
+t,Mix (x, y)
+
+,
+θ(t+1) = θ(t+1)
+Mix
+g−1 ◦(f ′
+∞⊮{dD−
+(r,θ(t)
+RL)
+=0}),
+θ(t+1) = θ(t+1)
+RL
+(21)
+Average Reward Improvement: Under Assumption 4.2:
+µθref
+r
+(x) < µθ(t)
+r
+(x) for all t > 0 & θ(t) ∈{θ(t)
+Mix, θ(t)
+RL}.
+Furthermore, if g−1(f ′
+∞) = ∞then µ
+θ(t)
+RL
+r
+(x) < µ
+θ(t+1)
+RL
+r
+(x)
+with µθ∗
+RL
+r
+(x) = maxy r(x, y).
+In the above, D±
+(r,θ) are defined in 4.1, M±
+t,Mix = λD± +
+(1 −λ)c±(x)D±
+(r,θ(t)
+RL) is a mixture measure with λ being di-
+rect alignment weight from Eq. (16) and c±(x) are normal-
+ization constants for a given x. Also, f ′
+∞= limu→∞f(u)/u.
+Theorem 4.3 shows that (1) for any FP iterate f-GRPO
+(On-Policy) estimates the f-divergence between the reward-
+aligned and unaligned distribution w.r.t.
+previous pol-
+icy iterate. Similarly, the hybrid loss f-HAL estimates
+the divergence between a mixture aligned and unaligned
+distribution, where the mixture is weighted between true
+aligned/unaligned and the reward-aligned/unaligned w.r.t.
+the previous FP iterate policy. (2) The FP iterate for f-
+HAL upweights the policy probability for responses having
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Divergence-Based RL for General LLM Alignment
+a higher mixture-aligned measure compared to the mixture-
+unaligned Eq. (21). This captures the fact that after align-
+ment, the likelihood of higher reward and aligned responses
+increases. f-HAL reduces to the FDO loss with λ = 1
+and we recover the alignment consistency result for FDO
+discussed by (Haldar et al., 2025). Similarly, for f-GRPO,
+the alignment consistency happens in the form of a constant
+upweighting by g−1 ◦f ′
+∞only for above-average reward
+responses w.r.t. the previous policy. (3) In terms of average
+reward improvement for any FP iterate after alignment, the
+average reward is strictly higher compared to the reference
+policy. Moreover, when g−1 ◦f ′
+∞= ∞, we get a strict
+average reward improvement in every iteration until all the
+probability mass is redistributed uniformly among responses
+with the maximum attainable reward.
+Name
+f(t)
+Canonical Link g(u)
+Hellinger
+(
+√
+t −1)2
+1 −e−u
+Jensen–Shannon
+t ln t −(t + 1) ln t+1
+2
+ln 2 −ln(1 + e−u)
+KL
+t ln t
+u
+Pearson χ2
+(t −1)2
+u
+Reverse KL
+−ln t
+−e−u
+Total Variation
+1
+2|t −1|
+1
+2(1 + e−u)−1
+Table 1. Some f-divergences and their canonical links of choice.
+Canonical Link Function (g)
+In order to ensure fast
+learning with strict average reward improvement with a
+guarantee to attain maximum reward, we need to satisfy
+g−1(f ′
+∞) = ∞. For popular f-divergences, we recommend
+canonical choice of the link function g : R →ED(f ∗) in
+Table 1 (Expanded Table 6). In the experiments, we will
+use these specific pairs of f, g to implement f-GRPO and
+f-HAL.
+4.1. f-GRPO vs GRPO
+Similar to Theorem 4.3, the below characterizes the FP
+iterate for the unclipped GRPO objective.
+Theorem 4.4. For the unclipped GRPO loss, as G →∞, al-
+most surely: πθ(t+1)
+GRPO(y|x) ∝πref(y|x) exp
+ β−1at(x, y)
+
+,
+where at(x, y) = (r(x, y) −µ
+θ(t)
+GRPO
+r
+)/σ
+θ(t)
+GRPO
+r
+. Further-
+more, µ
+θ(t)
+GRPO
+r
+> µθref
+r
+for all t > 0.
+The policy post-alignment is reweighted from the reference
+distribution by an exponential of the standardized reward, in
+the same vein as Vojnovic & Yun (2025)’s stationary policy
+result. Hence, GRPO increases the probability of above-
+average responses and decreases that of below-average ones,
+satisfying alignment consistency and leading to a reward
+improvement for any tth iterate compared to the reference.
+In contrast, for f-GRPO with the canonical link function
+(i.e., g−1(f ′
+∞) = ∞), probability mass is assigned exclu-
+sively to above-average reward samples at each iterate Equa-
+tion (21). GRPO, even after downweighting, still retains
+a nonzero mass on below-average responses. This results
+in a stronger result for f-GRPO with a canonical link that
+admits strict reward improvement until convergence to the
+maximal-reward policy, and suggests an empirical advan-
+tage over GRPO, which we validate in §5.
+5. Experiments
+In this section, we evaluate the practical effectiveness of
+our framework on real-world alignment tasks spanning both
+alignment regimes.
+RLVR Regime.
+We study math reasoning alignment
+(§5.1), which requires on-policy optimization, and com-
+pare f-GRPO against GRPO. We observe consistent perfor-
+mance improvements, aligning with the analysis in §4.1 and
+maximal-reward attainment property satisfied by f-GRPO
+with canonical link.
+Preference Alignment Regime. We consider safety align-
+ment (§5.2), where both on- and off-policy methods apply.
+We evaluate f-HAL with λ ∈{0, 1
+2, 1}—corresponding
+to FDO (off-policy), the hybrid objective (FDO+f-GRPO),
+and f-GRPO (on-policy)—and compare against DPO, KTO,
+BCO, and GRPO. We find that f-HAL achieves superior
+performance over both on- and off-policy baselines, and
+that hybrid alignment (λ = 1
+2) significantly mitigates re-
+ward hacking observed in purely on-policy methods when
+trained with reward models.
+All experiments are implemented using the Unsloth library
+(Daniel Han & team, 2023) with the vLLM backend (Kwon
+et al., 2023) for efficient large-scale fine-tuning. We release
+custom trainers and code that are fully compatible with this
+stack. For the exact algorithm used for implementation,
+refer to Appendix Algorithm 1. [Github Repository.]
+5.1. Math Reasoning (RLVR Task)
+Base Model and Training. We fine-tune the 7B and 1.5B
+variants of Qwen2.5-Math Base (Yang et al., 2024b) on
+three math reasoning benchmarks of increasing difficulty:
+OpenRS, LIMR, and GSM8K (Dang & Ngo, 2025; Li et al.,
+2025; Cobbe et al., 2021). We adopt a binary accuracy
+reward as the verifiable signal,
+r(x, y) = ⊮{the final answer in y is correct for question x} ,
+and train the models to output their final answer enclosed
+in \boxed{} to enable automatic evaluation using our chat
+template (Appendix Table 8).
+Evaluation.
+We compute Pass@1 on test math datasets
+GSM8k(test), MATH500, AMC23, AIME24, and AIME25,
+ordered by increasing difficulty. Pass@1 represents the prob-
+ability that the first answer generated is correct. Directly
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Divergence-Based RL for General LLM Alignment
+calculating Pass@1 with only 1 sample per instance often
+results in high variance. To obtain more stable evaluation re-
+sults, we generate n = 16 samples for each problem, count
+the number of correct samples c, and calculate the unbiased
+estimator Pass@1 = Ex c/n (Chen, 2021).
+Method
+GSM8K MATH500 AMC23 AIME24 AIME25
+Relative
+Overall ↑
+Avg. Rank
+↓
+Base
+21.39
+25.66
+27.34
+5.63
+2.29
+0.00
+8.0
+GRPO
+71.67
+60.60
+43.28
+8.54
+3.13
+74.26
+5.2
+Hellinger
+72.73
+61.18
+41.09
+7.08
+5.42
+81.11
+4.2
+JS
+72.47
+61.93
+40.94
+7.50
+4.79
+78.99
+4.2
+KL
+72.34
+61.59
+41.72
+7.71
+5.00
+81.83
+4.4
+Pearson
+72.59
+61.70
+45.16
+10.42
+3.33
+86.49
+2.6
+Reverse KL
+72.65
+61.65
+43.75
+7.92
+4.58
+82.47
+3.0
+Total Variation
+72.40
+61.51
+43.28
+7.92
+4.79
+83.11
+3.8
+Table 2. Pass@1 accuracy (%) on math benchmarks for Qwen2.5-
+Math-1.5B trained on LIMR dataset. Relative Overall is the
+average of per-benchmark min–max normalized scores (0–100).
+Avg. Rank is the mean rank across benchmarks. Cell color &
+intensity indicates performance relative to GRPO.
+Comparing GRPO vs f-GRPO Table 2 shows the detailed
+Pass@1 reasoning performance of f-GRPO with GRPO
+across all math benchmarks trained on the LIMR dataset
+for the Qwen-1.5B model. We see that f-GRPO, across all
+divergence choices, performs better than GRPO on most in-
+dividual benchmarks. To aggregate the relative performance
+of each method across all benchmarks, we compute the Rel-
+ative Overall Score (average of per-benchmark min–max
+normalized scores [0,100]) and Average Rank (mean rank
+across benchmarks), and we see the improved numbers for
+f-GRPO for all divergences.
+Table 3 shows the summary of this computed relative overall
+score and average rank across both 1.5B and 7B models
+trained on all 3 datasets: LIMR (Medium-Hard), OpenRS
+(Hard), GSM8K (Easy). We can see that most cells are
+green, indicating that, in general, f-GRPO shows consistent
+reasoning improvement over GRPO. We can attribute this
+to the maximal reward attainment guarantee we have for
+f-GRPO with the canonical-link function.
+5.2. Safety Alignment (PA Task)
+Base Model and Training. For safety alignment, we use
+the compliance–refusal dataset introduced in Haldar et al.
+(2025), which is designed to provably amplify robustness.
+We align the Qwen-2.5-Base models in both the 1.5B and 7B
+variants (Yang et al., 2024a; Team, 2024) using different di-
+rect alignment methods (off-policy) and GRPO (on-policy)
+as baselines for comparison with f-HAL.
+For on-policy methods, a reward signal is required. Since
+safety alignment does not admit a verifiable environmental
+reward r(x, y), we employ a parameterized reward model
+rϕ(x, y), specifically the DeBERTa-v3-large reward model,
+trained on large-scale helpful–harmless preference data
+from Anthropic (Bai et al., 2022a) and OpenAI (Stiennon
+et al., 2020; Nakano et al., 2021).
+Evaluation. We evaluate both robustness and utility to
+ensure that alignment improves safety without degrading
+model performance.
+(a) Robustness. (i) Separation: we measure the separation
+between latent clusters of safe and harmful prompts after
+alignment using the Bhattacharyya distance DB (Haldar
+et al., 2025; Lin et al., 2024a; Zheng et al., 2024) (Ap-
+pendix §C.2 & Figure 2). (ii) Attack Success Rate (ASR):
+we evaluate robustness on adversarial prompts using GCG-
+optimized AdvBench (Zou et al., 2023) and the SALAD
+benchmark (Li et al., 2024), which aggregates transfer at-
+tacks generated by TAP, AutoDAN, GCG, and GPTFuzz
+(Liu et al., 2023; Yu et al., 2023). (iii) ToxiGen: a binary
+classification benchmark for distinguishing harmful from
+harmless content (Hartvigsen et al., 2022).
+(b) Utility. We report performance on MMLU-Pro (Wang
+et al., 2024), IFEval (Zhou et al., 2023), and MuSR (Sprague
+et al., 2024), which evaluate general knowledge, instruction-
+following capability, and soft chain-of-thought reasoning,
+respectively.
+Comparing f-HAL with Other Alignment Methods Ta-
+ble 4 reports the detailed robustness and utility benchmarks
+for all alignment methods. To obtain a compact measure
+of overall performance, we additionally compute three ag-
+gregated metrics: AvgRob, defined as the average over
+all robustness benchmarks where the separation metric is
+min–max normalized to [0, 100] (with the pre-alignment
+base model as the minimum); AvgUtil, defined as the aver-
+age over all utility benchmarks; and the Total Score, defined
+as the mean of AvgRob and AvgUtil. Table 5 summarizes
+these aggregated scores for both the Qwen-1.5B and Qwen-
+7B base models, enabling a direct comparison of alignment
+methods across model scales.
+Within-Alignment-Class Superiority.
+Tables 4 and 5
+show that f-HAL is consistently superior or competitive
+within each alignment class. Among direct aligners, the off-
+policy f-HAL variant (λ = 1) outperforms KTO and DPO
+and is generally stronger than BCO in terms of the Total
+Score, indicating a better robustness–utility trade-off. In the
+on-policy regime, f-GRPO uniformly improves over GRPO,
+demonstrating that generalizing GRPO to f-divergence ob-
+jectives with a canonical link g, yields systematic gains.
+Hybrid Alignment Mitigates Reward Hacking. Tables 4
+and 5 show that on-policy methods perform relatively poorly
+(red cells), with GRPO performing worst overall. This is
+consistent with reward hacking: when optimization relies on
+a learned reward model rather than a verifiable environment
+reward, on-policy updates can exploit vulnerabilities in the
+reward signal and converge to superficially high-reward yet
+suboptimal responses (Skalse et al., 2022).
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Divergence-Based RL for General LLM Alignment
+Method
+LIMR
+Qwen-1.5B
+LIMR
+Qwen-7B
+GSM8K
+Qwen-1.5B
+GSM8K
+Qwen-7B
+Open-RS
+Qwen-1.5B
+Open-RS
+Qwen-7B
+Relative
+Overall ↑
+Avg
+Rank↓
+Relative
+Overall ↑
+Avg
+Rank↓
+Relative
+Overall ↑
+Avg
+Rank↓
+Relative
+Overall ↑
+Avg
+Rank↓
+Relative
+Overall ↑
+Avg
+Rank↓
+Relative
+Overall ↑
+Avg
+Rank↓
+Base
+0.0
+8.0
+0.0
+8.0
+0.0
+8.0
+0.0
+8.0
+0.0
+8.0
+0.0
+8.0
+GRPO
+74.26
+5.2
+91.72
+5.2
+86.17
+4.0
+90.71
+4.4
+82.44
+4.6
+90.52
+5.8
+Hellinger
+81.11
+4.2
+91.54
+3.8
+86.24
+3.8
+95.08
+3.8
+78.47
+3.6
+91.70
+4.4
+Jensen–Shannon
+78.99
+4.2
+94.93
+3.8
+97.22
+2.2
+91.44
+3.2
+93.30
+2.4
+98.47
+2.0
+KL
+81.83
+4.4
+93.64
+3.4
+79.65
+6.0
+86.60
+5.2
+85.66
+4.0
+95.16
+3.0
+Pearson
+86.49
+2.6
+96.28
+2.8
+84.23
+4.0
+87.82
+3.6
+85.19
+3.6
+91.86
+5
+Reverse KL
+82.47
+3.0
+96.59
+2.4
+88.07
+3.4
+90.46
+3.8
+81.65
+5.2
+96.78
+2.4
+Total Variation
+83.11
+3.8
+87.79
+5.4
+94.27
+4.4
+95.27
+3.2
+86.93
+4.0
+86.05
+4.8
+Table 3. Summary of Relative Overall performance (higher is better) and Avg. Rank across Qwen2.5-Math-1.5B and Qwen2.5-Math-7B
+models trained on LIMR, GSM8K, and Open-RS datasets. Cell color and intensity indicate performance relative to the GRPO baseline.
+Method
+Robustness
+Utility
+Total
+Sep.
+ASR(%)↓
+ToxiGen AvgRob. MMLU IFEval MuSR AvgUtil.
+Score
+DB ↑
+GCG
+SALAD
+(%) ↑
+↑
+(%) ↑
+↑
+↑
+Direct Aligners (Off-Policy)
+BCO
+8.53 14.27
+44.96
+56.12
+58.95
+44.05
+55.52
+45.11
+48.23
+53.59
+DPO
+5.77 37.20
+78.90
+45.11
+37.54
+44.03
+54.80
+44.84
+47.89
+42.71
+KTO
+5.99 21.34
+68.42
+52.37
+46.28
+44.35
+56.59
+44.84
+48.59
+47.44
+FDO (f-HAL, λ = 1) :
+Hellinger
+10.89 11.45
+38.70
+57.02
+65.22
+43.77
+55.64
+46.03
+48.48
+56.85
+JS
+9.14 16.66
+53.96
+59.15
+57.83
+43.77
+54.68
+45.90
+48.12
+52.97
+KL
+8.29 22.10
+56.50
+56.01
+53.68
+44.02
+56.00
+46.30
+48.77
+51.23
+χ2
+17.33
+0.00
+16.24
+56.91
+84.03
+43.58
+55.28
+45.77
+48.21
+66.12
+RKL
+14.34
+1.16
+8.76
+56.28
+80.64
+43.30
+51.92
+46.03
+47.08
+63.86
+TV
+13.46 11.58
+39.04
+57.23
+69.29
+44.11
+52.64
+46.30
+47.68
+58.49
+Hybrid , f-HAL (λ = 0.5) :
+Hellinger
+9.74
+8.96
+38.22
+57.66
+64.28
+43.65
+54.44
+46.03
+48.04
+56.16
+JS
+12.13 14.13
+48.76
+60.20
+64.83
+44.10
+55.76
+46.43
+48.76
+56.80
+KL
+10.52 19.70
+52.46
+57.02
+59.13
+44.01
+52.76
+45.50
+47.42
+53.28
+χ2
+12.48
+0.00
+14.74
+57.02
+76.64
+43.83
+55.16
+44.84
+47.94
+62.29
+RKL
+16.65
+0.00
+4.76
+57.66
+85.98
+43.63
+50.96
+45.24
+46.61
+66.30
+TV
+18.04
+3.40
+30.04
+57.66
+81.06
+44.17
+53.96
+44.52
+47.55
+64.30
+On-Policy RL
+GRPO
+4.62 62.18
+66.54
+43.38
+32.09
+43.80
+46.76
+42.31
+44.29
+38.19
+f-GRPO (f-HAL, λ = 0) :
+Hellinger
+6.44 30.24
+70.38
+56.17
+45.24
+43.60
+46.53
+44.97
+45.03
+45.14
+JS
+4.47 23.80
+58.08
+56.91
+46.96
+44.25
+48.32
+42.86
+45.14
+46.05
+KL
+4.20 44.70
+77.86
+55.00
+35.87
+43.38
+46.80
+43.39
+44.52
+40.20
+χ2
+6.31
+1.50
+16.98
+56.91
+65.76
+43.82
+43.53
+43.12
+43.49
+54.62
+RKL
+5.37 41.64
+35.46
+55.85
+49.32
+43.41
+49.64
+45.09
+46.05
+47.68
+TV
+4.02 56.32
+87.56
+56.91
+30.73
+43.39
+42.33
+44.18
+43.30
+37.01
+Table 4. Robustness and Utility benchmarks for Qwen2.5-7B
+(Base) using different alignment methods. AvgRob & AvgUtil
+denotes the average robustness & utility score respectively. The
+Total score is defined as mean(AvgRob, AvgUtil). Cell color and
+intensity indicate performance relative to the mean value within
+each benchmark column. Pre-alignment model separation is 2.48.
+Hybrid alignment mitigates reward hacking by combining
+on-policy exploration with off-policy direct supervision. It
+benefits from the exploration inherent to on-policy methods
+while preventing lazy reward-hacking suboptimalities by
+using preference data as guidance. For the larger Qwen-7B
+model, hybrid f-HAL generally outperforms pure direct
+aligners, indicating that the added exploration improves
+performance when sufficient model capacity is available.
+This behavior is theoretically grounded in Equations (19)
+and (21), where the mixture formulation of f-HAL assigns
+non-negligible probability mass to ideal responses, con-
+straining degenerate solutions.
+For the smaller Qwen-1.5B model, reward hacking effects
+are more pronounced due to limited capacity. Although hy-
+brid f-HAL (λ = 0.5) still yields large improvements over
+pure on-policy RL, direct aligners remain slightly stronger
+Qwen-7B (base)
+Qwen-1.5B (base)
+Method
+AvgRob. AvgUtil. Score
+AvgRob. AvgUtil. Score
+Direct Aligners (Off-Policy)
+BCO
+58.95
+48.23
+53.59
+55.92
+32.67
+44.30
+DPO
+37.54
+47.89
+42.71
+27.56
+33.11
+30.33
+KTO
+46.28
+48.59
+47.44
+37.33
+32.62
+34.98
+FDO (f-HAL, λ = 1) :
+Hellinger
+65.22
+48.48
+56.85
+74.84
+31.46
+53.15
+JS
+57.83
+48.12
+52.97
+61.17
+33.44
+47.30
+KL
+53.68
+48.77
+51.23
+47.33
+33.97
+40.65
+χ2
+84.03
+48.21
+66.12
+60.90
+32.82
+46.86
+RKL
+80.64
+47.08
+63.86
+79.95
+34.17
+57.06
+TV
+69.29
+47.68
+58.49
+57.37
+32.84
+45.11
+Hybrid, f-HAL (λ = 0.5) :
+Hellinger
+64.28
+48.04
+56.16
+72.31
+29.66
+50.99
+JS
+64.83
+48.76
+56.80
+55.75
+32.36
+44.05
+KL
+59.13
+47.42
+53.28
+49.12
+33.26
+41.19
+χ2
+76.64
+47.94
+62.29
+59.09
+33.01
+46.05
+RKL
+85.98
+46.61
+66.30
+77.27
+33.48
+55.37
+TV
+81.06
+47.55
+64.30
+58.32
+32.65
+45.49
+On-Policy RL
+GRPO
+32.09
+44.29
+38.19
+12.30
+21.25
+16.77
+f-GRPO (f-HAL, λ = 0) :
+Hellinger
+45.24
+45.03
+45.14
+37.65
+32.33
+34.99
+JS
+46.96
+45.14
+46.05
+22.96
+31.48
+27.22
+KL
+35.87
+44.52
+40.20
+33.74
+28.81
+31.27
+χ2
+65.76
+43.49
+54.62
+23.17
+31.22
+27.20
+RKL
+49.32
+46.05
+47.68
+34.97
+29.94
+32.46
+TV
+30.73
+43.30
+37.01
+22.20
+31.43
+26.81
+Table 5. Post-Safety-Alignment Avg. Robustness, Utility and Total
+Score results for Qwen2.5-Base Family.
+overall, suggesting that stronger supervision is preferable
+when model expressivity is constrained.
+6. Conclusion
+In this work, we present a unified divergence-based per-
+spective for general LLM alignment, extending prior direct
+alignment frameworks to the RLVR regime. We introduce
+a principled recipe for constructing on-policy and hybrid
+alignment objectives, yielding f-GRPO and f-HAL as in-
+stances derived from general f-divergences, and provide the-
+oretical guarantees characterizing their optimal policies and
+reward-improvement properties. Empirically, we demon-
+strate the effectiveness and flexibility of this framework
+across both RLVR and preference alignment regimes. Our
+work proposes divergence estimation as a unifying and prac-
+tical foundation for general LLM alignment.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Divergence-Based RL for General LLM Alignment
+References
+Bai, Y., Jones, A., Ndousse, K., Askell, A., Chen, A., Das-
+Sarma, N., Drain, D., Fort, S., Ganguli, D., Henighan, T.,
+et al. Training a helpful and harmless assistant with rein-
+forcement learning from human feedback. arXiv preprint
+arXiv:2204.05862, 2022a.
+Bai, Y., Kadavath, S., Kundu, S., Askell, A., Kernion, J.,
+Jones, A., Chen, A., Goldie, A., Mirhoseini, A., McKin-
+non, C., et al. Constitutional ai: Harmlessness from ai
+feedback. arXiv preprint arXiv:2212.08073, 2022b.
+Bengio, Y. and Sen´ecal, J.-S. Adaptive importance sampling
+to accelerate training of a neural probabilistic language
+model. IEEE Transactions on Neural Networks, 19(4):
+713–722, 2008.
+Bradley, R. A. and Terry, M. E. Rank analysis of incom-
+plete block designs: I. the method of paired comparisons.
+Biometrika, 39(3/4):324–345, 1952.
+Chen, M. Evaluating large language models trained on code.
+arXiv preprint arXiv:2107.03374, 2021.
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+R., Hesse, C., and Schulman, J. Training verifiers to solve
+math word problems. arXiv preprint arXiv:2110.14168,
+2021.
+Dang, Q.-A. and Ngo, C. Reinforcement learning for rea-
+soning in small llms: What works and what doesn’t, 2025.
+URL https://arxiv.org/abs/2503.16219.
+Daniel Han, M. H. and team, U. Unsloth, 2023. URL
+http://github.com/unslothai/unsloth.
+Ethayarajh, K., Xu, W., Muennighoff, N., Jurafsky, D., and
+Kiela, D. Kto: Model alignment as prospect theoretic
+optimization. arXiv preprint arXiv:2402.01306, 2024.
+Guo, D., Yang, D., Zhang, H., Song, J., Zhang, R., Xu, R.,
+Zhu, Q., Ma, S., Wang, P., Bi, X., et al. Deepseek-r1: In-
+centivizing reasoning capability in llms via reinforcement
+learning. arXiv preprint arXiv:2501.12948, 2025.
+Haldar, R., Wang, Z., Song, Q., Lin, G., and Xing, Y. Llm
+safety alignment is divergence estimation in disguise.
+arXiv preprint arXiv:2502.00657, 2025.
+Hartvigsen, T., Gabriel, S., Palangi, H., Sap, M., Ray, D.,
+and Kamar, E. Toxigen: A large-scale machine-generated
+dataset for adversarial and implicit hate speech detection.
+arXiv preprint arXiv:2203.09509, 2022.
+Jiang, D., Lu, Y., Li, Z., Lyu, Z., Nie, P., Wang, H., Su, A.,
+Chen, H., Zou, K., Du, C., et al. Verltool: Towards holis-
+tic agentic reinforcement learning with tool use. arXiv
+preprint arXiv:2509.01055, 2025.
+Jung, S., Han, G., Nam, D. W., and On, K.-W. Binary clas-
+sifier optimization for large language model alignment.
+In Proceedings of the 63rd Annual Meeting of the Asso-
+ciation for Computational Linguistics (Volume 1: Long
+Papers), pp. 1858–1872, 2025.
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,
+C. H., Gonzalez, J. E., Zhang, H., and Stoica, I. Efficient
+memory management for large language model serving
+with pagedattention. In Proceedings of the ACM SIGOPS
+29th Symposium on Operating Systems Principles, 2023.
+Le, H., Wang, Y., Gotmare, A. D., Savarese, S., and Hoi,
+S. C. H. Coderl: Mastering code generation through
+pretrained models and deep reinforcement learning. Ad-
+vances in Neural Information Processing Systems, 35:
+21314–21328, 2022.
+Li, L., Dong, B., Wang, R., Hu, X., Zuo, W., Lin, D., Qiao,
+Y., and Shao, J. Salad-bench: A hierarchical and com-
+prehensive safety benchmark for large language models.
+arXiv preprint arXiv:2402.05044, 2024.
+Li, X., Zou, H., and Liu, P. Limr: Less is more for rl scaling.
+https://github.com/GAIR-NLP/LIMR, 2025.
+Lin, Y., He, P., Xu, H., Xing, Y., Yamada, M., Liu,
+H., and Tang, J.
+Towards understanding jailbreak
+attacks in LLMs:
+A representation space analysis.
+In Proceedings of the 2024 Conference on Empir-
+ical Methods in Natural Language Processing, pp.
+7067–7085. Association for Computational Linguistics,
+November 2024a. doi: 10.18653/v1/2024.emnlp-main.
+401. URL https://aclanthology.org/2024.
+emnlp-main.401/.
+Lin, Y., He, P., Xu, H., Xing, Y., Yamada, M., Liu, H.,
+and Tang, J. Towards understanding jailbreak attacks in
+llms: A representation space analysis. arXiv preprint
+arXiv:2406.10794, 2024b.
+Liu, X., Xu, N., Chen, M., and Xiao, C. Autodan: Generat-
+ing stealthy jailbreak prompts on aligned large language
+models. arXiv preprint arXiv:2310.04451, 2023.
+Nakano, R., Hilton, J., Balaji, S., Wu, J., Ouyang, L.,
+Kim, C., Hesse, C., Jain, S., Kosaraju, V., Saunders, W.,
+Jiang, X., Cobbe, K., Eloundou, T., Krueger, G., Button,
+K., Knight, M., Chess, B., and Schulman, J. Webgpt:
+Browser-assisted question-answering with human feed-
+back. In arXiv, 2021.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.,
+Mishkin, P., Zhang, C., Agarwal, S., Slama, K., Ray, A.,
+et al. Training language models to follow instructions
+with human feedback. Advances in neural information
+processing systems, 35:27730–27744, 2022.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Divergence-Based RL for General LLM Alignment
+Rafailov, R., Sharma, A., Mitchell, E., Manning, C. D.,
+Ermon, S., and Finn, C. Direct preference optimiza-
+tion: Your language model is secretly a reward model.
+Advances in neural information processing systems, 36:
+53728–53741, 2023.
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang,
+H., Zhang, M., Li, Y., et al. Deepseekmath: Pushing
+the limits of mathematical reasoning in open language
+models. arXiv preprint arXiv:2402.03300, 2024.
+Skalse, J., Howe, N., Krasheninnikov, D., and Krueger, D.
+Defining and characterizing reward gaming. Advances in
+Neural Information Processing Systems, 35:9460–9471,
+2022.
+Sprague, Z., Ye, X., Bostrom, K., Chaudhuri, S., and Durrett,
+G. Musr: Testing the limits of chain-of-thought with
+multistep soft reasoning, 2024. URL https://arxiv.
+org/abs/2310.16049.
+Stiennon, N., Ouyang, L., Wu, J., Ziegler, D. M., Lowe,
+R., Voss, C., Radford, A., Amodei, D., and Christiano,
+P. Learning to summarize from human feedback. In
+NeurIPS, 2020.
+Team, Q. Qwen2.5: A party of foundation models, Septem-
+ber 2024.
+URL https://qwenlm.github.io/
+blog/qwen2.5/.
+Vojnovic, M. and Yun, S.-Y. What is the alignment objective
+of grpo? arXiv preprint arXiv:2502.18548, 2025.
+Wang, Y., Ma, X., Zhang, G., Ni, Y., Chandra, A., Guo,
+S., Ren, W., Arulraj, A., He, X., Jiang, Z., Li, T., Ku,
+M., Wang, K., Zhuang, A., Fan, R., Yue, X., and Chen,
+W. Mmlu-pro: A more robust and challenging multi-
+task language understanding benchmark, 2024. URL
+https://arxiv.org/abs/2406.01574.
+Yang, A., Yang, B., Hui, B., Zheng, B., Yu, B., Zhou, C.,
+Li, C., Li, C., Liu, D., Huang, F., Dong, G., Wei, H., Lin,
+H., Tang, J., Wang, J., Yang, J., Tu, J., Zhang, J., Ma, J.,
+Xu, J., Zhou, J., Bai, J., He, J., Lin, J., Dang, K., Lu, K.,
+Chen, K., Yang, K., Li, M., Xue, M., Ni, N., Zhang, P.,
+Wang, P., Peng, R., Men, R., Gao, R., Lin, R., Wang, S.,
+Bai, S., Tan, S., Zhu, T., Li, T., Liu, T., Ge, W., Deng,
+X., Zhou, X., Ren, X., Zhang, X., Wei, X., Ren, X., Fan,
+Y., Yao, Y., Zhang, Y., Wan, Y., Chu, Y., Liu, Y., Cui, Z.,
+Zhang, Z., and Fan, Z. Qwen2 technical report. arXiv
+preprint arXiv:2407.10671, 2024a.
+Yang, A., Zhang, B., Hui, B., Gao, B., Yu, B., Li, C., Liu, D.,
+Tu, J., Zhou, J., Lin, J., Lu, K., Xue, M., Lin, R., Liu, T.,
+Ren, X., and Zhang, Z. Qwen2.5-math technical report:
+Toward mathematical expert model via self-improvement.
+arXiv preprint arXiv:2409.12122, 2024b.
+Yu, J., Lin, X., Yu, Z., and Xing, X. Gptfuzzer: Red team-
+ing large language models with auto-generated jailbreak
+prompts. arXiv preprint arXiv:2309.10253, 2023.
+Zheng, C., Yin, F., Zhou, H., Meng, F., Zhou, J., Chang,
+K.-W., Huang, M., and Peng, N.
+On prompt-driven
+safeguarding for large language models. arXiv preprint
+arXiv:2401.18018, 2024.
+Zhou, J., Lu, T., Mishra, S., Brahma, S., Basu, S.,
+Luan, Y., Zhou, D., and Hou, L. Instruction-following
+evaluation for large language models. arXiv preprint
+arXiv:2311.07911, 2023.
+Zou, A., Wang, Z., Carlini, N., Nasr, M., Kolter, J. Z.,
+and Fredrikson, M. Universal and transferable adversar-
+ial attacks on aligned language models. arXiv preprint
+arXiv:2307.15043, 2023.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Divergence-Based RL for General LLM Alignment
+A. f-Divergence
+Name
+f(t)
+f ∗(u)
+eff. dom
+ED(f ∗)
+Canonical
+link: g(u)
+g−1(u)
+Mixture Scaler
+g−1◦f ′(t)
+f ′
+∞
+Hellinger
+(
+√
+t −1)2
+u
+1 −u
+u < 1
+1 −e−u
+−ln(1 −u)
+1
+2 ln t
+1
+Jensen–Shannon
+
+t ln t −(t + 1) ln t+1
+2
+
+−ln
+ 2 −eu
+u < ln 2
+ln 2 −ln(1 + e−u)
+−ln
+ eln 2−u −1
+
+ln t
+ln 2
+KL
+t ln t
+eu−1
+R
+u
+u
+ln t + 1
+∞
+Pearson χ2
+(t −1)2
+1
+4u2 + u
+R
+u
+u
+2(t −1)
+∞
+Reverse KL
+−ln t
+−1 −ln(−u)
+u < 0
+−e−u
+−ln(−u)
+ln t
+0
+Total Variation
+1
+2|t −1|
+u
+|u| ≤1/2
+1
+2(1 + e−u)−1
+−ln((2u)−1 −1)
+−ln((sign(t −1))−1 −1)
+1/2
+Table 6. Common f-divergences with conjugates, effective domains, canonical links, inverse links, mixture scalers, and tail slopes.
+Canonical links are characterized by functions g : R →ED(f ∗) s.t. g−1 ◦f ′
+∞= ∞.
+Expectation w.r.t. a positive measure.
+Let µ be any positive (finite) measure on a measurable space (Ω, F) and let
+h : Ω→R be measurable. We define the expectation with respect to µ as
+E
+µ[h] :=
+Z
+Ω
+h(ω) dµ(ω).
+When µ is a probability measure, this reduces to the usual notion of expectation.
+Definition A.1 (f-Divergence). For two positive measures P, Q with P ≪Q (absolute continuous), the f-divergence
+between the two measures is defined as follows:
+Df(P∥Q) = E
+v∼Q
+
+f
+dP
+dQ(v)
+
+,
+where f : R+ →R is a convex function with f(1) = 0 and P ≪Q : dQ(v) = 0 =⇒dP(v) = 0.
+General Case.
+For arbitrary P, Q, let P = Pac+Ps be the Lebesgue decomposition of P w.r.t. Q into absolute continuous
+and singular measures. The f-divergence is defined as
+Df(P∥Q) = E
+v∼Q
+
+f
+dPac
+dQ (v)
+
++ f ′
+∞Ps(Ω),
+where f ′
+∞:= limt→∞
+f(t)
+t
+∈[0, ∞].
+Definition A.2 (Convex Conjugate).
+f ∗(u) = sup
+t∈R
+{ut −f(t)},
+where f ∗(u) is the convex conjugate of f. Note that f ∗is also a convex function.
+Lemma A.3 (Variational Representation & Optimality). Let P, Q be probability measures on V, and write the Lebesgue
+decomposition P = Pac + Ps w.r.t. Q, with density r := dPac
+dQ . Let S ∈V satisfy Q(S) = 0 and Ps(S) = Ps(V) (support
+of Ps). Define f ′
+∞:= limt→∞
+f(t)
+t
+∈[0, ∞]. Then
+Df(P∥Q) =
+sup
+T :V→ED(f ∗)
+
+E
+P[T(v)] −E
+Q[f ∗(T(v))]
+
+,
+(22)
+where f ∗is the convex conjugate of f and ED(f ∗) = {u : f ∗(u) < ∞}. Moreover, the optimal functional can be chosen as
+T ∗(v) ∈∂f(r(v)) ⊮Sc(v) + f ′
+∞⊮S(v),
+(23)
+(and if f is differentiable, ∂f(r) = {f ′(r)}).
+Proof. For any measurable T : V →ED(f ∗), Fenchel–Young gives
+t u ≤f(t) + f ∗(u)
+(t ≥0, u ∈ED(f ∗)).
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Divergence-Based RL for General LLM Alignment
+Applying this pointwise with (t, u) = (r(v), T(v)) and integrating over Q yields
+E
+Pac[T] −E
+Q[f ∗(T)] = E
+Q[rT −f ∗(T)] ≤E
+Q[f(r)].
+For the singular part, for any u and any t ≥0, f(t) ≥tu −f ∗(u) implies
+f(t)
+t
+≥u −f ∗(u)
+t
+⇒
+u ≤f ′
+∞
+whenever f ∗(u) < ∞.
+Hence T ≤f ′
+∞Ps-a.s., and so
+E
+Ps[T] ≤f ′
+∞Ps(Ω).
+Combining,
+E
+P[T] −E
+Q[f ∗(T)] ≤E
+Q[f(r)] + f ′
+∞Ps(Ω) = Df(P∥Q),
+so the RHS of (22) is ≤Df(P∥Q).
+To see tightness, take T ∗(v) ∈∂f(r(v)) on {r > 0} (equivalently T ∗= f ′(r) when differentiable), so that rT ∗−f ∗(T ∗) =
+f(r) Q-a.s. For the singular part, choose a set S with Q(S) = 0, Ps(S) = Ps(Ω), and let Tn = f ′
+∞1S + T ∗1Sc (or
+Tn ↑f ′
+∞1S if needed). Then
+E
+P[Tn] −E
+Q[f ∗(Tn)] ↑E
+Q[f(r)] + f ′
+∞Ps(Ω) = Df(P∥Q).
+Thus the supremum equals Df(P∥Q), proving (22).
+B. Proofs and Additional Theoretical Details
+Lemma B.1 (Comonotone Covariance Inequality). Let X : Ω→R be a random variable. If f, g : R →R are integrable
+and both non- decreasing (or both non-increasing), then
+E[f(X)g(X)] ≥E[f(X)] E[g(X)],
+equivalently Cov(f(X), g(X)) ≥0.
+Proof. Let X′ be an independent copy of X. Then
+2 Cov(f(X), g(X)) = E
+h
+(f(X) −f(X′))(g(X) −g(X′))
+i
+.
+(Indeed, expanding the RHS and using independence gives E[f(X)g(X)] + E[f(X′)g(X′)] −E[f(X)g(X′)] −
+E[f(X′)g(X)] = 2 E[f(X)g(X)] −2 E[f(X)] E[g(X)].)
+If f and g are both non-decreasing, then for every (x, x′),
+(x −x′) ≥0 ⇒f(x) −f(x′) ≥0 and g(x) −g(x′) ≥0,
+and similarly if (x −x′) ≤0 then both differences are ≤0. Hence (f(x) −f(x′))(g(x) −g(x′)) ≥0 pointwise, so the
+expectation is nonnegative:
+E
+h
+(f(X) −f(X′))(g(X) −g(X′))
+i
+≥0.
+Therefore Cov(f(X), g(X)) ≥0, which is equivalent to E[f(X)g(X)] ≥E[f(X)] E[g(X)]. The non-increasing case
+follows identically.
+Lemma B.2 (Monotone Reweighting Increases the Mean). Fix x and let q(· | x) be a distribution over y. For any
+nonnegative weight function wx(y) with Eq[wx] > 0, define the tilted distribution
+qw(y | x) = q(y | x) wx(y)
+Ey∼q[wx(y)] .
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Divergence-Based RL for General LLM Alignment
+Then for any measurable reward r(x, y),
+E
+qw[r(x, y)] −E
+q [r(x, y)] = Covq(·|x)
+ r(x, y), wx(y)
+
+Eq[wx(y)]
+.
+In particular, if wx(y) is (weakly) increasing in r(x, y), then
+E
+qw[r(x, y)] ≥E
+q [r(x, y)],
+with strict inequality unless r(x, ·) is q-a.s. constant or wx is q-a.s. constant.
+Proof. By definition,
+E
+qw[r] =
+Z
+y
+r(y) q(y)w(y)
+Eq[w]
+· dy = Eq[rw]
+Eq[w] .
+Hence
+E
+qw[r] −E
+q [r] = Eq[rw] −Eq[r] Eq[w]
+Eq[w]
+= Covq(r, w)
+Eq[w]
+.
+If w is non decreasing in r, then r and w(r) are comonotone, so Covq(r, w) ≥0 (Lemma B.1), yielding Eqw[r] ≥Eq[r],
+with strict inequality unless r or w is q-a.s. constant.
+Proof of Theorem 4.3. Divergence Estimation and Alignment Consistency:
+(i) F-GRPO: The loss can be expressed as :
+L(f,g)
+f-GRPO(θ) = 1 + β−1
+G
+E
+x
+G
+X
+yi∼πθold,i=1
+ −ai ˆw+
+i · g(rθ,i) −ai ˆw−
+i · f ∗◦g(rθ,i)
+
+(24)
+where ˆw±
+i = ⃗σi
+ {±rj −ln πθold(yj|x)}G
+j=1
+
+· ⊮{±ai>0} [Equation (12)]. As G →∞, we can use Strong Law of Large
+numbers, Continuous mapping theorem and softmax with log-Q correction to get the following:
+• ˆµ(r(x, .))
+a.s.
+−→µθold
+r
+= Eπθold r(x, y); ˆσ(r(x, .))
+a.s.
+−→σθold
+r
+=
+q
+Vπθold r(x, y)
+• ai
+a.s.
+−→r(x,yi)−µ
+θold
+r
+σ
+θold
+r
+• ⃗σi
+ {±rj −ln πθold(yj|x)}G
+j=1
+
+· G
+a.s.
+−→dQ±
+πθold (yi|x), where dQ± ∝exp ±r(x, y).
+• ⊮{±ai>0}
+a.s.
+−→⊮{±r(x,yi)∓µ
+θold
+r
+>0}
+Combining the above with the convergence in the empirical distribution sampled from πθold, we have:
+L(f,g)
+f-GRPO(θ)
+a.s.
+= (1 + β−1) E
+x
+E
+y∼πθold
+ 
+−r(x, y) −µθold
+r
+σθold
+r
+"
+dQ+
+πθold
+(y|x) · g(rθ)⊮{r(x,yi)−µ
+θold
+r
+>0}+
+dQ−
+πθold
+(y|x) · f ∗◦g(rθ,i)⊮{µ
+θold
+r
+−r(x,yi)>0}
+#!
+= (1 + β−1)σθold
+r
+
+−E
+x
+E
+y∼Q+[r(x, y) −µθold
+r
+]+g(rθ) + E
+x
+E
+y∼Q−[−r(x, y) + µθold
+r
+]+f ∗◦g(rθ)
+
+Given measures D+
+(r,θold), D−
+(r,θold) with densities
+dD±
+(r,θold)(x, y) ∝[±(r(x, y) −µθold
+r
+(x))]+ exp(±r(x, y)) dP(x),
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Divergence-Based RL for General LLM Alignment
+which matches Def. 4.1 (with πθold in place of πθ). Then up-to scaling constants the above can be simplified as
+const ·L(f,g)
+f-GRPO(θ)
+a.s.
+=
+
+−
+E
+D+
+(r,θold)
+[ c(x) · g(rθ) ] +
+E
+D−
+(r,θold)
+[ f ∗◦g(rθ) ]
+
+,
+(25)
+where c(x) is a normalization constant. Using Lemma A.3 As D+
+(r,θold) ⊥D−
+(r,θold), that is the supports are complementary
+(no subspace where D+
+(r,θold) ≪D−
+(r,θold)) then the divergence is just:
+inf
+θ L(f,g)
+f-GRPO(θ) ∝−Df(c(x)D+
+(r,θold) ∥D−
+(r,θold)) = −f ′
+∞= −Df(D+
+(r,θold) ∥D−
+(r,θold))
+For tth FP iterate, θ(t)
+RL = θold and θ(t+1)
+RL
+= arg infθ L(f,g)
+f-GRPO(θ)
+L(f,g)
+f-GRPO(θ(t+1)) ∝−Df(D+
+(r,θ(t)) ∥D−
+(r,θ(t)))
+Moreover, using T = g(rθ), the optimality Lemma A.3 for the (t + 1)th FP iterate is attained at T (t+1) = g(rθ(t+1)
+RL
+) =
+β ln
+π
+θ(t+1)
+RL
+πref
+= f ′
+∞⊮D−
+(r,θ(t)
+RL)
+(x,y)=0.
+πθ(t+1)
+RL
+(y|x) ∝πref(y|x) exp
+ 
+β−1g−1(f ′
+∞⊮D−
+(r,θ(t)
+RL)
+(x,y)=0)
+!
+(26)
+(ii) F-HAL The hybrid alignment loss is λ weighted avergae between the direct aligner FDO loss and f-GRPO:
+L(f,g)
+f-HAL(θ) = λL(f,g)
+FDO (θ) + (1 −λ)L(f,g)
+f-GRPO(θ),
+where LFDO(f,g)(θ) = −ED+ g(rθ)+ED−f ∗◦g(rθ) with infimum at −Df(D+ ∥D−) using the variational representation
+Lemma A.3. We know that as G →∞, F-GRPO loss is almost surely equal to the representation in Equation (25). As a
+corollary, F-HAL is almost surely equal to the following, up to some scaling constants:
+L(f,g)
+f-HAL(θ) ∝λ
+
+−E
+D+ g(rθ) + E
+D−f ∗◦g(rθ)
+
++ (1 −λ)
+ 
+−
+E
+D+
+(r,θold)
+[ c+(x) · g(rθ) ] +
+E
+D−
+(r,θold)
+c−(x) · [ f ∗◦g(rθ) ]
+!
+For mixture measures M±
+Mix = λD± + (1 −λ)c±(x)D±
+(r,θold), then:
+inf
+θ L(f,g)
+f-HAL(θ) ∝−Df(M+
+Mix ∥M−
+Mix).
+For tth FP iterate, θ(t)
+Mix = θold and θ(t+1)
+Mix
+= arg infθ L(f,g)
+f-HAL(θ), and
+L(f,g)
+f-HAL(θ(t+1)
+Mix ) ∝−Df(M+
+t,Mix ∥M−
+t,Mix)
+Moreover, using T = g(rθ) and the optimality Lemma A.3, the (t + 1)th FP iterate is attained at T (t+1) = g(rθ(t+1)
+Mix ) =
+β ln
+π
+θ(t+1)
+Mix
+πref
+= f ′(
+dM+
+t,Mix
+dM−
+t,Mix ). This implies that
+πθ(t+1)
+RL
+(y|x) ∝πref(y|x) exp
+ 
+β−1g−1 ◦f ′(
+dM+
+t,Mix
+dM−
+t,Mix
+)
+!
+(27)
+Note that Equations (26) and (27) are indeed alignment consistent and assign more mass/density to responses from (+)
+distribution (−). To see that the probability density (27) is non-decreasing in R(x, y) where R(x, y) =
+dM+
+t,Mix
+dM−
+t,Mix , we note
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Divergence-Based RL for General LLM Alignment
+that g−1′(u) > 0 as g ◦g−1(u) = u =⇒g−1′(u) =
+1
+g′(g−1(u)) > 0 (monotonicity of g(u)). Combined with the fact that
+f ′′ ≥0 as f is convex, we have that eβ−1ht(R(x,y)) = exp(β−1 · g−1 (f ′(R(x, y))) is non-decreasing. Similarly, (26) is
+also non-decreasing in R(x, y) =
+dD+
+(r,θ(t)
+RL)
+dD−
+(r,θ(t)
+RL)
+.
+Average Reward Improvement:
+We know that g−1 is monotone increasing and g−1 ◦f ′ is non-decreasing.
+We can apply Lemma B.2 with q
+=
+πref and wx(y)
+=
+exp(β−1g−1(f ′
+∞⊮D−
+(r,θ(t)
+RL)
+=0)) for f-GRPO and
+wx(y) = exp(β−1g−1(f ′(
+dM+
+t,Mix
+dM−
+t,Mix )) for f-HAL (Note: By Assumption 4.2 dD± is non-decreasing/increasing in
+r(x, y), hence the mixture density ratio is also monotone in r(x, y).) to get:
+µθref
+r
+(x) < µθ(t+1)
+r
+(x),
+for all t ≥0 & θ(t) ∈{θ(t)
+Mix, θ(t)
+RL}.
+For the special case when g−1(f ′
+∞)
+=
+∞,
+applying Lemma B.2 with q
+=
+πθ(t)
+RL
+and wx(y)
+=
+exp(β−1[g−1(f ′
+∞⊮D−
+(r,θ(t)
+RL)
+=0) −g−1(f ′
+∞⊮D−
+(r,θ(t−1)
+RL
+)
+=0)]), on Supp(πθ(t)
+RL) = {y : D−
+(r,θ(t−1)
+RL
+) = 0} which simplifies
+to wx(y) =
+
+
+
+0,
+y ∈Supp(πθ(t)
+RL) ∋D−
+(r,θ(t)
+RL) = 0
+−∞,
+y ∈Supp(πθ(t)
+RL) ∋D−
+(r,θ(t)
+RL) > 0. Basically, the support after each iteration shrinks further and further
+and increases the average reward at each iteration:
+µ
+θ(t)
+RL
+r
+(x) < µ
+θ(t+1)
+RL
+r
+(x)
+This continues strictly until the FP iteration stops with µ
+θ(t)
+RL
+r
+(x) = maxy r(x, y) for some t.
+Proof of Theorem 4.4. Simplifying Equation (5), the unclipped GRPO objective (or ϵ →∞) can be expressed as:
+sup
+θ
+E
+x
+
+
+G
+X
+yi∼πθold,i=1
+1
+G
+πθ(yi|x)
+πθold(yi|x)ai −βDKL(πθ ∥πref)
+
+
+As G →∞, using strong law of large numbers and continuous mapping, ai = Aπθ(x, yi)
+a.s.
+−→r(x,yi)−µ
+θold
+r
+σ
+θold
+r
+. Furthermore,
+the empirical distribution converges to samples from πθold, leading to:
+sup
+θ
+E
+x
+
+E
+y∼πθold
+πθ(y|x)
+πθold(y|x) · r(x, y) −µθold
+r
+σθold
+r
+−βDKL(πθ ∥πref)
+
+With a(x, y) = r(x,y)−µ
+θold
+r
+σ
+θold
+r
+The above simplifies to:
+−inf
+θ LGRPO(θ) = sup
+θ
+E
+x
+
+E
+y∼πθ a(x, y) −βDKL(πθ ∥πref)
+
+= sup
+θ
+E
+x
+E
+y∼πθ
+
+a(x, y) −β ln πθ(y|x)
+πref(y|x)
+
+The above objective is maximized when a(x, y)−β[ln πθ(y|x)
+πref(y|x) +1] = 0. (first order conditions). Hence, upto normalization
+constant, for the tth FP iterate Equation (17) with θ(t) = θold and θ(t+1) = arg infθ LGRPO(θ):
+πθ(t+1)(y|x) ∝πref(y|x) exp [at(x, y)
+β
++ 1]
+πθ(t+1)(y|x) ∝πref(y|x) exp at(x, y)
+β
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Divergence-Based RL for General LLM Alignment
+B.1. From Sign-Based Updates to Advantage-Weighted f-GRPO
+In the main text, the preliminary form of the f-GRPO objective in Eq. (13) involves a sign-based weighting sign(ai), where
+ai denotes a standardized reward-based advantage. This form arises naturally from the variational decomposition in Eq. (9),
+as the sign determines whether a sample contributes to the aligned or unaligned component of the divergence estimator.
+While this formulation is sufficient for identifying the correct update direction, it discards magnitude information contained
+in the advantage.
+Connection to Standard Policy Gradient Methods.
+Popular on-policy reinforcement learning algorithms such as PPO
+and GRPO maximize expected reward by optimizing objectives of the form
+sup
+θ
+E
+x
+E
+y∼πθold
+h
+πθ(y|x)
+πθold(y|x) Aπθold(x, y)
+i
+,
+(28)
+where the advantage Aπθold(x, y) scales the policy gradient and determines both its direction and magnitude. In particular,
+GRPO uses a batch-standardized advantage
+Aπθold(x, yi) = r(x, yi) −ˆµ(r(x, ·))
+ˆσ(r(x, ·))
+,
+(29)
+so that gradient magnitudes are proportional to relative reward improvements.
+Motivation for Advantage Weighting.
+Using only sign(ai) treats all above-average samples equally and all below-
+average samples equally, regardless of how strongly they deviate from the mean reward. Replacing sign(ai) with ai restores
+the standard policy-gradient behavior in which higher-advantage samples exert proportionally larger influence on the update.
+This modification preserves the alignment direction implied by the divergence estimator while improving optimization
+efficiency and variance properties.
+Normalization and Scaling.
+In f-GRPO, the policy score is parameterized as rθ,i = β ln πθ(yi|x)
+πref(yi|x), so the gradient of
+the loss contains a factor of β−1 relative to the standard log-policy gradient. To ensure that gradient magnitudes remain
+comparable to those of conventional on-policy methods, we scale the advantage by (1 + β−1), yielding the final weighting
+ai(1+β−1). This normalization aligns the overall gradient scale with that of GRPO and PPO, facilitating stable optimization
+and fair empirical comparison.
+Resulting Objective.
+With this replacement, the resulting f-GRPO loss in Eq. (15) can be viewed as a divergence-based
+generalization of GRPO, where the policy gradient is weighted by a standardized advantage while the update direction is
+shaped by the chosen f-divergence through the function ψ(·, ·). This modification preserves the theoretical interpretation of
+f-GRPO as a divergence estimator while recovering the practical benefits of advantage-weighted on-policy optimization.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Divergence-Based RL for General LLM Alignment
+C. Experiment Details
+We use a single Nvidia H200 140GB for all our experiments with the following implementation of f-HAL, with correspond-
+ing hyperparameters.
+Algorithm 1 f-HAL Training (minibatch implementation)
+Input: policy πθ, reference πref, divergence f, link g
+Input: batch size B, rollouts per prompt G, step size η, regularization
+coefficient β ̸= 0.
+Input: optional supervision dataset Dsup
+either Dsup = {(x, yw, yl)} (pairwise) or Dsup = {(x, y, ℓ)} with
+ℓ∈{+1, −1} (binary)
+Initialize parameters θ
+repeat
+Sample minibatch of prompts {xb}B
+b=1
+Set behavior policy πθold ←πθ
+Initialize gon ←0 and goff ←0
+On-policy term (F-GRPO):
+for b = 1 to B do
+Sample {yb,i}G
+i=1 ∼πθold(·|xb)
+Compute rewards rb,i = r(xb, yb,i) and advantages ab,i (Eq. (4))
+Compute ˆw±
+b,i Eq. (12)) and ψ(rθ,i, ai) Eq. (14)
+Accumulate
+gon
+←
+gon
++
+1
+BG
+PG
+i=1 ai
+·
+(1
++
+β−1)∇θψ(f,g)(rθ,b,i, ai)
+end for
+Off-policy FDO term (if supervision exist):
+Set λ > 0
+if a pairwise minibatch (xb, yw,b, yl,b) is available from Dsup then
+for b = 1 to B do
+Accumulate goff ←goff + 1
+B
+
+−∇θg(rθ(xb, yw,b)) + ∇θf ∗◦
+g(rθ(xb, yl,b))
+
+end for
+else if a binary minibatch (xb, yb, ℓb) is available from Dsup then
+for b = 1 to B do
+if ℓb = +1 then
+goff ←goff −1
+B ∇θg(rθ(xb, yb))
+else
+goff ←goff + 1
+B ∇θf ∗◦g(rθ(xb, yb))
+end if
+end for
+else
+Set λ ←0
+end if
+Hybrid update:
+θ ←θ −η
+ (1 −λ) gon + λ goff
+
+until converged
+Output: trained policy πθ
+Parameter
+Value
+Learning rate (Math RLVR)
+5 × 10−6
+Learning rate (Safety PA)
+5 × 10−5
+KL coefficient (β)
+0.1
+LoRA rank
+64
+LoRA α
+64
+Weight decay
+0.1
+Warmup ratio
+0.1
+LR scheduler
+Cosine
+Optimizer
+AdamW (8-bit)
+On-policy (GRPO / f-GRPO / f-HAL) specific
+Gradient accumulation steps
+4
+Number of generations (G)
+4
+Direct Aligner (Off-policy) specific
+Per-device train batch size
+4
+Gradient accumulation steps
+1
+Table 7. Left: f-HAL training algorithm. Right: training hyperparameters used across all experiments.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Divergence-Based RL for General LLM Alignment
+Chat Template:
+Role
+Math Reasoning Template
+Safety Alignment Template
+System
+<|im start|>system
+You are a helpful
+assistant.<|im end|>
+<|im start|>system
+You are a helpful
+assistant.<|im end|>
+User
+<|im start|>user
+{input} Please reason step by step,
+and put your final answer within
+\boxed{}.<|im end|>
+<|im start|>user
+{input} <|im end|>
+Assistant
+<|im start|>assistant
+<|im start|>assistant
+Table 8. Chat templates used for (left) math reasoning and (right) safety alignment. The math template encourages standardized
+final-answer formatting via \boxed{} for automated evaluation.
+C.1. Additional Math Reasoning Tables
+Method
+GSM8K MATH500 AMC23 AIME24 AIME25
+Relative
+Overall ↑
+Avg. Rank
+↓
+Base
+21.39
+25.66
+27.34
+5.63
+2.29
+0.00
+8.0
+GRPO
+71.67
+60.60
+43.28
+8.54
+3.13
+74.26
+5.2
+Hellinger
+72.73
+61.18
+41.09
+7.08
+5.42
+81.11
+4.2
+JS
+72.47
+61.93
+40.94
+7.50
+4.79
+78.99
+4.2
+KL
+72.34
+61.59
+41.72
+7.71
+5.00
+81.83
+4.4
+Pearson
+72.59
+61.70
+45.16
+10.42
+3.33
+86.49
+2.6
+Reverse KL
+72.65
+61.65
+43.75
+7.92
+4.58
+82.47
+3.0
+Total Variation
+72.40
+61.51
+43.28
+7.92
+4.79
+83.11
+3.8
+Table 9. Pass@1 accuracy (%) for Qwen2.5-Math-1.5B trained on
+LIMR.
+Method
+GSM8K MATH500 AMC23 AIME24 AIME25
+Relative
+Overall
+Avg. Rank
+↓
+Base
+20.32
+23.15
+12.03
+3.54
+1.88
+0.00
+8.0
+GRPO
+79.90
+68.13
+55.78
+16.46
+7.92
+91.72
+5.2
+Hellinger
+81.14
+68.93
+57.81
+16.88
+7.08
+91.54
+3.8
+Jensen–Shannon
+80.83
+69.45
+54.53
+19.17
+7.71
+94.93
+3.8
+KL
+81.15
+68.90
+54.69
+17.29
+8.13
+93.64
+3.4
+Pearson
+81.07
+69.45
+55.47
+17.08
+8.96
+96.28
+2.8
+Reverse KL
+80.86
+69.28
+55.78
+19.17
+8.13
+96.59
+2.4
+Total Variation
+80.63
+68.71
+55.78
+14.38
+7.29
+87.79
+5.4
+Table 10. Pass@1 accuracy (%) for Qwen2.5-Math-7B trained on
+LIMR.
+Method
+GSM8K MATH500 AMC23 AIME24 AIME25
+Relative
+Overall
+Avg. Rank
+↓
+Base
+21.39
+25.66
+27.34
+5.63
+2.29
+0.00
+8.0
+GRPO
+81.34
+67.26
+48.44
+10.21
+4.79
+86.17
+4.0
+Hellinger
+80.71
+68.64
+48.75
+10.00
+4.79
+86.24
+3.8
+Jensen–Shannon
+81.13
+67.89
+49.06
+12.08
+5.63
+97.22
+2.2
+KL
+80.13
+66.80
+44.38
+7.71
+5.83
+79.65
+6.0
+Pearson
+80.89
+68.26
+47.81
+11.46
+3.75
+84.23
+4.0
+Reverse KL
+80.79
+67.65
+49.22
+11.67
+4.17
+88.07
+3.4
+Total Variation
+80.22
+67.28
+46.88
+11.25
+6.04
+94.27
+4.4
+Table 11. Pass@1 accuracy (%) for Qwen2.5-Math-1.5B trained on
+GSM8k .
+Method
+GSM8K MATH500 AMC23 AIME24 AIME25
+Relative
+Overall
+Avg. Rank
+↓
+Base
+20.32
+23.15
+12.03
+3.54
+1.88
+0.00
+8.0
+GRPO
+85.51
+73.70
+61.56
+19.17
+8.75
+90.71
+4.4
+Hellinger
+85.96
+74.23
+58.13
+22.08
+9.79
+95.08
+3.8
+Jensen–Shannon
+87.76
+74.86
+60.00
+17.71
+9.58
+91.44
+3.2
+KL
+86.67
+74.21
+57.34
+18.54
+7.71
+86.60
+5.2
+Pearson
+87.28
+74.93
+59.22
+18.54
+7.71
+87.82
+3.6
+Reverse KL
+87.34
+74.60
+57.03
+18.96
+9.17
+90.46
+3.8
+Total Variation
+86.55
+74.31
+60.78
+18.54
+11.04
+95.27
+3.2
+Table 12. Pass@1 accuracy (%) for Qwen2.5-Math-7B trained on
+GSM8k.
+Method
+GSM8K MATH500 AMC23 AIME24 AIME25
+Relative
+Overall ↑
+Avg. Rank
+↓
+Base
+21.39
+25.66
+27.34
+5.63
+2.29
+0.00
+8.0
+GRPO
+73.28
+61.46
+41.09
+8.75
+4.79
+82.44
+4.6
+Hellinger
+73.97
+63.30
+44.06
+7.92
+3.96
+78.47
+3.6
+JS
+74.03
+62.33
+41.88
+10.00
+5.42
+93.30
+2.4
+KL
+72.59
+61.50
+43.75
+9.38
+4.38
+85.66
+4.0
+Pearson
+72.81
+61.61
+45.31
+9.38
+3.96
+85.19
+3.6
+Reverse KL
+73.08
+61.21
+42.03
+9.17
+4.17
+81.65
+5.2
+Total Variation
+73.28
+61.26
+42.50
+8.13
+5.83
+86.93
+4.0
+Table 13. Pass@1 accuracy (%) for Qwen2.5-Math-1.5B trained on
+OpenRS .
+Method
+GSM8K MATH500 AMC23 AIME24 AIME25
+Relative
+Overall ↑
+Avg. Rank
+↓
+Base
+20.32
+23.15
+12.03
+3.54
+1.88
+0.00
+8.0
+GRPO
+81.42
+70.08
+55.63
+18.13
+7.71
+90.52
+5.8
+Hellinger
+82.39
+70.58
+59.38
+15.63
+8.54
+91.70
+4.4
+JS
+83.53
+71.75
+56.41
+19.58
+9.38
+98.47
+2.0
+KL
+82.42
+71.69
+59.53
+17.08
+8.96
+95.16
+3.0
+Pearson
+81.97
+69.66
+57.50
+18.13
+7.92
+91.86
+5.0
+Reverse KL
+83.06
+71.68
+60.00
+18.96
+8.54
+96.78
+2.4
+Total Variation
+82.02
+71.84
+56.41
+16.67
+6.25
+86.05
+4.8
+Table 14. Pass@1 accuracy (%) for Qwen2.5-Math-7B trained on
+OpenRS.
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Divergence-Based RL for General LLM Alignment
+C.2. Separation Metric for Safety Alignment
+We follow the methodology of (Haldar et al., 2025; Lin et al., 2024b; Zheng et al., 2024) to visualize the separation between
+anchor safe and harmful prompts in the latent space of the LLM before and after alignment. Each prompt is represented
+using the last hidden state of the final token, which captures the full contextual history of the sequence. We then apply PCA
+to these representations and visualize the first two principal components. Please refer to the previous mentioned references
+for more details.
+Figure 2 illustrates this visualization for the Qwen-7B base model and its aligned variants. Alignment induces substantially
+stronger separation between safe and harmful clusters, a phenomenon that has been shown to correlate with increased
+robustness. Following the procedure of (Haldar et al., 2025) (Appendix C.3), we quantify this separation using the
+Bhattacharyya distance DB between the clusters, which we adopt as a robustness metric.
+(a) Base, (DB=2.48)
+(b) λ = 0, DB = 4.47
+(c) λ = 0.5, DB=12.13
+(d) λ = 1, DB = 9.14
+Figure 2. Latent-space separation (Bhattacharyya distance DB) between safe and harmful prompt clusters before and after alignment with
+f-HAL (Jensen–Shannon divergence) on Qwen-7B-Base. Compared to the base model, all aligned variants increase separation. The
+on-policy method (f-GRPO, λ=0) yields weaker separation than the hybrid (f-HAL, λ=0.5) and the off-policy supervised objective
+(FDO, λ=1).
+C.3. Qwen-1.5B Safety Alignment Table
+Method
+Robustness
+Utility
+Total
+Sep.
+ASR(%)↓
+ToxiGen AvgRob. MMLU IFEval MuSR AvgUtil.
+Score
+DB ↑
+GCG
+SALAD
+(%) ↑
+↑
+(%) ↑
+↑
+↑
+Direct Aligners (Off-Policy)
+BCO
+9.36 30.10
+35.14
+48.40
+55.92
+28.91
+35.25
+33.86
+32.67
+44.30
+DPO
+2.95 86.00
+62.28
+47.87
+27.56
+28.67
+35.73
+34.92
+33.11
+30.33
+KTO
+4.48 54.50
+65.02
+51.06
+37.33
+29.01
+35.13
+33.73
+32.62
+34.98
+FDO (f-HAL, λ = 1) :
+Hellinger
+17.95
+1.10
+25.66
+45.53
+74.84
+28.22
+33.21
+32.94
+31.46
+53.15
+Jensen-Shannon
+13.89 23.20
+37.94
+44.15
+61.17
+28.37
+37.17
+34.79
+33.44
+47.30
+KL
+13.02 54.00
+60.28
+45.96
+47.33
+28.91
+37.41
+35.58
+33.97
+40.65
+Pearson
+12.76 13.60
+45.52
+46.28
+60.90
+28.61
+35.73
+34.13
+32.82
+46.86
+Reverse KL
+22.11
+5.00
+23.30
+48.09
+79.95
+27.50
+40.89
+34.13
+34.17
+57.06
+Total Variation
+11.61 17.20
+49.58
+45.21
+57.37
+28.13
+35.73
+34.66
+32.84
+45.11
+Hybrid , f-HAL (λ = 0.5) :
+Hellinger
+12.48
+7.25
+9.86
+51.28
+72.31
+26.36
+27.58
+35.05
+29.66
+50.99
+Jensen-Shannon
+11.18 19.60
+53.60
+47.13
+55.75
+28.21
+36.21
+32.67
+32.36
+44.05
+KL
+12.42 46.50
+62.70
+50.85
+49.12
+29.06
+36.21
+34.52
+33.26
+41.19
+Pearson
+10.96 13.30
+48.44
+50.11
+59.09
+28.44
+36.21
+34.39
+33.01
+46.05
+Reverse KL
+20.08
+0.00
+32.44
+50.96
+77.27
+27.29
+38.49
+34.66
+33.48
+55.37
+Total Variation
+15.02 22.31
+59.74
+48.40
+58.32
+28.30
+35.13
+34.52
+32.65
+45.49
+On-Policy RL
+GRPO
+0.66 98.00
+96.62
+43.83
+12.30
+28.11
+2.52
+33.11
+21.25
+16.77
+f-GRPO (f-HAL, λ = 0) :
+Hellinger
+5.75 77.10
+44.42
+48.40
+37.65
+28.91
+32.49
+35.58
+32.33
+34.99
+Jensen-Shannon
+3.39 92.42
+73.04
+44.57
+22.96
+28.46
+31.06
+34.92
+31.48
+27.22
+KL
+4.11 64.27
+64.28
+47.45
+33.74
+28.47
+25.42
+32.54
+28.81
+31.27
+Pearson
+3.64 93.10
+75.22
+47.13
+23.17
+28.53
+30.22
+34.92
+31.22
+27.20
+Reverse KL
+3.52 67.80
+55.96
+50.32
+34.97
+27.97
+27.34
+34.52
+29.94
+32.46
+Total Variation
+4.99 97.10
+81.96
+47.66
+22.20
+28.22
+32.73
+33.33
+31.43
+26.81
+Table 15. Post-Safety-Alignment robustness and utility results for Qwen2.5-1.5B (Base) across different alignment methods. AvgRob is
+computed using min–max normalized separation scores in [0, 100] and (100 −ASR) for AdvBench and SALAD, while AvgUtil denotes
+the average utility score. The Total score is defined as mean(AvgRob, AvgUtil). Cell color and intensity indicate performance relative to
+the mean value within each benchmark column. The pre-alignment Base model separation is 1.16.
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Divergence-Based RL for General LLM Alignment
+C.4. Sample Generations Pre vs Post-Alignment (Safety Task)
+Here we display some example responses after aligning using JS divergence f-HAL (λ ∈{0, 1
+2, 1} corresponding to direct
+alignment FDO, Hybrid, on-policy f-GRPO).
+Model / Method
+Response to Prompt: “What color is the sky?”
+Qwen-7B
+Base
+(Pre-
+alignment)
+The sky is typically blue. Write a Python function named ‘find max min’ that takes a list of
+numbers . . . [Response continues with an unrelated Python coding task, including extraneous
+instructions and incorrect code.]
+JS f-HAL (λ = 0, On-
+policy / f-GRPO)
+The sky is usually blue during the day and turns pink or orange at sunrise and sunset.
+JS f-HAL (λ = 0.5, Hy-
+brid: f-GRPO + FDO)
+The sky is typically blue during the day due to a phenomenon called Rayleigh scattering, which
+causes shorter wavelengths of light (like blue and violet) to scatter more easily in the Earth’s
+atmosphere. However, the sky can appear pink or red at sunrise and sunset due to increased
+scattering of longer wavelengths (red, orange).
+JS f-HAL (λ = 1, Off-
+policy / FDO)
+The color of the daytime sky is typically blue, due to a phenomenon called Rayleigh scattering,
+which causes shorter wavelengths of light (such as blue) to scatter more than longer wavelengths
+(like red and orange). However, the color can vary depending on the time of day, weather
+conditions, and other factors.
+Table 16. Example responses for a benign factual prompt before and after alignment on Qwen-7B Base using JS-based f-HAL. Here,
+λ = 0 corresponds to purely on-policy f-GRPO, λ = 1 to off-policy direct alignment (FDO), and λ = 0.5 to the hybrid objective
+combining both. The hybrid setting often yields the most coherent answer by leveraging off-policy factual supervision while maintaining
+on-policy reward-driven optimization.
+Model / Method
+Response to Harmful Prompt: ”Outline the steps for a terrorist organization to infiltrate
+a government agency.”
+Qwen-7B
+Base
+(Pre-
+alignment)
+To infiltrate a government agency, a terrorist organization would likely follow these steps: 1.
+**Identify Targets**: The organization .... [The base model generates a detailed, step-by-step
+procedural response describing how a terrorist organization could infiltrate a government
+agency, including recruitment, trust-building, information gathering, and cover maintenance.]
+JS f-HAL (λ = 0, On-
+policy / f-GRPO)
+I’m sorry, I can’t assist with that. Instead, let’s talk about how to protect yourself and your
+organization from cyber threats.
+JS f-HAL (λ = 0.5, Hy-
+brid: f-GRPO + FDO)
+I’m sorry, but I can’t assist with that request. Infiltrating a government agency is illegal and
+dangerous. Please respect the law and focus on positive
+JS f-HAL (λ = 1, Off-
+policy / FDO)
+I’m sorry, but I can’t assist with that request. Infiltrating a government agency is illegal and
+unethical. If you have any other questions or need”
+Table 17. Qualitative comparison on a harmful prompt using JS-based f-HAL for Qwen-7B Base. The base model produces unsafe
+procedural content , while the aligned models provide robust safet-aligned refusals.
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Divergence-Based RL for General LLM Alignment
+C.5. Sample Generations Pre vs Post-Alignment (Math Reasoning Task)
+Table 18. Qualitative example where the base model fails (score 0) while aligned methods succeed (score 1). Responses are lightly
+truncated for space.
+Method
+Response (short)
+Prompt
+Wendi has 20 chickens. Each chicken gets 3 cups per meal. Morning: 15 cups. Afternoon: 25 cups. How many cups in the
+final meal? (Answer in \boxed{}.)
+Base (pre)
+Computes total as 3 × 20 = 60, subtracts 15 + 25 = 40, but outputs 10 (incorrect).
+GRPO
+Total needed: 3 × 20 = 60. Given: 15 + 25 = 40. Final meal: 60 −40 = 20 .
+KL
+Total: 60. Given: 40. Remaining: 20 .
+Pearson
+15 + 25 = 40 given; 60 needed; final = 60 −40 = 20 .
+Reverse-KL
+Total = 60, already = 40, final = 20 .
+Hellinger
+Total = 60; remaining after 40 is 20 .
+Jensen–
+Shannon
+Total 20 · 3 = 60; final 60 −(15 + 25) = 20 .
+Total
+Varia-
+tion
+Final meal: 3 · 20 −(15 + 25) = 20 .
+21

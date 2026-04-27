@@ -1,0 +1,3375 @@
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I)
+Models
+Anonymous Authors1
+Abstract
+As Text-to-Image (T2I) diffusion models are in-
+creasingly used in real-world creative workflows,
+a principled framework for valuing contributors
+who provide a collection of data is essential for
+fair compensation and sustainable data market-
+places. While the Shapley value offers a theoreti-
+cally grounded approach to attribution, it faces a
+dual computational bottleneck: (i) the prohibitive
+cost of exhaustive model retraining for each sam-
+pled subset of players (i.e., data contributors) and
+(ii) the combinatorial number of subsets needed
+to estimate marginal contributions due to con-
+tributor interactions. To this end, we propose
+SURROGATESHAP, a retraining-free framework
+that approximates the expensive retraining game
+through inference from a pretrained model. To
+further improve efficiency, we employ a gradient-
+boosted tree to approximate the utility function
+and derive Shapley values analytically from the
+tree-based model. We evaluate SurrogateSHAP
+across three diverse attribution tasks: (i) image
+quality for DDPM-CFG on CIFAR-20, (ii) aes-
+thetics for Stable Diffusion on Post-Impressionist
+artworks, and (iii) product diversity for FLUX.1
+on Fashion-Product data. Across settings, Sur-
+rogateSHAP outperforms prior methods while
+substantially reducing computational overhead,
+consistently identifying influential contributors
+across multiple utility metrics. Finally, we demon-
+strate that SurrogateSHAP effectively localizes
+data sources responsible for spurious correlations
+in clinical images, providing a scalable path to-
+ward auditing safety-critical generative models.
+Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+. Introduction
+Modern conditional generative models enable controlled
+generation from structured signals such as class labels,
+text prompts, or learned embeddings. In particular, Text-
+to-image (T2I) diffusion models such as Stable Diffusion
+(Rombach et al., 2022) and FLUX (Labs et al., 2025), have
+driven rapid progress in controllable image synthesis. At
+the same time, their widespread deployment has intensified
+concerns about fair credits for training data contributors. In
+the context of data marketplaces (Zhang et al., 2024) and
+revenue sharing for generative AI (Deng et al., 2023; Wang
+et al., 2024a), a contributor typically provides a group of
+samples rather than a single sample. This motivates con-
+tributor attribution: quantifying the marginal value of each
+contributor’s group of samples as a unit.
+A common approach for group-level attribution is to aggre-
+gate individual data attributions, which measure the impact
+of training data on the model. Existing methods for diffu-
+sion models, such as D-TRAK (Zheng et al., 2023) and DAS
+(Lin et al., 2024), approximate the leave-one-out (LOO) in-
+fluence (Koh & Liang, 2017) using first-order gradients. To
+obtain group-level scores, one typically sums these indi-
+vidual influences (Koh et al., 2019; Deng et al., 2023) or
+computes group-wise influence directly (Ley et al., 2024).
+While efficient, this paradigm typically relies on loss-based
+gradients, which may fail to capture downstream properties
+such as aesthetics. Furthermore, prior work has shown that
+such additive approximation often underestimates a group’s
+true influence (Koh et al., 2019; Basu et al., 2020).
+To address these concerns, researchers have turned to the
+Shapley value (Shapley et al., 1953), a principled valua-
+tion framework that treats each data provider as a “player”
+(Wang et al., 2024a; Lu et al., 2025; Lee et al., 2025). It
+quantifies importance by averaging a contributor’s marginal
+contribution, the change in utility when their data is added,
+across all possible subsets of players. Despite its theoretical
+appeal, applying Shapley value on modern T2I diffusion
+faces a dual scalability bottleneck. First, its computation
+requires evaluating a utility function across an exponential
+number of subsets, which entails ideally model retraining
+for every subset. While recent work proposes alternatives
+to bypass retraining (Lu et al., 2025), these alternatives still
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+incur high computational costs. Other approximations, such
+as the gradient-based methods (Wang et al., 2024b), are de-
+signed for individual data points and do not naturally scale to
+group-level attribution. Second, even with sample-efficient
+estimators (Lundberg & Lee, 2017; Mitchell et al., 2022),
+obtaining stable, low-variance estimates can require a pro-
+hibitive number of subset queries when the utility function is
+highly non-linear or involves complex interactions—a com-
+mon effect in dataset valuation, even for regression tasks
+(Garrido Lucero et al., 2024).
+To enable efficient and accurate Shapley computation at
+the scale of modern text-to-image diffusion models, we
+introduce SURROGATESHAP, which has two complemen-
+tary ideas. First, we define a training-free proxy game that
+reinterprets the target model as a mixture of conditional gen-
+erators, enabling subset evaluation without retraining. We
+propose a theoretical bound and empirically demonstrate
+that this proxy closely tracks the subset utility of retraining
+models. Second, to improve Shapley estimation for complex
+utility functions, we propose learning a tree-ensemble surro-
+gate of the proxy game and computing Shapley value ana-
+lytically via TreeSHAP. This surrogate accurately captures
+the underlying utility function, allowing for high-fidelity
+subset approximations that significantly enhance the sample
+efficiency of Shapley estimation. We benchmark Surrogate-
+SHAP against existing attribution methods and find that it
+significantly outperforms prior baselines in predicting held-
+out model behaviors. Furthermore, our approach demon-
+strates superior computational and sampling efficiency com-
+pared to existing methods based on Shapley value. Finally,
+we show that SurrogateSHAP reliably identifies key con-
+tributors across diverse use cases, ranging from perceptual
+quality to auditing biased data sources in a clinical setting,
+thereby offering a principled framework for contributor val-
+uation.
+. Related Works
+Data Attribution in Diffusion Models Existing attribution
+methods for diffusion models primarily focus on individ-
+ual data attribution and utilize the first-order gradient to
+approximate leave-one-out (LOO) influence. For example,
+Journey-TRAK (Georgiev et al., 2023) and D-TRAK (Zheng
+et al., 2023) adapt the TRAK framework (Park et al., 2023)
+to diffusion training by computing TRAK-style scores from
+gradients of diffusion losses, whereas DAS (Lin et al., 2024)
+utilizes the KL divergence between noise distributions as
+a proxy for sample impact.1 However, these methods are
+anchored to the diffusion training objective (e.g., noise-
+prediction losses); their attributions can be misaligned with
+downstream utilities that are not directly optimized during
+training, such as aesthetics or diversity.
+Please refer to Section A for details about these methods.
+Scaling Individual Data to Group Influence Group-level
+attribution seeks to evaluate entity-based subsets, such as
+data owners or curated collections. While a natural exten-
+sion of individual data attribution is summation (Koh et al.,
+) or computing group influence via batch gradients
+(Ley et al., 2024), this linear approximation often diverges
+from the actual change in loss as the group size increases
+(Koh et al., 2019; Basu et al., 2020), suggesting that sim-
+ple aggregation overlooks the non-linear interaction effects
+present in large-scale data removals.
+Shapley-Based Contributor Attribution Recent work has
+leveraged the Shapley value (Shapley et al., 1953) to provide
+principled frameworks for revenue sharing and copyright
+assignment for data contributors in T2I models (Wang et al.,
+a; Lee et al., 2025; Lu et al., 2025). Wang et al. (2024a);
+Lee et al. (2025) rely on exact retraining, which is only feasi-
+ble when the number of contributors is small, an assumption
+that rarely holds for T2I models. While Lu et al. (2025) pro-
+posed replacing full retraining with sparsified fine-tuning,
+the fine-tuning still incurs a significant computational cost
+considering the total number of subsets. Furthermore, ex-
+isting works often rely on Shapley estimators (Lundberg
+& Lee, 2017; Mitchell et al., 2022) that do not account for
+the high-variance challenges inherent in the non-linear and
+non-additive utility functions often found in dataset valu-
+ation (Garrido Lucero et al., 2024). These challenges are
+especially pronounced in T2I diffusion models, motivating
+methods that can both (i) reduce the cost of per-subset eval-
+uation and (ii) improve the sampling efficiency for Shapley
+estimation.
+. Preliminaries and Problem Setup
+This section establishes the formal framework for Text-to-
+Image (T2I) diffusion models and defines the problem of
+attributing global model properties to data contributors.
+.1. Text-to-Image (T2I) Diffusion Models
+We consider T2I models that approximate a conditional data
+distribution q(x0|c) for a given conditioning signal c (e.g.,
+a text embedding). This framework encompasses Denoising
+Diffusion Probabilistic Models (DDPMs) (Ho et al., 2020),
+Latent Diffusion Models (LDMs) (Rombach et al., 2022),
+and Flow Matching (FM) models (Lipman et al., 2022).
+Training and Inference. Each sample (x, y) ∈D consists
+of an image x and a prompt y, where y is mapped to c =
+ψ(y) via a text encoder ψ.2 For DDPM/LDM variants,
+training optimizes a conditional denoising objective:
+L(x, y; θ) = Et,ϵ
+h
+λt ∥ϵ −ϵθ(xt, t, c)∥2
+i
+,
+(1)
+Many T2I models, e.g., Stable Diffusion, keep the text encoder
+frozen during training.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+where ϵθ predicts the noise added to image x at timestep
+t, and λt is a timestep-dependent loss weight. FM mod-
+els generalize this by regressing a conditional vector field
+vθ(xt, t, c). We denote θ as the target model optimized on
+the full dataset D, and pθ(x0|c) as the distribution induced
+by the model during inference via classifier-free guidance
+(CFG) (Ho & Salimans, 2022).
+.2. Attribute Contributor via Shapley value
+We study attribution settings where data provenance is tied
+to explicit prompt metadata (e.g., artist name, brand tokens),
+so that contributors correspond to subsets of prompt labels.
+Definition 3.1 (Contributor Attribution). An attribution
+method τ assigns importance scores to contributors based
+on a utility function v : 2N →R that maps a subset of
+contributors to a scalar utility.
+Contributor–label correspondence. Let N = {1, . . . , n}
+be the set of contributors, where each i ∈N is uniquely
+identified by a set of tags or aliases Ti (e.g., artist names
+such as “Van Gogh” or “vanGogh”). We define Yi ⊆Y
+as the subset of prompts containing at least one tag t ∈Ti.
+For any coalition (subset) S ⊆N, the induced training
+set is defined as DS := {(x, y) ∈D : y ∈YS}, where
+YS := S
+i∈S Yi
+The Retraining Game. Let A be a training algorithm, rang-
+ing from full retraining to various fine-tuning procedures,
+and let θ∗
+S ∼A(DS) denote the parameters obtained from
+a stochastic training run on training set DS. We define the
+Retraining Game via the utility function:
+v(S) := F(pθ∗
+S),
+(2)
+where pθ∗
+S is the (implicit) model distribution induced by θ∗
+S,
+and F : P(X) →R is a function that maps this distribution
+to a scalar quality metric. Following Lu et al. (2025), we
+define utility over a collection of outputs because compre-
+hensive model evaluation requires studying global proper-
+ties (Covert et al., 2020) rather than individual outputs. For
+example, in supervised learning, F might manifest as test
+accuracy; in text-to-image generation, it may encompass
+metrics ranging from perceptual scores (Zhang et al., 2018)
+to distributional measures, e.g., FID (Heusel et al., 2017).
+Shapley value computation The Shapley value (Shapley
+et al., 1953) assigns credit to each contributor (player) i ∈N
+via the expected marginal contribution over subsets. For-
+mally, given the retraining utility function v(S), the Shapley
+value of contributor i is
+ϕi(v) = 1
+n
+X
+S⊆N\{i}
+n −1
+|S|
+−1
+[v(S ∪i) −v(S)] . (3)
+Computational bottlenecks
+Estimating ϕi(v) for the re-
+training game is computationally challenging. Each coali-
+tion query v(S) = F(pθ∗
+S) requires: (i) retraining a model
+θ∗
+S from scratch (or significant fine-tuning) on DS, and (ii)
+generating a sample set to compute the distributional metric
+F. For models like FLUX (Labs et al., 2025), the per-query
+cost is expensive. Beyond this cost, the utility functions
+are typically non-additive, which inflates the variance of
+marginal contributions and increases the number of coali-
+tions M needed for accurate estimation (Mitchell et al.,
+). Consequently, even with sampling-based estimators
+such as KernelSHAP (Lundberg & Lee, 2017), the total
+cost O(M · Cost(A)) remains prohibitive. This motivates
+our training-free proxy framework, which approximates the
+retraining-game utility to reduce the cost for subset queries.
+. Method - SurrogateSHAP
+We now present SurrogateSHAP in detail. First, we de-
+fine a training-free proxy game to enable efficient subset
+evaluation in T2I models (Section 4.1). Second, we intro-
+duce a surrogate model-based procedure (Section 4.2) that
+computes Shapley values with improved sample efficiency.
+.1. Training-Free Coalition Evaluation
+Retraining θ∗
+S even for a single coalition S ⊆N is compu-
+tationally prohibitive for large-scale diffusion models. To
+bypass this, one might consider leveraging the composi-
+tional properties of diffusion scores, reformulating pθ∗
+S via
+test-time score composition (Liu et al., 2022). However,
+while this reduces the problem to a standard inference task,
+the computational complexity scales as O(T|S|) per sam-
+ple, as it requires aggregating |S| scores at every denoising
+timestep t ∈T. Fortunately, as our objective is to evaluate
+the global utility F on the induced distribution pθ∗
+S, we can
+reformulate the coalition’s output as a distributional mixture.
+For conditional diffusion models, pθ∗
+S is defined as:
+pθ∗
+S(x) =
+X
+y∈YS
+πS(y)pθ∗
+S(x | ψ(y)),
+(4)
+where πS(y) = ˆp(y)/ P
+y′∈YS ˆp(y′) represents the relative
+label prior based on the empirical frequency ˆp in D.
+.1.1. TRAINING-FREE PROXY GAME
+Building on this structural observation, we define a training-
+free proxy game (N, ˆvθ) that leverages the conditional gen-
+eration capabilities of the target model θ. By assuming the
+full-data conditional pθ(x | ψ(y)) serves as a valid proxy
+for the retrained conditional pθ∗
+S(x | ψ(y)) for all y ∈YS,
+we obtain the proxy utility function:
+ˆvθ(S) := F
+
+X
+y∈YS
+πS(y)pθ(x | ψ(y))
+
+.
+(5)
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Evaluating equation 5 is highly efficient as it eliminates the
+need for subset-specific retraining, reducing subset evalu-
+ation to a mixture sampling problem. To obtain ˆvθ(S) we
+draw a label y ∼πS and then perform standard conditional
+generation x ∼pθ(· | ψ(y)). By bypassing both retraining
+and score-level aggregation, this proxy game enables practi-
+cal coalition evaluation for large-scale generative models.
+.1.2. THEORETICAL FIDELITY OF THE PROXY
+The fidelity of proxy utility to the retraining utility hinges
+on the stability of the class-conditional distributions, which
+we formalize below:
+Assumption 4.1 ((ε, φ)-Stability). For any coalition S ⊆
+N and any condition c ∈C, let φu : X →Rmu be a
+perceptual embedding function (or utility-aligned feature
+extractor). We assume that under a shared-noise coupling
+γc induced by a common noise seed z ∼N(0, I), the root-
+mean-squared (RMS) representation drift in ℓ2 between the
+target model and the retrain model is uniformly bounded:
+dφu(pθ∗
+S, pθ | c) :=
+ E(XS,XF )∼γc
+
+∥φu(XS) −φu(XF )∥2
+1/2 ≤εφu.
+(6)
+where XS ∼pθ∗
+S(· | c) and XF ∼pθ(· | c) are the outputs
+of the retrained model θ∗
+S and target model θ, respectively,
+generated from the same noise seed z. This coupling implies
+Wp
+ φu#pθ∗
+S(· | c), φu#pθ(· | c)
+
+≤dφu pθ∗
+S, pθ | c
+
+≤εφu. (7)
+Since (φu(XS), φu(XF )) constitutes a valid coupling of
+the distributions induced in the representation space (Peyr´e
+et al., 2019), and Wp is defined as the infimum over all
+possible couplings, for p = 2, this implies W2 ≤dφu ≤
+εφu.
+Proposition 4.2 (Proxy Error Bound). Under Assump-
+tion 4.1, recall that v(S) := F(pθ∗
+S) and ˆvθ(S) := F(pθ),
+where the utility functional F is induced by V via
+F(p) := V (Ec∼π[φu#p(· | c)]) ,
+(8)
+and V is a utility functional on probability measures over
+Rmu. If V is Lu-Lipschitz with respect to the Wp metric for
+some p ∈{1, 2} on P(Rmu), then for any realization of the
+retrained parameters θ∗
+S, the following bound holds:
+|v(S) −ˆvθ(S)| ≤Luεφu.
+(9)
+The proof is provided in Section B.1.
+Remark 4.3 (Metric Applicability). Proposition 4.2 applies
+to a broad class of standard image evaluation utilities. For
+expectation-based metrics like LPIPS (Zhang et al., 2018) or
+CLIP-score (Radford et al., 2021), if the underlying scorer
+s(·) is Ls-Lipschitz and V is a linear functional of the dis-
+tribution, then the expected score is Ls-Lipschitz w.r.t. W1.
+For distributional metrics like FID (Heusel et al., 2017),
+which compares Gaussian moment-matches in feature space,
+the functional is locally W2-Lipschitz. While FID is not
+globally Lipschitz, a small W2 drift (under bounded second
+moments) implies small perturbations of the feature mean
+and covariance, ensuring stability in our evaluation regime.
+As a consequence, when the representation is stable, ˆvθ(S)
+serves as a computationally efficient surrogate for v(S) up
+to the error bound in equation 9.
+.2. Approximate Shapley Values via Tree Explainer
+Although the training-free proxy ˆvθ(S) makes individual
+coalition queries inexpensive, Shapley value estimation can
+still require many queries due to the utility function’s strong
+nonlinearity in the player set (Garrido Lucero et al., 2024).
+Butler et al. (2025) addresses this by fitting a gradient-
+boosting tree (GBT) surrogate to exploit hierarchical in-
+teraction priors and subsequently extracting a sparse inter-
+action spectrum. However, such explicit sparsification can
+compromise faithfulness if the utility function contains even
+higher-order interactions. In contrast, we use the learned
+GBT surrogate and compute Shapley values directly on the
+trained ensemble using TreeSHAP (Lundberg et al., 2020),
+without imposing explicit sparsity or truncation constraints
+on the utility function. Our implementation is as follows:
+Approximating Utilities with Tree Surrogates We sam-
+ple M coalitions Sm via the Shapley kernel, and encode
+each as zm ∈{0, 1}n, the indicator vector of contribu-
+tors Sm ⊆{1, . . . , n}. These samples form a training set
+D = {(zm, ˆvθ(Sm))}M
+m=1 used to learn a surrogate model
+ˆfω by solving:
+ˆfω = arg min
+f∈H
+M
+X
+m=1
+(f(zm) −ˆvθ(Sm))2 + Ω(f),
+(10)
+where Ωis a tree-specific complexity penalty (Section D.3).
+We optimize hyperparameters using 5-fold cross-validation.
+This transforms expensive subset queries into a reusable
+surrogate that can be evaluated on any point within the
+Boolean hypercube {0, 1}n.
+TreeSHAP on the Surrogate Model We then compute
+Shapley values ˆϕ = ϕ( ˆfω) via Interventional TreeSHAP
+(Lundberg et al., 2020) with the all-zeros reference r = 0 as
+the background. Because TreeSHAP is exact for tree mod-
+els, ˆϕ satisfies the efficiency axiom Pn
+i=1 ˆϕi = ˆfω(1) −
+ˆfω(0). Under this framework, ˆϕ are deterministic and exact
+conditional on ˆfω; the remaining error is driven by the sur-
+rogate’s generalization error over the 2n possible coalitions.
+Error decomposition Our goal is to estimate ϕ(v), the
+Shapley values for the retraining game v (Equation (2)),
+using an estimator ˆϕ. Using linearity of the Shapley operator
+and the triangle inequality, we decompose the attribution
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+error as
+∥ˆϕ −ϕ(v)∥2 = ∥ϕ( ˆfω) −ϕ(v)∥2
+≤∥ϕ( ˆfω −ˆvθ)∥2
+|
+{z
+}
+Esur
++ ∥ϕ(ˆvθ −v)∥2
+|
+{z
+}
+Egap
+.
+(11)
+The term Esur reflects the surrogate’s approximation and
+estimation error, i.e., bias from function-class and variance
+from fitting ( ˆfω) on M sampled coalitions. The term Egap is
+the approximation gap between the proxy and the retraining
+game; controlled by equation 9, which in turn limits the
+induced Shapley discrepancy. This decomposition ensures
+that approximation errors remain theoretically controlled.
+In summary, SurrogateSHAP (Algorithm 1) enables scalable
+attribution by (i) reformulating the retraining game as a
+training-free proxy game, (ii) approximating utilities via a
+GBT, and (iii) computing Shapley value via TreeSHAP.
+. Experiments Setup & Results
+We evaluate SurrogateSHAP through: (i) the fidelity of the
+proxy game to the retraining game, (ii) sample efficiency
+and convergence for Shapely estimation, (iii) the Linear
+Datamodel Score (LDS), and (iv) counterfactual evaluation.
+.1. Datasets & Models
+CIFAR-20 (32×32). Following Lu et al. (2025), we use
+CIFAR-20, a 20-class subset of CIFAR-100, where each con-
+tributor (labeler) corresponds to a distinct class (Krizhevsky
+et al., 2009). We evaluate a DDPM-CFG (Ho & Salimans,
+), generating samples with a 50-step DDIM sampler.
+To assess model behavior, we report FID and Inception
+Score (IS).
+ArtBench (Post-Impressionism) (256×256). We use the
+post-impressionism subset of ArtBench (Liao et al., 2022),
+which contains 5,000 images from 258 artists, and treat
+each artist as a player.
+Each image has a correspond-
+ing
+prompt
+template
+‘‘a Post-Impressionist
+painting by {artist}’’. We fine-tune Stable Dif-
+fusion v1.5 (Rombach et al., 2022) with LoRA (rank 256).
+The model property is computed as the average aesthetic
+score with an aesthetic predictor3.
+Fashion-Product (256×256). We build a dataset from the
+Fashion Product Images collection (Aggarwal, 2019), com-
+prising 4,468 images from 100 brands. Each image is paired
+with a text prompt that includes the product description and
+brand name. We treat each brand as a player and define a
+player’s data as the subset of images associated with that
+brand. We fine-tune FLUX-dev1 (Labs et al., 2025) us-
+ing LoRA (rank 128). To assess fashion-specific behavior,
+https://github.com/LAION-AI/
+aesthetic-predictor
+Table 1. Utility fidelity relative to retraining and runtime.
+Sample-level fidelity is measured by pixel similarity (MAE, SSIM)
+and representation alignment (RMS in LPIPS, CLIP distance);
+utility error is reported via range-normalized NMAE and NRMSE.
+Time is average wall-clock minutes per subset query.
+Pixel similarity
+Representation alignment
+Utility error
+Method
+MAE ↓
+SSIM ↑
+RMS CLIP ↓
+RMS LPIPS ↓
+NMAE ↓
+NRMSE ↓
+Time (min) ↓
+CIFAR-20
+.36∗
+sFT
+.145
+.639
+.496
+.129
+.079
+.150
+.42
+Ours
+.105
+.779
+.452
+.108
+.037
+.071
+.72
+ArtBench
+.83†
+sFT
+.179
+.441
+.571
+.479
+.101
+.166
+.15
+Ours
+.147
+.531
+.529
+.458
+.068
+.124
+.92
+Fashion-Product
+.24†
+sFT
+.186
+.772
+.458
+.337
+.198
+.296
+.33
+Ours
+.177
+.786
+.429
+.301
+.192
+.265
+.23
+∗Full retraining.
+† LoRA fine-tuning.
+Figure 1. Alignment between the proxy utility ˆvθ(S) (y-axis) and
+retraining utility v(S) (x-axis) across subsets, for (a) FID, (b)
+Inception Score (IS), and (c) mean aesthetic score.
+we report LPIPS and diversity computed over generated
+samples (Moosaei et al., 2022).
+Computational Considerations. Evaluating LDS (Ilyas
+et al., 2022) requires exact retraining for many subsets,
+which is computationally infeasible for Stable Diffusion and
+FLUX. Therefore, we use CIFAR-20 as a simplified ana-
+logue of T2I models for full-parameter retraining. For Art-
+Bench and Fashion-Product, we employ LoRA fine-tuning
+as an efficient alternative for the retraining process. Con-
+sequently, throughout the following sections, the term “re-
+training” refers to LoRA fine-tuning in these settings and
+full-parameter retraining for CIFAR-20. Please refer to
+Section D for dataset, training, and implementation details.
+.2. Proxy Game Fidelity
+We evaluate the empirical faithfulness of the proxy ˆvθ(S)
+relative to retraining utility v(S) at two granularities. First,
+we measure paired sample agreement under a shared noise z
+and conditioning c using pixel-level metrics (MAE, SSIM)
+and RMS of feature-space distances (LPIPS, CLIP similar-
+ity). Second, at the utility level, we assess using NMAE
+and NMSE. These metrics are computed over 100 subsets
+sampled from the Shapley distribution, with utilities defined
+as described in Section 5.1.
+As shown in Table 1, our proposed proxy game achieves
+high pixel-level alignment with retraining. Across all bench-
+marks, it consistently exhibits lower representation drift
+(cf. Equation (6)) compared to retraining alternatives such
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Figure 2. (a) Local samples and structural similarities between
+retrained models (left) and the target model (right) for three subsets.
+(b) Shapley estimator accuracy: ℓ2 error to the oracle versus subset
+budget on synthetic games (mean ± std over 60 independent trials).
+as sparsified fine-tuning (sFT) (Lu et al., 2025). Notably,
+our method consistently achieves lower RMS LPIPS than
+sFT, with scores of 0.108, 0.458, and 0.301 on CIFAR-20,
+ArtBench (Post-Impressionism), and Fashion-Product, re-
+spectively, compared to 0.129, 0.479, and 0.337 for sFT.
+Similar performance gains are observed in RMS CLIP, indi-
+cating that our method effectively preserves structural and
+semantic features relative to retraining (Figure 2a). This
+local stability translates into a tight global utility approxi-
+mation. As shown in Figure 1 and the utility-level metrics
+(Table 1), our proxy tracks the retraining utility with an
+NRMSE ranging from 0.071 on CIFAR-20 to 0.265 on
+Fashion-Product. These findings empirically validate that
+the bound in equation 9 is effectively controlled in practice.
+Computationally, because our proposed game is inference-
+only, it offers a significant speedup (Table 1). On CIFAR-
+, ArtBench (Post-Impressionism), and Fashion-Product,
+it is 23.4×, 12.8×, and 2.9× faster than explicit retraining,
+respectively. Compared to sFT, we achieve gains of 2.5×,
+.4×, and 1.5× while bypassing the need for subset fine-
+tuning. Collectively, these gains in speed and proxy fidelity
+make large-scale subset queries for T2I attribution practical.
+.3. Sample Efficiency on Synthetic Games
+To validate the Shapley estimation proposed in Section 4.2,
+we first evaluate its performance on synthetic coalition
+games (n = 10) characterized by non-linearities and up
+to three-way interactions (Section E). This controlled set-
+ting eliminates the proxy-retraining gap and enables the
+computation of exact Shapley values ϕ(v) via equation 3.
+We then measure the ℓ2 error relative to ϕ(v) across various
+query budgets M for different Shapley estimators.
+As shown in Figure 2b, SurrogateSHAP is substantially
+more sample-efficient than KernelSHAP (Lundberg & Lee,
+) and ProxySPEX (k ∈1, 2) (Butler et al., 2025) in
+the interaction-heavy setting. At a budget of M = 512,
+kernelSHAP maintains a ℓ2 error of 0.085. In contrast, Sur-
+rogateSHAP reaches an error of 0.010 with the same budget.
+This reduction in error translates directly to better axiomatic
+fidelity; as M increases, our method more consistently sat-
+isfies properties like efficiency and the null-player axiom
+compared to ProxySPEX (Section E.3). While KernelSHAP
+is effective in purely additive regimes (Figure S.1a), its per-
+formance degrades if the coalition utility function involves
+non-linearity and interaction (Figure S.1b, Figure 2). These
+results indicate that when utility functions involve complex
+interactions and query budgets are limited, SurrogateSHAP
+provides superior sample efficiency and estimation accuracy.
+.4. Evaluating SurrogateSHAP with Linear Datamodel
+Score (LDS)
+In this section, we evaluate SurrogateSHAP in attribution
+tasks for T2I diffusion models through Linear Datamodel
+Score (LDS) (Ilyas et al., 2022), which measures how well
+an attribution method predicts utilities of unseen coalitions.
+Formally, for a coalition S ⊆[n] and an attribution method
+τ, its additive scores is g(S; τ) = P
+i∈S τi, and LDS is
+defined as:
+LDS(τ; α) := ρ
+ { g(S; τ) }S∈Sα , { v(S)}S∈Sα
+
+, (12)
+where ρ is Spearman correlation (Spearman, 1961) and Sα
+is a held-out subset sampled uniformly from {S ⊆[n] :
+|S| = αn}. We consider α ∈{0.25, 0.5, 0.75}. For each
+α, we sample 100 subsets, retrain the model (or fine-tune
+with LoRA when appropriate), and compute v(S) following
+Section 5.1. We report the mean LDS with 95% confidence
+intervals over five seeds.
+Baseline Methods. We group baseline attribution meth-
+ods into four categories: (i) similarity-based methods; (ii)
+leave-one-out and its approximations (e.g., influence func-
+tions (Koh & Liang, 2017) and TRAK-based methods (Park
+et al., 2023)); (iii) application-specific heuristics (e.g., aes-
+thetic scores for ArtBench Post-Impressionism); and (iv)
+retraining proxies (Lu et al., 2025).4 For TRAK-based meth-
+ods, gradients are computed at the target model θ follow-
+ing Zheng et al. (2023). For local attribution methods, we
+averaged sample-level scores over images generated by θ
+to obtain global scores. The aggregation strategy at the
+contributor level depends on the method: we sum datum-
+level attributions for influence-function and TRAK methods
+(the principled aggregation (Koh et al., 2019)), while for
+similarity-based and application-specific baselines, we ag-
+gregate by either the mean or the maximum. Additional
+details for baseline implementations are in Section A.
+Results.
+Table 2 summarizes LDS (α = 0.5) perfor-
+mance for each method. Our results reveal that TRAK
+and influence-function (IF) variants frequently underper-
+form LOO estimates. In ArtBench (Post-Impressionism),
+We exclude TracIn (Pruthi et al., 2020) since intermediate
+checkpoints are often unavailable in practice.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Table 2. LDS (%) results with α = 0.5. Means and 95% confidence intervals across five random initializations are reported.
+Method
+CIFAR-20
+ArtBench
+(Post-Impressionism)
+Fashion Product
+Inception score
+FID
+Aesthetic score
+Diversity
+LPIPS
+Pixel similarity (avg.)
+−8.88 ± 2.80
+.74 ± 7.44
+.48 ± 5.57
+.16 ± 6.09
+−14.90 ± 4.90
+Pixel similarity (max)
+−23.20 ± 3.16
+.37 ± 1.76
+.40 ± 4.49
+−21.40 ± 7.11
+.30 ± 14.37
+CLIP similarity (avg.)
+−21.49 ± 5.10
+.13 ± 6.40
+−6.85 ± 9.09
+.84 ± 7.72
+−4.19 ± 16.49
+CLIP similarity (max)
+.36 ± 4.04
+−17.79 ± 1.03
+.27 ± 6.65
+.94 ± 10.62
+.97 ± 2.69
+Gradient similarity (avg.)
+.29 ± 2.84
+−11.47 ± 1.88
+.69 ± 5.73
+.41 ± 8.38
+−23.21 ± 12.02
+Gradient similarity (max)
+−20.70 ± 3.64
+.54 ± 1.85
+.06 ± 2.79
+.47 ± 11.87
+−23.22 ± 8.70
+Gmvaluator (Yang et al., 2025)
+.85 ± 3.17
+.37 ± 6.20
+.49 ± 4.24
+−2.86 ± 7.86
+−12.75 ± 0.20
+Aesthetic score (avg.)
+–
+–
+.68 ± 3.79
+–
+–
+Aesthetic score (max)
+–
+–
+.61 ± 4.28
+–
+–
+Relative IF (Barshan et al., 2020)
+.88 ± 1.55
+.29 ± 2.84
+−3.49 ± 4.07
+.23 ± 5.97
+.52 ± 1.65
+Renormalized IF (Hammoudeh & Lowd, 2022)
+.74 ± 4.61
+.82 ± 2.70
+−4.76 ± 3.99
+.45 ± 5.25
+.02 ± 2.86
+TRAK (Park et al., 2023)
+.08 ± 1.45
+.84 ± 2.76
+−3.52 ± 3.96
+.27 ± 5.86
+.52 ± 2.31
+Journey-TRAK (Georgiev et al., 2023)
+.80 ± 3.03
+−34.42 ± 1.49
+−11.94 ± 6.36
+.65 ± 16.34
+−0.40 ± 16.17
+D-TRAK (Zheng et al., 2023)
+.82 ± 4.11
+.38 ± 0.33
+−20.75 ± 2.52
+.61 ± 5.71
+−2.82 ± 6.67
+DAS (Lin et al., 2024)
+.70 ± 1.50
+.59 ± 2.71
+−3.53 ± 4.09
+.35 ± 6.10
+.31 ± 2.37
+Leave-one-out (LOO)
+.31 ± 1.11
+.82 ± 0.92
+−0.18 ± 3.19
+−3.88 ± 3.00
+−1.50 ± 0.71
+Sparsified-FT Shapley (Lu et al., 2025)
+.0 ± 2.25
+−14.1 ± 3.51
+.85 ± 1.89
+.34 ± 12.43
+.57 ± 6.21
+SurrogateSHAP (Ours)
+.7 ± 2.20
+.21 ± 6.78
+.14 ± 5.27
+.41 ± 5.31
+.60 ± 0.81
+Sparsified-FT and SurrogateSHAP use an identical number of coalitions.
+Figure 3. LDS (%) at α = 0.5 for Shapley-based methods, eval-
+uated on (a) FID and (b) average aesthetic score. Computational
+budget is measured in units of retraining-and-inference runtime.
+these methods exhibit negative correlations, most notably
+D-TRAK (−20.75% LDS). Similarity-based methods (e.g.,
+CLIP similarity, GMValuator (Yang et al., 2025)) are of-
+ten inconsistent across datasets and utilities. Such results
+suggest that these baseline methods can be misleading re-
+garding the impact of data contributors on generative quality.
+In contrast, SurrogateSHAP shows consistent and superior
+performance across diverse utility functions, ranging from
+distributional metrics (FID) to perceptual ones (Avg. Aes-
+thetic, LPIPS). Within the Shapley-based framework, Surro-
+gateSHAP outperforms sFT (Lu et al., 2025) by a substantial
+margin. On CIFAR-20, it achieves 51.21% LDS for FID,
+whereas sFT struggles and underperforms other baselines.
+In ArtBench (Post-Impressionism), SurrogateSHAP reaches
+.14% LDS, more than doubling sFT. SurrogateSHAP
+consistently outperforms other methods across various data-
+model α ∈{0.25, 0.75} (see Tables S.5 and S.6).
+We next evaluate the efficiency-performance trade-off within
+the Shapley-based framework5 by measuring LDS across
+varying computational budgets. For SurrogateSHAP, we
+omit the GBT training time from the total budget, as it
+is negligible compared to the total cost of subset queries.
+Across all tested budgets, SurrogateSHAP achieves the high-
+est LDS and demonstrates better scaling trends on CIFAR-
+We employ KernelSHAP for both the retraining baseline and sFT, following Lu et al. (2025).
+Table 3. Counterfactual performance after top removal. We
+report the relative change (%) in ∆F after removing the top k%
+most influential groups identified by each method. Results are
+mean ± std over five random seeds.
+Method
+Top 5%
+Top 10%
+Top 15%
+Top 20%
+CIFAR-20 ( ∆FID ↑)
+CLIP Score
+.42 ± 3.57
+.53 ± 1.58
+.99 ± 2.11
+.09 ± 3.51
+LOO
+.19 ± 3.42
+.48 ± 2.68
+.37 ± 3.14
+.07 ± 3.60
+SurrogateSHAP (Ours)
+.76 ± 4.60
+.70 ± 2.47
+.20 ± 3.34
+.73 ± 2.14
+ArtBench (∆Aesthetic Score ↓)
+Avg. Aesthetic Score
+-4.30± 1.10
+−4.99 ± 1.13
+−3.69 ± 0.29
+−2.36 ± 1.69
+Avg. Pixel Similarity
+−0.23 ± 2.03
+−2.03 ± 0.57
+−3.98 ± 1.19
+−3.26 ± 3.21
+Relative Influence
+−0.76 ± 2.06
+−4.09 ± 1.03
+.46 ± 0.18
+−2.08 ± 1.01
+SurrogateSHAP (Ours)
+−3.30 ± 1.58
+−5.76 ± 0.49
+−5.75 ± 0.63
+−7.71 ± 1.38
+Fashion Product ( ∆Diversity ↓)
+Avg. GradSim
+−6.52 ± 5.82
+−6.09 ± 9.24
+−5.44 ± 3.33
+−3.59 ± 2.03
+DTRAK
+.21 ± 2.24
+−7.18 ± 6.23
+−5.05 ± 9.52
+−4.14 ± 2.01
+SurrogateSHAP (Ours)
+−16.11 ± 1.71
+−17.49 ± 8.34
+−7.05 ± 7.48
+-0.60 ± 7.41
+and ArtBench (Post-Impressionism) (Figure 3). For
+CIFAR-20, our method exceeds baseline performance at
+low budgets (< 10 retraining units) and scales consistently
+as compute increases; in contrast, retraining and sFT fre-
+quently plateau or exhibit high variance. For FID at budget
+, our method reaches an LDS 41.2% whereas the retrain-
+ing baseline and sFT are below 0% (Figure 3a). We also
+compare TreeSHAP-based estimates (dark purple) with Ker-
+nelSHAP (light purple) using the same proxy subsets, and
+our approach outperforms the KernelSHAP estimate by a
+significant margin. These results confirm that Surrogate-
+SHAP provides computationally efficient, reliable estimates
+of held-out set utilities.
+.5. Counterfactual Evaluation
+To complement the rank-based LDS evaluation, we perform
+counterfactual evaluation (Hooker et al., 2019) to verify the
+influence of identified contributors. We measure the relative
+change in model property, ∆F :=
+F(pθ∗
+K )−F(pθ)
+F(pθ)
+, where
+θ∗
+K is model retrained after excluding or retaining the top-
+K contributors. A high-fidelity attribution method should
+maximize this change (degradation or preservation) for a
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+given K. We compare SurrogateSHAP against the best-
+performing baselines within each category from Table 2.
+Under top-removal counterfactuals (Table 3), Surrogate-
+SHAP induces the largest degradations in generative qual-
+ity. On CIFAR-20, removing the top 10% of groups in-
+creases FID by 31.70% (vs. CLIP Score 17.53% and LOO
+.48%) and decreases the Inception Score by 26.55% (vs.
+LOO 22.45% and GMValuator 19.52%) (Table S.9). Simi-
+larly, on ArtBench (Post-Impressionism), removing the top
+% results in a 7.71% drop in aesthetic score, exceeding
+all baselines. As shown in Figure S.16, SurrogateSHAP
+identifies the most visually salient classes as top contribu-
+tors to FID on CIFAR-20, and highlights ArtBench (Post-
+Impressionism) artists whose works are warm-toned and
+atmospheric (Figure S.20), indicating it captures the most
+influential contributors.
+In contrast, Table S.7 shows that removing low-ranked
+groups can enable dataset pruning with minimal impact
+or even performance gains. SurrogateSHAP yields the most
+consistent improvements across percentiles; Removing low-
+ranked groups on ArtBench (Post-Impressionism) improves
+the aesthetic score by 3.62% at 20% removal. On Fashion
+Product, diversity improves by 12.75% at 15% removal,
+whereas baselines often degrade the same metrics (e.g., Avg.
+GradSim: −6.53%). A similar pattern holds for CIFAR-20,
+where our method yields the smallest FID increases under
+bottom removal (11.79% at 5% removal).
+Overall, these counterfactual results, combined with LDS
+analysis, confirm that SurrogateSHAP provides accurate
+attribution effectively and identifies influential contributors.
+. Case Study: Dermatology Data Auditing
+Finally, we showcase the clinical utility of SurrogateSHAP
+by auditing a Stable Diffusion model fine-tuned on the ISIC
+dataset6, a multi-site collection of dermoscopic images from
+ten hospitals. As modern generative models are trained on
+multi-site clinical data (Ktena et al., 2024; Koetzier et al.,
+), especially in scenarios like federated learning (Zhang
+et al., 2021) where the training data is not directly accessible,
+they risk inheriting site-specific acquisition protocols that
+exacerbate undesired behaviors, e.g., non-biological associ-
+ation between sex and specific diseases (Sagers et al., 2023;
+Ktena et al., 2024). To address this, we define the utility
+function v(S) as the Spearman correlation between the out-
+puts of two classifiers, one trained to predict biological sex
+and another for melanoma, on the model’s generated images
+(Section G). This utility quantifies the learned correlation
+between sex and melanoma diagnosis, which should ide-
+ally be near zero. However, our results reveal a significant
+correlation (r = 0.21, p = 3.2 × 10−7).
+https://www.isic-archive.com/
+Hospital 7
+Hospital 9
+b.
+a.
+.10
+.05
+.00
+.05
+.10
+.15
+.20
+.25
+.30
+Hospital 9
+Hospital 4
+Hospital 10
+Hospital 6
+Hospital 3
+Hospital 5
+Hospital 1
+Hospital 2
+Hospital 8
+Hospital 7
+Hospital 9
+Hospital 4
+Hospital 10
+Hospital 6
+Hospital 3
+Hospital 5
+Hospital 1
+Hospital 2
+Hospital 8
+Hospital 7
++0.28
++0.1
++0.07
++0.05
++0.05
++0.02
+.13
+.1
+.1
+.03
+Figure 4. (a) SurrogateSHAP value for ten hospitals (x-axis: mag-
+nitude; y-axis: site; red/blue: positive/negative). (b) Examples of
+dermoscopic images with visual artifacts.
+To localize the source of this bias, we attribute the correla-
+tion to individual hospitals using SurrogateSHAP; as shown
+in Figure 4a, it identifies Hospital 7 as the primary driver
+of the spurious correlation, while Hospital 9 contributes
+the least. We subsequently inspected the source datasets
+from these hospitals and found that images from Hospital
+exhibit a high prevalence of hair artifacts, which corre-
+late with male patients (Gadgil et al., 2025) and possess
+dark pigmentation associated with melanoma (Tsao et al.,
+) (Figure 4b). In contrast, Hospital 9 images frequently
+feature ruler markings, typically associated with benign
+lesions, and show no correlation with patient sex. Upon
+excluding Hospital 7 from the training data, the correla-
+tion in the resulting model’s generations drops to nearly
+zero (r = 5 × 10−4, p = 3.9 × 10−4), effectively reducing
+the spurious association. In contrast, removing the hospi-
+tal with the highest correlation between the binary sex and
+melanoma labels in the training set (Figure S.26) results in
+only a marginal decrease in the generated image correla-
+tion (r = 0.11, p = 1.4 × 10−3). This disparity suggests
+that there are spurious correlations induced by inter-hospital
+interactions that are only captured by SurrogateSHAP.
+. Conclusion
+In this work, we introduce SurrogateSHAP, a framework
+designed to enable efficient and scalable contributor valu-
+ation for T2I diffusion models. By reformulating the ex-
+pensive retraining game as a training-free proxy game and
+approximate subset evaluations via tree-based surrogates,
+we enable efficient and accurate Shapley estimation without
+subset-specific retraining. This approach not only signifi-
+cantly enhances subset query speed but also improves the
+sample efficiency required for stable Shapley estimation,
+making contributor valuation practical for large-scale mod-
+els. Our experiments across CIFAR-20, ArtBench (Post-
+Impressionism), and Fashion-Product demonstrate that Sur-
+rogateSHAP provides accurate estimates of influence, en-
+abling scalable and reliable attribution of data contributors.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Impact Statements
+This work introduces a training-free group-attribution frame-
+work for text-to-image diffusion models, enabling efficient
+estimation of contributor influence on various model behav-
+iors of interest.
+The primary positive impact is the democratization of model
+auditing.
+By eliminating the computational burden of
+retraining-based methods, our framework allows researchers
+with limited compute resources to perform transparency
+audits on large-scale models. This facilitates fair credit
+assignment for data contributors and supports principled
+dataset curation, which can lead to more efficient and spe-
+cialized generative systems. Additionally, as demonstrated
+in our clinical case study, SurrogateSHAP identifies biased
+data providers with high precision. This provides a critical
+tool for identifying and mitigating systematic disparities
+in healthcare AI, ensuring that generative technologies are
+deployed equitably and safely across diverse populations.
+While our method enhances transparency, it carries risks
+if misused as a sole arbiter for data removal. Because at-
+tribution scores are metric-specific, optimizing purely for
+generative quality (e.g., FID) might lead to the systematic
+pruning of “outlier” data representing minority groups or
+marginalized artistic styles, amplifying representation bias.
+We emphasize that this framework should be used as a di-
+agnostic tool within a broader multi-objective governance
+pipeline, supplemented by qualitative safety audits to en-
+sure that data curation decisions do not suppress diverse or
+underrepresented content.
+References
+Aggarwal, P. Fashion product images dataset, 2019. URL
+https://www.kaggle.com/ds/139630.
+Barshan, E., Brunet, M.-E., and Dziugaite, G. K. Relatif:
+Identifying explanatory training samples via relative in-
+fluence. In International Conference on Artificial Intelli-
+gence and Statistics, pp. 1899–1909. PMLR, 2020.
+Basu, S., You, X., and Feizi, S. On second-order group
+influence functions for black-box predictions. In Inter-
+national Conference on Machine Learning, pp. 715–724.
+PMLR, 2020.
+Butler, L., Erginbas, Y. E., Agarwal, A., Kang, J. S., Yu, B.,
+and Ramchandran, K. Proxyspex: Inference-efficient in-
+terpretability via sparse feature interactions in llms. arXiv
+preprint arXiv:2505.17495, 2025.
+Charpiat, G., Girard, N., Felardos, L., and Tarabalka, Y.
+Input similarity from the neural network perspective. Ad-
+vances in Neural Information Processing Systems, 32,
+.
+Codella, N. C., Gutman, D., Celebi, M. E., Helba, B.,
+Marchetti, M. A., Dusza, S. W., Kalloo, A., Liopyris, K.,
+Mishra, N., Kittler, H., et al. Skin lesion analysis toward
+melanoma detection: A challenge at the 2017 interna-
+tional symposium on biomedical imaging (isbi), hosted
+by the international skin imaging collaboration (isic). In
+IEEE 15th international symposium on biomedical
+imaging (ISBI 2018), pp. 168–172. IEEE, 2018.
+Covert, I., Lundberg, S. M., and Lee, S.-I. Understand-
+ing global feature contributions with additive importance
+measures. Advances in neural information processing
+systems, 33:17212–17223, 2020.
+Deng, J., Dong, W., Socher, R., Li, L.-J., Li, K., and Fei-Fei,
+L. Imagenet: A large-scale hierarchical image database.
+In 2009 IEEE conference on computer vision and pattern
+recognition, pp. 248–255. Ieee, 2009.
+Deng, J., Zhang, S., and Ma, J. Computational copyright:
+Towards a royalty model for music generative ai. arXiv
+preprint arXiv:2312.06646, 2023.
+Dettmers, T., Lewis, M., Shleifer, S., and Zettlemoyer, L. 8-
+bit optimizers via block-wise quantization. In The Tenth
+International Conference on Learning Representations,
+ICLR 2022, Virtual Event, April 25-29, 2022. OpenRe-
+view.net, 2022. URL https://openreview.net/
+forum?id=shpkpVXzo3h.
+Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn,
+D., Zhai, X., Unterthiner, T., Dehghani, M., Minderer,
+M., Heigold, G., Gelly, S., Uszkoreit, J., and Houlsby,
+N. An image is worth 16x16 words: transformers for
+image recognition at scale. International Conference on
+Learning Representations (ICLR), 2021.
+Esser, P., Kulal, S., Blattmann, A., Entezari, R., M¨uller, J.,
+Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., et al.
+Scaling rectified flow transformers for high-resolution
+image synthesis. In Forty-first international conference
+on machine learning, 2024.
+Gadgil, S. U., DeGrave, A. J., Janizek, J. D., Xu, S.,
+Nwandu, L., Fonjungo, F., Lee, S.-I., and Daneshjou,
+R. Dream: A framework for discovering mechanisms
+underlying ai prediction of protected attributes. medRxiv,
+pp. 2024–04, 2025.
+Garrido Lucero, F., Heymann, B., Vono, M., Loiseau, P.,
+and Perchet, V. Du-shapley: A shapley value proxy for ef-
+ficient dataset valuation. Advances in Neural Information
+Processing Systems, 37:1973–2000, 2024.
+Georgiev, K., Vendrow, J., Salman, H., Park, S. M.,
+and Madry, A.
+The journey, not the destination:
+How data guides diffusion models.
+arXiv preprint
+arXiv:2312.06205, 2023.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Hammoudeh, Z. and Lowd, D. Identifying a training-set
+attack’s target using renormalized influence estimation.
+In Proceedings of the 2022 ACM SIGSAC Conference on
+Computer and Communications Security, pp. 1367–1381,
+.
+Han, S., Pool, J., Tran, J., and Dally, W. Learning both
+weights and connections for efficient neural network.
+Advances in neural information processing systems, 28,
+.
+Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., and
+Hochreiter, S. Gans trained by a two time-scale update
+rule converge to a local nash equilibrium. Advances in
+neural information processing systems, 30, 2017.
+Ho, J. and Salimans, T. Classifier-free diffusion guidance.
+arXiv preprint arXiv:2207.12598, 2022.
+Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-
+bilistic models. Advances in neural information process-
+ing systems, 33:6840–6851, 2020.
+Hooker, S., Erhan, D., Kindermans, P.-J., and Kim, B. A
+benchmark for interpretability methods in deep neural
+networks. Advances in neural information processing
+systems, 32, 2019.
+Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang,
+S., Wang, L., Chen, W., et al. Lora: Low-rank adaptation
+of large language models. ICLR, 1(2):3, 2022.
+Ilyas, A., Park, S. M., Engstrom, L., Leclerc, G., and Madry,
+A. Datamodels: Predicting predictions from training data.
+arXiv preprint arXiv:2202.00622, 2022.
+Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating
+the design space of diffusion-based generative models.
+Advances in neural information processing systems, 35:
+–26577, 2022.
+Koetzier, L. R., Wu, J., Mastrodicasa, D., Lutz, A., Chung,
+M., Koszek, W. A., Pratap, J., Chaudhari, A. S., Ra-
+jpurkar, P., Lungren, M. P., et al. Generating synthetic
+data for medical imaging. Radiology, 312(3):e232471,
+.
+Koh, P. W. and Liang, P. Understanding black-box predic-
+tions via influence functions. In International conference
+on machine learning, pp. 1885–1894. PMLR, 2017.
+Koh, P. W. W., Ang, K.-S., Teo, H., and Liang, P. S. On the
+accuracy of influence functions for measuring group ef-
+fects. Advances in neural information processing systems,
+, 2019.
+Krizhevsky, A., Hinton, G., et al. Learning multiple layers
+of features from tiny images. 2009.
+Ktena, I., Wiles, O., Albuquerque, I., Rebuffi, S.-A., Tanno,
+R., Roy, A. G., Azizi, S., Belgrave, D., Kohli, P., Cemgil,
+T., et al. Generative models improve fairness of medical
+classifiers under distribution shifts. Nature Medicine, 30
+(4):1166–1173, 2024.
+Labs, B. F., Batifol, S., Blattmann, A., Boesel, F., Consul,
+S., Diagne, C., Dockhorn, T., English, J., English, Z.,
+Esser, P., Kulal, S., Lacey, K., Levi, Y., Li, C., Lorenz,
+D., M¨uller, J., Podell, D., Rombach, R., Saini, H., Sauer,
+A., and Smith, L. Flux.1 kontext: Flow matching for in-
+context image generation and editing in latent space, 2025.
+URL https://arxiv.org/abs/2506.15742.
+Lee, K., Liu, Z., Tang, W., and Zhang, Y. Faithful group
+shapley value. arXiv preprint arXiv:2505.19013, 2025.
+Ley, D., Srinivas, S., Zhang, S., Rusak, G., and Lakkaraju,
+H. Generalized group data attribution. arXiv preprint
+arXiv:2410.09940, 2024.
+Liao, P., Li, X., Liu, X., and Keutzer, K. The artbench
+dataset: Benchmarking generative models with artworks.
+arXiv preprint arXiv:2206.11404, 2022.
+Lin, J., Tao, L., Dong, M., and Xu, C. Diffusion attribution
+score: Evaluating training data influence in diffusion
+models. arXiv preprint arXiv:2410.18639, 2024.
+Lipman, Y., Chen, R. T., Ben-Hamu, H., Nickel, M., and
+Le, M. Flow matching for generative modeling. arXiv
+preprint arXiv:2210.02747, 2022.
+Liu, N., Li, S., Du, Y., Torralba, A., and Tenenbaum, J. B.
+Compositional visual generation with composable diffu-
+sion models. In European conference on computer vision,
+pp. 423–439. Springer, 2022.
+Loshchilov, I. and Hutter, F. Decoupled weight decay regu-
+larization. arXiv preprint arXiv:1711.05101, 2017.
+Lu, M., Lin, C., Kim, C., and Lee, S.-I. An efficient frame-
+work for crediting data contributors of diffusion models.
+In The Thirteenth International Conference on Learning
+Representations, 2025.
+Lundberg, S. M. and Lee, S.-I. A unified approach to inter-
+preting model predictions. Advances in neural informa-
+tion processing systems, 30, 2017.
+Lundberg, S. M., Erion, G., Chen, H., DeGrave, A., Prutkin,
+J. M., Nair, B., Katz, R., Himmelfarb, J., Bansal, N.,
+and Lee, S.-I. From local explanations to global under-
+standing with explainable ai for trees. Nature machine
+intelligence, 2(1):56–67, 2020.
+Mitchell, R., Cooper, J., Frank, E., and Holmes, G. Sam-
+pling permutations for shapley value estimation. Journal
+of Machine Learning Research, 23(43):1–46, 2022.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Moosaei, M., Lin, Y., Akhazhanov, A., Chen, H., Wang,
+F., and Yang, H. Outfitgan: Learning compatible items
+for generative fashion outfits.
+In Proceedings of the
+IEEE/CVF conference on computer vision and pattern
+recognition, pp. 2273–2277, 2022.
+Park, S. M., Georgiev, K., Ilyas, A., Leclerc, G., and Madry,
+A. Trak: Attributing model behavior at scale. arXiv
+preprint arXiv:2303.14186, 2023.
+Peyr´e, G., Cuturi, M., et al. Computational optimal trans-
+port: With applications to data science. Foundations and
+Trends® in Machine Learning, 11(5-6):355–607, 2019.
+Pruthi, G., Liu, F., Kale, S., and Sundararajan, M. Estimat-
+ing training data influence by tracing gradient descent.
+Advances in Neural Information Processing Systems, 33:
+–19930, 2020.
+Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G.,
+Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J.,
+et al. Learning transferable visual models from natural
+language supervision. In International conference on
+machine learning, pp. 8748–8763. PmLR, 2021.
+Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and
+Ommer, B. High-resolution image synthesis with latent
+diffusion models. In Proceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition, pp.
+–10695, 2022.
+Rotemberg, V., Kurtansky, N., Betz-Stablein, B., Caffery,
+L., Chousakos, E., Codella, N., Combalia, M., Dusza, S.,
+Guitera, P., Gutman, D., et al. A patient-centric dataset
+of images and metadata for identifying melanomas using
+clinical context. Scientific data, 8(1):34, 2021.
+Sagers, L. W., Diao, J. A., Melas-Kyriazi, L., Groh, M., Ra-
+jpurkar, P., Adamson, A. S., Rotemberg, V., Daneshjou,
+R., and Manrai, A. K. Augmenting medical image clas-
+sifiers with synthetic data from latent diffusion models.
+arXiv preprint arXiv:2308.12453, 2023.
+Salimans, T., Goodfellow, I., Zaremba, W., Cheung, V.,
+Radford, A., and Chen, X.
+Improved techniques for
+training gans. Advances in neural information processing
+systems, 29, 2016.
+Shapley, L. S. et al. A value for n-person games. 1953.
+Song, J., Meng, C., and Ermon, S. Denoising diffusion
+implicit models. arXiv preprint arXiv:2010.02502, 2020.
+Spearman, C. The proof and measurement of association
+between two things. 1961.
+Tsao, H., Olazagasti, J. M., Cordoro, K. M., Brewer, J. D.,
+Taylor, S. C., Bordeaux, J. S., Chren, M.-M., Sober,
+A. J., Tegeler, C., Bhushan, R., et al. Early detection
+of melanoma: reviewing the abcdes. Journal of the Amer-
+ican Academy of Dermatology, 72(4):717–723, 2015.
+Tschandl, P., Rosendahl, C., and Kittler, H. The ham10000
+dataset, a large collection of multi-source dermatoscopic
+images of common pigmented skin lesions. Scientific
+Data, 5(180161), 2018.
+Wang, J. T., Deng, Z., Chiba-Okabe, H., Barak, B., and Su,
+W. J. An economic solution to copyright challenges of
+generative ai. arXiv preprint arXiv:2404.13964, 2024a.
+Wang, J. T., Mittal, P., Song, D., and Jia, R. Data shapley
+in one training run. arXiv preprint arXiv:2406.11011,
+b.
+Yang, J., Deng, W., Liu, B., Huang, Y., Zou, J., and Li, X.
+Gmvaluator: Similarity-based data valuation for genera-
+tive models. In The Thirteenth International Conference
+on Learning Representations, 2025.
+Zhang, C., Xie, Y., Bai, H., Yu, B., Li, W., and Gao, Y. A
+survey on federated learning. Knowledge-Based Systems,
+:106775, 2021.
+Zhang, J., Bi, Y., Cheng, M., Liu, J., Ren, K., Sun, Q., Wu,
+Y., Cao, Y., Fernandez, R. C., Xu, H., et al. A survey on
+data markets. arXiv preprint arXiv:2411.07267, 2024.
+Zhang, R., Isola, P., Efros, A. A., Shechtman, E., and Wang,
+O. The unreasonable effectiveness of deep features as a
+perceptual metric. In Proceedings of the IEEE conference
+on computer vision and pattern recognition, pp. 586–595,
+.
+Zheng, X., Pang, T., Du, C., Jiang, J., and Lin, M. Intriguing
+properties of data attribution on diffusion models. arXiv
+preprint arXiv:2311.00500, 2023.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Appendix.
+A. Data Attribution Methods for Diffusion Models
+Here we summarize data attribution methods for diffusion models and provide implementation details for the baselines used
+in Section 5.4. For local attribution methods, we compute sample-level attributions for images generated by θ and average
+them to obtain global scores. Contributor-level aggregation depends on the method: for variants of influence-function (IF)
+and TRAK, we aggregate by summing datum-level attributions; for similarity-based and application-specific baselines, we
+aggregate using either the mean or the maximum.
+A.1. Similarity-based Methods
+Raw pixel similarity. This is a simple baseline that uses each raw image as the representation and then computes the cosine
+similarity between the generated sample of interest and each training sample as the attribution score.
+CLIP similarity. This method utilizes CLIP7 (Radford et al., 2021) to encode each sample into an embedding and then
+compute the cosine similarity between the generated sample of interest and each training sample as the attribution score.
+GMValuator. Yang et al. (2025) propose a data valuation method for generative models. Given training data X = {xi}n
+i=1
+and generated samples ˆX = {ˆxj}m
+j=1, each xi is valued by its similarity to ˆX. Using a distance dij = d(xi, ˆxj), the
+(normalized) contribution to ˆxj is
+V (xi, ˆxj) =
+exp(−dij)
+Pn
+i′=1 exp(−di′j),
+(13)
+and the value of xi is ϕi = Pm
+j=1 V (xi, ˆxj). For efficiency, GMValuator considers only the top-k nearest neighbors Pj of
+each ˆxj and weights by a generation-quality score qj ∈[0, 1]:
+V (xi, ˆxj) =
+
+
+
+
+
+
+
+qj ·
+exp(−dij)
+P
+x∈Pj
+exp
+ −d(x, ˆxj)
+,
+xi ∈Pj,
+,
+otherwise.
+(14)
+In our implementation, we use LPIPS for d(·, ·) and set k = 50.
+A.2. Influence Functions and TRAKs
+Leave-one-out. Leave-one-out (LOO) evaluates the change in model property due to the removal of a single data contributor
+i from the training set (Koh & Liang, 2017). Formally, it is defined as:
+τLOO(F, D)i = F(θ∗) −F(θ∗
+D\Ci),
+(15)
+where F(θ∗) denotes the global property for the model trained with the full dataset, and F(θ∗
+D\Ci) represents the global
+property of the mode trained with the data provided by the ith contributor.
+Gradient similarity. This is a gradient-based influence estimator (Charpiat et al., 2019), which computes the cosine
+similarity using the gradient representations of the generated sample of interest, ˜x and each training sample x(j) as the
+attribution score:
+PT∇θLSimple(x(j); θ∗) · PT∇θLSimple(˜x; θ∗)
+∥PT∇θLSimple(x(j); θ∗)T∥∥PT∇θLSimple(˜x; θ∗)∥
+(16)
+TRAK. Park et al. (2023) propose an approach that aims to enhance the efficiency and scalability of data attribution for
+classifiers. Zheng et al. (2023) adapt TRAK for attributing images generated by diffusion models, defined as follows:
+S
+S
+X
+s=1
+Φs
+ Φ⊤
+s Φs + λI
+−1 P⊤
+s ∇θLSimple(˜x; θ∗
+s), and
+(17)
+Φs =
+h
+ϕs(x(1)), . . . , ϕs(x(N))
+i⊤
+, where ϕs(x) = P⊤
+s ∇θLSimple(x; θ∗
+s),
+(18)
+https://github.com/openai/CLIP
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+where LSimple is the diffusion loss used during training, Ps is a random projection matrix, and λI serves for numerical
+stability and regularization. For TRAK-based approaches, we follow the implementation details in Zheng et al. (2023)8.
+D-TRAK. Zheng et al. (2023) find that, compared to the theoretically motivated setting where the loss function is defined as
+L = LSimple, using alternative functions, such as the squared loss LSquare, to replace both the loss function and local model
+property result in improved performance:
+S
+S
+X
+s=1
+Φs
+ Φ⊤
+s Φs + λI
+−1 P⊤
+s ∇θLSquare(˜x; θ∗
+s), and
+(19)
+Φs =
+h
+ϕs(x(1)), . . . , ϕs(x(N))
+i⊤
+, where ϕs(x) = P⊤
+s ∇θLSquare(x; θ∗
+s).
+(20)
+Journey-TRAK. (Georgiev et al., 2023) focus on attributing noisy images xt during the denoising process. It attributes
+training data not only for the final generated sample but also for the intermediate noisy samples throughout the denoising
+process. At each time step, the reconstruction loss is treated as a local model property. Following (Zheng et al., 2023), we
+compute attribution scores by averaging over the generation time steps, as shown below:
+T ′
+S
+T ′
+X
+t=1
+S
+X
+s=1
+Φs
+ Φ⊤
+s Φs + λI
+−1 P⊤
+s ∇θLt
+Simple(˜xt; θ∗
+s), and
+(21)
+Φs =
+h
+ϕs(x(1)), . . . , ϕs(x(N))
+i⊤
+, where ϕs(x) = P⊤
+s ∇θLSimple(x; θ∗
+s).
+(22)
+Here, Lt
+Simple is the diffusion loss restricted to the time step t (hence without taking the expectation over the time step).
+In practice, we follow the main implementation by Zheng et al. (2023) that considers TRAK, D-TRAK, and Journey-TRAK
+as retraining-free methods. That is, S = 1, and θ∗
+= θ∗is the original diffusion model trained on the entire dataset.
+DAS. Lin et al. (2024) propose the Diffusion Attribution Score (DAS), which quantifies the influence of a training sample
+by comparing the model’s predicted distributions before vs. after removing that sample. For a target generated example
+xgen, DAS defines the attribution of x(i) as the KL divergence between the original model and the leave-one-out model. For
+diffusion models, this is approximated by the expected squared difference between noise-predictor outputs:
+τDAS(xgen, D)(i) ≈DKL
+
+pθ(xgen)
+
+
+ pθ\i(xgen)
+
+≈Eϵ,t
+h
+
+ϵθ
+ xgen
+t
+, t
+
+−ϵθ\i
+ xgen
+t
+, t
+
+
+i
+.
+(23)
+To avoid retraining, they linearize the noise predictor around θ∗and approximate the parameter change θ∗−θ\i via a
+one-step Newton update. Using the Sherman–Morrison formula, they derive a closed-form attribution at timestep t:
+τDAS,t(xgen, D)(i) = Eϵ
+
+
+
+
+
+
+
+gt(xgen)⊤ Gt(D)⊤Gt(D)
+−1gt
+ x(i)
+r(i)
+t
+−gt
+ x(i)⊤ Gt(D)⊤Gt(D)
+−1gt
+ x(i)
+
+
+
+
+
+
+,
+(24)
+where gt(x) = ∇θϵθ∗(xt, t), Gt(D) = ∇θϵθ∗(Dt, t), and r(i)
+t
+is the residual term from the noise prediction. Here,
+D = {x(j)}N
+j=1 denotes the training dataset, and all quantities are evaluated at the final weights θ∗. In practice, we follow
+the implementation from Lin et al. (2024)9 which treats DAS as a retraining-free method using the final weights θ∗.
+Relative Influence. Proposed by Barshan et al. (2020), the θ-relative influence functions estimator normalizes the influence
+functions estimator of Koh & Liang (2017) by the HVP magnitude. Following Zheng et al. (2023), we combine this estimator
+with TRAK dimension reduction. The attribution for each training sample x(j) is as follows:
+PT∇θLSimple(˜x; θ∗) ·
+
+ΦTRAK
+T · ΦTRAK + λI
+−1
+· PT∇θLSimple(x(j); θ∗)
+
+
+
+
+
+ΦTRAK
+T · ΦTRAK + λI
+−1
+· PT∇θLSimple(x(j); θ∗)
+
+
+
+
+,
+(25)
+https://github.com/sail-sg/D-TRAK/
+https://github.com/Jinxu-Lin/DAS/
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+and
+ΦTRAK =
+h
+ϕ(x(1)), . . . , ϕ(x(N))
+i⊤
+, where ϕ(x) = P⊤∇θLSimple(x; θ∗).
+(26)
+Renormalized Influence. Introduced by Hammoudeh & Lowd (2022), this method renormalizes the influence functions by
+the magnitude of the training sample’s gradients. Similar to relative influence, we made an adaptation following Zheng et al.
+(2023). The attribution for each training sample x(j) is as follows:
+PT∇θLSimple(˜x; θ∗) ·
+
+ΦTRAK
+T · ΦTRAK + λI
+−1
+· PT∇θLSimple(x(j); θ∗)
+∥PT∇θLSimple(x(j); θ∗)∥
+,
+(27)
+and
+ΦTRAK =
+h
+ϕ(x(1)), . . . , ϕ(x(N))
+i⊤
+, where ϕ(x) = P⊤∇θLSimple(x; θ∗).
+(28)
+For TRAK-based methods and gradient similarity, we compute gradients using the final model checkpoint, meaning that
+S = 1 in Equation (17). We select 100 time steps evenly spaced within the interval [1, T] for computing the diffusion loss.
+At each time step, we introduce one instance of noise. The projection dimensions are set to k = 4096 for CIFAR-20 and
+k = 32768 for ArtBench (Post-Impressionism) and Fashion-Product. For D-TRAK, we use the best-performing output
+function LSquare and choose λ = 5e−1 as in Zheng et al. (2023).
+Generalized Group Data Attribution (GGDA)
+Ley et al. (2024) propose GGDA as a unified framework for attributing
+model behavior to groups of training examples. In its leave-one-out instantiation, GGDA measures a group’s attribution as
+the change in a target property between a model trained on the full dataset and a model retrained with that group removed,
+i.e., F(θD) −F(θD\Ci), which is precisely a group leave-one-out effect. Accordingly, in our experiments, we report group
+leave-one-out estimates. Ley et al. (2024) also considers forming groups via unsupervised methods (e.g., via k-means) to
+improve efficiency; however, such groupings do not generally coincide with our pre-defined contributor groups.
+TracIn. Pruthi et al. (2020) propose to attribute the training sample’s influence based on first-order approximation with
+saved checkpoints during the training process. However, this is also a major limitation because sometimes it is impossible to
+obtain checkpoints for models such as Stable Diffusion (Rombach et al., 2022) and FLUX (Labs et al., 2025).
+A.3. Retraining-based Methods
+Sparsified fine-tuning (sFT). Lu et al. (2025) propose sparsified fine-tuning, which first prunes a trained target model and
+then fine-tunes the pruned model on sampled data subsets. Their approach relies on the approximation
+F(p˜θft
+S,k) ≈F(pθ∗
+S),
+(29)
+where ˜θft
+S,k denotes the sparsified-and-fine-tuned model for subset S with fine-tuning steps k. Following their protocol10,
+we apply magnitude-based pruning (Han et al., 2015) to produce sparse diffusion models: 10.4M→3.0M (CIFAR-20),
+.1M→2.6M (ArtBench, Post-Impressionism), and 358M→107.9M (Fashion-Product). We then fine-tune each sparsified
+model using the same training configuration (see Section D) to obtain a performant pruned model.
+For unlearning on subsets S, we adopt the best-performing setting reported by Lu et al. (2025). Concretely, for each subset,
+we fine-tune the pruned model for 1,000 steps, using 50 epochs for CIFAR-20, 50 epochs for ArtBench (Post-Impressionism),
+and 16 epochs for Fashion-Product. We estimate Shapley values with KernelSHAP (Lundberg & Lee, 2017) implementation
+from Lu et al. (2025).
+https://github.com/suinleelab/An-Efficient-Framework-for-Crediting-Data-Contributors-of-Diffusion-Models
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+B. Proofs
+B.1. Proof of Proposition 4.2
+Proof of Proposition 4.2. Fix a coalition S ⊆N and the realized retrained parameters θ∗
+S. Let φu : X →Rmu be the
+utility-aligned feature extractor. Define the π-marginal pushforward feature distributions:
+νS := Ec∼π
+
+φu#pθ∗
+S(· | c)
+
+,
+ˆνS := Ec∼π[φu#pθ(· | c)] .
+By the definition of F in equation 8, v(S) = V(νS) and ˆvθ(S) = V(ˆνS). Since V is Lu-Lipschitz with respect to Wp for
+p ∈{1, 2}, we have
+|v(S) −ˆvθ(S)| ≤Lu Wp(νS, ˆνS).
+(30)
+To bound Wp(νS, ˆνS), consider the shared-noise coupling γc from Assumption 4.1. For c ∼π and z ∼N(0, I), let
+Z := φu
+ xθ∗
+S
+(z, c)
+
+,
+ˆZ := φu
+ xθ
+(z, c)
+
+.
+Under (c, z) ∼π × N(0, I), the marginals of Z and ˆZ are νS and ˆνS, respectively; hence (Z, ˆZ) defines a coupling
+of (νS, ˆνS). Using the definition of the Wasserstein distance as the infimum over all couplings (Peyr´e et al., 2019), and
+specializing to p = 2, we obtain
+W2(νS, ˆνS) ≤
+
+Ec,z
+h
+∥Z −ˆZ∥2
+i1/2
+=
+
+Ec∼π
+
+Ez
+
+
+
+φu(xθ∗
+S
+(z, c)) −φu(xθ
+(z, c))
+
+
+
+1/2
+.
+By Assumption 4.1, the inner expectation is bounded by (εφu)2 for all c ∈C, hence W2(νS, ˆνS) ≤εφu. Since
+W1(νS, ˆνS) ≤W2(νS, ˆνS), we obtain Wp(νS, ˆνS) ≤εφu for p ∈{1, 2}. Substituting into equation 30 yields
+|v(S) −ˆvθ(S)| ≤Lu εφu.
+which concludes the proof.
+C. Algorithm
+Algorithm 1 SurrogateSHAP
+Require: Contributor set N, target model θ, global model property F, sampling budget M, tree-based hypothesis class H.
+Ensure: Estimated contributor attributions ˆϕ ∈Rn.
+: Initialize surrogate dataset Dsurr ←∅.
+: for m = 1, . . . , M do
+:
+Sample coalition Sm ⊆N following πKernelSHAP, and let zm ∈{0, 1}n be its indicator vector.
+:
+Identify union of contributor labels: YSm = S
+i∈Sm Yi.
+:
+Compute the mixture distribution for Sm via θ: PSm = P
+y∈YSm πSm(y)pθ(x | ψ(y)).
+:
+Compute proxy utility: ym ←F(PSm).
+:
+Dsurr ←Dsurr ∪{(zm, ym)}.
+: end for
+: Train non-linear surrogate: ˆfω ←arg minf∈H
+P
+(z,y)∈Dsurr L(f(z), y) + Ω(f).
+: Compute attributions: ˆϕ ←TreeSHAP( ˆfω; target = 1n, baseline = 0n).
+:
+: return ˆϕ.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+D. Experiment Setup & Implementation Details
+D.1. Datasets and Model Properties
+CIFAR-20 (32 × 32). We derive CIFAR-20 from CIFAR-10011, which contains 50,000 training images across 100
+fine-grained classes grouped into 20 superclasses (Krizhevsky et al., 2009). Following Lu et al. (2025) for computational
+feasibility, we restrict CIFAR-100 to four superclasses (large carnivores, flowers, household electrical
+devices, vehicles 1). The resulting dataset contains 10,000 training images from 20 fine-grained classes (5 per
+superclass). Unless otherwise stated, we treat each fine-grained class as a player (corresponding to a class-specific labeling
+unit) and define a player’s data as all images belonging to that class.
+Model properties. To quantify the quality of generated images, we report Inception Score (IS) (Salimans et al., 2016) and
+Fr´echet Inception Distance (FID) (Heusel et al., 2017), which capture complementary aspects of sample quality. For both
+metrics, we generate 10,240 samples per evaluation and compute scores using standard PyTorch implementations: Inception
+Score12 and FID13.
+ArtBench Post-Impressionism (256 × 256). ArtBench-10 is a dataset for benchmarking artwork generation with 10 art
+styles, consisting of 5,000 training images per style (Liao et al., 2022). For our experiments, we consider the 5,000 training
+images corresponding to the art style “post-impressionism” from 258 artists.
+Model property. We consider a downstream use case in which many images are generated, and only the most aesthetically
+pleasing outputs are retained. Following (Lu et al., 2025), we evaluate each model using an aesthetic predictor14 by scoring
+generated images and reporting the mean predicted score as the model property. The predictor is a linear head trained
+on top of CLIP embeddings and outputs a scalar proxy for perceived aesthetic quality.
+Fashion-Product-100 (256 × 256).
+We use the Fashion Product Images dataset (Aggarwal, 2019), which provides product
+images with textual descriptions, categories, and brand names. We remove images containing human faces to avoid
+identity-related artifacts, then select the 100 brands with the largest remaining product counts. To enable efficient LDS
+evaluation, we uniformly subsample within each selected brand by retaining 25% of its products, yielding a final dataset of
+,468 images across 100 brands. In this dataset, each brand is treated as a player, and a player’s data consists of all retained
+products from that brand.
+Model properties. Following Moosaei et al. (2022), we evaluate generated fashion-product images using two complementary
+metrics. First, we report LPIPS (Zhang et al., 2018), using training images as the reference, as an image-quality (perceptual-
+fidelity) metric, where lower values indicate higher perceptual similarity. Second, we measure output diversity using an
+MS-SSIM-based score: we randomly sample 300 pairs of generated images and report Diversity := 1−MS-SSIM, averaged
+over the sampled pairs (higher indicates greater diversity). Together, these metrics capture brand-level effects on both
+perceptual quality and sample diversity.
+D.2. Additional Details on Diffusion Model Training and Inference
+CIFAR-20.
+For CIFAR-20, we implement a DDPM-CFG (Ho & Salimans, 2022) with a U-Net architecture containing
+.4M parameters. The maximum diffusion timestep is set to T = 1000 during training, with a linear variance schedule for
+the forward diffusion process ranging from β1 = 10−4 to βT = 0.02. We use the AdamW optimizer (Loshchilov & Hutter,
+) with a learning rate of 3 × 10−4 and weight decay of 10−4. The model is trained for 30,000 steps with a batch size
+of 256, using a cosine learning rate schedule with 3,000 warm-up steps. Random horizontal flipping is applied for data
+augmentation. During inference, images are generated using the 50-step DDIM solver (Song et al., 2020) with class label as
+conditioning.
+ArtBench (Post-Impressionism).
+A Stable Diffusion model15 (Rombach et al., 2022) is fine-tuned using LoRA (Hu et al.,
+) with rank r = 256, corresponding to 5.1M LoRA parameters. The prompt is set to ‘‘a Post-Impressionist
+painting by {artist}’’ for each image. The LoRA parameters are trained using the AdamW optimizer (Loshchilov
+https://www.cs.toronto.edu/˜kriz/cifar.html
+https://github.com/sbarratt/inception-score-pytorch
+https://github.com/mseitzer/pytorch-fid
+https://github.com/LAION-AI/aesthetic-predictor
+https://huggingface.co/lambdalabs/miniSD-diffusers
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+& Hutter, 2017) with a weight decay of 10−6, for 200 epochs and a batch size of 64. Cosine learning rate annealing is used,
+with 500 warm-up steps and an initial learning rate of 3 × 10−4. At inference time, images are generated using the PNDM
+scheduler with 100 steps (Karras et al., 2022).
+Fashion-Product.
+We fine-tune FLUX.1-DEV16, which is a 12 billion parameter rectified flow transformer (Labs et al.,
+) capable of generating images from text descriptions, using LoRA with rank r = 128, corresponding to 358M
+trainable LoRA parameters. Prompts are constructed from the product display name using the template ‘‘{brand}
+{category}’’ (e.g., Highlander Men Black Checked Shirt). LoRA parameters are optimized with 8-bit AdamW
+(Loshchilov & Hutter, 2017) with weight decay 10−4 for 60 epochs and an effective batch size of 32 (batch size 16 per
+device with 2 gradient-accumulation steps). We adopt a constant learning-rate schedule with 500 warm-up steps and an
+initial learning rate of 3 × 10−4. At inference time, we generate 256×256 images using the Euler Discrete Scheduler (Esser
+et al., 2024) with 50 denoising steps.
+Training details
+For training diffusion models, we utilize NVIDIA GPUs: A40 for CIFAR-20 and ArtBench and H200
+for Fashion-product, equipped with 48GB and 192GB of memory, respectively. This study employs the Diffusers package
+version 0.35.0 17 to train models across. Per-sample gradients are computed using the techniques outlined in the PyTorch
+package tutorial (version 2.8.0) 18. Furthermore, we apply the TRAK package19 to project gradients with a random projection
+matrix. All experiments are conducted on systems equipped with 64 CPU cores and the specified NVIDIA GPUs.
+To fine-tune FLUX.1-DEV efficiently, we apply two memory-saving strategies. First, because the VQ-VAE remains
+frozen, we pre-compute and cache its latent embeddings for all training samples. Likewise, we pre-compute and store
+text embeddings from both T5 and the CLIP text encoder. This eliminates the need to load the VQ-VAE and text-encoder
+modules into GPU memory during training. Second, we reduce optimizer and activation memory by using the 8-bit Adam
+optimizer from the bitsandbytes20 package (Dettmers et al., 2022) together with fp16 mixed-precision fine-tuning.
+D.3. Training details for Surrogate XGBoost Model
+This section details the implementation and optimization of the surrogate model introduced in Section 4.2. We employ
+a gradient-boosted decision tree (GBDT) regressor using the XGBoost framework.21 To train the model, each sampled
+coalition is represented as a binary mask zm ∈{0, 1}n, paired with its respective target value. The surrogate ˆfω is optimized
+by minimizing the Mean Squared Error (MSE) using the squared-loss objective. To ensure robust generalization and prevent
+overfitting, we perform a grid search over the hyperparameter space defined in Table S.1, selecting the optimal configuration
+via 5-fold cross-validation.
+Table S.1. XGBoost hyperparameter search space for training the surrogate model fω.
+Hyperparameter
+Search Space / Values
+Max. Tree Depth
+{3, 5, 10}
+Number of Trees
+{100, 300, 900}
+Learning Rate
+{0.01, 0.05}
+L1 Regularization λ
+{0, 10}
+https://huggingface.co/black-forest-labs/FLUX.1-dev
+https://pypi.org/project/diffusers/
+https://pytorch.org/
+https://trak.csail.mit.edu/quickstart
+https://github.com/bitsandbytes-foundation/bitsandbytes
+https://xgboost.readthedocs.io/en/latest/index.html
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+E. Synthetic Validation and Axiomatic Checks
+In this section, we examine whether our proposed pipeline for Shapley computation in Section 4.2 satisfies the fundamental
+axioms of Shapley values and evaluate its sample efficiency across three distinct utility functions in synthetic environments.
+E.1. Experimental Environment Setup
+We first define three synthetic coalition value functions v : {0, 1}N →R spanning increasing levels of nonlinearity and
+interaction structure. We use N ∈{10, 11} players so that the ground-truth Shapley values ϕ(v) can be computed exactly
+by enumerating all coalitions. Unless otherwise stated, we sample feature weights w ∼N(0, 1) and fix the base utility to
+b = 0.25. For any coalition indicator z ∈{0, 1}N, zi = 1 denotes inclusion of player i.
+Linear (additive).
+This setting is purely additive and serves as a baseline where contributions are independent.
+v(z) = b + w⊤z.
+(31)
+Nonlinear (additive with saturation).
+To introduce diminishing returns without explicit feature interactions, we apply a
+global nonlinearity to the additive score:
+v(z) = 3 tanh
+b + w⊤z
+
+.
+(32)
+This tests whether the estimator remains accurate under output saturation near the extremes of the coalition hypercube.
+Interaction-heavy.
+To emphasize interaction effects, we add pairwise and third-order terms before applying the same
+saturating nonlinearity:
+v(z) = 3 tanh
+ 
+b + w⊤z + P
+(i,j,α)∈P α zizj + αtri z0z2z4
+!
+,
+(33)
+where P = {(0, 1, 1.5), (2, 3, −1.0), (4, 5, 0.8)} and αtri = 2.0. This regime requires resolving synergistic effects that
+cannot be captured by linear surrogates alone.
+E.2. Comparative Analysis of Sample Efficiency
+Evaluation setup & baselines
+To evaluate the convergence properties of our proposed estimator, we compare Surro-
+gateSHAP against baselines on synthetic coalition utilities where the proxy gap is set to Egap = 0 (Equation (11)). This
+controlled environment allows us to isolate the surrogate error Esur and measure the accuracy of the estimated Shapley values
+using the relative L2 error, defined as ∥ˆϕ −ϕ(v)∥2/∥ϕ(v)∥2..
+For a fixed budget of M function evaluations, we enforce the inclusion of the boundary cases, the empty coalition 0 and
+the grand coalition 1, to ensure foundational consistency with the efficiency and dummy axioms. The remaining M −2
+coalitions are drawn from the interior of the hypercube, {0, 1}n \ {0, 1}, according to the specific sampling distribution of
+each method (e.g., the Shapley kernel or a uniform distribution) sampled with replacement. We report the mean relative L2
+error aggregated over 60 independent trials.
+Our baselines include KernelSHAP, a weighted linear regression estimator (Lundberg & Lee, 2017), and ProxySPEX with
+varying interaction orders (k ∈{1, 2, 3}) (Butler et al., 2025). Both SurrogateSHAP and ProxySPEX use the same ensemble
+XGBoost.
+Results
+The results across three synthetic environments illustrate the trade-off between estimator inductive bias and model
+capacity. In the purely linear regime, KernelSHAP leverages its inherent linear bias to achieve L2 error ≈10−14, significantly
+outperforming surrogate-based methods (Figure S.1-a). However, as utility complexity increases, KernelSHAP’s performance
+stagnates; in contrast, in non-additive settings, tree-based surrogates—including SurrogateSHAP and ProxySPEX (k =
+)—converge more slowly but eventually surpass KernelSHAP, reaching an error of ≈10−2 at M = 512, (Figure S.1-b).
+This advantage is most pronounced in the interaction-heavy regime (Figure S.1-c), where KernelSHAP’s linear assumption
+causes the error to plateau near 10−1. While ProxySPEX (Butler et al., 2025) improves upon the linear model, it remains
+sensitive to the specified interaction order k: low-order configurations (k = 1, 2) underfit, while higher orders eventually
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+saturate. Conversely, by avoiding explicit sparsity constraints, SurrogateSHAP exceeds ProxySPEX performance at
+M = 500 and achieves errors several orders of magnitude lower than the linear estimator. Finally, we investigate the
+bias-variance decomposition of these estimators; our results show that in interaction-heavy settings, SurrogateSHAP achieves
+both lower bias and lower variance than competing methods (Figure S.2).
+Number of Coalition Samples (M)
+Relative L2 Error
+KernelSHAP
+MC Permutation
+SurrogateSHAP
+ProxySPEX (order=1)
+ProxySPEX (order=2)
+ProxySPEX (order=3)
+(a) Linear (additive)
+Number of Coalition Samples (M)
+Relative L2 Error
+KernelSHAP
+MC Permutation
+SurrogateSHAP
+ProxySPEX (order=1)
+ProxySPEX (order=2)
+ProxySPEX (order=3)
+(b) With nonlinearity (tanh-sum)
+Number of Coalition Samples (M)
+Relative L2 Error
+KernelSHAP
+MC Permutation
+SurrogateSHAP
+ProxySPEX (order=1)
+ProxySPEX (order=2)
+ProxySPEX (order=3)
+(c) With interaction
+Figure S.1. Sample-efficiency across utility landscapes. The x-axis shows the number of sampled coalitions M, and the y-axis shows the
+ℓ2 relative to the oracle. (a) Simple linear additive utilities; (b) nonlinear utilities; (c) interaction-dominated utilities.
+Number of Coalition Samples (M)
+Relative Bias²
+A. Bias² (Systematic Error)
+Number of Coalition Samples (M)
+Relative Variance
+B. Variance (Estimation Spread)
+KernelSHAP
+MC Permutation
+SurrogateSHAP
+SurrogateSHAP (Shapley kernel)
+ProxySPEX (order=3)
+Figure S.2. Error decomposition (bias (left) vs. variance (right)) for the interaction setting.
+E.3. Axiomatic Sanity Checks
+Evaluation setup
+In addition to evaluating convergence, we validate that SurrogateSHAP adheres to the core game-
+theoretic axioms across all three synthetic environments, specifically focusing on the null player and efficiency properties.To
+assess the null player axiom, we injected a player with a zero marginal contribution into the utility function.
+Results
+Our results demonstrate that the attribution magnitude |ϕnull| consistently converges toward zero in all regimes as
+the number of sampled coalitions M increases, reaching its minimum at the exhaustive limit of M = 210 as illustrated in
+panels B of Figure S.3. This convergence indicates that the surrogate model correctly identifies and discounts features that
+do not contribute to the overall model behavior.
+The efficiency axiom is similarly satisfied, as the absolute efficiency gap | P ˆϕ −∆v| remains negligible across all utility
+complexities. Throughout our experiments, this gap consistently stays below a threshold of 0.006, as shown in panels C
+of Figure S.3. Because the sum of the attributions closely matches the total change in utility, we confirm that the exact
+TreeSHAP decomposition applied to our learned surrogate maintains high theoretical fidelity. This stability ensures that the
+resulting Shapley values are a mathematically sound representation of the global utility gain, regardless of the underlying
+interaction landscape.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+(a) Linear Utility
+(b) Nonlinear Utility
+(c) Interaction Utility
+Figure S.3. Axiomatic Validation across three environments. In all cases, the relative L2 error (A) and Null Player attribution (B) diminish
+with increased sampling, while the Efficiency Gap (C) remains consistently near zero.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+F. Additional Results
+F.1. Approximation Gap Analysis
+In this section, we provide an extensive validation of the relationship between global generative quality and local similarity
+metrics. We compare our proposed proxy game (Section 4.1) against full retraining instances across subsets sampled from
+the Shapley distribution to quantify the fidelity of our approximation. Specifically, we sample N = 100 subsets and generate
+samples for both our proxy games and the retraining instances to compute local distances and global metrics.
+F.1.1. CIFAR-20
+Fr´echet Inception Distance (FID)
+As shown in Figure S.4-left, Proxy FID exhibits high alignment with retrained
+FID (R2 = 0.935, Spearman ρ = 0.984, N = 100), confirming that the proxy effectively preserves relative performance
+rankings. Correlation analysis reveals that ∆FID is strongly associated with local reconstruction errors, particularly pixel-wise
+similarity (MAE: r = 0.745, SSIM: r = −0.782) and representation-level drift (RMSE-CLIP: r = 0.689, RMSE-LPIPS:
+r = 0.667). These results empirically validate the stability assumption (ε, φu), specifically, that the utility error is bounded
+by the representation-space drift as predicted in Theorem 4.2.
+FID (Retrain)
+FID (Proxy)
+y = x
+.0
+.5
+.0
+.5
+Inception Score (Retrain)
+.0
+.5
+.0
+.5
+Inception Score (Proxy)
+y = x
+Figure S.4. Fidelity of the proxy utility: Alignment between the proxy game (y-axis) and ground-truth retraining (x-axis).
+Figure S.5. Empirical Validation of Proxy FID. (Top) The approximation gap δFID scales linearly with local reconstruction metrics
+(MAE, SSIM) and representation-space drift (RMSE-CLIP, RMSE-LPIPS). (Bottom) Cumulative Distribution Functions (CDFs) of local
+fidelity metrics across N = 100 subsets. Dashed red lines denote the 25th, 50th, and 75th percentiles.
+Empirical Validation of Proxy IS.
+We further validate the Inception Score (IS) of proxy coalitions across the same
+subset distribution. As shown in Figure S.4-right, the Proxy IS demonstrates a high degree of fidelity to the retraining
+ground truth (R2 = 0.920, Spearman ρ = 0.942, N = 100). Consistent with the FID findings, the IS approximation gap,
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+∆IS = |ISretrain −ISproxy|, is strongly conditioned on local reconstruction quality. We observe a significant relationship
+between δIS and our fidelity metrics: MAE (r = 0.791), SSIM (r = −0.745), RMSE-CLIP (r = 0.580), and RMSE-LPIPS
+(r = 0.575). These results reinforce the conclusion that the proxy effectively preserves the utility landscape, particularly
+when representation drift εφu is small.
+Figure S.6. Empirical Validation of Proxy Inception Score. (Top) The approximation gap δIS scales linearly with local reconstruction
+metrics (MAE, SSIM) and representation-space drift (RMSE-CLIP, RMSE-LPIPS). (Bottom) Cumulative Distribution Functions (CDFs)
+of local fidelity metrics across N = 100 subsets. Dashed red lines denote the 25th, 50th, and 75th percentiles.
+Distributional Thresholds
+To provide practical reference points for proxy reliability, Table S.4 summarizes the empirical
+distributions of local metrics. Our results suggest that the proxy remains a robust estimator of generative performance
+provided local structural similarity is maintained (median SSIM = 0.730). For instance, MAE exhibits a median of
+.142 (90th percentile: 0.214), while SSIM reaches 0.894 at the 90th percentile, establishing empirical bounds where the
+approximation gap is minimized.
+Table S.2. Empirical distributions of local reconstruction metrics across 100 samples of 100 evaluation subsets from the Shapley
+distribution for CIFAR-20
+Metric
+Mean
+Median
+th %
+th %
+th %
+th %
+MAE
+.105
+.132
+.085
+.188
+.214
+.235
+SSIM
+.779
+.785
+.390
+.874
+.894
+.900
+RMSE (CLIP dist.)
+.452
+.442
+.369
+.589
+.631
+.667
+RMSE (LPIPS)
+.108
+.109
+.068
+.182
+.217
+.224
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Figure S.7. Qualitative Comparison of Retrained vs. Target Model Outputs (CIFAR-20) Each row (Idx 0–6) displays five pairs of
+images generated using a shared noise coupling z, with the retrained model θ∗
+S on the left and the target model θ output on the right of
+each pair. The labels indicate the Structural Similarity Index (SSIM) for each coalition S.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+F.1.2. ARTBENCH POST-IMPRESSION VALIDATION
+Average Aesthetic Score.
+As illustrated in Figure S.8, the proxy aesthetic scores exhibit moderate alignment with the
+retraining ground truth (R2 = 0.330, Spearman ρ = 0.589, N = 100). We define the approximation gap as ∆Aesthetic Score =
+|Aesthetic Scoreretrain −Aesthetic Scoreproxy|. This gap demonstrates a stronger correlation with representation-level drift
+(RMSE-CLIP: r = 0.445; RMSE-LPIPS: r = 0.578) than with pixel-level metrics (MAE: r = 0.224; SSIM: r = −0.315).
+This suggests that the proxy’s fidelity for aesthetic utility is primarily sensitive to semantic shifts in the feature space rather
+than low-level pixel residuals, consistent with the perceptual nature of aesthetic scoring models.
+.0
+.5
+.0
+.5
+.0
+Aesthetic Score (Retrain)
+.0
+.5
+.0
+.5
+.0
+Aesthetic Score (Proxy)
+y = x
+Figure S.8. Fidelity of the proxy utility: Alignment between the proxy game (y-axis) and ground-truth retraining (x-axis).
+.12
+.14
+.16
+.18
+.20
+Local MAE
+.0
+.2
+.4
+.6
+.8
+|Aesthetic Score|
+y=2.39x+-0.15
+.4
+.5
+.6
+.7
+Local SSIM
+.0
+.2
+.4
+.6
+.8
+|Aesthetic Score|
+y=-1.08x+0.77
+.50
+.55
+.60
+.65
+.70
+Local RMSE CLIP
+.0
+.2
+.4
+.6
+.8
+|Aesthetic Score|
+y=2.19x+-1.08
+.45
+.50
+.55
+.60
+Local RMSE LPIPS
+.0
+.2
+.4
+.6
+.8
+|Aesthetic Score|
+y=2.10x+-0.80
+.12
+.14
+.16
+.18
+.20
+MAE
+Cumulative Percentage (%)
+th50th75th
+.4
+.5
+.6
+.7
+SSIM
+Percentage with SSIM 
+ x (%)
+th50th75th
+.50
+.55
+.60
+.65
+.70
+RMSE CLIP
+Cumulative Percentage (%)
+th
+th
+th
+.45
+.50
+.55
+.60
+RMSE LPIPS
+Cumulative Percentage (%)
+th
+th
+th
+Figure S.9. Empirical Validation of Proxy Average Aesthetic Score. (Top) The approximation gap δavg. aesthetic score scales linearly with
+local reconstruction metrics (MAE, SSIM) and representation-space drift (RMSE-CLIP, RMSE-LPIPS). (Bottom) Cumulative Distribution
+Functions (CDFs) of local fidelity metrics across N = 100 subsets. Dashed red lines denote the 25th, 50th, and 75th percentiles.
+Table S.3. Empirical distributions of local reconstruction metrics across 100 samples of 100 evaluation subsets from Shapley distribution
+for ArtBench (post-impressionism
+Metric
+Mean
+Median
+th %
+th %
+th %
+th %
+MAE
+.147
+.129
+.128
+.170
+.201
+.211
+SSIM
+.531
+.553
+.447
+.603
+.634
+.642
+RMSE (CLIP dist.)
+.529
+.510
+.494
+.594
+.653
+.693
+RMSE (LPIPS)
+.458
+.446
+.436
+.479
+.526
+.533
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Figure S.10. Qualitative Comparison of Retrained vs. Target Model Outputs (AtBench (Post-Impressionism)) Each row (Idx 0–4)
+displays three pairs of images generated using a shared noise coupling z, with the retrained model θ∗
+S on the left and the target model θ
+output on the right of each pair. The labels indicate the Structural Similarity Index (SSIM) for each coalition S.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+F.1.3. FASHION-PRODUCT VALIDATION
+Average LPIPS.
+We evaluate the proxy’s fidelity in approximating the mean LPIPS utility on the Fashion-Product dataset.
+In this setup, the LPIPS utility measures the perceptual distance between generated samples and a reference training point,
+whereas RMSE-LPIPS quantifies the drift between samples generated by the proxy and the retrained ground truth. As
+shown in Figure S.11-left, the proxy utility exhibits moderate linear alignment with the retraining ground truth (R2 = 0.150,
+Spearman ρ = 0.443, N = 100). However, the utility approximation gap, ∆LPIPS = |LPIPSretrain −LPIPSproxy|, is
+highly structured. Specifically, ∆LPIPS is exceptionally well-correlated with cross-model representation drift (RMSE-CLIP:
+r = 0.817; RMSE-LPIPS: r = 0.900). This strong positive correlation indicates that the utility error vanishes predictably
+as the generated outputs of the proxy and retrained models converge in representation space. These results validate
+that the proxy’s limitations are strictly a function of reconstruction quality, empirically supporting the stability bound in
+Proposition 4.2.
+.30 0.35 0.40 0.45 0.50 0.55
+LPIPS (Retrain)
+.30
+.35
+.40
+.45
+.50
+.55
+LPIPS (Proxy)
+y = x
+.18
+.24
+.30
+.36
+.42
+Diversity (Retrain)
+.18
+.24
+.30
+.36
+.42
+Diversity (Proxy)
+y = x
+Figure S.11. Fidelity of the proxy utility: Alignment between the proxy game (y-axis) and ground-truth retraining (x-axis).
+.05
+.10
+.15
+.20
+Local MAE
+.00
+.05
+.10
+.15
+.20
+.25
+|LPIPS|
+y=-1.47x+0.29
+.6
+.7
+.8
+Local SSIM
+.00
+.05
+.10
+.15
+.20
+.25
+|LPIPS|
+y=0.80x+-0.46
+.35
+.40
+.45
+.50
+.55
+Local RMS CLIP
+.05
+.10
+.15
+.20
+.25
+|LPIPS|
+y=-0.87x+0.55
+.2
+.3
+.4
+.5
+Local RMS LPIPS
+.00
+.05
+.10
+.15
+.20
+.25
+|LPIPS|
+y=-0.74x+0.40
+.05
+.10
+.15
+.20
+MAE
+Cumulative Percentage (%)
+th50th
+th
+.6
+.7
+.8
+SSIM
+Percentage with SSIM 
+ x (%)
+th
+th 75th
+.35
+.40
+.45
+.50
+.55
+RMS CLIP
+Cumulative Percentage (%)
+th50th
+th
+.2
+.3
+.4
+.5
+RMS LPIPS
+Cumulative Percentage (%)
+th 50th
+th
+Figure S.12. Empirical Validation of Proxy Average LPIPS Score. (Top) The approximation gap δLPIPS scales linearly with local
+reconstruction metrics (MAE, SSIM) and representation-space drift (RMSE-CLIP, RMSE-LPIPS). (Bottom) Cumulative Distribution
+Functions (CDFs) of local fidelity metrics across N = 100 subsets. Dashed red lines denote the 25th, 50th, and 75th percentiles.
+Diversity.
+We evaluate the proxy’s fidelity in approximating the diversity score on the Fashion-Product dataset. As
+illustrated in Figure S.11-right, the proxy diversity scores exhibit moderate alignment with the retraining ground truth
+(R2 = 0.313, Spearman ρ = 0.495, N = 100), capturing the general distributional trends despite some dispersion. We
+define the approximation gap as ∆Diversity = |Diversityretrain −Diversityproxy|. This gap demonstrates a stronger correlation
+with representation-level drift (RMSE-CLIP: r = 0.585; RMSE-LPIPS: r = 0.679) and pixel-level metrics (MAE:
+r = 0.694; SSIM: r = −0.581).
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+.05
+.10
+.15
+.20
+Local MAE
+.00
+.05
+.10
+.15
+.20
+.25
+|Diversity|
+y=0.71x+-0.02
+.6
+.7
+.8
+Local SSIM
+.00
+.05
+.10
+.15
+.20
+.25
+|Diversity|
+y=-0.32x+0.28
+.35
+.40
+.45
+.50
+.55
+Local RMS CLIP
+.00
+.05
+.10
+.15
+.20
+.25
+|Diversity|
+y=0.37x+-0.13
+.2
+.3
+.4
+.5
+Local RMS LPIPS
+.00
+.05
+.10
+.15
+.20
+.25
+|Diversity|
+y=0.33x+-0.07
+.05
+.10
+.15
+.20
+MAE
+Cumulative Percentage (%)
+th50th
+th
+.6
+.7
+.8
+SSIM
+Percentage with SSIM 
+ x (%)
+th
+th 75th
+.35
+.40
+.45
+.50
+.55
+RMS CLIP
+Cumulative Percentage (%)
+th50th
+th
+.2
+.3
+.4
+.5
+RMS LPIPS
+Cumulative Percentage (%)
+th 50th
+th
+Figure S.13. Empirical Validation of Proxy Diversity Score. (Top) The approximation gap δDiversity scales linearly with local
+reconstruction metrics (MAE, SSIM) and representation-space drift (RMSE-CLIP, RMSE-LPIPS). (Bottom) Cumulative Distribution
+Functions (CDFs) of local fidelity metrics across N = 100 subsets. Dashed red lines denote the 25th, 50th, and 75th percentiles.
+Table S.4. Empirical distributions of local reconstruction metrics across 100 samples of 100 evaluation subsets from Shapley distribution
+for Fashion-Product
+Metric
+Mean
+Median
+th %
+th %
+th %
+th %
+MAE
+.177
+.166
+.147
+.195
+.235
+.263
+SSIM
+.786
+.801
+.763
+.827
+.841
+.848
+RMS CLIP
+.429
+.414
+.397
+.461
+.487
+.511
+RMS LPIPS
+.301
+.291
+.255
+.340
+.389
+.400
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Figure S.14. Qualitative Comparison of Retrained vs. Target Model Outputs (Fashion-Product). Each row (Idx 0–4) displays three
+pairs of images generated using a shared noise coupling z, with the retrained model θ∗
+S on the left and the target model θ output on the
+right of each pair. The labels indicate the Structural Similarity Index (SSIM) for each coalition S.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+F.2. Additional Results for Linear Datamodel Score (LDS)
+We provide supplemental results for the Linear Datamodel Score (LDS) experiments using varying ratio α ∈{0.25, 0.75}.
+These evaluations follow the experimental protocol detailed in Section 5.4 and demonstrate the consistency of our findings
+across different datamodel α.
+Table S.5. LDS (%) results with α = 0.25. Means and 95% confidence intervals across five random initializations are reported.
+Method
+CIFAR-20
+ArtBench
+(Post-Impressionism)
+Fashion Product
+Inception score
+FID
+Aesthetic score
+Diversity
+LPIPS
+Pixel similarity (avg.)
+−4.83 ± 2.02
+.77 ± 1.24
+−1.03 ± 2.30
+.64 ± 16.12
+−6.48 ± 12.43
+Pixel similarity (max)
+−20.25 ± 3.48
+−1.34 ± 1.46
+.52 ± 3.12
+−16.71 ± 10.18
+.67 ± 7.65
+CLIP similarity (avg.)
+.68 ± 1.36
+−5.22 ± 3.90
+.37 ± 0.97
+.81 ± 14.31
+−11.46 ± 18.77
+CLIP similarity (max)
+−8.12 ± 1.44
+.38 ± 0.56
+−2.46 ± 1.21
+.35 ± 17.99
+−8.42 ± 8.21
+Gradient similarity (avg.)
+.69 ± 0.85
+−38.49 ± 0.18
+.92 ± 5.00
+.64 ± 5.66
+−7.12 ± 11.39
+Gradient similarity (max)
+.03 ± 3.46
+−6.18 ± 1.05
+−3.00 ± 3.40
+.04 ± 9.54
+−3.39 ± 4.19
+Gmvaluator (Yang et al., 2025)
+.42 ± 0.27
+−15.31 ± 0.98
+−5.06 ± 2.67
+.37 ± 13.66
+−13.58 ± 11.60
+Aesthetic score (avg.)
+–
+–
+.76 ± 1.98
+–
+–
+Aesthetic score (max)
+–
+–
+.84 ± 1.24
+–
+–
+Relative IF (Barshan et al., 2020)
+.79 ± 1.99
+.43 ± 1.36
+.57 ± 3.12
+.51 ± 4.52
+−2.20 ± 4.13
+Renormalized IF (Hammoudeh & Lowd, 2022)
+.84 ± 1.97
+−0.35 ± 1.35
+.95 ± 3.78
+.85 ± 4.66
+−2.33 ± 4.08
+TRAK (Park et al., 2023)
+.53 ± 3.98
+−0.79 ± 0.35
+.31 ± 3.21
+.31 ± 4.15
+−3.12 ± 4.42
+Journey-TRAK (Georgiev et al., 2023)
+.82 ± 0.20
+−15.87 ± 2.63
+−19.86 ± 1.73
+−1.24 ± 9.18
+.51 ± 11.20
+D-TRAK (Zheng et al., 2023)
+.39 ± 2.48
+−15.73 ± 2.27
+−20.75 ± 2.52
+.31 ± 8.44
+−3.30 ± 16.89
+DAS (Lin et al., 2024)
+.40 ± 1.96
+−0.45 ± 2.34
+.45 ± 3.28
+.06 ± 4.23
+−3.09 ± 4.22
+Leave-one-out (LOO)
+.48 ± 0.35
+−13.40 ± 1.52
+.76 ± 1.93
+−14.41 ± 6.19
+−2.42 ± 4.61
+Sparsified-FT Shapley (Lu et al., 2025)
+.73 ± 2.99
+−2.03 ± 0.73
+.27 ± 3.11
+.31 ± 4.15
+.57 ± 6.21
+SurrogateSHAP (Ours)
+.85 ± 1.20
+.11 ± 0.14
+.29 ± 1.62
+.97 ± 9.80
+.35 ± 7.78
+Sparsified-FT and SurrogateSHAP use an identical number of coalitions.
+Table S.6. LDS (%) results with α = 0.75. Means and 95% confidence intervals across five random initializations are reported.
+Method
+CIFAR-20
+ArtBench
+(Post-Impressionism)
+Fashion Product
+Inception score
+FID
+Aesthetic score
+Diversity
+LPIPS
+Pixel similarity (avg.)
+−5.84 ± 1.24
+−1.82 ± 1.21
+.63 ± 9.07
+.88 ± 15.71
+−6.76 ± 8.34
+Pixel similarity (max)
+−12.11 ± 0.21
+−9.87 ± 0.55
+.02 ± 0.91
+−15.60 ± 9.54
+.67 ± 2.92
+CLIP similarity (avg.)
+−18.77 ± 0.86
+.98 ± 0.17
+.57 ± 6.68
+−8.72 ± 6.90
+.72 ± 5.35
+CLIP similarity (max)
+.78 ± 0.93
+−7.39 ± 0.38
+.89 ± 5.45
+−4.88 ± 4.47
+.21 ± 5.28
+Gradient similarity (avg.)
+.44 ± 1.85
+−17.19 ± 0.60
+.34 ± 2.26
+.71 ± 15.03
+−10.19 ± 12.45
+Gradient similarity (max)
+−0.96 ± 1.56
+−2.44 ± 0.72
+−3.89 ± 3.56
+.41 ± 10.93
+−1.28 ± 11.47
+Gmvaluator (Yang et al., 2025)
+−5.89 ± 0.517
+.07 ± 0.94
+.12 ± 3.32
+.99 ± 12.67
+−9.26 ± 2.71
+Aesthetic score (avg.)
+–
+–
+.25 ± 2.29
+–
+–
+Aesthetic score (max)
+–
+–
+−9.47 ± 6.97
+–
+–
+Relative IF (Barshan et al., 2020)
+.09 ± 1.14
+.62 ± 1.21
+.80 ± 5.15
+.07 ± 10.82
+.42 ± 4.24
+Renormalized IF (Hammoudeh & Lowd, 2022)
+.15 ± 1.10
+.09 ± 1.51
+.51 ± 4.89
+−1.49 ± 10.48
+.42 ± 4.81
+TRAK (Park et al., 2023)
+.68 ± 1.13
+.91 ± 2.52
+.16 ± 4.91
+.17 ± 9.46
+.77 ± 2.77
+Journey-TRAK (Georgiev et al., 2023)
+−1.67 ± 0.70
+−17.65 ± 2.43
+−4.81 ± 2.63
+.58 ± 15.80
+−10.45 ± 10.29
+D-TRAK (Zheng et al., 2023)
+.34 ± 1.35
+−11.83 ± 1.59
+−22.87 ± 4.56
+.26 ± 15.68
+.86 ± 9.45
+DAS (Lin et al., 2024)
+.97 ± 1.14
+.49 ± 1.53
+.52 ± 5.00
+.15 ± 9.25
+.76 ± 2.73
+Leave-one-out (LOO)
+.88 ± 0.71
+.33 ± 1.22
+.40 ± 3.31
+.59 ± 5.91
+−5.57 ± 11.28
+Sparsified-FT Shapley (Lu et al., 2025)
+.79 ± 0.74
+.38 ± 1.10
+.35 ± 2.55
+−2.19 ± 8.77
+−10.38 ± 3.14
+SurrogateSHAP (Ours)
+.37 ± 0.62
+.58 ± 0.68
+.07 ± 3.82
+.39 ± 11.66
+.48 ± 9.20
+Sparsified-FT and SurrogateSHAP use an identical number of coalitions.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+F.3. Counterfactual results
+We report full counterfactual retraining results across all evaluated percentiles. For each dataset/metric, we include both
+bottom-percentile removal Table S.7 and top-percentile removal Table 3, which together assess whether an attribution
+method ranks contributors correctly. Table S.10 presents the complete results on ArtBench (Post-Impressionism), and
+Table S.9, S.8, S.11, and S.12 provide the corresponding results on CIFAR-20 (Inception Score/FID) and Fashion Product
+(LPIPS/Diversity).
+Table S.7. Bottom-removal counterfactuals on model utilities. Relative change in the target metric (%, mean±std over five seeds) after
+removing groups from the bottom attribution percentiles on CIFAR-20, ArtBench (Post-Impressionism), and Fashion-Product.
+Method
+%
+%
+%
+%
+CIFAR-20 (FID ↓)
+CLIP Score
+.39 ± 3.20
+.36 ± 2.86
+.21 ± 3.22
+.98 ± 3.66
+LOO
+.21 ± 4.76
+.85 ± 2.27
+.22 ± 3.65
+.11 ± 2.02
+SurrogateSHAP (Ours)
+.79 ± 1.47
+.85 ± 2.55
+.75 ± 3.34
+.98 ± 3.67
+ArtBench (Post-Impressionism) (Aesthetic Score ↑)
+Avg. Aesthetic Score
+−2.59 ± 1.44
+−1.38 ± 1.16
+−2.22 ± 1.06
+−2.40 ± 0.42
+Avg. Pixel Similarity
+−1.32 ± 1.05
+−1.68 ± 1.78
+−0.80 ± 1.07
+−2.20 ± 1.13
+Relative Influence
+−2.93 ± 2.72
+−1.25 ± 2.28
+.08 ± 0.94
+.17 ± 0.65
+SurrogateSHAP (Ours)
+.43 ± 1.67
+.54 ± 2.38
+.06 ± 0.38
+.62 ± 2.37
+Fashion Product (Diversity ↑)
+Avg. GradSim
+.19 ± 4.98
+−6.53 ± 2.44
+.83 ± 3.54
+.70 ± 6.17
+DTRAK
+−1.12 ± 4.25
+−4.49 ± 4.98
+−0.50 ± 2.14
+−7.24 ± 5.95
+SurrogateSHAP (Ours)
+.36 ± 3.46
+.22 ± 5.01
+.75 ± 3.34
+.46 ± 4.44
+F.3.1. CIFAR-20
+Figure S.16 shows the top six contributors to the FID score on CIFAR-20, as identified by SurrogateSHAP.
+Table S.8. Full counterfactual retraining results on CIFAR-20 (FID). Top: top-percentile removal (higher is better). Bottom: bottom-
+percentile removal (lower is better). Results are reported over five seeds.
+CIFAR-20 (FID relative change %)
+Percentile removed
+Method
+%
+%
+%
+%
+%
+Top-percentile removal
+(↑better)
+CLIPScore
+.42 ± 3.57
+.53 ± 1.58
+.09 ± 3.51
+.46 ± 3.73
+.26 ± 5.43
+LOO
+.19 ± 3.42
+.48 ± 2.68
+.07 ± 3.60
+.01 ± 2.39
+.92 ± 1.55
+TreeSHAP (Ours)
+.76 ± 4.60
+.70 ± 2.47
+.73 ± 2.14
+.83 ± 2.21
+.74 ± 1.55
+Bottom-percentile removal
+(↓better)
+CLIPScore
+.39 ± 3.20
+.36 ± 2.86
+.03 ± 1.97
+.60 ± 4.33
+.11 ± 1.93
+LOO
+.21 ± 4.76
+.85 ± 2.27
+.11 ± 2.02
+.18 ± 5.11
+.57 ± 5.04
+TreeSHAP (Ours)
+.79 ± 1.47
+.85 ± 2.55
+.98 ± 3.66
+.90 ± 0.71
+.55 ± 3.21
+Percentile (%)
+Relative FID Change (%)
+(positive = worse)
+Top Percentile Removal
+CLIP Score
+Leave-one-out
+SurrogateSHAP
+Full Model (Baseline)
+Percentile (%)
+Relative FID Change (%)
+(positive = worse)
+Bottom Percentile Removal
+CLIP Score
+Leave-one-out
+SurrogateSHAP
+Full Model (Baseline)
+Figure S.15. Counterfactual evaluation on CIFAR-20. We report the relative change in FID (∆F%) after removing the top (left) and
+bottom (right) percentiles of contributors. The x-axis denotes the percentage of contributors removed.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Class 3
+Score: -3.647
+Class 12
+Score: -3.018
+Class 18
+Score: -2.676
+Class 17
+Score: -1.474
+Class 11
+Score: -0.522
+Class 10
+Score: 1.756
+Figure S.16. Influential Data Contributors for FID. This figure visualizes the top six classes identified by SurrogateSHAP as having
+the highest marginal contribution to FID on the CIFAR-20. Each row displays representative training samples from the identified class
+alongside their computed importance score.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Table S.9. Full counterfactual retraining results on CIFAR-20 (Inception Score). Top: top-percentile removal (more negative is better).
+Bottom: bottom-percentile removal (larger/less negative is better). Results are reported over five seeds.
+CIFAR-20 (Inception Score relative change %)
+Percentile removed
+Method
+%
+%
+%
+%
+%
+Top-percentile removal
+(↓better)
+GMV
+−20.17 ± 0.53
+−19.52 ± 0.30
+−19.71 ± 0.47
+−24.40 ± 0.76
+−29.49 ± 1.00
+LOO
+−21.97 ± 0.39
+−22.45 ± 0.64
+−24.34 ± 1.53
+−27.84 ± 0.50
+−29.94 ± 0.80
+TreeSHAP (Ours)
+−20.87 ± 1.25
+−26.55 ± 1.43
+−31.05 ± 1.33
+−35.50 ± 0.01
+−40.03 ± 1.05
+Bottom-percentile removal
+(↑better)
+GMV
+−20.57 ± 0.86
+−18.22 ± 0.91
+−18.44 ± 1.20
+−16.66 ± 1.74
+−15.38 ± 0.96
+LOO
+−19.40 ± 0.55
+−16.87 ± 0.56
+−12.93 ± 0.11
+−10.81 ± 1.07
+−10.22 ± 1.12
+TreeSHAP (Ours)
+−19.82 ± 0.59
+−17.20 ± 1.25
+−12.93 ± 0.11
+−10.97 ± 0.82
+−9.36 ± 1.06
+Percentile (%)
+Relative Inception Score Change (%)
+(positive = better)
+Top Percentile Removal
+GMValuator
+Leave-one-out
+SurrogateSHAP
+Full Model (Baseline)
+Percentile (%)
+Relative Inception Score Change (%)
+(positive = better)
+Bottom Percentile Removal
+GMValuator
+Leave-one-out
+SurrogateSHAP
+Full Model (Baseline)
+Figure S.17. Counterfactual evaluation on CIFAR-20. We report the relative change in Inception Score (∆F%) after removing the top
+(left) and bottom (right) percentiles of contributors. The x-axis denotes the percentage of contributors removed.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Class 7
+Score: 0.565
+Class 0
+Score: 0.551
+Class 18
+Score: 0.535
+Class 11
+Score: 0.524
+Class 3
+Score: 0.452
+Class 8
+Score: 0.427
+Figure S.18. Influential Data Contributors for Inception Score. This figure visualizes the top six classes identified by SurrogateSHAP
+as having the highest marginal contribution to Inception Score on the CIFAR-20. Each row displays representative training samples from
+the identified class alongside their computed importance score.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+F.3.2. ARTBENCH POST-IMPRESSIONISM
+Table S.10. Full counterfactual retraining results on ArtBench (Post-Impressionism). Top: top-percentile removal (more negative is
+better). Bottom: bottom-percentile removal (larger is better). Results are reported over five seeds.
+Avg. Aesthetic Score (relative change %)
+Percentile removed
+Method
+%
+%
+%
+%
+%
+%
+%
+%
+%
+Top-percentile removal
+(↓better)
+Aesthetic
+−2.26 ± 0.67
+−1.85 ± 2.29
+−3.60 ± 1.24
+−2.53 ± 1.99
+−4.30 ± 1.10
+−4.99 ± 1.13
+−3.69 ± 0.29
+−2.36 ± 1.69
+−2.40 ± 0.70
+Pixel Sim.
+−1.62 ± 1.03
+−3.58 ± 2.07
+−0.46 ± 0.68
+−3.19 ± 0.68
+−0.23 ± 2.03
+−2.03 ± 0.57
+−3.98 ± 1.19
+−3.26 ± 3.21
+−1.63 ± 0.58
+Rel. Infl.
+−3.04 ± 2.07
+−2.17 ± 2.07
+−2.21 ± 0.67
+−2.73 ± 2.59
+−0.76 ± 2.06
+−4.09 ± 1.03
+−3.46 ± 0.18
+−2.08 ± 1.01
+−2.18 ± 2.53
+TreeSHAP (Ours)
+−2.60 ± 0.90
+−3.27 ± 1.50
+−3.97 ± 0.47
+−4.29 ± 1.58
+−3.30 ± 1.69
+−5.76 ± 0.49
+−5.75 ± 0.63
+−7.71 ± 1.38
+−5.73 ± 0.58
+Bottom-percentile removal
+(↑better)
+Aesthetic
+−2.08 ± 0.70
+−2.84 ± 0.35
+−2.64 ± 1.52
+−2.57 ± 1.51
+−2.59 ± 1.44
+−1.38 ± 1.16
+−2.22 ± 1.06
+−2.40 ± 0.42
++3.19 ± 1.02
+Pixel Sim.
+−3.63 ± 2.10
+−1.88 ± 0.72
+−2.63 ± 1.09
+−1.80 ± 0.86
+−1.32 ± 1.05
+−1.68 ± 1.78
+−0.80 ± 1.07
+−2.20 ± 1.13
+−1.64 ± 1.76
+Rel. Infl.
+−0.95 ± 1.21
+−0.79 ± 0.62
+−1.79 ± 1.11
+−1.23 ± 1.02
+−2.93 ± 2.72
+−1.25 ± 2.28
++1.08 ± 0.94
++0.17 ± 0.65
+−0.06 ± 2.24
+TreeSHAP (Ours)
+−0.02 ± 1.44
+−1.09 ± 0.53
++0.65 ± 1.06
+−0.06 ± 1.04
++0.43 ± 1.67
++2.54 ± 2.38
++3.06 ± 0.38
++3.62 ± 2.37
++5.03 ± 1.59
+2 3 4 5
+Percentile (%)
+Relative Aesthetic Score Change (%)
+(positive = better)
+Top Percentile Removal
+Avg
+Avg Pixel Similarity
+Relative Influence
+SurrogateSHAP
+Full Model (Baseline)
+2 3 4 5
+Percentile (%)
+Relative Aesthetic Score Change (%)
+(positive = better)
+Bottom Percentile Removal
+Avg
+Avg Pixel Similarity
+Relative Influence
+SurrogateSHAP
+Full Model (Baseline)
+Figure S.19. Counterfactual evaluation on ArtBench (Post-impressionism). We report the relative change in average aesthetic score
+(∆F%) after removing the top (left) and bottom (right) percentiles of contributors. The x-axis denotes the percentage of contributors
+removed.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+edouard-cortes
+Score: 0.059
+adalbert-erdeli
+Score: 0.044
+theo-van-rysselberghe
+Score: 0.039
+xu-beihong
+Score: 0.034
+vladimir-dimitrov
+Score: 0.033
+nicolae-tonitza
+Score: 0.031
+ion-theodorescu-sion
+Score: 0.031
+Figure S.20. Influential Data Contributors for Artistic Aesthetics. This figure visualizes the top seven artists identified by Surrogate-
+SHAP as having the highest marginal contribution to the mean aesthetic score on the ArtBench (Post-Impressionism). Each row displays
+representative training samples from the identified artist alongside their computed importance score.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+F.3.3. FASHION PRODUCT
+Table S.11. Full counterfactual retraining results on Fashion Product (LPIPS). Top: top-percentile removal (higher is better). Bottom:
+bottom-percentile removal (lower is better). Results are reported over five seeds.
+Fashion Product (LPIPS relative change %)
+Percentile removed
+Method
+%
+%
+%
+%
+%
+%
+%
+Top-percentile removal
+(↑better)
+Avg. PixelSim
+.15 ± 0.49
+.76 ± 3.95
+.13 ± 1.90
+.09 ± 2.59
+.09 ± 1.85
+.32 ± 3.58
+−3.93 ± 4.00
+Rel. Infl.
+.33 ± 1.10
+.16 ± 0.90
+.64 ± 1.97
+.39 ± 0.16
+.89 ± 2.96
+.74 ± 3.98
+.90 ± 1.45
+SurrogateSHAP
+.07 ± 1.99
+.27 ± 1.51
+.33 ± 3.51
+.37 ± 1.94
+.477 ± 2.83
+.57 ± 2.30
+.82 ± 0.33
+Bottom-percentile removal
+(↓better)
+Avg. PixelSim
+.29 ± 2.15
+.30 ± 3.43
+.45 ± 2.09
+.78 ± 0.86
+.29 ± 2.93
+.83 ± 2.81
+.23 ± 3.07
+Rel. Infl.
+.58 ± 0.20
+.20 ± 1.98
+.87 ± 2.45
+.73 ± 1.71
+.83 ± 0.91
+.73 ± 4.83
+.98 ± 2.51
+SurrogateSHAP
+.86 ± 1.69
+.73 ± 3.95
+.43 ± 3.32
+.17 ± 2.54
+−0.62 ± 3.45
+−1.83 ± 2.85
+−0.96 ± 1.15
+2
+Percentile (%)
+Relative LPIPS Change (%)
+(positive = worse)
+Top Percentile Removal
+Avg Pixel Similarity
+Renorm Influence
+SurrogateSHAP
+Full Model (Baseline)
+2
+Percentile (%)
+Relative LPIPS Change (%)
+(positive = worse)
+Bottom Percentile Removal
+Avg Pixel Similarity
+Renorm Influence
+SurrogateSHAP
+Full Model (Baseline)
+Figure S.21. Counterfactual evaluation on Fashion-Product. We report the relative change in mean LPIPS (∆F%) after removing the top
+(left) and bottom (right) percentiles of contributors. The x-axis denotes the percentage of contributors removed.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Figure S.22. Influential Data Contributors for LPIPS. This figure visualizes the top five brands identified by SurrogateSHAP as having
+the highest marginal contribution to LPIPS on the Fashion-Product. Each row displays representative training samples from the identified
+brand alongside their computed importance score.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Table S.12. Full counterfactual retraining results on Fashion Product (Diversity). Top: top-percentile removal (lower/more negative is
+better). Bottom: bottom-percentile removal (higher is better). Results are reported over five seeds.
+Fashion Product (Diversity relative change %)
+Percentile removed
+Method
+%
+%
+%
+%
+%
+%
+%
+Top-percentile removal
+(↓better)
+Avg. GradSim
+−6.09 ± 2.83
+−3.78 ± 2.70
+−6.52 ± 5.82
+−6.09 ± 9.24
+−5.44 ± 3.33
+−3.59 ± 2.03
+−4.32 ± 4.16
+DTRAK
+−8.36 ± 4.46
+−12.58 ± 6.49
++2.21 ± 2.24
+−7.18 ± 6.33
++5.05 ± 9.52
+−4.14 ± 2.01
+−3.20 ± 7.20
+SurrogateSHAP
+−1.20 ± 5.16
+−8.96 ± 0.07
+−16.11 ± 1.71
+−17.49 ± 8.34
+−7.05 ± 7.48
+−0.60 ± 7.41
+−11.15 ± 6.19
+Bottom-percentile removal
+(↑better)
+Avg. GradSim
+−3.63 ± 2.99
+−8.13 ± 2.74
++3.19 ± 4.98
+−6.53 ± 2.44
++4.83 ± 3.54
++6.70 ± 6.17
++2.94 ± 2.16
+DTRAK
+−1.56 ± 3.65
+−2.73 ± 6.16
+−1.12 ± 4.25
+−4.49 ± 4.98
+−0.50 ± 2.14
+−7.24 ± 5.95
+−10.57 ± 3.40
+SurrogateSHAP
+−2.24 ± 5.44
+−2.06 ± 5.43
++9.36 ± 3.46
++5.22 ± 5.01
++12.75 ± 3.34
++7.46 ± 4.44
++7.19 ± 3.55
+2
+Percentile (%)
+Relative Diversity Change (%)
+(positive = better)
+Top Percentile Removal
+Avg Grad Sim
+D-TRAK
+SurrogateSHAP
+Full Model (Baseline)
+2
+Percentile (%)
+Relative Diversity Change (%)
+(positive = better)
+Bottom Percentile Removal
+Avg Grad Sim
+D-TRAK
+SurrogateSHAP
+Full Model (Baseline)
+Figure S.23. Counterfactual evaluation on Fashion-Product. We report the relative change in diversity (∆F%) after removing the top (left)
+and bottom (right) percentiles of contributors. The x-axis denotes the percentage of contributors removed.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Catwalk
+Score: 0.007
+Deborah
+Score: 0.006
+Lucera
+Score: 0.005
+Franco Leone
+Score: 0.005
+HM
+Score: 0.004
+Figure S.24. Influential Data Contributors for Diversity. This figure visualizes the top five brands identified by SurrogateSHAP as
+having the highest marginal contribution to Diversity on the Fashion-Product. Each row displays representative training samples from the
+identified brand alongside their computed importance score.
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+G. Additional details for the dermatology data auditing case study
+ISIC Dataset
+We use dermoscopic lesions (which offer a magnified view of the patient’s skin) from the ISIC archive
+(Codella et al., 2018; Tschandl et al., 2018; ?; Rotemberg et al., 2021), specifically the 2019 and 2020 ISIC challenge
+datasets, for this analysis. We exclude non-dermoscopic images and images lacking sex labels. After partioninig, we are left
+with 76295 images.
+We then fine-tune a Stable Diffusion model22 on dermoscopic images using hospital-conditioned captions. To create the
+finetuning dataset, we sample a maximum of 1200 images from each of the 10 hospital sites, while balancing it in terms of
+sex and melanoma. For hospitals with less than 1200 images, we sample all the images. After the preprocessing step, we
+are left with 9922 images with the distribution shown in Figure S.25. The diffusion model is fine-tuned using LoRA with
+rank r=32, corresponding to 3.2M parameters. The prompt is set to ‘‘Image of a dermoscopic lesion from
+Hospital {hospital site}’’ for each image. The LoRA parameters are trained using the AdamW optimizer for
+epochs with a learning rate of 1 × 10−5. The images are generated at inference time using the PNDM scheduler for 100
+steps.
+Model property Let H = {1, ..., H} denote the hospital sites, treated as the data contributors in our setup, with H = 10. We
+first train independent sex and melanoma classifiers on the ISIC dataset, yielding probabilistic predictors fsex(x) ∈[0, 1] and
+fmel(x) ∈[0, 1]. We use vision transformer-based models (ViT-Base architectures) (Dosovitskiy et al., 2021) for both the
+prediction tasks. We start with classifiers pre-trained on ImageNet (Deng et al., 2009) and then replace the 1000-class linear
+classification head with a new linear head suited for binary prediction. We optimize the network using an Adam optimizer
+with a cosine learning rate scheduler with an initial learning rate of 1 × 10−4. We train for 10 epochs with a batch size of
+. The sex classifier achieves a ROC-AUC of 0.752 and the melanoma classifier achieves a ROC-AUC of 0.937.
+To quantify the spurious correlation, we sample coalitions S ⊆H from the Shapley distribution. For each coalition, we
+generate a set of images {xj}K
+j=1 ∼pθ(· | S) by restricting the sampled prompt to the hospital sites in S. The coalition
+utility is defined as the dependence between the two probes on the generated images:
+v(S) = ρ
+ {fsex(xj)}K
+j=1, {fmel(xj)}K
+j=1
+
+,
+where ρ is the Spearman correlation and K = 256. Intuitively, a large |v(S)| indicates a potentially spurious association
+between sex and melanoma predictions induced by the coalition’s generated distribution. Finally, we evaluate v(S) for 100
+sampled coalitions and use SurrogateSHAP to compute the attributions for each hospital site.
+https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5
+
+SurrogateSHAP: Training-Free Contributor Attribution for Text-to-Image (T2I) Models
+Number of cases
+Melanoma distribution by hospital site
+Diagnosis
+Benign
+Cancerous
+Hospital 1
+Hospital 10
+Hospital 2
+Hospital 3
+Hospital 4
+Hospital 5
+Hospital 6
+Hospital 7
+Hospital 8
+Hospital 9
+Number of cases
+Sex distribution by hospital site
+Sex
+female
+male
+Figure S.25. Distribution of the fine-tuning data for the Stable Diffusion model across different hospital sites in terms of the diagnosis and
+patient sex.
+.05
+.00
+.05
+.10
+.15
+Spearman Correlation (Sex and Melanoma)
+Hospital 9
+Hospital 2
+Hospital 1
+Hospital 6
+Hospital 5
+Hospital 4
+Hospital 3
+Hospital 7
+Hospital 8
+Hospital 10
+Figure S.26. Spearman correlation between sex and melanoma binary labels in the training data across different hospital sites. Hospital 10
+has the maximum correlation r = 0.17, p = 6.3 × 10−6.

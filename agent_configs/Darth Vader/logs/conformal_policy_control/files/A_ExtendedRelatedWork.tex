@@ -1,0 +1,176 @@
+\section{Extended Related Work}
+\label{app:extended_related_work}
+
+\subsection{Conservative Model-Based Optimization}
+
+The tension between optimization performance and reliability has deep roots in decision theory, from early work on optimal decision-making under uncertainty \citep{raiffa1961applied} to stochastic methods for optimization under noise \citep{kushner1964new}. 
+The \textit{optimizer's curse} \citep{smith2006optimizer} captures the key challenge: when decisions are selected by maximizing an estimated value function, the selected action is systematically biased toward outcomes whose value is overestimated. 
+Crucially, this bias persists even when the value estimates are unbiased on average and arises from the act of selection itself. Among many uncertain alternatives, those with the largest positive estimation errors are most likely to be chosen. 
+In the context of sequential decision making and policy optimization, this effect manifests when an optimized policy is trained to maximize expected reward under limited or noisy feedback, leading it to concentrate probability mass on actions whose apparent advantage is driven by estimation error rather than true performance. 
+As a result, policies that appear optimal in expectation may perform poorly when deployed, particularly when they extrapolate beyond regions where reliable evidence is available.
+In sequential settings, this effect compounds. Aggressive optimization shifts the data distribution away from regions where the estimators are reliable, further degrading the estimates and creating more error for the optimizer to exploit.
+
+
+Various communities have aimed at guiding models toward high-performing solutions while explicitly constraining distribution shift away from trusted data or policies.
+In stochastic control and reinforcement learning, entropy-regularized control and KL-penalized objectives constrain optimized policies to stay close to a reference distribution \citep{todorov2009efficient, fox2015taming}. 
+Related formulations arise in path integral control and KL-regularized path measures \citep{kappen2005path, theodorou2010generalized}. 
+Trust-region policy optimization methods can be viewed as a practical instantiation that explicitly bound policy updates with local constraints \citep{schulman2015trust, schulman2017proximal}. 
+In offline and batch reinforcement learning, conservative objectives penalize actions whose value estimates rely on out-of-distribution extrapolation \citep{kumar2020conservative, trabucco2021conservative}. 
+More recently, the control-theoretic perspective has been extended to generative model fine-tuning. Fine-tuning diffusion and flow models to maximize the expected reward while retaining the pretrained model information via KL regularization has been framed as an entropy-regularized optimal control problem \citep{uehara2024fine, domingo2024adjoint}, and generalized to other utilities and divergence measures \citep{de2025flow}. 
+
+Finally, in black-box optimization, trust-region Bayesian optimization restricts search to local regions where surrogate models are reliable \citep{eriksson2019scalable}, while safe Bayesian optimization enforces hard safety constraints to prevent evaluation in unsafe regions \citep{sui2015safe, berkenkamp2016safe, kirschner2019adaptive, berkenkamp2023bayesian}.
+All of these methods operationalize safety by bounding how far the optimized distribution may deviate from a known baseline.
+
+In practice, however, the strength of this constraint is governed by a scalar hyperparameter that has no intrinsic semantic interpretation. Whether expressed as a KL penalty weight, a likelihood ratio threshold, or a trust-region radius, this parameter controls the degree of aggressiveness in optimization but does not directly correspond to any declarative risk criterion, such as a target failure rate. As a result, practical deployment requires solving a secondary  \textit{hyperparameter selection problem}: one must select many candidate values of the constraint parameter and empirically evaluate their downstream risk in order to identify a satisfactory operating point. Critically, this calibration must be performed \textit{on-policy}, since the risk of interest depends on the distribution induced by each specific choice of the hyperparameter. This requirement is costly and introduces further feedback-loop dependencies \citep{bergstra2011algorithms, feurer2019hyperparameter}.
+
+Yet the distribution shift these methods seek to control is self-inflicted. The agent chooses its own policy, and therefore knows the likelihood ratio between any candidate policy and the safe baseline in closed form. The distribution shift is not an external unknown but a consequence of the agent's own design. This means the hyperparameter selection problem can be solved with off-policy data from the safe policy alone, provided the calibration is done carefully. Conformal techniques provide exactly this kind of careful calibration.
+
+    \begin{table*}[!t]
+    \caption{Summary comparison of selected related work on conformal prediction for decision making under agent-induced shifts.}
+    \centering
+    {\small
+    \begin{tabular}{ c | c | c | c  c  c }
+    \toprule
+    & & &  \multicolumn{3}{|c}{\textbf{3. Type of Risk Control}}  \\
+      $\begin{matrix}
+      \textbf{Method Group}\\
+      \text{References}
+      \end{matrix}$ & $\begin{matrix}
+        \textbf{1. Agent-} \\
+            \textbf{Induced} \\
+           \textbf{Data Shift}
+       \end{matrix}$
+     & $\begin{matrix}
+     \textbf{2. Action} \\
+     \textbf{Space}
+     \end{matrix}$ & $\begin{matrix}\textbf{Prediction Set} \\ \textbf{Miscoverage} \\ \mathbbm{1}\{Y_t\not\in \hat{C}_{\color{blue}\alpha}(X_t)\} \end{matrix}$ & $\begin{matrix}\lambda\textbf{-Parameterized} \\ \textbf{Losses} \\ L_t(A_t({\color{blue}\lambda}))\end{matrix}$ &
+      $\begin{matrix}
+          \textbf{Unparameterizable} \\
+          \textbf{Losses} \\
+          \textbf{($\beta$-Param. Policy)} \\
+          L_t(A_t), \ A_t\sim p_t({\color{blue}\beta})
+      \end{matrix}$
+       \\
+     \hline
+     $\begin{matrix}\textbf{Conformal Prediction} \\
+     \text{\citet{vovk2005algorithmic}}
+     \\
+     \text{\citet{vovk2018conformal}}
+     \end{matrix}$ & \xmark & $\begin{matrix}
+         \text{Small/} \\ \text{Finite}
+     \end{matrix}$ & \cmark & \xmark & \xmark \\
+     \hline
+     $\begin{matrix}\textbf{Weighted Conformal Pred.} \\
+     \text{\citet{tibshirani2019conformal}}
+     \\
+     \text{\citet{fannjiang2022conformal}} \\
+     \text{\citet{stanton2023bayesian}} \\
+     \text{\citet{nair2023randomization}} \\
+     \text{\citet{prinster2024conformal}} \\
+     \end{matrix}$  & $\begin{matrix}
+         \text{Single-Round} \\
+
+         \hline \\
+         \textbf{\mygreen{Multi-Round}}
+     \end{matrix}$ & $\begin{matrix}
+         \text{Small/} \\ \text{Finite} \\ \hline  \text{Contin.} \\ \hline \text{Small/} \\ \text{Finite}
+     \end{matrix}$ & \cmark & \xmark & \xmark \\
+     \hline
+     $\begin{matrix}\textbf{Conformal Risk Control} \\
+     \text{\citet{angelopoulos2022conformal}}
+     \\
+     \text{\citet{lekeufack2024conformal}}
+     \end{matrix}$ & $\begin{matrix}
+      \\
+         \text{Single-Round} \\
+         \hline
+         \text{Eventually safe}
+     \end{matrix}$ & $\begin{matrix}
+         \text{Small/} \\ \text{Finite}
+     \end{matrix}$ & \cmark & \cmark & \xmark \\
+     \hline
+     $\begin{matrix} \textbf{Conformal Policy Control} \\
+     \text{(Proposed)}
+     \end{matrix}$ & \textbf{\mygreen{Multi-Round}} & $\begin{matrix}
+         \text{Large/} \\ \boldsymbol{\infty}
+     \end{matrix}$ & \cmark & \cmark & \cmark  \\
+    \bottomrule
+    \end{tabular}
+    }
+    \label{table:comparisons}
+    \end{table*}
+
+\subsection{Conformal Methods}
+
+\textbf{Conformal prediction under distribution shift in high-dimensional spaces}
+
+Conformal prediction, originally developed for exchangeable or i.i.d. data by \cite{vovk2005algorithmic}, has been extended to a variety of distribution shift settings. Closest to the current paper are \textit{weighted} conformal methods that \textit{proactively adapt} to distribution shift by re-weighting calibration data using knowledge of the change, though another line of work develops conformal-inspired methods for \textit{retroactively reacting} to adversarial shifts over time (e.g., \citet{Gibbs2021-ed, zaffran2022adaptive, bastani2022, Angelopoulos_pid}). Among weighted conformal methods, those most relevant to the present work are methods tailored for covariate shift \cite{tibshirani2019conformal, prinster2022jaws, yang2024doubly, jonkers2024conformal}, and especially its extensions in which the training and test data are dependent, such as one-step \cite{fannjiang2022conformal, prinster2023jaws} and multi-step \cite{nair2023randomization, prinster2024conformal} feedback covariate shift, as is the case in the policy optimization setting. Also relevant are the fixed-weight methods of \citet{barber2023}, which bound the coverage violation due to misspecified data-independent weights, and the unifying weighted conformal framework of \citet{barber2025unifying}.
+
+When deviating from the assumption of exchangeable calibration and test data, any analysis of proactive conformal prediction methods invokes quantities characterizing the relationship between the calibration and test distributions, such as their density ratios or divergences.
+Therefore, despite the advances in theory, deployment of conformal prediction methods in practice in distribution shift settings has been hamstrung by the practical difficulty of evaluating such quantities, particularly in high-dimensional spaces.
+Consider the combinatorially large action spaces involved in high-impact applications such as biological sequence design.
+Unless modeling the distribution using factorizations amenable to tractable computation (e.g., autoregressive generative models), it is generally computationally intractable to evaluate the density of distributions over sequence space, as exact computation of normalizing constants is infeasible.
+As a workaround, some approaches have resorted to density ratio estimation \cite{stanton2023bayesian, Laghuvarapu2023, fannjiang2025, correia2025neurips}, a task that is also challenging and ill-posed in high dimensions \cite{rhodes2020}, and which nullifies validity guarantees due to estimation error.
+In the present work, we circumvent the difficulty of evaluating density ratios between the calibration and test policies by making their density ratio itself the tunable control parameter, as follows. 
+We first assume existence of an initial safe policy, $\pi_0$, that satisfies the safety constraint, as well as naively optimized policies at each time, $\pi_t$.
+At each time, we define a family of ``constrained policies'' that interpolates between $\pi_0$ and $\pi_t$ by clipping their density ratio, $\pi_t(\cdot) / \pi_0(\cdot)$, at an upper bound, $\beta_t$ (Eq.~\eqref{eq:piecewise_constraint_def}).
+By making this density ratio upper bound, $\beta_t$, the tunable control parameter, we have done away with the need to estimate the density ratio altogether.
+
+
+
+\textbf{Conformal methods for decision-making in the offline setting}
+
+Conformal methods, by which we mean conformal prediction techniques and their generalizations to settings beyond constructing instance-wise prediction sets with coverage guarantees, have also been developed for various decision-making settings.
+\citet{vovk2018conformal} laid the groundwork for conformal decision-making, demonstrating how conformal prediction (specifically conformal predictive distributions \citep{vovk2017nonparametric}) can be used to make decisions that satisfy a notion of efficiency.
+They noted, however, that they had ``limited [themselves] to analyzing a given batch of data, without attempting active learning, and this limitation has made it possible to develop a fairly systematic theory.''
+
+
+Indeed, following \citet{vovk2018conformal}, subsequent work on conformal methods for decision making has largely also assumed an offline (i.e., non-active) setting, where training and calibration are entirely independent of test-time decisions: that is, where pre-deployment training and calibration cannot influence distributions at test time, and vice versa (without breaking statistical guarantees). For instance, see \citet{hullman2025conformal} for a recent overview. Approaches in this offline setting have included conformal prediction sets for individual treatment effect estimates \citep{lei2021conformal}, off-policy prediction \citep{taufiq2022conformal, zhang2023conformal}, extending conformal prediction sets to handle notions of risk beyond miscoverage \citep{bates2021distribution, angelopoulos2022conformal}, risk assessment \citep{prinster2022jaws, singh2023distribution, zhou2025conformalized}, developing connections with Bayesian decision theory \citep{hoff2023bayes, snell2025conformal}, and designing conformal sets for (or the filtering of) outputs of fixed/pre-trained generative models \citep{quach2023conformal, teneggi2023trust, mohri2024language, cherian2024large, overman2024aligning, jiang2025conformal}. Another line of work has developed conformal-inspired optimization procedures to simulate decision making during training \citep{colombo2020training, stutz2021learning, cortes2024utility, yeh2024end, yeh2025conformal}, but notably, these methods all require a further split of the data beyond that of split conformal \citep{papadopoulos2002inductive}, thus effectively side-stepping the ``optimizer's curse'' at the cost of reduced data efficiency.\footnote{That is, 
+these ``conformal training'' works typically require at least three disjoint splits of the data to maintain statistical validity: a ``proper'' training set for learning, a validation set used for hyperparameter tuning (or simulating conformal calibration), and a separate fresh calibration set at test time for inference.
+In contrast, the present paper's conformal policy control methods avoid such an additional data split by carefully reweighting the calibration data to adjust for data-dependent policy selection.} 
+
+
+While \citet{kiyani2025decision} theoretically demonstrated that prediction sets are particularly suitable for risk-averse decision-making and several works have empirically demonstrated the utility of prediction sets for human decision makers \citep{straitouri2023improving, cresswell2024conformal, zhang2024evaluating}, there nonetheless remains a gap between methodological progress and practical impact of conformal methods \citep{hullman2025conformal}. Arguably, this persistent gap is due to the fact that predictions (and consequently, prediction sets) are almost never the end goal in practice. Instead, the end goal in practice is often to control how prediction error affects the specific downstream decisions, or the policy, of interest.
+
+
+\textbf{Conformal methods for decision-making in the active setting}
+
+In the active setting, where an agent's actions may influence the observed data distribution, there are two main threads of literature that parallel corresponding methods for conformal prediction under distribution shift. The first thread uses ideas from weighted conformal to proactively adapt prediction sets to agent-induced shifts: \citet{fannjiang2022conformal} extended the weighted conformal methods of \citet{tibshirani2019conformal} to a one-step instance of  ``feedback covariate shift,'' where the input distribution of a single test batch can depend on the training data. 
+Inspired by this work, \citet{stanton2023bayesian} incorporated weighted conformal methods into Bayesian optimization, aiming to close the decision-making loop by allowing conformal calibration and optimization to bidirectionally influence each other; however, they noted gaps in the theory that prevented the desired guarantees from being realized.  \citet{prinster2023jaws} extended \citet{fannjiang2022conformal}'s methods to cross-validation-style conformal calibration; \citet{nair2023randomization} introduced an extension to multiple rounds of dependent covariate shifts; and \citet{prinster2024conformal} extended weighted conformal methods to any data distribution, with multiround agent-induced covariate shifts as a main focus. However, these prior works differ from the present paper in several ways: they all operate \textit{descriptively} to adapt prediction sets for a fixed policy, whereas our methods function \textit{prescriptively}, using conformal calibration to \textit{find} a risk-controlling policy; in combinatorial action spaces, they are bottlenecked by challenges of density-ratio estimation and normalization; and they focus on (mis)coverage rather than more general notions of risk. 
+
+
+
+The second line of conformal methods in the active setting uses ideas from online adversarial conformal (e.g., \citet{Gibbs2021-ed}) to retroactively learn decision rules over time: \citet{feldman2023achieving} extended the online algorithm of \citet{Gibbs2021-ed} to more general loss functions (similarly as \citet{bates2021distribution, angelopoulos2022conformal} did in the offline setting), and \citet{lekeufack2024conformal} extended those ideas to a conformal decision theory framework, where the online learning update directly steers an agent's decisions at the next timestep. \citet{zhang2024bayesian} use ideas from online adversarial conformal for Bayesian optimization and \citet{zhao2024conformalized} for imitation learning. These works achieve bounds on the long-term average risk as the number of time steps grows indefinitely.
+In robotics, conformal prediction has also been used to construct predictive sets of trajectories, which are used to make planning or control procedures safer \cite{Lindemann2023-aj, Luo2024-na, sun2023, wang2025neurips, lindemann2024formal}.
+
+\textbf{Conformal selection and high-probability risk control}
+
+Along a different vein, motivated by candidate selection problems that arise in drug discovery, conformal selection methods \cite{Jin2022, Jin2023-bw, Bai2024-bb, gui2025} merge ideas from conformal prediction and multiple testing to select designs from a pool of individual candidates, such that the false discovery rate, or expected proportion of selected designs whose label does not surpass a desired threshold, is controlled.
+While these methods assume access to a pool of exchangeable (e.g., i.i.d.) candidates, in some applications---for example, biological sequence design---this is not a natural setting.
+Instead, it is more relevant to reason about generating candidates from some distribution, which brings us to our problem of how to select a generative model that controls risk as desired.
+\citet{fannjiang2025} tackle this problem as a multiple testing problem to arrive at high-probability guarantees of risk control. 
+Such high-probability risk control guarantees are akin in spirit to prior works on risk controlling prediction sets \citep{bates2021distribution} and the Learn-then-Test framework \citep{angelopoulos2021learn}, which provide high-probability guarantees for monotonic and non-monotonic losses respectively. In contrast, we build on 
+techniques from conformal risk control \cite{angelopoulos2022conformal} to achieve guarantees in expectation, which typically provides tighter risk control. Relative to conformal risk control, we also introduce and focus on the policy control setting, wherein the control parameter directly controls the agent's policy, to fully connect the decision-making loop, circumvent challenges of density-ratio estimation, and address the optimizer's curse head-on.
+
+
+\subsection{Seldonian Algorithms}
+
+Seldonian algorithms \citep{thomas2019preventing} provide a framework for constructing machine learning systems that satisfy user-specified behavioral constraints with high probability.
+The approach builds on earlier work on high-confidence policy improvement \citep{thomas2015highconfidence}, which introduced the use of concentration inequalities to obtain probabilistic guarantees on policy performance.
+Rather than requiring users to tune abstract regularization weights or penalty coefficients, Seldonian algorithms allow direct specification of constraints such as ``the probability of causing harm should be at most 5\%.''
+The framework uses concentration inequalities to derive high-probability bounds on constraint satisfaction, returning a solution only when sufficient evidence exists that the constraints will be met.
+
+The Seldonian framework has been extended in several directions.
+\citet{metevier2019offline} adapted the approach to contextual bandits with fairness constraints, demonstrating how user-specified fairness definitions can be enforced with high-probability guarantees.
+\citet{chandak2020towards} addressed non-stationary MDPs by incorporating time-series forecasting to anticipate distribution shift.
+\citet{giguere2022fairness} extended the framework to handle demographic shift between training and deployment, providing guarantees that remain valid when the population composition changes.
+
+Both Seldonian algorithms and conformal policy control share the goal of translating user-specified risk tolerances directly into algorithmic constraints, eliminating the need for trial-and-error hyperparameter tuning.
+However, the two frameworks differ in the nature of their guarantees and the distinction between \textit{certification} and \textit{regulation}.
+Seldonian algorithms provide \textit{conditional, high-probability} bounds: with probability at least $1 - \delta$, the deployed policy satisfies the specified constraints.
+In contrast, conformal methods provide \textit{marginal, expected value} guarantees: on average, the expected loss under the deployed policy is bounded by the user-specified level $\alpha$.
+Neither guarantee type strictly dominates the other. High-probability bounds are more conservative but offer protection against worst-case outcomes. Expected value bounds are tighter on average but permit occasional constraint violations.
+The greatest difference between our work and Seldonian algorithms is our method can be used to safely deploy (control the expected risk of) a model that would not be safe otherwise through the rejection sampling regulation procedure. 
+By contrast, a Seldonian algorithm can certify that the solution it returns satisfies its constraints with high probability, however it cannot regulate an existing solution trained by some third-party algorithm.
+
+\clearpage

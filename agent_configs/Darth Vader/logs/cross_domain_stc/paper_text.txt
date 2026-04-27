@@ -1,0 +1,1593 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+Anonymous Authors1
+Abstract
+It remains a critical challenge to adapt policies
+across domains with mismatched dynamics in re-
+inforcement learning (RL). In this paper, we study
+cross-domain offline RL, where an offline dataset
+from another similar source domain can be ac-
+cessed to enhance policy learning upon a target
+domain dataset. Directly merging the two datasets
+may lead to suboptimal performance due to poten-
+tial dynamics mismatches. Existing approaches
+typically mitigate this issue through source do-
+main transition filtering or reward modification,
+which, however, may lead to insufficient exploita-
+tion of the valuable source domain data. Instead,
+we propose to modify the source domain data into
+the target domain data. To that end, we leverage
+an inverse policy model and a reward model to
+correct the actions and rewards of source tran-
+sitions, explicitly achieving alignment with the
+target dynamics. Since limited data may result in
+inaccurate model training, we further employ a
+forward dynamics model to retain corrected sam-
+ples that better match the target dynamics than the
+original transitions. Consequently, we propose the
+Selective Transition Correction (STC) algorithm,
+which enables reliable usage of source domain
+data for policy adaptation. Experiments on var-
+ious environments with dynamics shifts demon-
+strate that STC achieves superior performance
+against existing baselines.
+1. Introduction
+Reinforcement learning (RL) typically requires extensive
+interactions to train effective policies for a new task, which
+can be costly or infeasible in real-world applications (Levine
+et al., 2020; Eysenbach et al., 2021; Torne et al., 2024). In
+contrast, humans can rapidly adapt to new but structurally
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+similar tasks once they have mastered a related skill (Lyu
+et al., 2025). This motivates the design of RL agents capa-
+ble of leveraging experience from a similar domain (e.g.,
+a simulator) to enhance learning efficiency in the target
+domain, a setting commonly referred to as the policy adap-
+tation problem (Xu et al., 2023; Lyu et al., 2024b). A key
+challenge in this setting is the potential dynamics mismatch
+between the source domain and the target domain, which
+can significantly degrade the performance of the policy.
+There are many researches focusing on the online policy
+adaptation setting where either the source or target domain
+is online. They fulfill policy adaptation by training domain
+classifiers (Eysenbach et al., 2021), filtering data via value
+difference (Xu et al., 2023), capturing representation mis-
+match (Lyu et al., 2024a), etc. However, in many real-world
+scenarios, online interactions can be costly or even unsafe.
+This motivates a shift of focus to theoffline policy adapta-
+tionproblem, or cross-domain offline RL (Wen et al., 2024;
+Lyu et al., 2025), where both the source domain and the
+target domain are offline. Existing cross-domain offline
+RL methods include filtering source domain data based on
+mutual information (Wen et al., 2024) or optimal transport
+(Lyu et al., 2025), augmenting source transition rewards by
+training domain classifiers (Liu et al., 2022), etc. These ap-
+proaches typically mitigate the dynamics mismatch between
+datasets from two domains by selecting source transitions
+that resemble target domain data or penalizing dissimilar
+ones. However, such strategies may keep few transitions
+and discard potentially useful transitions, thereby limiting
+the utilization of the source dataset for policy learning.
+To mitigate this issue, we propose tomodify source transi-
+tions into target domain datasuch that more source transi-
+tions can align with the target domain dataset, even those
+exhibiting substantial dynamics discrepancies. We leverage
+the inverse policy model trained on the target dataset to cor-
+rect actions and rewards in the source domain dataset, which
+predicts the action label given the current state and the next
+state. We utilize the inverse policy model to replace the
+original source actions with ones that are more consistent
+with target dynamics. Based on the revised action, we ap-
+proximately adjust the reward label using Taylor expansion
+and a trained reward model. We theoretically analyze the dy-
+namics discrepancy of the corrected data against the target
+dataset and the value discrepancy on the corrected data and
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+sample
+𝐷𝑡𝑎𝑟
+ forward dynamics model
+inverse policy model and reward model
+sample
+Phase I: Forward and Inverse Model Training
+Phase II: Offline Policy Adaptation with Source Transition Correction
+𝐷𝑡𝑎𝑟
+𝐷𝑠𝑟𝑐
+sample
+𝑠𝑠𝑟𝑐, 𝑎𝑠𝑟𝑐, 𝑟𝑠𝑟𝑐, 𝑠𝑠𝑟𝑐′
+Batch 𝐵
+ Correction
+sample
+Batch 𝐵
+(𝑠𝑡𝑎𝑟, 𝑎𝑡𝑎𝑟, 𝑟𝑡𝑎𝑟, 𝑠𝑡𝑎𝑟
+′ )
+⟹ (𝑠𝑠𝑟𝑐, ෝ𝒂𝒔𝒓𝒄, ො𝒓𝒔𝒓𝒄, 𝑠𝑠𝑟𝑐′ )
+Selection
+𝑓inv(𝑠, 𝑠′) 𝑓fwd(𝑠, 𝑎)
+𝑓inv(𝑠, 𝑠′) 𝑓fwd(𝑠, 𝑎)
+Offline RL
+𝑟(𝑠, 𝑎)
+Figure 1.Training pipeline of our proposed STC algorithm.InPhase I, we train the forward dynamics model ffwd(s, a), the
+reward model r(s, a), and the inverse policy model finv(s, s′). These models are trained to capture the bidirectional dynamics transition
+information in the target domain dataset. InPhase II, we sample data from Dsrc and Dtar to train an offline RL agent, where we correct
+the actions and rewards in the source domain transition tuple by using the inverse policy model. We further use the forward dynamics
+model to selectively correct source transitions to better align with the target domain.
+the source dataset. We further show the performance bound
+on the corrected data and the true target domain, which can
+be tighter if the source transitions are well corrected.
+However, in practice, the target domain dataset is limited,
+which inevitably introduces approximation errors in the in-
+verse policy model. Blindly correcting all source transitions
+may lead to performance degradation, as inaccurate pre-
+dictions can produce poor corrected source transitions. To
+address this issue, we train a forward dynamics model based
+on the target domain dataset and introduce a selection mech-
+anism that selectively corrects source dataset samples to
+achieve better alignment with the target dynamics. Combin-
+ing the techniques above gives birth to our Selective Transi-
+tion Correction (STC) algorithm, with its overall framework
+depicted in Figure 1. Empirical results on datasets with
+varied dynamics shifts show that STC exhibits competitive
+or better performance than prior strong baselines.
+2. Related Work
+Offline Reinforcement Learning (RL).Offline RL (Levine
+et al., 2020; Lange et al., 2012) addresses the problem of
+learning policies from fixed datasets without further envi-
+ronment interaction. A key challenge of offline RL lies in
+the extrapolation error (Fujimoto et al., 2019; Kumar et al.,
+2019). Offline RL methods generally involve model-free
+methods (Xu et al., 2022; Wu et al., 2021; An et al., 2021;
+Lyu et al., 2022; Kostrikov et al., 2022; Yang et al., 2024;
+Tarasov et al., 2024; Yeom et al., 2024), and model-based
+methods (Yu et al., 2021; Matsushima et al., 2021; Yu et al.,
+2020; Kidambi et al., 2020; Qiao et al., 2024; Liu et al.,
+2025b). These approaches typically assume access to large-
+scale datasets from a single domain that closely matches
+the target environment. In contrast, we consider a more
+challenging setting where the target domain data is limited,
+and we aim to leverage supplementary source domain data
+to enhance policy performance.
+Domain Adaptation in RL.We focus on the cross-domain
+policy adaptation problem in RL (Eysenbach et al., 2021;
+Xu et al., 2023; Lyu et al., 2024b), where the source do-
+main and the target domain share the same state and action
+spaces but differ in their underlying dynamics. Effectively
+identifying and bridging the dynamics mismatch is a central
+challenge. Prior works have explored various techniques, in-
+cluding system identification (Clavera et al., 2018; Du et al.,
+2021; Xie et al., 2022), meta-RL (Nagabandi et al., 2018;
+Raileanu et al., 2020), domain randomization (Slaoui et al.,
+2019; Mehta et al., 2019; Vuong et al., 2019; Jiang et al.,
+2023), and imitation learning (Kim et al., 2019; Hejna et al.,
+2020; Fickinger et al., 2022), etc. However, the reliance on
+training environment distributions or expert demonstrations
+limits their practicality in many scenarios. Recent methods
+in online domain adaptation setting address this by learn-
+ing dynamics models for both domains (Desai et al., 2020),
+value-guided data filtering (Xu et al., 2023) or dynamics-
+aware reward modification (Lyu et al., 2024a; Eysenbach
+et al., 2021; Van et al., 2024). In the context of cross-domain
+offline RL, existing approaches often involve reward penal-
+ization (Liu et al., 2022), dataset constraint (Liu et al., 2024),
+source transition filtering using mutual information (Wen
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+et al., 2024) or optimal transport (Lyu et al., 2025), tra-
+jectory editing (Niu et al., 2024), data augmentation (Guo
+et al., 2025), flow matching (Kong et al., 2025), utilizing
+skill expansion and composition (Liu et al., 2025a), gen-
+erating samples with a diffusion model (Van et al., 2025).
+These methods often focus less on source domain data that
+is not close to the target domain. In contrast, we propose
+to selectively correct source transitions into target domain
+transitions to better align with target domain dynamics.
+3. Preliminaries
+RL problems can be formulated as a Markov Decision
+Process (MDP), defined by M= (S,A, P, r, γ) , where
+S, A denote the state and action spaces, P(s ′|s, a) is the
+transition dynamics, r(s, a) :S × A →R is the scalar
+reward signal, γ∈[0,1) is the discount factor. The ob-
+jective of an RL agent is to learn a policy π to maxi-
+mize the expected discounted cumulative return J(π) =
+Eπ [P∞
+t=0 γtr(st, at)]. Q-value is defined as Q(s, a) :=
+Eπ [P∞
+t=0 γtr(st, at)|s, a]. In cross-domain RL (Lyu et al.,
+2024b), we have a source domain Msrc = (S,A, P src, r, γ)
+and a target domain Mtar = (S,A, P tar, r, γ), which
+share the state space, action space and reward function
+but differ in transition dynamics. We denote the transi-
+tion dynamics in a domain M as PM, and P π
+M,t(s) is
+the probability that the policy π encounters the state s
+at timestep t in M. Then we calculate the normalized
+probability that π encounters the state-action pair (s, a)
+in M as ρπ
+M(s, a) := (1−γ) P∞
+t=0 γtP π
+M,t(s)π(a|s).
+P π(·|s) = P
+a P(·|s, a)π(a|s) is the transition dynamics
+induced by the policy π. We consider the offline setting
+where we have access to a static source domain dataset
+Dsrc ={(s i
+src, ai
+src, ri
+src, si+1
+src )}N
+i=1 and a limited target do-
+main dataset Dtar =
+ 
+si
+tar, ai
+tar, ri
+tar, si+1
+tar
+	N ′
+i=1, where N
+and N ′ are the dataset sizes. Cross-domain offline RL aims
+to leverage the mixed dataset Dsrc
+S Dtar to acquire good
+performance in the target domain. We assume that each
+dataset corresponds to an empirical MDP, where the source
+domain dataset induces cMsrc with dynamics bPsrc, and the
+target domain dataset induces cMtar with dynamics bPtar. We
+denote behavior policies in the source and target domain
+datasets as µsrc and µtar, the true transition dynamics in the
+source and target domain asPsrc and Ptar, and the transition
+dynamics in the corrected source domain dataset as ePsrc.
+4. Selective Source Transition Correction
+In this section, we describe key components in STC, which
+mainly contains two parts, (a) training an inverse policy
+model and a reward model in the target domain for source
+transition correction; (b) selectively correcting source do-
+main transitions by using a forward dynamics model of the
+target domain dataset. We theoretically analyze the dynam-
+ics discrepancy behavior and the value discrepancy behavior
+given corrected data. We also provide performance bounds
+of a policy on the corrected data and the true target domain.
+4.1. Source Transition Correction
+To align source domain transitions with the target dynamics,
+we introduce an inverse policy model and a reward model
+to correct actions and rewards of the source data to make
+themtarget domain data. The inverse policy model finv :
+(s, s′)→a is optimized to predict the action that most likely
+incurs the observed next state under the target dynamics:
+Linv =E (star,atar,s′
+tar)∼Dtar
+h
+∥finv(star, s′
+tar)−a tar∥2
+2
+i
+(1)
+As the inverse policy model captures the underlying dy-
+namics of the target domain, we employ it as a surro-
+gate to infer more target-consistent actions for state tran-
+sitions from the source domain. Given a source transition
+(ssrc, asrc, s′
+src)∈D src, where asrc is the original source do-
+main action, we apply the trained inverse model to produce
+a corrected action:
+ˆasrc =f inv(ssrc, s′
+src).(2)
+Since the reward of a transition is determined by both the
+state and the action, modifying the action necessitates a
+corresponding adjustment to the reward. To support this, we
+train a parametric reward modelr(s, a)to approximate the
+true reward function in the target domain using the available
+offline target dataset, which is optimized via:
+Lrew =E (star,atar,rtar)∼Dtar
+h
+(r(star, atar)−r tar)2
+i
+.(3)
+The trained reward model is used to estimate the corrected
+reward for transitions in the source domain whose actions
+have been modified. For a transition (ssrc, asrc, s′
+src, rsrc)
+and its corrected action ˆasrc, we apply a first-order Taylor
+expansion around the original action to approximate the
+corrected rewardˆrsrc as:
+ˆrsrc =r src +α· ∇ ar(ssrc, a)⊤|a=asrc (ˆasrc −a src),(4)
+where ∇ar(ssrc, a) denotes the gradient of the reward model
+with respect to the action, and α is a tunable hyperparameter
+that scales the extent of reward adjustment. To ensure re-
+ward adjustment stability, the gradient is ℓ2-normalized and
+clipped within a bounded range. This correction leverages
+the local smoothness of the reward function in action space
+and enables efficient reward estimation without directly eval-
+uating out-of-distribution (OOD) actions.
+We then construct the candidate corrected source domain
+transition (ssrc,ˆasrc, s′
+src,ˆrsrc). If the inverse policy model is
+sufficiently accurate, the corrected transition is expected to
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+better align with the underlying dynamics of the target do-
+main compared to the original transition(ssrc, asrc, s′
+src, rsrc).
+This correction process allows for the effective reutilization
+of source domain data that would otherwise be incompat-
+ible, by substituting their actions with ones that are more
+consistent with the target domain dynamics.
+4.2. Theoretical Analysis
+To demonstrate the rationality of source transition correc-
+tion, we provide a theoretical analysis given corrected
+source data. We first impose the following assumptions
+that are required for further theoretical analysis. These as-
+sumptions are common and widely used in RL. Due to space
+constraints, all proofs are deferred to Appendix A.
+Assumption 4.1.There exists ϵ >0 such that
+∥Psrc(·|s, a)−P tar(·|s, a)∥ ≤ϵ,∀(s, a).
+Assumption 4.2.The estimated inverse policy modelˆπ inv
+well approximates the true empirical inverse policy model
+πtar
+inv such that the error between the empirical forward policy
+models in the corrected data and the target domain dataset
+is bounded, i.e.,E[∥ˆπ(s)−µ tar(s)∥1]≤κ.
+Assumption 4.3.The reward function is bounded and is Lr-
+smooth, i.e.,∀(s, a),∥∇ ar(s, a)∥ ≤L r,|r(s, a)| ≤r max.
+Assumption 4.1 requires that the dynamics discrepancy be-
+tween the source domain and the target domain is bounded,
+and Assumption 4.2 assumes that the estimated inverse pol-
+icy model well-fit the target domain. Theorem 4.4 depicts
+the dynamics discrepancy between the corrected source do-
+main dataset and the target domain dataset.
+Theorem 4.4.Denote the corrected source domain tran-
+sition dynamics as ePsrc, then under Assumption 4.1 and
+4.2, the deviation between the corrected dynamics and the
+empirical target domain dynamics bPtar(·|s, a)is bounded:
+∥ePsrc(·|s, a)− bPtar(·|s, a)∥ ≤κ+ϵ.
+Furthermore, we show the value discrepancy of Qπ(s, a)
+given a policyπbetween the corrected data and raw data.
+Theorem 4.5.Given Assumption 4.3 and assume that the
+source domain rewards are corrected via ˆr(ssrc, asrc) =
+r(ssrc, asrc) +∇ ar(ssrc, a)⊤|a=asrc (ˆasrc −a src), where
+ˆasrc ∼µ tar(·|ssrc). Then given any (s, a), the deviation
+of Q-values on the corrected empirical source domainfMsrc
+and the raw empirical source domain cMsrc is bounded:
+Qπ
+fMsrc
+(s, a)−Q π
+cMsrc
+(s, a)
+ ≤ 2Lr
+1−γ DTV(µsrc∥µtar).
+Theorem 4.5 shows that the deviation of Q-values on cMsrc
+and fMsrc is bounded by the total variation deviation be-
+tween the behavior policies in the source domain dataset
+and target domain dataset. This ensures that the corrected
+value function well reflects the dynamics discrepancy be-
+tween the two domains and verifies the necessity of reward
+correction. To see how transition correction affects the per-
+formance of the agent, we derive a concrete performance
+bound of a policy given the corrected source domain data
+and the true target domain in Theorem 4.6.
+Theorem 4.6(Finite data bound).Denote fMsrc as the
+corrected empirical source domain MDP ,n is the size of the
+target domain dataset, C1 = γrmax|S|√
+2(1−γ)2 , C2 =|S × A ×
+S|. Then under Assumption 4.1-4.3, for any policy π, the
+following bound holds with probability at least1−δ:
+J fMsrc
+(π)−JMtar (π)≥ − γrmax(κ+ϵ)
+(1−γ) 2 −C1
+r
+1
+n ln 2C2
+δ .
+The above bound indicates that the performance difference
+of a policy π in two domains is decided by the policy esti-
+mation error κ (other components are constants). The lower
+bound becomes tight (i.e, the policy can closely match its
+performance in the true target domain by using corrected
+source domain data) if the inverse policy is well-trained
+(i.e., κ is small) and large vice versa. It also highlights the
+necessity of training a good inverse policy model.
+4.3. Selective Correction Mechanism
+Since Dtar contains limited data, the learned inverse policy
+model may be less reliable in OOD regions. This hypothesis
+is supported by preliminary experiments, where we attempt
+to apply action correction uniformly across all source do-
+main transitions. While this approach yields performance
+improvements in some environments, it leads to significant
+degradation in others. This suggests that, in certain cases,
+corrections produced by the inverse policy and reward model
+may not provide consistent benefits and could potentially
+introduce errors for policy learning.
+To address this challenge, we introduce a selective correc-
+tion mechanism that operates in a conservative manner,
+correcting source-domain samples only when the model
+is (comparatively) confident about its prediction. To ful-
+fill that, we quantify the dynamic discrepancy between a
+transition and the target domain and use it as a metric to
+decide whether the inverse policy model can be reliable. It
+motivates us to additionally train a forward dynamics model
+upon the target domain dataset, which predicts the next state
+difference given the current state-action pair, by minimizing
+the following loss:
+Lfwd =E (star,atar,s′
+tar)∼Dtar
+h
+∥ffwd(star, atar)−(s ′
+tar −s tar)∥2
+2
+i
+(5)
+For the original source transition(ssrc, asrc, s′
+src, rsrc) and its
+corrected counterpart (ssrc,ˆasrc, s′
+src,ˆrsrc), we compute their
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+respectivedynamics discrepancieswith respect to the target
+domain, denoted by εorig and εcorr. These discrepancies
+are defined as the prediction errors of a forward dynamics
+model trained on the target dataset:
+εorig =∥f fwd(ssrc, asrc)−(s ′
+src −s src)∥2 ,
+εcorr =∥f fwd(ssrc,ˆasrc)−(s ′
+src −s src)∥2 .
+(6)
+The corrected transition is adopted only if its dynamics
+discrepancy is substantially smaller than that of the original
+transition, formally defined as:
+˜τsrc =
+(
+(ssrc,ˆasrc, s′
+src,ˆrsrc),ifε corr < λ·ε orig,
+(ssrc, asrc, s′
+src, rsrc),otherwise, (7)
+where λ is a tunable threshold hyperparameter. Then we
+construct the corrected source domain dataset eDsrc using
+such selectively corrected transitions:
+eDsrc ={˜τsrc |(s src, asrc, rsrc, s′
+src)∈D src}.(8)
+Finally, we use eDsrc together with the original target data
+Dtar to train the final policy,Dtrain =D tar
+SeDsrc. Note that
+when the correction is rejected, the original source transition
+is retained for training since we believe there are still some
+underlying shared behavior embedded in those data that can
+be beneficial for policy learning. By mutually constraining
+each other, the inverse and forward models help prevent
+performance degradation caused by errors from a single
+model. This selective correction mechanism enables more
+stable and conservative corrections, producing more reliable
+data for offline learning.
+4.4. Actor-Critic Learning
+After constructing the training dataset Dtrain, we train the
+policy under an offline actor-critic framework. We optimize
+the Q-functionQ θ via temporal difference (TD) learning:
+LQ(θ) =E (s,a,r,s′)∼Dtrain
+h
+(Qθ(s, a)−y) 2
+i
+,(9)
+where y=r+γmin j=1,2 Qθ−
+j
+(s′, π(s′)) is the target value,
+θ− is the target Q-network parameters. To mitigate the
+distribution shift issue and prevent the agent from exploiting
+OOD actions, we regularize the policy learning with the
+Q-value-weighted behavior cloning:
+Lπ(ϕ) =−E (s,a)∼Dtrain
+h
+ηQθ(s, πϕ(s))
+−β·exp (ηQ θ(s, a))∥π ϕ(s)−a∥ 2
+2
+i
+,(10)
+where η= 1
+1
+n
+Pn
+i=1|Qθ(si,ai)| is a batch-wise scaling factor
+and n denotes the batch size, β is a hyperparameter used to
+balance the behavior regularization error and Q-loss. We
+use Q-values as weights for behavior cloning loss to inform
+the agent the importance of each transition, akin to IQL
+(Kostrikov et al., 2022). We summarize the pseudocode for
+STC in Algorithm 1, which can be found in Appendix D.
+5. Experiments
+In this section, we evaluate the effectiveness of our method
+for offline policy adaptation through experiments in varied
+environments with dynamics shifts and dataset qualities. We
+additionally conduct a visualization study to validate the
+reliability of STC in correcting source transitions. Moreover,
+ablation studies on key hyperparameters are performed to
+further understand the hyperparameter sensitivity of STC.
+Considering the page limit, please check more experimental
+results in Appendix E.
+5.1. Main Results
+Tasks and datasets.We consider three kinds of dynamics
+shifts, including gravity shift, friction shift, and morphology
+shift, for four tasks (ant, hopper, halfcheetah, walker2d)
+from ODRL (Lyu et al., 2025) to comprehensively evaluate
+the cross-domain offline policy adaptation ability. The grav-
+ity shift modifies the strength of the gravity while keeping its
+direction unchanged. The friction shift is introduced by ad-
+justing the static, dynamic, and rolling friction components.
+The morphology shift modifies the size of specific limbs or
+torsos of the simulated robot in the target domain. As we
+focus on cross-domain offline RL setting with limited target
+domain data, we use the original environments as source do-
+main and use those modified environments as target domain.
+We adopt the MuJoCo “-v2” datasets from D4RL (Fu et al.,
+2020) for source domain datasets and use ODRL datasets in
+modified environments as target domain datasets (only5000
+transitions). We adopt ODRL medium and expert datasets
+and construct medium-expert datasets by selecting 2 trajec-
+tories from medium datasets and 3 trajectories from expert
+datasets. For source domain datasets, we adopt medium,
+medium-replay and medium-expert datasets. We conduct
+experiments across various combinations of data qualities
+and dynamics shifts. All algorithms are trained for 1M
+gradient steps across 5 random seeds.
+Baselines.We consider the following typical baselines:
+IQL(Kostrikov et al., 2022) that is trained on the com-
+bined source and target dataset;DARA(Liu et al., 2022)
+that trains domain classifiers to impose penalties on source
+domain rewards;BOSA(Liu et al., 2024) that addresses the
+OOD issue through support-constrained policy and value op-
+timization;SRPO(Xue et al., 2024) that modifies rewards
+based on the stationary state distribution;IGDF(Wen et al.,
+2024) that introduces a contrastive score function to selec-
+tively share source transitions;OTDF(Lyu et al., 2025) that
+filters source data via optimal transport.
+Metrics.To ensure that the results are interpretable across
+different tasks, we follow ODRL (Lyu et al., 2024b) and
+adopt the normalized score (NS) in the target domain as the
+evaluation metric, defined as NS= J−J r
+Je−Jr
+×100 , where
+J, Je, and Jr denote the returns of the learned, expert, and
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+Table 1.Performance comparison under distinct dynamics shift. half = halfcheetah, hopp = hopper, walk = walker2d, med = medium,
+r = replay, e = expert.Sourcemeans the source domain dataset, andTargetindicates the target domain dataset quality. The normalized
+average scores in the target domain across 5 seeds are reported and±captures the standard deviation. We highlight the best cell.
+Type Source Target IQL DARA BOSA SRPO IGDF OTDF STC (ours)
+Gravity
+half-med med 39.6±3.3 41.2±3.9 38.9±4.0 36.9±4.5 36.6±5.5 40.7±7.7 42.4±5.3
+half-med-r med 20.1±5.0 17.6±6.2 20.0±4.9 17.5±5.2 14.4±2.2 21.5±6.5 26.7±2.2
+half-med-e med 38.6±6.0 37.8±3.3 41.8±5.1 42.5±2.3 37.7±7.3 39.5±3.5 39.2±4.2
+hopp-med med 11.2±1.1 17.3±3.8 15.2±3.3 12.4±1.0 15.3±3.5 32.4±8.0 43.4±6.1
+hopp-med-r med 13.9±2.9 10.7±4.3 3.3±1.9 14.0±2.6 15.3±4.4 31.1±13.4 36.8±17.8
+hopp-med-e med 19.1±6.6 18.5±12.3 15.9±5.9 19.7±8.5 22.3±5.4 26.4±10.1 45.3±7.5
+walk-med med 28.1±12.9 28.4±13.7 38.0±11.2 21.4±7.0 22.1±8.4 36.6±2.3 41.6±4.0
+walk-med-r med 14.6±2.5 14.1±6.1 7.6±5.8 17.9±3.8 11.6±4.6 32.7±7.0 29.0±1.9
+walk-med-e med 39.9±13.1 41.6±13.0 32.3±7.2 46.4±3.5 33.8±3.1 30.2±9.8 34.9±9.1
+ant-med med 10.2±1.8 9.4±0.9 12.4±2.0 11.7±1.0 11.3±1.3 45.1±12.4 42.6±8.4
+ant-med-r med 18.9±2.6 21.7±2.1 13.9±1.5 18.7±1.7 19.6±1.0 29.6±10.7 40.9±5.6
+ant-med-e med 9.8±2.4 8.1±1.8 8.1±3.0 8.4±2.1 8.9±1.5 18.6±11.9 39.2±9.2
+Morph
+half-med med 24.5±2.4 21.0±3.9 24.2±5.6 18.1±1.8 23.7±3.4 21.1±7.6 19.5±2.2
+half-med-r med 11.0±1.2 9.5±2.3 4.7±2.9 8.9±1.2 9.2±0.6 6.5±1.4 13.0±5.3
+half-med-e med 21.1±2.8 19.2±2.2 23.2±3.9 21.1±1.9 18.6±1.3 20.8±2.5 16.8±8.8
+hopp-med med 15.9±6.8 17.8±10.1 12.8±0.1 21.7±7.7 25.3±9.7 16.4±7.1 43.1±23.9
+hopp-med-r med 12.9±0.3 12.8±0.1 2.0±1.2 12.4±0.7 12.5±1.7 13.3±0.1 22.9±6.1
+hopp-med-e med 14.9±3.1 11.1±5.6 14.4±1.8 16.6±1.9 18.3±7.5 25.4±9.4 53.4±20.8
+walk-med med 31.5±8.6 35.0±10.8 26.7±6.6 38.6±5.1 38.5±8.4 42.5±3.1 56.7±8.1
+walk-med-r med 41.5±3.0 38.5±7.9 15.3±7.6 36.0±4.4 24.2±8.6 17.9±13.4 63.1±8.0
+walk-med-e med 32.8±4.3 41.4±10.9 45.1±13.7 39.8±14.3 37.9±4.2 55.3±2.2 62.1±8.1
+ant-med med 71.4±2.4 71.5±6.8 54.8±13.2 72.8±2.2 71.8±2.7 75.1±2.3 77.2±2.8
+ant-med-r med 65.9±5.5 62.3±8.2 15.2±2.3 59.3±4.0 65.0±5.3 63.1±5.9 76.2±2.6
+ant-med-e med 70.2±7.3 64.3±5.8 64.0±6.0 68.5±4.4 66.8±11.0 76.4±1.9 79.3±0.2
+Total Score 677.6 670.9 549.8 681.1 660.8 818.11045.2
+random policies in the target domain, respectively.
+Results.We summarize the performance of all methods
+under gravity shift and morphology shift in Table 1. Due
+to space limitations, results for friction shift setting are de-
+ferred to Appendix E.1. For each task, we vary the quality
+of the source domain data to evaluate the robustness of
+different methods under varied dynamics shifts and data
+quality combinations. Our results show that STC consis-
+tently outperforms all baselines in most tasks and achieves
+a total normalized score1045.2. In particular, compared to
+IQL, which directly learns from the mixed dataset without
+any adaptation, STC achieves a notable improvement of
+54%, highlighting the effectiveness of selectively correct-
+ing source domain transitions. STC achieves the highest
+normalized score on18 out of all 24 tasks. OTDF is the
+best-performing baseline excluding STC, and STC beats
+OTDF in overall average performance by 27%. While STC
+slightly underperforms other top-performing methods on
+several tasks, the gap is marginal and does not indicate a
+significant weakness.
+We find that some policy adaptation methods offer limited
+improvement over IQL (as also observed in (Lyu et al.,
+2025)), likely due to the limited quantity (5000) of available
+target transitions, which increases the difficulty of effec-
+tive adaptation. Methods like DARA and SRPO may fail
+to learn reliable domain classifiers under such conditions,
+resulting in inaccurate reward modification. OTDF achieves
+clear improvements over IQL by using optimal transport,
+but it still falls short compared to STC. It indicates that
+selective source transition correction can be more powerful
+than source data filtering, which allows for more effective
+reuse of potentially valuable transitions. Meanwhile, the
+bidirectional dynamics-based selection mechanism helps
+mitigate the negative effects of potential model training bias.
+Moreover, the training efficiency of STC remains competi-
+tive with that of other baselines (see Appendix H for details).
+Considering the performance gains achieved, we deem the
+extra training effort of the auxiliary models acceptable.
+5.2. Influence of Target Domain Dataset Quality
+To evaluate the robustness of our method under varying
+target data quality, we conduct experiments using target
+domain datasets of different qualities. As demonstrated in
+Table 2, STC exhibits superior performance across varying
+data quality settings, sometimes outperforming baseline
+methods by a large margin. In general, STC achieves the
+highest score on 12 out of the 20 tasks and a total score
+of820.8, which beats all baseline methods and surpasses
+the second best baseline OTDF by13.5%. These empirical
+results clearly show the strong adaptability and effectiveness
+of STC under diverse target domain dataset qualities.
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+Table 2.Performance comparison under distinct target dataset qualities. half = halfcheetah, hopp = hopper, walk = walker2d, med =
+medium, e = expert.Sourcemeans the source domain dataset, andTargetindicates the target domain dataset quality. The normalized
+average scores in the target domain across 5 seeds are reported and±captures the standard deviation. We highlight the best cell.
+Type Source Target IQL DARA BOSA SRPO IGDF OTDF STC (ours)
+Gravity
+half-med med 39.6±3.3 41.2±3.9 38.9±4.0 36.9±4.5 36.6±5.5 40.7±7.7 42.4±5.3
+half-med med-e 39.6±3.7 40.7±2.8 40.4±3.0 40.7±2.3 38.7±6.2 28.6±3.2 37.3±1.5
+half-med expert 42.4±3.8 39.8±4.4 40.5±3.9 39.4±1.6 39.6±4.6 36.1±5.3 43.1±5.7
+hopp-med med 11.2±1.1 17.3±3.8 15.2±3.3 12.4±1.0 15.3±3.5 32.4±8.0 43.4±6.1
+hopp-med med-e 14.7±3.6 15.4±2.5 21.1±9.3 14.2±1.8 15.1±3.6 24.2±3.6 23.4±6.4
+hopp-med expert 12.5±1.6 19.3±10.5 12.7±1.7 11.8±0.9 14.8±4.0 33.7±7.8 37.1±14.1
+walk-med med 28.1±12.9 28.4±13.7 38.0±11.2 21.4±7.0 22.1±8.4 36.6±2.3 41.6±4.0
+walk-med med-e 35.7±4.7 30.7±9.7 40.9±7.2 34.0±9.9 35.4±9.1 44.8±7.5 36.9±6.5
+walk-med expert 37.3±8.0 36.0±7.0 41.3±8.6 39.5±3.8 36.2±13.6 44.0±4.0 49.9±10.1
+ant-med med 10.2±1.8 9.4±0.9 12.4±2.0 11.7±1.0 11.3±1.3 45.1±12.4 42.6±8.4
+ant-med med-e 9.4±1.2 10.0±0.9 11.6±1.3 10.2±1.2 9.4±1.4 33.9±5.4 23.2±6.1
+ant-med expert 10.2±0.3 9.8±0.6 11.8±0.4 9.5±0.6 9.7±1.6 33.2±9.0 35.6±5.6
+Morph
+half-med med 24.5±2.4 21.0±3.9 24.2±5.6 18.1±1.8 23.7±3.4 21.1±7.6 19.5±2.2
+half-med expert 11.1±1.5 11.3±0.6 9.1±1.7 10.1±1.6 10.1±0.8 7.4±2.3 7.7±1.2
+hopp-med med 15.9±6.8 17.8±10.1 12.8±0.1 21.7±7.7 25.3±9.7 16.4±7.1 43.1±23.9
+hopp-med expert 15.5±4.1 13.0±1.4 4.5±4.0 10.4±3.1 13.4±2.0 14.0±4.0 53.2±50.3
+walk-med med 31.5±8.6 35.0±10.8 26.7±6.6 38.6±5.1 38.5±8.4 42.5±3.1 56.7±8.1
+walk-med expert 37.0±6.0 43.7±5.5 31.3±8.6 43.8±8.4 38.5±4.3 49.9±5.4 32.9±7.3
+ant-med med 71.4±2.4 71.5±6.8 54.8±13.2 72.8±2.2 71.8±2.7 75.1±2.3 77.2±2.8
+ant-med expert 63.9±8.1 68.9±7.6 47.5±11.9 59.0±4.7 66.1±4.0 63.8±6.4 74.1±21.2
+Total Score 561.6 580.2 535.8 556.1 571.7 723.3820.8
+5.3. Influence of Target Domain Dataset Size
+Our method has demonstrated strong effectiveness, even
+when only a limited amount of target domain data is avail-
+able. To further validate the general applicability of STC, we
+systematically vary the size of the target domain dataset and
+evaluate its impact on performance. Specifically, we train all
+methods using different amounts of target transitions (e.g.,
+5k, 100k) across several environments and report the normal-
+ized scores in Table 3. We observe that the performance of
+all methods generally improves as the dataset size increases.
+However, STC consistently outperforms the baselines across
+most tasks, regardless of whether the dataset size is limited
+(e.g., 5k) or relatively large (e.g., 100k). This demonstrates
+that our method remains effective under limited data and
+scales efficiently with larger datasets, highlighting STC’s
+robustness and data efficiency in cross-domain adaptation.
+5.4. STC Can Correct Source Samples Reliably
+To evaluate the reliability of STC in correcting source tran-
+sitions, we conduct a visualization study to assess whether
+the corrected source transition distribution better aligns with
+the target domain. Specifically, we take thehopperenviron-
+ment with the gravity shift and thewalker2denvironment
+with the morphology shift as illustrative examples, and ad-
+ditional visualizations on other environments are provided
+in Appendix E.2. We first apply STC to original source
+transitions to obtain the corrected source transitions. For
+each transition in the target dataset, we identify its nearest
+neighbor using a KD-Tree in the original source dataset
+0.0 0.5 1.0 1.5 2.0
+L2 Norm of Action
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5Density
+Target
+Source
+0.0 0.5 1.0 1.5
+L2 Norm of Action
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5Density
+Target
+Corrected
+(a)Comparison inhopper-gravityenvironment.
+0.5 1.0 1.5 2.0 2.5
+L2 Norm of Action
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5Density
+Target
+Source
+0.5 1.0 1.5 2.0 2.5
+L2 Norm of Action
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5Density
+Target
+Corrected
+(b)Comparison inwalker2d-morphenvironment.
+Figure 2.Action distribution comparison in (a) the hopper
+(gravity shift) and (b) the walker2d (morphology shift) envi-
+ronments.In each subplot, the left panel shows KDE curves com-
+paring original source domain actions and target domain actions,
+while the right panel shows KDE curves comparing STC-corrected
+source actions with target actions.
+based on the state transition pair (s, s′), and extract the
+corresponding original action asrc. We then locate the tran-
+sition with the same (s, s′) in the corrected source dataset
+and extract the corrected action ˆasrc. Finally, we plot the
+kernel density estimation (KDE) curves of bothasrc and ˆasrc
+and compare them with the action distribution of the target
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+Table 3.Performance comparison under distinct target domain dataset size. med = medium. TheSourcecolumn means the source
+domain dataset, and theSizecolumn indicates the size of target domain dataset. The normalized average scores in the target domain
+across 5 seeds are reported and±captures the standard deviation. We highlight the best cell.
+Type Source Size IQL DARA BOSA SRPO IGDF OTDF STC (ours)
+Gravity
+hopper-med 5k 11.2±1.1 17.3±3.8 15.2±3.3 12.4±1.0 15.3±3.5 32.4±8.0 43.4±6.1
+hopper-med 100k 18.0±4.4 19.4±14.6 15.8±6.6 18.1±6.6 17.0±6.2 47.1±11.4 66.1±4.8
+walker2d-med 5k 28.1±12.9 28.4±13.7 38.0±11.2 21.4±7.0 22.1±8.4 36.6±2.3 41.6±4.0
+walker2d-med 100k 33.0±7.9 28.4±5.0 40.3±10.9 33.9±8.1 41.9±5.8 42.8±5.2 45.2±3.3
+Morph
+hopper-med 5k 15.9±6.8 17.8±10.1 12.8±0.1 21.7±7.7 25.3±9.7 16.4±7.1 43.1±23.9
+hopper-med 100k 21.5±10.7 18.6±8.5 12.8±0.1 26.6±9.9 31.3±13.9 30.5±18.3 57.8±22.5
+walker2d-med 5k 31.5±8.6 35.0±10.8 26.7±6.6 38.6±5.1 38.5±8.4 42.5±3.1 56.7±8.1
+walker2d-med 100k 75.6±6.6 79.1±3.8 44.8±11.8 69.6±5.1 75.6±5.8 64.2±4.5 67.4±6.1
+Total Score 234.9 243.9 206.5 242.3 267.0 312.4421.3
+0.0 0.2 0.4 0.6 0.8 1.0
+Steps (×106)
+250
+500
+750
+1000
+1250
+1500Return
+hopper (gravity shift)
+λ = 0.0
+λ = 1.0
+λ = 5.0
+λ = 10.0
+0.0 0.2 0.4 0.6 0.8 1.0
+Steps (×106)
+1000
+1500
+2000
+2500
+walker2d (gravity shift)
+(a)Correction thresholdλ.
+0.0 0.2 0.4 0.6 0.8 1.0
+S teps/uni00A0(×106)
+500
+750
+1000
+1250
+1500Return
+hopper/uni00A0(gravity/uni00A0shift)
+/uni00A0=/uni00A00.0
+/uni00A0=/uni00A00.5
+/uni00A0=/uni00A01.0
+/uni00A0=/uni00A02.0
+0.0 0.2 0.4 0.6 0.8 1.0
+S teps/uni00A0(×106)
+1000
+2000
+3000
+walker2d/uni00A0(morph/uni00A0shift)
+(b)Reward gradient coefficientα.
+Figure 3.Parameter study. We report target domain returns in
+two shift tasks. The shaded region captures the standard deviation.
+domain dataset. As shown in both Figure 2a and 2b, the
+corrected source action distribution (the green curve) aligns
+more closely with the target domain distribution (the blue
+curve) compared to the original source action distribution
+(the orange curve), indicating that STC effectively aligns
+corrected source transitions with the target dynamics.
+5.5. Parameter Study
+We conduct an ablation study to investigate the sensitivity
+of STC to key hyperparameters: the correction threshold λ
+and the reward gradient coefficientα.
+Correction threshold λ.The coefficient λ decides whether
+the source domain transition should be corrected, i.e., a cor-
+rected transition is adopted only if εcorr < λ·ε orig. Smaller
+λ enforces stricter alignment with target dynamics but may
+limit the number of accepted corrected transitions. In con-
+trast, larger λ allows more corrections but can introduce
+misaligned samples. Therefore, selecting an appropriate λ
+is crucial for balancing correction quality and data coverage.
+We run STC withλ∈ {0,1.0,5.0,10.0}, and the results in
+Figure 3a show that no correction ( λ= 0 ) leads to unsat-
+isfying performance, while different tasks achieve the best
+results with different λ. Across all tasks, we adopt λ= 1.0
+or5.0to achieve favorable performance.
+Reward gradient coefficient α.The coefficient α controls
+the extent of reward adjustment. A small α may lead to in-
+sufficient reward adjustment, failing to capture the influence
+of the action change; a large α may amplify model noise
+or cause over-adjustment. We conduct experiments with
+α∈ {0.0,0.5,1.0,2.0} and present results in Figure 3b.
+We observe that STC is less sensitive to α compared to λ.
+As setting α= 0.5 yields the best performance across most
+tasks, we fix this value throughout all experiments.
+6. Conclusion
+In this paper, we address the challenge of offline policy
+adaptation across domains with dynamics mismatch. Un-
+like existing methods that typically mitigate the mismatch
+through data filtering or reward penalties, we directly cor-
+rect source domain transitions to better align with the target
+dynamics. Specifically, we propose Selective Transition
+Correction (STC), a framework that modifies source transi-
+tions by leveraging the inverse policy model and the forward
+dynamics model trained on the target domain. The inverse
+model generates corrected actions and rewards, while the
+forward model is used to select transitions that are more
+consistent with the target dynamics. Extensive experiments
+on benchmarks with varying data qualities and types of dy-
+namics shift demonstrate that STC consistently outperforms
+existing baselines, often with substantial performance gains.
+Our results highlight the effectiveness of directly aligning
+dynamics during offline cross-domain policy adaptation.
+Limitations.STC needs to train both the forward dynamics
+model and the inverse policy model. Also, we make sev-
+eral assumptions for the benefit of theoretical analysis. We
+honestly admit that some of the assumptions may be strong.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+Impact Statement
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal
+consequences of our work, none which we feel must be
+specifically highlighted here.
+References
+An, G., Moon, S., Kim, J.-H., and Song, H. O. Uncertainty-
+based offline reinforcement learning with diversified q-
+ensemble.Advances in neural information processing
+systems, 34:7436–7447, 2021.
+Brockman, G., Cheung, V ., Pettersson, L., Schneider, J.,
+Schulman, J., Tang, J., and Zaremba, W. OpenAI Gym.
+ArXiv, abs/1606.01540, 2016.
+Clavera, I., Nagabandi, A., Fearing, R. S., Abbeel, P.,
+Levine, S., and Finn, C. Learning to adapt: Meta-learning
+for model-based control.ArXiv, abs/1803.11347, 2018.
+Desai, S., Durugkar, I., Karnan, H., Warnell, G., Hanna, J.,
+and Stone, P. An imitation from observation approach
+to transfer learning with dynamics mismatch. InNeural
+Information Processing Systems, 2020.
+Du, Y ., Watkins, O., Darrell, T., Abbeel, P., and Pathak, D.
+Auto-tuned sim-to-real transfer. InIEEE International
+Conference on Robotics and Automation, 2021.
+Eysenbach, B., Chaudhari, S., Asawa, S., Levine, S., and
+Salakhutdinov, R. Off-dynamics reinforcement learn-
+ing: Training for transfer with domain classifiers. In
+International Conference on Learning Representations,
+2021. URL https://openreview.net/forum?
+id=eqBwg3AcIAK.
+Fickinger, A., Cohen, S., Russell, S., and Amos, B. Cross-
+domain imitation learning via optimal transport. In
+International Conference on Learning Representations,
+2022. URL https://openreview.net/forum?
+id=xP3cPq2hQC.
+Fu, J., Kumar, A., Nachum, O., Tucker, G., and Levine,
+S. D4RL: Datasets for Deep Data-Driven Reinforcement
+Learning.ArXiv, abs/2004.07219, 2020.
+Fujimoto, S., Meger, D., and Precup, D. Off-Policy Deep
+Reinforcement Learning without Exploration. InInterna-
+tional Conference on Machine Learning (ICML), 2019.
+Guo, Y ., Yang, Y ., Xu, P., and Liu, A. Mobody: Model
+based off-dynamics offline reinforcement learning.arXiv
+preprint arXiv:2506.08460, 2025.
+Haarnoja, T., Zhou, A., Hartikainen, K., Tucker, G., Ha, S.,
+Tan, J., Kumar, V ., Zhu, H., Gupta, A., Abbeel, P., et al.
+Soft Actor-Critic Algorithms and Applications.arXiv
+preprint arXiv:1812.05905, 2018.
+Hejna, D. J., Abbeel, P., and Pinto, L. Hierarchically de-
+coupled imitation for morphological transfer.ArXiv,
+abs/2003.01709, 2020.
+Jiang, Y ., Li, C., Dai, W., Zou, J., and Xiong, H. Variance
+reduced domain randomization for reinforcement learn-
+ing with policy gradient.IEEE Transactions on Pattern
+Analysis and Machine Intelligence, 46:1031–1048, 2023.
+Kidambi, R., Rajeswaran, A., Netrapalli, P., and Joachims, T.
+MOReL: Model-Based Offline Reinforcement Learning.
+InAdvances in Neural Information Processing Systems
+(NeurIPS), 2020.
+Kim, K., Gu, Y ., Song, J., Zhao, S., and Ermon, S. Domain
+adaptive imitation learning. InInternational Conference
+on Machine Learning, 2019.
+Kong, L., Wang, H., Wang, T., Xiong, G., and Tambe, M.
+Composite flow matching for reinforcement learning with
+shifted-dynamics data.arXiv preprint arXiv:2505.23062,
+2025.
+Kostrikov, I., Nair, A., and Levine, S. Offline reinforcement
+learning with implicit q-learning. InInternational Confer-
+ence on Learning Representations, 2022. URL https:
+//openreview.net/forum?id=68n2s9ZJWF8.
+Kumar, A., Fu, J., Tucker, G., and Levine, S. Stabilizing Off-
+Policy Q-Learning via Bootstrapping Error Reduction.
+InAdvances in Neural Information Processing Systems
+(NeurIPS), 2019.
+Lange, S., Gabel, T., and Riedmiller, M. A. Batch Rein-
+forcement Learning. InReinforcement Learning, 2012.
+Levine, S., Kumar, A., Tucker, G., and Fu, J. Offline Rein-
+forcement Learning: Tutorial, Review, and Perspectives
+on Open Problems.ArXiv, abs/2005.01643, 2020.
+Liu, J., Hongyin, Z., and Wang, D. DARA: Dynamics-aware
+reward augmentation in offline reinforcement learning. In
+International Conference on Learning Representations,
+2022. URL https://openreview.net/forum?
+id=9SDQB3b68K.
+Liu, J., Zhang, Z., Wei, Z., Zhuang, Z., Kang, Y ., Gai, S.,
+and Wang, D. Beyond ood state actions: Supported cross-
+domain offline reinforcement learning. InProceedings
+of the AAAI Conference on Artificial Intelligence, pp.
+13945–13953, 2024.
+Liu, T., Li, J., Zheng, Y ., Niu, H., Lan, Y ., Xu, X., and
+Zhan, X. Skill expansion and composition in parameter
+space. InThe Thirteenth International Conference on
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Cross-Domain Offline Policy Adaptation via Selective Transition Correction
+Learning Representations, ICLR 2025, Singapore, April
+24-28, 2025. OpenReview.net, 2025a. URL https://
+openreview.net/forum?id=GLWf2fq0bX.
+Liu, Z., Fang, Z., Lyu, J., and Li, X. Leveraging score-
+based models for generating penalization in model-based
+offline reinforcement learning. InProceedings of the
+24th International Conference on Autonomous Agents
+and Multiagent Systems, pp. 1389–1398, 2025b.
+Luo, Y ., Xu, H., Li, Y ., Tian, Y ., Darrell, T., and Ma,
+T. Algorithmic framework for model-based deep re-
+inforcement learning with theoretical guarantees. In
+International Conference on Learning Representations,
+2019. URL https://openreview.net/forum?
+id=BJe1E2R5KX.
+Lyu, J., Ma, X., Li, X., and Lu, Z. Mildly conservative
+q-learning for offline reinforcement learning. InNeural
+Information Processing Systems, 2022.
+Lyu, J., Bai, C., Yang, J., Lu, Z., and Li, X. Cross-domain
+policy adaptation by capturing representation mismatch.
+arXiv preprint arXiv:2405.15369, 2024a.
+Lyu, J., Xu, K., Xu, J., Yan, M., Yang, J.-W., Zhang, Z.,
+Bai, C., Lu, Z., and Li, X. ODRL: A benchmark for
+off-dynamics reinforcement learning. InThe Thirty-eight
+Conference on Neural Information Processing Systems
+Datasets and Benchmarks Track, 2024b. URL https:
+//openreview.net/forum?id=ap4x1kArGy.
+Lyu, J., Yan, M., Qiao, Z., Liu, R., Ma, X., Ye, D., Yang,
+J.-W., Lu, Z., and Li, X. Cross-domain offline policy
+adaptation with optimal transport and dataset constraint.
+InThe Thirteenth International Conference on Learning
+Representations, 2025. URL https://openreview.
+net/forum?id=LRrbD8EZJl.
+Matsushima, T., Furuta, H., Matsuo, Y ., Nachum, O., and
+Gu, S. Deployment-Efficient Reinforcement Learning
+via Model-Based Offline Optimization. InInternational
+Conference on Learning Representations (ICLR), 2021.
+Mehta, B., Diaz, M., Golemo, F., Pal, C. J., and Paull, L.
+Active domain randomization.ArXiv, abs/1904.04762,
+2019.
+Nagabandi, A., Clavera, I., Liu, S., Fearing, R. S., Abbeel,
+P., Levine, S., and Finn, C. Learning to adapt in dynamic,
+real-world environments through meta-reinforcement
+learning.arXiv preprint arXiv:1803.11347, 2018.
+Niu, H., Chen, Q., Liu, T., Li, J., Zhou, G., Zhang, Y .,
+Hu, J., and Zhan, X. xted: Cross-domain adaptation
+via diffusion-based trajectory editing.arXiv preprint
+arXiv:2409.08687, 2024.
+Qiao, Z., Lyu, J., Jiao, K., Liu, Q., and Li, X. Sumo: Search-
+based uncertainty estimation for model-based offline re-
+inforcement learning.arXiv preprint arXiv:2408.12970,
+2024.
+Raileanu, R., Goldstein, M., and Szlam, A. Fast adaptation
+to new environments via policy-dynamics value functions.
+InInternational Conference on Machine Learning, 2020.
+Slaoui, R. B., Clements, W. R., Foerster, J. N., and Toth, S.
+Robust domain randomization for reinforcement learning.
+ArXiv, abs/1910.10537, 2019.
+Tarasov, D., Kurenkov, V ., Nikulin, A., and Kolesnikov,
+S. Revisiting the minimalist approach to offline rein-
+forcement learning.Advances in Neural Information
+Processing Systems, 36, 2024.
+Todorov, E., Erez, T., and Tassa, Y . MuJoCo: A Physics
+Engine for Model-based Control.IEEE/RSJ International
+Conference on Intelligent Robots and Systems, 2012.
+Torne, M., Simeonov, A., Li, Z., Chan, A., Chen, T., Gupta,
+A., and Agrawal, P. Reconciling reality through simula-
+tion: A real-to-sim-to-real approach for robust manipula-
+tion.arXiv preprint arXiv:2403.03949, 2024.
+Van, L. L. P., Tran, H. T., and Gupta, S. Policy learning
+for off-dynamics rl with deficient support.arXiv preprint
+arXiv:2402.10765, 2024.
+Van, L. L. P., Nguyen, M. H., Kieu, D., Le, H., Tran, H. T.,
+and Gupta, S. Dmc: Nearest neighbor guidance diffusion
+model for offline cross-domain reinforcement learning.
+arXiv preprint arXiv:2507.20499, 2025.
+Vuong, Q. H., Vikram, S., Su, H., Gao, S., and Christensen,
+H. I. How to pick the domain randomization parameters
+for sim-to-real transfer of reinforcement learning poli-
+cies?ArXiv, abs/1903.11774, 2019.
+Wen, X., Bai, C., Xu, K., Yu, X., Zhang, Y ., Li, X., and
+Wang, Z. Contrastive representation for data filtering
+in cross-domain offline reinforcement learning.arXiv
+preprint arXiv:2405.06192, 2024.
+Wu, J., Wu, H., Qiu, Z., Wang, J., and Long, M. Supported
+policy optimization for offline reinforcement learning.
+Advances in Neural Information Processing Systems, 35:
+31278–31291, 2022.
+Wu, Y ., Zhai, S., Srivastava, N., Susskind, J. M., Zhang, J.,
+Salakhutdinov, R., and Goh, H. Uncertainty Weighted
+Actor-Critic for Offline Reinforcement Learning. InIn-
+ternational Conference on Machine Learning (ICML),
+2021.
+10

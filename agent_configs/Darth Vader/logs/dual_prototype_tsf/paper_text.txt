@@ -1,0 +1,2485 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework
+for Time Series Forecasting
+Anonymous Authors1
+Abstract
+Time series forecasting has witnessed significant
+progress with deep learning. While prevailing
+approaches improve forecasting performance by
+modifying architectures or introducing novel en-
+hancement strategies, they often fail to dynami-
+cally disentangle and leverage the complex, in-
+tertwined temporal patterns inherent in time se-
+ries, thus resulting in the learning of static, aver-
+aged representations that lack context-aware ca-
+pabilities. To address this, we propose the Dual-
+Prototype Adaptive Disentanglement framework
+(DPAD), a model-agnostic auxiliary method that
+equips forecasting models with the ability of pat-
+tern disentanglement and context-aware adapta-
+tion. Specifically, we construct a Dynamic Dual-
+Prototype bank (DDP), comprising a common pat-
+tern bank with strong temporal priors to capture
+prevailing trend or seasonal patterns, and a rare
+pattern bank dynamically memorizing critical yet
+infrequent events, and then an Dual-Path Context-
+aware routing (DPC) mechanism is proposed to
+enhance outputs with selectively retrieved context-
+specific pattern representations from the DDP.
+Additionally, we introduce a Disentanglement-
+Guided Loss (DGLoss) to ensure that each proto-
+type bank specializes in its designated role while
+maintaining comprehensive coverage. Compre-
+hensive experiments demonstrate that DPAD con-
+sistently improves forecasting performance and
+reliability of state-of-the-art models across diverse
+real-world benchmarks.
+1. Introduction
+Time series forecasting (TSF) plays a pivotal role across nu-
+merous real-world domains, including weather forecasting
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+(Bi et al., 2023; Wu et al., 2023b), transportation scheduling
+(Guo et al., 2020; Jin et al., 2021), healthcare monitoring
+(Tran et al., 2019; Wei et al., 2022), energy consumption (Al-
+varez et al., 2010; Guo et al., 2015) and finance (Chen et al.,
+2023; Yu et al., 2023). Due to the inherent non-stationarity
+and dynamics, traditional methods fail to effectively model
+intricate patterns across different time (Wang et al., 2024b;
+Chi et al., 2021). Recent advances in deep learning have
+demonstrated a strong capability for capturing intricate tem-
+poral dependencies in time series, making it a formidable
+tool for TSF (Wang et al., 2024a; Nie et al., 2023).
+Prevailing research focuses on improving forecasting perfor-
+mance by modifying architectures (Wu et al., 2023a; 2021)
+or incorporating novel enhancement strategies (Kim et al.,
+2022; Liu et al., 2023), both of which have obviously im-
+proved the ability to model intricate nonlinear patterns (Qiu
+et al., 2024; Yang et al., 2025). To effectively capture com-
+plex temporal dependencies, some approaches have refined
+attention mechanisms (Liu et al., 2024a) or redesigned MLP
+and CNN architectures for improved modeling of long-range
+and cross-channel dependencies (Tang & Zhang, 2024; Luo
+& Wang, 2024). Meanwhile, some methods introduce en-
+hancement strategies that directly encode prior knowledge
+about temporal structure into the learning process, which
+include explicit decomposition schemes that separate trend
+and seasonal components, as well as techniques such as
+post-processing to mitigate distribution shifts (Ning et al.,
+2025; Liu et al., 2025b).
+Despite these advancements, TSF remains challenging due
+to the inherent complexity in real-world time series data
+(Wang et al., 2024c). This complexity stems primarily from
+the intrinsic non-stationarity and dynamics, leading to grad-
+ual or abrupt distribution shifts over time (Han et al., 2025).
+Consequently, the learned representations by models may
+suffer from temporal lag. Meanwhile, time series often
+exhibit intertwined and complex patterns(e.g., trends, sea-
+sonality, and irregular fluctuations) (Wang et al., 2025b),
+whose influences may vary across different periods and data
+(Hu et al., 2025). In these patterns, some critical yet rare
+patterns occur infrequently in historical observations, re-
+sulting in long-tail distributions that models often fail to
+adequately memorize (Liu et al., 2025b). These inherent
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+0 50 100 150 192
+-1.8
+-1.5
+-1.2
+-1.0
+-0.8 True
+Pred
+(a)Failure under Distribution Shifts
+0 50 100 150 192
+-1.5
+-1.4
+-1.2
+-1.1
+-0.9
+True
+Pred (b)Failure on Intertwined Patterns
+0 50 100 150 192
+-2.0
+-1.0
+0.0
+1.0
+2.0
+3.0
+True
+Pred (c)Failure without Rare Events
+Figure 1.Limitation of static and averaged representations in time series forecasting. We visualize three characteristic failure scenarios
+where some methods fall short: (a) abrupt distribution shifts, (b) intertwined complex patterns, and (c) critical rare events. These
+limitations motivate our proposed context-aware enhancement framework.
+challenges drive existing methods toward learning averaged,
+static representations, thereby hindering their ability to cap-
+ture complex and context-sensitive temporal dependencies
+(Kudrat et al., 2025; Qiu et al., 2025b). To better illustrate
+this limitation, we select three representative real-world fore-
+casting scenarios. As shown in Figure 1, a model relying
+on such representations may struggle to adapt and disentan-
+gle individual patterns when confronted with distribution
+shifts and complex intertwined patterns. This phenomenon
+underscores the necessity of enhancing the model’s capabil-
+ity for dynamic disentanglement and adaptation to diverse
+temporal patterns.
+To this end, we propose the Dual-Prototype Adaptive Dis-
+entanglement framework (DPAD), a novel, model-agnostic
+paradigm designed to overcome the limitation of static repre-
+sentations by endowing models with context-aware pattern
+disentanglement capabilities. Unlike prior works that mod-
+ify the core architecture, DPAD functions as a plug-and-play
+auxiliary method that can be seamlessly integrated into var-
+ious forecasting backbones. Specifically, our framework
+first establishes a learnable Dynamic Dual-Prototype bank
+(DDP), which comprises a common pattern bank covering
+prevalent and stable temporal modes, and a rare pattern
+bank dedicated to memorizing infrequent yet critical events.
+Then, a Dual-Path Context-aware routing (DPC) mechanism
+dynamically retrieves and activates relevant patterns from
+the DDP, thereby enhancing the backbone’s representation
+via a weighted gating strategy. Furthermore, our frame-
+work is optimized with a Disentanglement-Guided Loss
+(DGLoss) that jointly ensures the separation of common
+and rare patterns, enforces diversity among common proto-
+types, and maintains the distinctiveness of rare prototypes.
+Our contributions are summarized as follows:
+• We introduce a novel context-aware enhancement
+framework based on dual-prototype disentanglement.
+Unlike existing methods, our framework equips mod-
+els with the capability for context-aware and pattern
+disentanglement, thereby directly mitigating the inher-
+ent limitation of static representations and enhancing
+their ability to dynamically model intricate temporal
+patterns.
+• We propose DPAD, a model-agnostic auxiliary frame-
+work that employs a learnable dual-prototype bank
+and an adaptive routing mechanism to dynamically en-
+hance model’s prediction. A disentanglement-guided
+loss is further introduced to enforce effective pattern
+separation and preservation, which jointly optimizes
+the backbone and the prototype banks.
+• Comprehensive experiments on multiple real-world
+datasets and state-of-the-art backbones demonstrate
+that DPAD consistently enhances forecasting perfor-
+mance with only negligible computational overhead.
+2. Related Work
+2.1. Time Series Forecasting Models
+Recent years have witnessed remarkable progress in deep
+forecasting models, with their core advancement lying in
+learning more expressive temporal representations (Shao
+et al., 2025; Qiu et al., 2025a). Existing models can be
+broadly categorized by architecture into MLP-based, CNN-
+based, Transformer-based, and LLM-based approaches
+(Wang et al., 2024b). MLP-based architectures (Oreshkin
+et al., 2020; Tang & Zhang, 2024; Yi et al., 2023) often
+employ decomposition strategies and simple linear layers
+to capture cross-time dependencies, offering a compelling
+balance of efficiency and performance. CNN-based architec-
+tures (Bai et al., 2018; LIU et al., 2022; Wang et al., 2023)
+leverage hierarchical convolution structures and frequency-
+domain analysis (Wu et al., 2023a) to model local patterns
+and multi-periodicity effectively. Nevertheless, both of them
+often struggle to capture long-term dependencies. There-
+fore, Transformer-based architectures (Zhou et al., 2021;
+Chen et al., 2024; Liu et al., 2025a) have emerged as a
+powerful paradigm by introducing various efficient atten-
+tion mechanisms to capture global dependencies. More
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+recently, LLM-based approaches (Liu et al., 2024b; Woo
+et al., 2024; Shi et al., 2025) have explored adapting pre-
+trained large language models for time series forecasting,
+leveraging their massive parameters and in-context learning
+capabilities. While excelling at capturing stable, recurring
+patterns, these models often tend to converge to a flexible
+representation (Zeng et al., 2023; Wang et al., 2025a). Con-
+sequently, they struggle to adaptively disentangle represen-
+tations in response to the specific context of input sequences,
+such as distribution shifts, intricate mixtures of patterns, or
+the emergence of anomalies. This inherent rigidity under-
+scores the need for a complementary mechanism that can
+inject contextual adaptability into these models.
+2.2. Enhancement Strategies for Time Series
+Forecasting
+Beyond architectural innovations, several efficient and
+model-agnostic strategies have been proposed to enhance
+predictive performance. Some methods employ decomposi-
+tion strategies as a strong inductive bias to guide model in
+handling diverse temporal patterns more effectively (Huang
+et al., 2025; Wang et al., 2024a). Autoformer (Wu et al.,
+2021) decomposes time series into seasonal and trend com-
+ponents, allowing other models to handle input from a
+clearer perspective. TimesNet (Wu et al., 2023a) learns
+frequency-adaptive periods in the frequency domain to ex-
+plicitly model intra- and inter-period variations. Another
+strategy focuses on model-agnostic methods (Liu et al.,
+2025c; Ning et al., 2025). RAFT (Han et al., 2025) employs
+retrieval augmented generation to retrieve from historical
+samples, providing the model with relevant information.
+HCAN (Sun et al., 2024) assigns class labels for timesteps
+to equip models with contextual-aware capability. Further-
+more, specialized loss function designs have been designed
+to improve robustness against distribution shifts and intri-
+cate patterns (Wang et al., 2025a; Liu et al., 2025b). DBLoss
+(Qiu et al., 2025b) decomposes both predictions and ground
+truth to calculate the loss for each component separately.
+PSLoss (Kudrat et al., 2025) enhances structural alignment
+by comparing time series at the patch level with statistical
+properties. While these strategies improve forecasting per-
+formance, they still fail to dynamically disentangle complex,
+intertwined patterns in a context-aware manner. Different
+from them, our proposed DPAD framework introduces a
+learnable dual-prototype bank and adaptively fuses them
+through a context-aware routing mechanism, thereby en-
+abling dynamic and interpretable enhancement of the back-
+bone model’s representations with high efficiency.
+3. Method
+Time series forecasting addresses the fundamental challenge
+of predicting future values Y=y t+1, ..., yt+h ∈R h×C
+from historical observations X=x 1, ..., xt ∈R t×C, where
+h is the prediction horizon, t is the history horizon, and C
+is the number of variables.
+3.1. Structure Overview
+As illustrated in Figure 2, our proposed DPAD consists three
+key components: (a) Dynamic Dual-Prototype Bank (DDP)
+that maintains a set of common and rare pattern prototypes
+to explicitly disentangle different patterns and dynamically
+update; (b) Dual-Path Context-aware routing (DPC) that
+dynamically retrieves and activates relevant prototypes from
+DDP, in which the representation is generated by an arbitrary
+backbone model, and then enhances the prediction through a
+weighted gating strategy; (c) Disentanglement-Guided Loss
+(DGLoss) that jointly optimizes DDP and the backbone
+model through a quadruple loss formulation, which ensures
+both the specialization and separation of the prototypes.
+3.2. Dynamic Dual-Prototype Bank
+The Dynamic Dual-Prototype bank (DDP) serves as the
+cornerstone of our framework, designed to explicitly dis-
+entangle and memorize two distinct categories of temporal
+patterns: prevalent common patterns and critical yet infre-
+quent rare patterns. Formally, the DDP consists of two
+separate prototype sets: a Common Pattern Bank Bc, which
+comprises sequences synthesized from a combination of
+fundamental trends and seasonal patterns, and a Rare Pat-
+tern Bank Br, dedicated to memorizing long-tailed, sudden
+events and some other temporal noise.
+Specifically, we generate two groups of base sequences{si
+c}
+and rare sequences {sj
+r} using distinct prior strategies to
+reflect their different pattern characteristics:
+si
+c ∼ GP(0, λ lKl +λ rKr +λ pKp), i= 1, . . . , M,
+(1)
+sj
+r ∼ N(0, σ 2I), j= 1, . . . , N,(2)
+where si
+c denotes the common sequences generated via a
+mixture of Gaussian Process GP kernels to embed strong
+temporal priors, andK l, Kr, Kp are the Linear, radial basis
+function (RBF), and Periodic kernel, λi is mixing coeffi-
+cients. This strategy yields diverse yet structured prototypes
+that cover stable, recurring patterns such as trends, seasonal-
+ity, and their mixtures, thereby providing a well-initialized
+basis for modeling prevalent temporal dynamics.
+In contrast, sj
+r is initialized from a Gaussian distribution
+N(0, σ 2I), where σ2 is a small variance controlling the
+magnitude of initialization noise. This minimal random ini-
+tialization ensures that rare prototypes begin from a nearly
+unbiased state, allowing them to remain flexible and exclu-
+sively adapt to capture rare patterns during training, without
+being predisposed to common modes. Notably, all of se-
+quence sets would be transformed into learnable parameters.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Input X
+Backbone
+a) Dynamic Dual-Prototype Bank
+Feature
+Unified Projection
+b) Dual-Path Context-Aware Routing
+TS-Sim
+Top-K Select
+Softmax
+Softmax
+Weighted Sum
+Projection
+Output
+c) Disentanglement-Guided Loss
+Rare Select
+𝓛𝓛𝒅𝒅𝒅𝒅𝒅𝒅 𝓛𝓛𝒓𝒓𝒓𝒓𝒓𝒓𝒓𝒓𝓛𝓛𝒔𝒔𝒓𝒓𝒔𝒔𝓛𝓛𝑴𝑴𝑴𝑴𝑴𝑴
+freq
+𝓛𝓛= 𝓛𝓛𝑴𝑴𝑴𝑴𝑴𝑴+ 𝓛𝓛𝑫𝑫𝑫𝑫𝑫𝑫
+𝜶𝜶 * 𝜷𝜷 *
+𝜸𝜸 *
+∑
+Common Bank
+ Rare Bank
+𝓛𝓛𝑫𝑫𝑫𝑫𝑫𝑫
+𝐗𝐗
+𝐡𝐡
+Figure 2.The overall architecture of the DPAD framework. The framework constructs a learnable dual-prototype bank, then performs
+adaptive dual-path routing on the input data to retrieve relevant prototypes, and finally generates a context-aware enhancement for
+prediction. The entire framework is optimized under a disentanglement-guided loss.
+Then each generated sequence is projected into a shared
+D-dimensional latent space via the linear layers:
+pi
+c =Proj c(si
+c),(3)
+pj
+r =Proj r(sj
+r),(4)
+The resulting Common Pattern Bank Bc and Rare Pattern
+BankB r are defined as follows:
+Bc ={p 1
+c,p 2
+c, . . . ,pM
+c },B r ={p 1
+r,p 2
+r, . . . ,pN
+r },(5)
+This strategy explicitly separates the modeling of common
+and rare patterns while keeping the prototype representa-
+tion compact and adaptive. Both Bc and Br are updated
+throughout training via the disentanglement loss described
+in Section 3.4. This allows the common prototypes to evolve
+toward more representative and dataset-specific stable pat-
+terns, while the rare prototypes dynamically adapt to capture
+and memorize infrequent yet critical temporal patterns.
+3.3. Dual-Path Context-Aware Routing
+Dual-Path Context-aware routing (DPC) mechanism is pro-
+posed to adaptively enhance final prediction. Given the
+input X and its contextual representation h∈R D from
+the backbone model, our DPC dynamically retrieves and
+fuses relevant patterns from the DDP through a dual-path
+design using TS-Sim block. Specifically, we first project X
+into the same D-dimensional latent space as the prototypes
+via a learnable linear projection ϕ. Then we compute the
+similarity scores ρc and ρr between the input X and each
+prototype inB c andB r in the latent space:
+ρc =s(ϕ(X),B c), ρ r =s(ϕ(X),B r),(6)
+Here we adopt the Pearson Correlation as the similarity mea-
+surement s(·,·) , which provides scale-invariant matching
+that focuses on the shape similarity of temporal patterns.
+We then employ a dual-path selection strategy to retrieve
+the most relevant prototypes:
+Ic = argtop-K(ρ i|1< i≤K),(7)
+Ir =
+(
+arg max(ρr),ifmax(ρ r)> ϵ
+∅,otherwise (8)
+For the common bank Bc, we select top-K prototypes with
+the highest similarity scores, forming an index set Ic. Con-
+versely, to enforce sparsity and precise memory for rare
+events, we select at most one prototype from the rare bank
+Br, with its index denoted asI r.
+Then we compute adaptive weights for the selected common
+and rare prototypes by Softmax function:
+ωc =Softmax(ρ c[Ic]/τ), ω r =Softmax(ρ r[Ir]/τ),
+(9)
+Then the retrieved pattern contributions are then computed
+as weighted sums:
+zc =
+X
+k∈Ic
+ωk
+c · Bc[Ic],z r =ω r · Br[Ir],(10)
+Finally, these context-aware contributions are fused with
+the backbone representation h through concatenation and a
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+linear projection to produce the enhanced predictionY:
+Y=W o[h;z c;z r],(11)
+This adaptive fusion mechanism thereby enhances the ca-
+pability of the model to dynamically disentangle intricate
+temporal dependencies, which mitigates the inherent limita-
+tion of static, averaged representations.
+3.4. Disentanglement-Guided Loss
+To ensure the DDP learns a well-disentangled and effective
+representation of common and rare patterns, we propose a
+Disentanglement-Guided Loss (DGLoss). This loss function
+jointly optimizes the parameters of backbone model and the
+DDP by enforcing three key properties: pattern separation,
+rarity preservation, and common set diversity.
+We first introduce the Separation Loss Lsep to ensure a clear
+functional divide between the common and rare banks, pre-
+venting role confusion. Guided by pattern frequency statis-
+tics within a training batch, Lsep dynamically encourages
+each bank to specialize in its respective domain:
+Lsep =E[ω·max(0, m−△ρ)+(1−ω)·max(0, m+△ρ)],
+(12)
+where △ρ is the difference between similarities ρc and ρr,
+m is a margin, and ω∈[0,1] is a frequency weight that
+computed as the exponential moving average of prototypes
+activation frequencies across batches. Intuitively, if the input
+contains patterns frequently observed in recent batches,Lsep
+penalizes activation of the rare bank, while for a rare input
+pattern, it penalizes over-reliance on the common bank.
+Then we propose a Rarity Preservation Loss Lrare. With
+the contrastive restriction, Lrare prevents the prototypes in
+the rare bank from being contaminated or forgotten due to
+common patterns, thereby ensuring their persistent memory
+for rare patterns:
+Lrare =− 1
+|A|
+X
+k∈A
+log[ exp( skk
+τ )
+PN
+j=1 exp( skj
+τ )
+],(13)
+where A is the set of activated rare prototype indices for the
+input, skj denotes the similarity between the input repre-
+sentation and the j-th rare prototype. Lrare pulls the input
+representation closer to the activated rare prototype in the la-
+tent space while pushing it away from other rare prototypes.
+Furthermore, we adopt a diversity loss Ldiv that leverages
+orthogonal constraints to promote diversity and reduce re-
+dundancy among common prototypes, thereby ensuring the
+common bank covers a more comprehensive range of preva-
+lent patterns:
+Ldiv = 1
+M(M−1)
+MX
+i=1
+MX
+j̸=i
+ 
+pi
+c
+⊤
+pj
+c
+∥pic∥∥pj
+c∥
+!2
+,(14)
+where M is the number of common prototypes and pi
+c is
+thei-th common prototype vector.
+Finally, we integrated this three loss terms as the
+Disentanglement-Guided LossL DGL:
+LDGL =λ sepLsep +λ rareLrare +λ divLdiv,(15)
+where λsep, λrare, λdiv are balancing coefficients. The total
+loss function is formulated as follows:
+L=L MSE +L DGL (16)
+By explicitly coordinating the separation, preservation, and
+diversity of temporal prototypes, our DGLoss shapes a well-
+structured and disentangled pattern memory. This mech-
+anism enables the model to dynamically retrieve context-
+aware patterns, effectively mitigating the limitation of static
+representation.
+4. Experiments
+To comprehensively verify the performance and effective-
+ness of the proposed DPAD, we conduct extensive experi-
+ments on both long-term and short-term forecasting tasks.
+4.1. Experimental Setup
+Datasets.For long-term forecasting, we conduct exper-
+iments on six well-known benchmarks, including ETT
+(ETTh1, ETTh2, ETTm1, ETTm2), Electricity, Exchange,
+Solar, Weather, and Traffic. Meanwhile, we utilize PEMS
+(PEMS03, PEMS04, PEMS07, PEMS08) for short-term
+forecasting. Detailed information about the datasets is pro-
+vided in the Section A.
+Baselines.To verify the performance and effectiveness of
+our DPAD, we select five state-of-the-art (SOTA) time se-
+ries forecasting models with diverse architectures, including
+transformer-based models: iTransformer (Liu et al., 2024a),
+TimeXer (Wang et al., 2024c), TimeBridge (Liu et al.,
+2025a); MLP-based models: DLinear (Zeng et al., 2023);
+and CNN-based models: TimesNet (Wu et al., 2023a).
+Implementation Details.All experiments are implemented
+in PyTorch, and conducted on a single NVIDIA RTX 4090
+24 GB GPU. We utilize ADAM optimizer with an initial
+learning rate 10−3 and L2 loss for model optimization. For
+fair evaluation, we use the framework of TimesNet (Wu
+et al., 2023a), and all the baselines are implemented based
+on the configurations of original paper and its code.
+4.2. Main Results
+We present the main results for both long-term and short-
+term forecasting on seven real-world datasets for five state-
+of-art forecasting models in Table 1, where the lower MSE
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Table 1.Forecasting results for long-term and short-term. The look-back length is fixed to 96 for all baselines. All the results are
+averaged from 4 different prediction lengths, that is {12,24,48,96} for PEMS and {96,192,336,720} for others. The better results are
+highlighted inbold. See Section G.1 for full results.
+Methods iTransformer+DPAD DLinear+DPAD TimesNet+DPAD TimeXer+DPAD TimeBridge+DPAD
+ETTh1 MSE 0.4520.446 0.4610.449 0.4790.476 0.4600.442 0.4500.432
+MAE 0.4460.439 0.4570.450 0.4660.463 0.4520.441 0.4430.431
+ETTh2 MSE 0.3830.376 0.5630.529 0.4110.396 0.3730.369 0.3790.367
+MAE 0.4060.399 0.5180.500 0.4200.414 0.4030.396 0.4030.391
+ETTm1 MSE 0.4070.401 0.4040.394 0.4180.400 0.3900.386 0.3870.379
+MAE 0.4120.405 0.4070.404 0.4170.409 0.3950.394 0.3990.387
+ETTm2 MSE 0.2920.285 0.3540.334 0.2910.281 0.2770.299 0.2810.282
+MAE 0.3350.329 0.4020.391 0.3300.325 0.3220.318 0.3260.321
+Electricity MSE 0.1750.170 0.2250.214 0.1930.196 0.2010.170 0.1710.165
+MAE 0.2640.261 0.3190.305 0.2930.296 0.2750.268 0.2660.256
+Exchange MSE 0.3610.354 0.3380.345 0.2010.384 0.3980.375 0.4170.361
+MAE 0.4060.401 0.4130.417 0.4460.422 0.4220.409 0.4400.402
+Solar MSE 0.2370.233 0.3300.264 0.2670.244 0.2260.220 0.2360.231
+MAE 0.2640.256 0.4010.308 0.2860.276 0.2690.262 0.2700.241
+Traffic MSE 0.4220.416 0.6880.613 0.6330.511 0.4660.463 0.9120.444
+MAE 0.2820.278 0.4270.385 0.3330.318 0.2860.284 0.5440.286
+Weather MSE 0.2600.256 0.2650.259 0.2560.244 0.2420.239 0.2580.256
+MAE 0.2810.276 0.3160.317 0.2830.272 0.2720.270 0.2810.273
+PEMS03 MSE 0.2600.188 0.2790.197 0.1530.125 0.1800.134 0.1530.155
+MAE 0.3270.283 0.3770.301 0.2540.229 0.2790.248 0.2620.259
+PEMS04 MSE 0.9120.199 0.2950.205 0.1380.111 0.3260.138 0.1930.192
+MAE 0.8010.312 0.3880.313 0.2500.222 0.4180.261 0.2950.289
+PEMS07 MSE 0.1090.104 0.3280.223 0.1090.105 0.0880.089 0.1280.130
+MAE 0.2140.207 0.3940.310 0.2160.206 0.1920.192 0.2320.230
+PEMS08 MSE 0.1990.173 0.4030.272 0.1980.160 0.2050.179 0.1680.164
+MAE 0.2780.254 0.4440.323 0.2360.235 0.2480.262 0.2550.251
+and MAE indicate better forecasting performance. Our pro-
+posed DPAD framework demonstrates consistent improve-
+ments across all backbone models, achieving the lowest
+MSE and MAE in most cases. Notably, DPAD achieves
+an average MSE reduction of 12.6% for DLinear and 9.3%
+for iTransformer, and follows a similar trend for other back-
+bones. The performance gains are particularly substantial
+on datasets with inherent complexities such as Traffic and
+PEMS. This reduction demonstrates the effectiveness of our
+model-agnostic design, which equips diverse architectures
+with context-aware and pattern disentanglement capability
+without modifying their core structure. The above obser-
+vations highlight the efficacy of DPAD in mitigating the
+inherent limitations of static representation in forecasting
+models.
+4.3. Ablation Studies
+To validate the contribution of each component in our DPAD
+framework, systematic ablation experiments were conducted
+on Electricity, Weather, Traffic and Solar datasets. The
+results are presented in Table 2, Table 3, and Table 4, which
+correspond to the ablations of the DDP, DPC, and DGLoss
+modules, respectively.
+For the Dynamic Dual-Prototype bank (DDP) components,
+we performed the following experiments: ① without the
+complete DDP, ② with only the Common Bank, ③ with
+only the Rare Bank. As shown in Table 2, removing the
+entire DDP significantly degrades performance, confirming
+its overall effectiveness. Interestingly, using either bank
+alone yields marginal or even negative gains compared to
+the baseline, while combining both achieves the best perfor-
+mance. This synergy stems from the Separation Loss Lsep,
+which lacks a meaningful objective without an opposing
+bank. This leads to pattern contamination and training in-
+stability. Only when both banks coexist does the loss create
+competitive pressure, forcing each bank to specialize in its
+designated pattern type. This demonstrates the benefit of
+explicitly maintaining separate representations for common
+and rare patterns, which is especially critical in real-world
+datasets characterized by complex, intertwined patterns.
+For the Dual-Path Context-aware routing (DPC) mecha-
+nism, we evaluated two alternative fusion strategies: ①
+adopts element-wise sum fusion, replacing adaptive retrieval
+with a simple summation of prototype vectors, and ② em-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Table 2.Ablation study on DDP to validate the efficacy of Common
+Pattern Bank and Rare Pattern Bank. ✓ and × indicate with
+and without certain components respectively. All the results are
+averaged from 4 different prediction lengths {96,192,336,720} ,
+see Section G.2 for full results.
+CaseCommonBank RareBank Electricity Weather Traffic Solar
+MSE MAEMSE MAEMSE MAEMSE MAE
+① × × 0.175 0.2640.260 0.2810.422 0.2820.237 0.262
+② ✓ × 0.178 0.2690.262 0.2820.362 0.3140.240 0.266
+③ × ✓ 0.183 0.2720.263 0.2820.423 0.2830.237 0.262
+④ ✓ ✓ 0.1700.2610.2560.2760.4160.2780.2330.256
+ploys fixed average fusion, substituting it with static average
+weighting. The results in Table 3 show that both fixed fusion
+strategies underperform our adaptive routing mechanism.
+This indicates that static fusion lacks dynamic selection
+and weighting mechanisms based on input context, thereby
+weakening the enhancement effect. It highlights the core
+functionality of our DPC mechanism, which dynamically
+adjusts the contribution of retrieved prototypes according to
+specific input contexts.
+Table 3.Ablation study on DPC to compare adaptive routing with
+different static fusion strategies.
+Case Electricity Weather Traffic Solar
+MSE MAEMSE MAEMSE MAEMSE MAE
+①w/ Additive0.179 0.2680.262 0.2820.422 0.2820.237 0.268
+②w/ Mean0.177 0.2690.260 0.2810.439 0.2980.237 0.262
+③Full DPC0.1700.2610.2560.2760.4160.2780.2330.256
+For the Disentanglement-Guided Loss (DGLoss), we con-
+duct experiments as follows:①removes all components in
+DGLoss, ② removes the separation lossLsep, ③ removes the
+rarity preservation loss Lrare, and ④ removes the diversity
+loss Ldiv. As shown in Table 4, removing any individual
+loss term or the whole DGLoss leads to a performance drop.
+Training without these specialized constraints fails to ef-
+fectively optimize the interaction between the model and
+our prototype banks. Meanwhile, without explicit guidance
+for separation, diversity, and rarity preservation, our DDP
+cannot learn a well-disentangled representation, and their
+synergistic effect will be severely compromised. Therefore,
+DGLoss serves as a core component that ensures effective
+pattern disentanglement and stable prototype memory for-
+mation.
+Table 4.Ablation study on DGLoss to assess the contribution of
+each loss component.
+CaseLsep Lrare Ldiv Electricity Weather Traffic Solar
+MSE MAEMSE MAEMSE MAEMSE MAE
+① × × × 0.180 0.2710.264 0.2830.441 0.2980.241 0.267
+② × ✓ ✓ 0.178 0.2690.262 0.2810.464 0.3220.239 0.266
+③ ✓ × ✓ 0.179 0.2680.261 0.2820.450 0.3080.239 0.266
+④ ✓ ✓ × 0.177 0.2690.262 0.2830.441 0.2990.238 0.265
+⑤ ✓ ✓ ✓ 0.1700.2610.2560.2760.4160.2780.2330.256
+4.4. Zero-Shot Forecasting
+To further evaluate the generalization and robustness of our
+DPAD on unseen datasets, we conduct zero-shot forecasting
+experiments. Following prior works(Kudrat et al., 2025; Jin
+et al., 2024), we sequentially use ETTh1, ETTh2, ETTm1,
+and ETTm2 as source datasets, and the remaining datasets
+as target datasets.
+Table 5 shows zero-shot results with four backbone mod-
+els, which consistently demonstrate that models enhanced
+with our DPAD framework achieve superior performance in
+most cases. These improvements indicate that the disentan-
+gled pattern memory in DPAD provides a more transferable
+and robust temporal representation. Specifically, the com-
+mon prototypes in DDP learn domain-invariant, prevalent
+patterns that serve as reusable components across differ-
+ent datasets. Meanwhile, the DPC mechanism enables the
+model to dynamically integrate these prototypes, and acti-
+vate sparse rare prototypes when necessary, which could ac-
+count for novel, target-specific variations without requiring
+retraining. Consequently, these zero-shot results underscore
+that DPAD not only enhances forecasting performance for
+in-distribution data, but also learns temporal patterns with
+more generalization.
+4.5. Model Analysis
+Prototype Visualization.To provide an intuitive under-
+standing of what the DDP learns, we visualize the temporal
+forms of several representative prototypes from both the
+common and rare bank on the Weather dataset. As shown in
+Figure 3, the prototypes in both the common bank and rare
+bank evolve dynamically during training. For the common
+bank, the learned prototypes consistently exhibit smooth,
+structured shapes, including stable hybrid patterns that com-
+bine trend and seasonality components. These patterns cor-
+respond well to the intricate dependencies of the dataset,
+confirming that our initialization provides effective guid-
+ance and that the common bank successfully captures and
+refines these prevalent patterns through training. In contrast,
+the rare bank displays markedly different characteristics,
+whose prototypes are characterized by abrupt, irregular fluc-
+tuations or sudden shifts. These patterns do not conform
+to regular seasonal or trend patterns, which demonstrates
+the capability of rare set to memorize infrequent yet critical
+events as well as some other fluctuations.
+Increasing Look-Back Length.A longer look-back se-
+quence provides richer historical information in principle,
+yet also presents a greater challenge due to the more com-
+plex temporal dependencies it includes. To evaluate the
+capability of DPAD to disentangle and leverage long-range
+historical context, we conduct experiments under increasing
+look-back length {48,96,192,336,720} on the Electricity
+dataset, taking TimeBridge as backbone model. As shown in
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Table 5.Zero-shot forecasting results on ETT datasets. The forecasting length is set to 96. And the better results are highlighted inbold.
+Methods iTransformer +DPAD DLinear +DPAD TimesNet +DPAD TimeXer +DPAD
+Source Target MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE MSE MAE
+ETTh1
+ETTh2 0.419 0.428 0.416 0.425 0.495 0.487 0.489 0.481 0.480 0.459 0.439 0.443 0.426 0.429 0.420 0.425
+ETTm10.822 0.585 0.834 0.596 0.749 0.579 0.746 0.576 0.849 0.575 0.754 0.571 0.832 0.591 0.798 0.575
+ETTm20.342 0.375 0.339 0.373 0.409 0.454 0.405 0.451 0.368 0.390 0.339 0.370 0.344 0.374 0.341 0.370
+ETTh2
+ETTh1 0.694 0.581 0.632 0.547 0.544 0.508 0.539 0.504 0.802 0.623 0.769 0.602 0.695 0.577 0.666 0.558
+ETTm10.980 0.631 0.904 0.606 0.768 0.594 0.783 0.605 1.059 0.658 1.043 0.644 1.428 0.748 1.412 0.734
+ETTm20.358 0.389 0.346 0.378 0.537 0.541 0.526 0.532 0.369 0.394 0.380 0.404 0.387 0.408 0.377 0.402
+ETTm1
+ETTh1 0.718 0.571 0.670 0.549 0.614 0.530 0.602 0.522 0.952 0.694 0.930 0.660 0.960 0.662 0.948 0.643
+ETTh2 0.482 0.465 0.476 0.459 0.500 0.492 0.492 0.479 0.566 0.515 0.555 0.507 0.591 0.522 0.578 0.507
+ETTm20.326 0.362 0.312 0.351 0.318 0.356 0.337 0.367 0.357 0.380 0.340 0.369 0.336 0.364 0.341 0.371
+ETTm2
+ETTh1 1.214 0.748 0.980 0.676 0.634 0.554 0.611 0.523 0.993 0.655 0.872 0.619 0.734 0.578 0.709 0.576
+ETTh2 0.553 0.507 0.519 0.487 0.508 0.499 0.519 0.506 0.528 0.487 0.490 0.472 0.457 0.453 0.436 0.425
+ETTm10.825 0.589 0.804 0.579 0.561 0.498 0.544 0.479 0.709 0.554 0.701 0.548 0.647 0.531 0.631 0.525
+0 20 40 60 80
+Common 15
+0 20 40 60 80
+Common 29
+0 20 40 60 80
+Common 36
+0 20 40 60 80
+Common 56
+0 20 40 60 80
+Rare 0
+Figure 3.Visualization of learned prototypes in DDP on the Electricity dataset.
+48 96 192 336 7200.12
+0.13
+0.14
+0.15
+0.17MSE
+-5.3%
+-5.9%
+-3.1%
+-10.7%
+-4.0%
+with DPAD
+w/o DPAD
+48 96 192 336 7200.21
+0.22
+0.24
+0.25
+0.27MAE
+-3.3%
+-4.8%
+-2.7% -3.7% -5.1%
+with DPAD
+w/o DPAD
+Figure 4.Forecasting results (MSE and MAE) with varying look-
+back length {48,96,192,336,720} on Electricity dataset. Predic-
+tion length is fixed to 96.
+Figure 4, DPAD consistently achieves greater performance
+gains over the backbone as the sequence length increases.
+While vanilla backbones may suffer from information over-
+load or struggle to focus on long-term dependencies, DPAD
+helps them utilize the extended history information more
+effectively. These results indicate that components in DPAD
+are particularly effective at capturing, disentangling, and se-
+lectively leveraging relevant intertwined patterns from long
+sequences. Our framework provides a structured mechanism
+to deal with the expanded context.
+Efficiency Analysis.We conduct the efficiency analysis
+for the backbone model with and without DPAD. As shown
+in Table 6, DPAD introduces minimal overhead for most
+backbone models. The relative increases in running time and
+memory footprint are generally modest, which are below
+10% for most Transformer or CNN-based backbones. While
+a lightweight model like DLinear shows a higher relative
+increase due to its extremely small base cost, the absolute
+added overhead remains minimal. This demonstrates DPAD
+is a practical and efficient enhancement module, delivering
+significant performance improvements while incurring only
+a small fraction of additional computational cost.
+Table 6.Comparison of efficiency analysis for backbone models
+with and without DPAD. The results are recorded on the Electricity
+dataset with batch size is set to 16. The look-back length and
+prediction length is fixed to 96. Running time means running time
+per iteration.∆%denotes the relative change rate.
+Metrics Running Time Memory Footprint
+Methods ori +DPAD ∆% ori +DPAD∆%
+iTransformer17ms 20ms 17.6% 782MB 820MB 4.8%
+TimeXer 119ms 126ms 5.8% 4634MB4746MB2.4%
+TimeBridge98ms 107ms 9.1% 4240MB4334MB2.2%
+DLinear 7ms 11ms 57.1% 62MB 90MB 45.1%
+TimesNet 262ms 266ms 1.5% 3332MB3470MB4.1%
+5. Conclusion
+In this paper, we address a critical limitation of static and
+averaged representations in deep time series forecasting,
+which hinders model adaptability to intricate and dynamic
+contexts. We propose the Dual-Prototype Adaptive Dis-
+entanglement (DPAD) framework, a model-agnostic auxil-
+iary method that enhances the backbone model through a
+Dynamic Dual-Prototype bank (DDP), Dual-Path Context-
+aware routing (DPC), and a Disentanglement-Guided Loss
+(DGLoss). Extensive experiments validate that DPAD con-
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+sistently improves forecasting performance while introduces
+minimal computational overhead. Future work may explore
+more interpretable routing mechanisms and a novel proto-
+type paradigm with multi-modal representations.
+References
+Alvarez, F. M., Troncoso, A., Riquelme, J. C., and Ruiz,
+J. S. A. Energy time series forecasting based on pattern
+sequence similarity.IEEE Transactions on Knowledge
+and Data Engineering, 23(8):1230–1243, 2010.
+Bai, S., Kolter, J. Z., and Koltun, V . An empirical evalua-
+tion of generic convolutional and recurrent networks for
+sequence modeling.arXiv preprint arXiv:1803.01271,
+2018.
+Bi, K., Xie, L., Zhang, H., Chen, X., and Gu, X. Accurate
+medium-range global weather forecasting with 3d neural
+networks.Nature, 619(7970):533–538, 2023.
+Chen, P., Zhang, Y ., Cheng, Y ., Shu, Y ., Wang, Y ., Wen, Q.,
+Yang, B., and Guo, C. Pathformer: Multi-scale transform-
+ers with adaptive pathways for time series forecasting. In
+12th International Conference on Learning Representa-
+tions, ICLR 2024, 2024.
+Chen, Z., Zheng, L., Lu, C., Yuan, J., and Zhu, D. Chat-
+gpt informed graph neural network for stock movement
+prediction.SSRN Electronic Journal, 2023. ISSN 1556-
+5068.
+Chi, H., Liu, F., Yang, W., Lan, L., Liu, T., Han, B., Cheung,
+W., and Kwok, J. Tohan: A one-step approach towards
+few-shot hypothesis adaptation.Advances in neural in-
+formation processing systems, 34:20970–20982, 2021.
+Guo, C., Yang, B., Andersen, O., Jensen, C. S., and Torp, K.
+Ecomark 2.0: empowering eco-routing with vehicular en-
+vironmental models and actual vehicle fuel consumption
+data.GeoInformatica, 19(3):567–599, 2015.
+Guo, C., Yang, B., Hu, J., Jensen, C. S., and Chen, L.
+Context-aware, preference-based vehicle routing.The
+VLDB Journal, 29(5):1149–1170, 2020.
+Han, S., Lee, S., Cha, M., Arik, S. O., and Yoon, J. Re-
+trieval augmented time series forecasting.arXiv preprint
+arXiv:2505.04163, 2025.
+Hu, Y ., Liu, P., Zhu, P., Cheng, D., and Dai, T. Adap-
+tive multi-scale decomposition framework for time series
+forecasting.arXiv preprint arXiv:2406.03751, 2025.
+Huang, S., Zhao, Z., Li, C., and Bai, L. Timekan: Kan-
+based frequency decomposition learning architecture
+for long-term time series forecasting.arXiv preprint
+arXiv:2502.06910, 2025.
+Jin, K., Wi, J., Lee, E., Kang, S., Kim, S., and Kim, Y .
+Trafficbert: Pre-trained model with large-scale data for
+long-range traffic flow forecasting.Expert Systems with
+Applications, 186:115738, 2021.
+Jin, M., Wang, S., Ma, L., Chu, Z., Zhang, J. Y ., Shi, X.,
+Chen, P.-Y ., Liang, Y ., Li, Y .-F., Pan, S., and Wen, Q.
+Time-llm: Time series forecasting by reprogramming
+large language models.arXiv preprint arXiv:2310.01728,
+2024.
+Kim, T., Kim, J., Tae, Y ., Park, C., Choi, J.-H., and Choo,
+J. Reversible instance normalization for accurate time-
+series forecasting against distribution shift. In10th Inter-
+national Conference on Learning Representations, ICLR
+2022, 2022.
+Kudrat, D., Xie, Z., Sun, Y ., Jia, T., and Hu, Q. Patch-wise
+structural loss for time series forecasting.arXiv preprint
+arXiv:2503.00877, 2025.
+LIU, M., Zeng, A., Chen, M., Xu, Z., LAI, Q., Ma, L., and
+Xu, Q. Scinet: Time series modeling and forecasting
+with sample convolution and interaction. InAdvances in
+Neural Information Processing Systems, volume 35, pp.
+5816–5828, 2022.
+Liu, P., Wu, B., Hu, Y ., Li, N., Dai, T., Bao, J., and tao Xia,
+S. Timebridge: Non-stationarity matters for long-term
+time series forecasting.arXiv preprint arXiv:2410.04442,
+2025a.
+Liu, Y ., Hu, T., Zhang, H., Wu, H., Wang, S., Ma, L.,
+and Long, M. itransformer: Inverted transformers are
+effective for time series forecasting.arXiv preprint
+arXiv:2310.06625, 2024a.
+Liu, Y ., Zhang, H., Li, C., Huang, X., Wang, J., and Long,
+M. Timer: Generative pre-trained transformers are large
+time series models. In41st International Conference on
+Machine Learning, ICML 2024, 2024b.
+Liu, Z., Cheng, M., Li, Z., Huang, Z., Liu, Q., Xie, Y ., and
+Chen, E. Adaptive normalization for non-stationary time
+series forecasting: A temporal slice perspective. In37th
+Conference on Neural Information Processing Systems,
+NeurIPS 2023, 2023.
+Liu, Z., Cheng, M., Zhao, G., Yang, J., Liu, Q., and Chen, E.
+Improving time series forecasting via instance-aware post-
+hoc revision.arXiv preprint arXiv:2505.23583, 2025b.
+Liu, Z., Yang, Z., Lin, X., Qiu, R., Wei, T., Zhu, Y ., Hamann,
+H., He, J., and Tong, H. Breaking silos: Adaptive
+model fusion unlocks better time series forecasting.arXiv
+preprint arXiv:2505.18442, 2025c.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Luo, D. and Wang, X. Moderntcn: A modern pure convo-
+lution structure for general time series analysis. InThe
+twelfth international conference on learning representa-
+tions, pp. 1–43, 2024.
+Nie, Y ., Nguyen, N. H., Sinthong, P., and Kalagnanam, J.
+A time series is worth 64 words: Long-term forecasting
+with transformers. In11th International Conference on
+Learning Representations, ICLR 2023, 2023.
+Ning, K., Pan, Z., Liu, Y ., Jiang, Y ., Zhang, J. Y ., Rasul,
+K., Schneider, A., Ma, L., Nevmyvaka, Y ., and Song,
+D. Ts-rag: Retrieval-augmented generation based time
+series foundation models are stronger zero-shot forecaster.
+arXiv preprint arXiv:2503.07649, 2025.
+Oreshkin, B. N., Carpov, D., Chapados, N., and Bengio, Y .
+N-beats: Neural basis expansion analysis for interpretable
+time series forecasting.arXiv preprint arXiv:1905.10437,
+2020.
+Qiu, X., Hu, J., Zhou, L., Wu, X., Du, J., Zhang, B., Guo,
+C., Zhou, A., Jensen, C. S., Sheng, Z., and Yang, B. Tfb:
+Towards comprehensive and fair benchmarking of time
+series forecasting methods.Proceedings of the VLDB
+Endowment, pp. 2363–2377, 2024.
+Qiu, X., Cheng, H., Wu, X., Hu, J., Guo, C., and Yang, B.
+A comprehensive survey of deep learning for multivariate
+time series forecasting: A channel strategy perspective.
+arXiv preprint arXiv:2502.10721, 2025a.
+Qiu, X., Wu, X., Cheng, H., Liu, X., Guo, C., Hu, J., and
+Yang, B. Dbloss: Decomposition-based loss function for
+time series forecasting.arXiv preprint arXiv:2510.23672,
+2025b.
+Shao, Z., Wang, F., Xu, Y ., Wei, W., Yu, C., Zhang, Z., Yao,
+D., Sun, T., Jin, G., Cao, X., Cong, G., Jensen, C. S.,
+and Cheng, X. Exploring progress in multivariate time
+series forecasting: Comprehensive benchmarking and
+heterogeneity analysis.IEEE Transactions on Knowledge
+and Data Engineering, pp. 291–305, 2025.
+Shi, X., Wang, S., Nie, Y ., Li, D., Ye, Z., Wen, Q., and
+Jin, M. Time-moe: Billion-scale time series founda-
+tion models with mixture of experts.arXiv preprint
+arXiv:2409.16040, 2025.
+Sun, Y ., Xie, Z., Chen, D., Eldele, E., and Hu, Q. Hier-
+archical classification auxiliary network for time series
+forecasting.arXiv preprint arXiv:2405.18975, 2024.
+Tang, P. and Zhang, W. Unlocking the power of patch:
+Patch-based mlp for long-term time series forecasting.
+arXiv preprint arXiv:2405.13575, 2024.
+Tran, L., Nguyen, M., and Shahabi, C. Representation
+learning for early sepsis prediction. In2019 Computing
+in Cardiology (CinC), pp. 1–4. IEEE, 2019.
+Wang, H., Peng, J., Huang, F., Wang, J., Chen, J., and Xiao,
+Y . Micn: Multi-scale local and global context modeling
+for long-term series forecasting. In11th International
+Conference on Learning Representations, ICLR 2023,
+2023.
+Wang, H., Pan, L., Chen, Z., Yang, D., Zhang, S., Yang, Y .,
+Liu, X., Li, H., and Tao, D. Fredf: Learning to forecast in
+the frequency domain.arXiv preprint arXiv:2402.02399,
+2025a.
+Wang, S., Wu, H., Shi, X., Hu, T., Luo, H., Ma, L., Zhang,
+J. Y ., and Zhou, J. Timemixer: Decomposable multi-
+scale mixing for time series forecasting.arXiv preprint
+arXiv:2405.14616, 2024a.
+Wang, S., Li, J., Shi, X., Ye, Z., Mo, B., Lin, W., Ju, S.,
+Chu, Z., and Jin, M. Timemixer++: A general time series
+pattern machine for universal predictive analysis.arXiv
+preprint arXiv:2410.16032, 2025b.
+Wang, Y ., Wu, H., Dong, J., Liu, Y ., Long, M., and Wang, J.
+Deep time series models: A comprehensive survey and
+benchmark.arXiv preprint arXiv:2407.13278, 2024b.
+Wang, Y ., Wu, H., Dong, J., Qin, G., Zhang, H., Liu, Y .,
+Qiu, Y ., Wang, J., and Long, M. Timexer: Empowering
+transformers for time series forecasting with exogenous
+variables.arXiv preprint arXiv:2402.19072, 2024c.
+Wei, K., Li, T., Huang, F., Chen, J., and He, Z. Cancer
+classification with data augmentation based on generative
+adversarial networks.Frontiers of Computer Science, 16
+(2):162601, 2022.
+Woo, G., Liu, C., Kumar, A., Xiong, C., Savarese, S., and Sa-
+hoo, D. Unified training of universal time series forecast-
+ing transformers. InICML’24: Proceedings of the 41st
+International Conference on Machine Learning, 2024.
+Wu, H., Xu, J., Wang, J., and Long, M. Autoformer: Decom-
+position transformers with auto-correlation for long-term
+series forecasting.Advances in neural information pro-
+cessing systems, 34:22419–22430, 2021.
+Wu, H., Hu, T., Liu, Y ., Zhou, H., Wang, J., and Long, M.
+Timesnet: Temporal 2d-variation modeling for general
+time series analysis. In11th International Conference on
+Learning Representations, ICLR 2023, 2023a.
+Wu, H., Zhou, H., Long, M., and Wang, J. Interpretable
+weather forecasting for worldwide stations with a unified
+deep model.Nature Machine Intelligence, pp. 602–611,
+2023b.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Yang, H., Tang, J., Li, Z., and Lan, L. Dmsc: Dynamic multi-
+scale coordination framework for time series forecasting.
+arXiv preprint arXiv:2508.02753, 2025.
+Yi, K., Zhang, Q., Fan, W., Wang, S., Wang, P., He, H.,
+An, N., Lian, D., Cao, L., and Niu, Z. Frequency-domain
+mlps are more effective learners in time series forecasting.
+Advances in Neural Information Processing Systems, 36:
+76656–76679, 2023.
+Yu, X., Chen, Z., Ling, Y ., Dong, S., Liu, Z., and Lu, Y . Tem-
+poral data meets llm – explainable financial time series
+forecasting.arXiv preprint arXiv:2306.11025, 2023.
+Zeng, A., Chen, M., Zhang, L., and Xu, Q. Are transformers
+effective for time series forecasting? InProceedings of
+the AAAI conference on artificial intelligence, volume 37,
+pp. 11121–11128, 2023.
+Zhou, H., Zhang, S., Peng, J., Zhang, S., Li, J., Xiong, H.,
+and Zhang, W. Informer: Beyond efficient transformer for
+long sequence time-series forecasting. InProceedings of
+the AAAI conference on artificial intelligence, volume 35,
+pp. 11106–11115, 2021.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+A. Datasets
+We conduct long-term forecasting experiments on 6 real-world datasets, including (1) ETT (ETTh1, ETTh2, ETTm1,
+ETTm2) contains 7 features of electricity transformer data from July 2016 to July 2018, which was sampled at hourly
+(ETTh1, ETTh2) and 15-minute (ETTm1, ETTm2) intervals. (2) Electricity (ECL) records hourly electricity consumption
+data of 321 clients from 2012 to 2014. (3) Exchange collects the daily exchange-rate data from eight different countries.
+(4) Solar-Energy contains the solar power production of 137 PV plants in 2006, which is sampled every 10 minutes. (5)
+Weather includes 21 meteorological factors collected every 10 minutes from the Max Planck Biogeochemistry Institute’s
+Weather Station in 2020. (6) Traffic contains hourly road occupancy rates from 862 sensors on San Francisco freeways.
+Meanwhile, we conduct short-term forecasting experiments on PEMS (PEMS03, PEMS04, PEMS07, PEMS08), which
+contains the public traffic network data in California with a 5-minute interval. The details of datasets are listed in Table 7.
+Table 7.Dataset Descriptions. Num is the number of variable. Dataset size is organized in (Train, Validation, Test).
+Name Domain Length Num Prediction Length Dataset Size Freq. (m)
+ETTh1 Temperature 14400 7{96,192,336,720}(8545,2881,2881) 60
+ETTh2 Temperature 14400 7{96,192,336,720}(8545,2881,2881) 60
+ETTm1 Temperature 57600 7{96,192,336,720}(34465,11521,11521) 15
+ETTm2 Temperature 57600 7{96,192,336,720}(34465,11521,11521) 15
+Electricity Electricity 26304 321{96,192,336,720}(18317,2633,5261) 60
+Exchange Exchange Rate 7588 8{96,192,336,720}(5120,665,1422) 1440
+Traffic Road Occupancy 17544 862{96,192,336,720}(12185,1757,3509) 60
+Weather Weather 52696 21{96,192,336,720}(36792,5271,10540) 10
+Solar-Energy Energy 52179 137{96,192,336,720}(36601,5161,10417) 10
+PEMS03 Traffic Flow 26208 358{12,24,48,96}(15617,5135,5135) 5
+PEMS04 Traffic Flow 16992 307{12,24,48,96}(10172,3375,3375) 5
+PEMS07 Traffic Flow 28224 883{12,24,48,96}(16711,5622,5622) 5
+PEMS08 Traffic Flow 17856 170{12,24,48,96}(10690,3548,3548) 5
+B. Metrics Details
+To evaluate forecasting performance for TSF, we utilize the mean square error (MSE) and mean absolute error (MAE). The
+calculations of metrics are as follows:
+MSE= 1
+n
+nX
+i=1
+(Yi − ˆYi)2,MAE= 1
+n
+nX
+i=1
+|Yi − ˆYi|.(17)
+C. Hyperparameter Sensitivity
+C.1. Size of Prototype Banks
+The sizes of the Common Pattern Bank Bc and Rare Pattern Bank Br determine the representational capacity and specializa-
+tion degree of our Dual-Prototype Bank. To analyze their impact, we set Bc ∈ {32,64,128,256} and Br ∈ {8,12,24,32}
+respectively on the Weather and ETTh2 dataset. As shown in Figure 5, the results remain stable across a broad range of
+sizes, indicating that DPAD is not highly sensitive to the size of prototype banks. Extremely small banks may limit the
+ability to capture pattern diversity, while very large banks offer no further gain and may slightly degrade performance due
+to increased optimization difficulty. The above observation confirms that DPAD is robust across various cases without
+requiring delicate tuning.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+32 64 128 256
+Size of Common Pattern Bank
+0.16
+0.21
+0.26
+0.31
+0.36MSE
+8 12 24 32
+Size of Rare Pattern Bank
+0.16
+0.21
+0.26
+0.31
+0.36MSE
+pred-length 96 pred-length 192 pred-length 336 pred-length 720
+(a)On Weather dataset.
+32 64 128 256
+Size of Common Pattern Bank
+0.28
+0.32
+0.36
+0.40
+0.44MSE
+8 12 24 32
+Size of Rare Pattern Bank
+0.28
+0.32
+0.36
+0.40
+0.44MSE
+pred-length 96 pred-length 192 pred-length 336 pred-length 720 (b)On ETTh2 dataset.
+Figure 5.Hyperparameter sensitivity analysis with varying sizes of prototype banks on Weather dataset. Here we use iTransformer as
+backbone. Left is of common pattern set, right is of rare patterns set. The look-back length is fixed to 96.
+64128 256 512 1024
+0.16
+0.23
+0.31
+0.38MSE
+96 192 336 720
+64128 256 512 1024
+0.36
+0.42
+0.47
+0.52
+96 192 336 720
+(a)With iTransformer as backbone.
+64128 256 512 1024
+0.14
+0.22
+0.29
+0.36MSE
+96 192 336 720
+64128 256 512 1024
+0.36
+0.42
+0.48
+0.54
+96 192 336 720 (b)With TimeXer as backbone.
+64128 256 512 1024
+0.15
+0.23
+0.30
+0.38MSE
+96 192 336 720
+64128 256 512 1024
+0.37
+0.43
+0.49
+0.55
+96 192 336 720
+(c)With TimesNet as backbone.
+64128 256 512 1024
+0.15
+0.23
+0.30
+0.38MSE
+96 192 336 720
+64128 256 512 1024
+0.35
+0.40
+0.45
+0.50
+96 192 336 720 (d)With TimeBridge as backbone.
+Figure 6.Hyperparameter sensitivity analysis on embedding dimension. For each backbone, forecasting results are on the Weather (left)
+and ETTh1 (right) datasets. The look-back length length is fixed to 96.
+C.2. Embedding Dimension
+The embedding dimension determines the richness of feature representations in the unified projection space. We vary
+dmodel ∈ {64,128,256,512,1024} on the Weather and ETTh1 dataset with four backbone models to evaluate its impact. As
+shown in Figure 6, in most cases DPAD exhibits low sensitivity to the choice of embedding dimension. Performance does
+not degrade significantly even at relatively small dimensions, while larger dimensions provide only marginal gains. So we
+choose the optimal dimension at 128/256 in most cases. The above observation indicates that our dual-prototype architecture
+and routing mechanism are effective at capturing and utilizing pattern information without requiring a high-dimension latent
+space. This property further simplifies the deployment of DPAD as a plug-and-play module.
+C.3. Weights of DGLoss
+The weight λsep, λrare, λdiv of the DGLoss controls the strength of separation, rarity preservation, and diversity of temporal
+prototypes. To analyze their individual effects, we vary them in 0.001−2.0 on electricity and weather datasets. As shown
+in Figure 7,
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+0.050.1 0.2 0.3 0.4 0.5 0.6
+0.13
+0.15
+0.18
+0.21MSE
+Weights of sep
+0.050.1 0.2 0.3 0.4 0.5 0.6
+0.13
+0.16
+0.18
+0.21
+Weights of rare
+0.050.1 0.2 0.3 0.4 0.5 0.6
+0.13
+0.16
+0.18
+0.21
+Weights of div
+96 192 336 720
+(a)On ECL dataset.
+0.050.1 0.2 0.3 0.4 0.5 0.6
+0.16
+0.23
+0.30
+0.37MSE
+Weights of sep
+0.050.1 0.2 0.3 0.4 0.5 0.6
+0.16
+0.23
+0.30
+0.37
+Weights of rare
+0.050.1 0.2 0.3 0.4 0.5 0.6
+0.16
+0.23
+0.30
+0.37
+Weights of div
+96 192 336 720
+(b)On Weather dataset.
+Figure 7.Hyperparameter sensitivity analysis on weights of DGLoss. Forecasting results are on the ECL and Weather datasets, and we
+use TimeBridge as backbone model. The look-back length length is fixed to 96.
+D. Comparison Results with other Enhancement Strategies
+To further validate the effectiveness of DPAD, we compare it against several representative model-agnostic enhancement
+strategies that adopt different technical paradigms. RAFT (Han et al., 2025) employs retrieval augmented generation to
+enhance forecasting by querying historical samples. HCAN(Sun et al., 2024) proposes a hierarchy-aware attention module
+supported by uncertainty-aware classifiers and a consistency loss to alleviate issues caused by the boundary effects during
+the classification of timesteps. FreDF (Wang et al., 2025a) bypasses the complexity of label autocorrelation by learning
+to forecast in the frequency domain. As shown in Table 8, DPAD consistently achieves superior performance in most
+cases across various datasets and forecasting horizons. This is due to its unified framework for context-aware and pattern
+disentanglement, which addresses the core limitations of static representation more directly than other strategies. Thus
+DPAD demonstrates consistently strong generalization across diverse forecasting scenarios.
+E. Case Studies On Failure Scenarios
+To directly verify that DPAD mitigates the three failure cases introduced in Section 1, we select representative sequences
+from the Weather datasets. As shown in Figure 8, for (a) distribution shifts, the backbone fails to fully adapt to changes in
+data distribution after a temporal shift, while the common bank in DPAD provides stable reference prototypes that persist
+across this cases, enabling the model to maintain more reliable predictions. For (b) intertwined patterns, where a linear trend
+coexists with multi-frequency periodic components, the backbone inadequately captures these patterns, whereas DPAD
+selectively retrieves relevant prototypes via its dual-path routing mechanism, thus effectively disentangling the interwined
+patterns. For (c) rare events, characterized by a sudden temperature spike, the backbone yields a large peak error, while
+DPAD reduces the MSE in the peak region by 83.7%. This improvements is attributed to the rare bank and rarity preservation
+loss, which preserve infrequent events without enforcing overfitting. Collectively, these case studies demonstrate that the
+three components in DPAD jointly address the core limitations of static representation learning in time series forecasting.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Table 8.Forecasting results compared with other enhancement strategies on Electricity, ETTh2, and Weather datasets. We use iTransformer
+as backbone for HCAN, FreDF, and DPAD. The best results are highlighted inbold, and the second-best results are highlighted in
+underline.
+Dataset Electricity ETTh2 Weather
+Forecast length 96 192 336 720 96 192 336 720 96 192 336 720
+ori MSE 0.148 0.167 0.179 0.208 0.301 0.380 0.423 0.431 0.176 0.225 0.281 0.361
+(2024a) MAE 0.241 0.2480.271 0.298 0.350 0.399 0.431 0.447 0.216 0.257 0.299 0.353
+RAFT MSE 0.168 0.172 0.182 0.212 0.2880.384 0.432 0.436 0.190 0.241 0.294 0.370
+(2025) MAE 0.269 0.270 0.281 0.304 0.3410.402 0.443 0.460 0.237 0.281 0.323 0.374
+HCAN MSE 0.588 0.484 0.466 0.440 0.776 1.208 1.123 1.857 0.219 0.274 0.3070.353
+(2024) MAE 0.603 0.530 0.516 0.499 0.656 0.813 0.787 1.119 0.301 0.348 0.371 0.400
+FreDF MSE 0.158 0.166 0.188 0.225 0.290 0.3730.418 0.426 0.171 0.224 0.282 0.359
+(2025a) MAE 0.248 0.259 0.277 0.308 0.342 0.394 0.429 0.443 0.209 0.2550.298 0.350
++ DPAD MSE 0.147 0.162 0.172 0.201 0.293 0.374 0.416 0.422 0.170 0.223 0.2790.355
+MAE 0.2340.251 0.271 0.289 0.3450.393 0.425 0.435 0.2080.256 0.295 0.347
+0 50 100 150 192
+0.024
+0.028
+0.032
+0.036
+0.040
+0.044
+Distribution Shift
+MSE:80.3%
+True Pred +DPAD
+(a)Distribution Shifts
+0 50 100 150 192
+0.04
+0.05
+0.06
+0.07
+0.08
+0.09
+MSE: 91.6%
+100 120 140 160 180
+0.06
+0.08
+Trend
+100 120 140 160 180
+-0.005
+0.000
+0.005
+Periodic
+True Pred +DPAD (b)Intertwined Patterns
+0 50 100 150 192
+0.015
+0.030
+0.045
+0.060
+0.075
+Anomaly
+Peak MSE: 0.0011  0.0002
+(83.7% )
+True Pred +DPAD (c)Rare Events
+Figure 8.Case studies on failure scenarios:a) distribution shifts; b) interwined patterns; c) rare events.
+F. Forecasting Visualization
+To provide a more intuitive and comprehensive view of the improvements brought by our DPAD framework, we present
+forecasting visualizations comparing the predictions of backbone models with and without DPAD across four representative
+datasets. As shown in Figure 9, the predictions with DPAD are closer to the ground truth. These visualization results serve
+as qualitative evidence that DPAD enables more flexible, context-aware, and accurate forecasting across diverse model
+architectures and temporal patterns.
+G. Full Results
+G.1. Main Experiments
+We evaluate DPAD on seven real-world TSF benchmarks spanning diverse domains. Table 9 shows the full results of
+long-term forecasting tasks on ETT (ETTh1, ETTh2, ETTm1, ETTm2), Electricity, Exchange, Solar, Weather, and Traffic
+datasets. Table 10 contains the full results of short-term forecasting tasks on PEMS (PEMS03, PEMS04, PEMS05, PEMS06)
+datasets. From the full results, we can see that DPAD achieves consistent improvements on most backbones and datasets.
+G.2. Ablation Results
+Table 11 shows the full results of ablation studies discussed in the main text. From full results, we can see that each
+component in our DPAD framework plays an indispensable role.
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+0 50 100 150 192
+-0.8
+0.0
+0.8
+1.6
+2.4
+3.2
+iTransformer
+True Pred +DPAD
+0 50 100 150 192
+-0.8
+0.0
+0.8
+1.6
+2.4
+3.2
+DLinear
+True Pred +DPAD
+0 50 100 150 192
+-0.8
+0.0
+0.8
+1.6
+2.4
+3.2
+TimesNet
+True Pred +DPAD
+0 50 100 150 192
+-0.8
+0.0
+0.8
+1.6
+2.4
+3.2
+TimeXer
+True Pred +DPAD
+(a)Visualization on Electricity dataset.
+0 50 100 150 192
+-1.6
+-1.5
+-1.4
+-1.3
+-1.2
+-1.1
+iTransformer
+True Pred +DPAD
+0 50 100 150 192
+-1.6
+-1.5
+-1.4
+-1.3
+-1.2
+-1.1
+DLinear
+True Pred +DPAD
+0 50 100 150 192
+-1.6
+-1.5
+-1.4
+-1.3
+-1.2
+-1.1
+TimesNet
+True Pred +DPAD
+0 50 100 150 192
+-1.6
+-1.5
+-1.4
+-1.3
+-1.2
+-1.1
+TimeXer
+True Pred +DPAD
+(b)Visualization on ETTm1 dataset.
+0 50 100 150 192
+-0.6
+-0.4
+-0.2
+0.0
+0.2
+iTransformer
+True Pred +DPAD
+0 50 100 150 192
+-0.6
+-0.4
+-0.2
+0.0
+0.2
+DLinear
+True Pred +DPAD
+0 50 100 150 192
+-0.6
+-0.4
+-0.2
+0.0
+0.2
+TimesNet
+True Pred +DPAD
+0 50 100 150 192
+-0.6
+-0.4
+-0.2
+0.0
+0.2
+TimeXer
+True Pred +DPAD
+(c)Visualization on ETTm2 dataset.
+0 50 100 150 192
+-0.6
+0.0
+0.6
+1.2
+1.8
+iTransformer
+True Pred +DPAD
+0 50 100 150 192
+-0.6
+0.0
+0.6
+1.2
+1.8
+DLinear
+True Pred +DPAD
+0 50 100 150 192
+-0.6
+0.0
+0.6
+1.2
+1.8
+TimesNet
+True Pred +DPAD
+0 50 100 150 192
+-0.6
+0.0
+0.6
+1.2
+1.8
+TimeXer
+True Pred +DPAD
+(d)Visualization on Solar dataset.
+Figure 9.Forecasting visualization for backbone models with and without DPAD.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Table 9.Full results of long-term forecasting. All the results are selected from 4 different prediction lengths {96,192,336,720} , and the
+look-back length is fixed to 96 for all baselines. The better results are highlighted inbold.
+Methods iTransformer DLinear TimesNet TimeXer TimeBridge
+Ori +DPAD Ori +DPAD Ori +DPAD Ori +DPAD Ori +DPAD
+Metric MSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAE
+ETTh1
+96 0.387 0.4050.383 0.4010.397 0.4120.388 0.4030.4150.429 0.4190.4230.386 0.4040.379 0.3980.377 0.3950.371 0.388192 0.441 0.4360.433 0.4230.446 0.4410.431 0.4320.479 0.4660.471 0.4600.4290.435 0.4330.4300.427 0.4250.423 0.421336 0.494 0.4630.478 0.4520.489 0.4670.478 0.4590.517 0.4820.504 0.4730.484 0.4570.472 0.4460.477 0.4560.461 0.441720 0.4880.483 0.4920.4820.513 0.5110.501 0.5060.505 0.4900.512 0.4960.544 0.5130.483 0.4930.521 0.4980.473 0.474
+Avg0.452 0.4460.446 0.4390.461 0.4570.449 0.4500.479 0.4660.476 0.4630.460 0.4520.442 0.4410.450 0.4430.432 0.431
+ETTh2
+96 0.301 0.3500.293 0.3450.341 0.3940.332 0.3810.316 0.3580.3090.358 0.284 0.3370.276 0.3310.294 0.3450.287 0.333192 0.380 0.3990.374 0.3930.482 0.4790.466 0.4710.415 0.4140.397 0.4070.3660.3910.366 0.3920.377 0.3950.359 0.380336 0.423 0.4310.416 0.4250.591 0.5410.535 0.5120.452 0.4480.433 0.4360.438 0.4380.424 0.4290.424 0.4330.408 0.418720 0.431 0.4470.422 0.4350.839 0.6610.785 0.6380.461 0.4630.448 0.4550.4070.449 0.4110.4320.423 0.4420.417 0.435
+Avg0.383 0.4060.376 0.3990.563 0.5180.529 0.5000.411 0.4200.396 0.4140.373 0.4030.369 0.3960.379 0.4030.367 0.391
+ETTm1
+96 0.341 0.3760.332 0.3690.346 0.3740.334 0.3690.336 0.3750.329 0.3710.318 0.3560.320 0.3580.324 0.3620.311 0.345192 0.382 0.3960.377 0.3890.3820.3910.3750.392 0.377 0.3950.376 0.3930.373 0.3890.366 0.3830.365 0.3840.361 0.375336 0.420 0.4210.411 0.4120.415 0.4150.4050.415 0.418 0.4200.405 0.4090.4120.3870.4070.394 0.398 0.4070.392 0.397720 0.487 0.4560.484 0.4510.473 0.4510.465 0.4430.541 0.4810.493 0.4640.460 0.4500.451 0.4410.462 0.4440.455 0.431
+Avg0.407 0.4120.401 0.4050.404 0.4070.394 0.4040.418 0.4170.400 0.4090.3900.3950.3860.394 0.387 0.3990.379 0.387
+ETTm2
+96 0.186 0.2720.179 0.2630.1930.2930.1900.295 0.188 0.2680.181 0.2640.172 0.2540.165 0.2510.177 0.2600.176 0.254192 0.252 0.3120.245 0.3060.284 0.3610.273 0.3530.250 0.3060.243 0.3040.241 0.3020.238 0.3000.243 0.3030.242 0.298336 0.315 0.3510.309 0.3440.382 0.4290.367 0.4150.306 0.3410.298 0.3370.3010.340 0.3970.3310.3030.342 0.3040.338720 0.415 0.4080.409 0.4050.558 0.5250.508 0.5010.420 0.4050.402 0.3980.3940.395 0.3960.3930.4010.399 0.4090.397
+Avg0.292 0.3350.285 0.3290.354 0.4020.334 0.3910.291 0.3300.281 0.3250.2770.322 0.2990.3180.2810.326 0.2820.321
+Electricity
+96 0.148 0.2410.147 0.2340.211 0.3020.202 0.2930.1630.2670.1590.269 0.241 0.2440.141 0.2410.143 0.2390.135 0.228192 0.1670.2480.1620.251 0.211 0.3050.203 0.2930.184 0.2840.178 0.2810.159 0.2600.153 0.2570.161 0.2560.154 0.247336 0.179 0.2710.172 0.2710.223 0.3190.210 0.3040.196 0.2970.205 0.3030.177 0.2760.1770.2710.176 0.2720.172 0.264720 0.208 0.2980.201 0.2890.258 0.3510.243 0.3320.232 0.3250.243 0.3310.229 0.3210.210 0.3060.204 0.2970.201 0.288
+Avg0.175 0.2640.170 0.2610.225 0.3190.214 0.3050.193 0.2930.196 0.2960.201 0.2750.170 0.2680.171 0.2660.165 0.256
+Exchange
+96 0.088 0.2080.081 0.2020.098 0.2330.095 0.2280.115 0.2420.097 0.2240.094 0.2140.086 0.2050.113 0.2360.084 0.201192 0.180 0.3030.175 0.2990.186 0.3250.182 0.3190.216 0.3330.186 0.3100.182 0.3030.179 0.3010.200 0.3270.177 0.297336 0.331 0.4180.326 0.4140.325 0.4340.329 0.4420.375 0.4440.360 0.4340.384 0.4480.350 0.4260.364 0.4400.339 0.421720 0.848 0.6950.835 0.6920.746 0.6630.772 0.6780.1010.765 0.8930.7200.932 0.7240.887 0.7060.992 0.7600.847 0.691
+Avg0.361 0.4060.354 0.4010.338 0.4130.345 0.4170.2010.446 0.3840.4220.398 0.4220.375 0.4090.417 0.4400.361 0.402
+Solar
+96 0.207 0.2370.199 0.2210.290 0.3780.240 0.2990.223 0.2560.211 0.2490.198 0.2440.191 0.2350.204 0.2450.196 0.212192 0.242 0.2640.237 0.2540.320 0.3980.263 0.3120.262 0.2720.241 0.2670.226 0.2700.221 0.2620.237 0.2690.228 0.236336 0.251 0.2770.249 0.2730.353 0.4150.279 0.3140.287 0.2990.257 0.2910.239 0.2810.231 0.2750.251 0.2830.247 0.256720 0.251 0.2780.250 0.2760.357 0.4130.276 0.3100.298 0.3180.267 0.2980.242 0.2820.238 0.2770.2530.284 0.2550.260
+Avg0.237 0.2640.233 0.2560.330 0.4010.264 0.3080.267 0.2860.244 0.2760.226 0.2690.220 0.2620.236 0.2700.231 0.241
+Traffic
+96 0.393 0.2690.392 0.2680.712 0.4380.647 0.4020.593 0.3170.471 0.2950.428 0.2710.415 0.2630.375 0.2700.371 0.243192 0.412 0.2770.407 0.2710.662 0.4170.599 0.3800.618 0.3270.493 0.3090.447 0.2800.442 0.2731.411 0.8030.397 0.254336 0.424 0.2830.417 0.2790.669 0.4190.590 0.3740.642 0.3410.514 0.3200.472 0.2890.473 0.2901.427 0.8060.408 0.261720 0.459 0.3010.447 0.2930.709 0.4370.616 0.3850.6790.3500.5680.3510.517 0.3070.522 0.3100.435 0.2980.602 0.387
+Avg0.422 0.2820.416 0.2780.688 0.4270.613 0.3850.633 0.3330.511 0.3180.466 0.2860.463 0.2840.912 0.5440.444 0.286
+Weather
+96 0.176 0.2160.170 0.2080.1950.2520.1870.255 0.172 0.2210.156 0.2040.157 0.2050.151 0.2010.177 0.2180.173 0.210192 0.225 0.2570.223 0.2560.239 0.2990.228 0.2910.220 0.2600.207 0.2490.204 0.2480.202 0.2440.223 0.2580.216 0.251336 0.281 0.2990.279 0.2950.2820.3330.2730.335 0.280 0.3020.265 0.2940.264 0.2930.264 0.2920.2790.299 0.2800.291720 0.361 0.3530.355 0.3470.345 0.3810.349 0.3880.353 0.3500.349 0.3430.3430.3430.3410.3440.3540.349 0.3560.343
+Avg0.260 0.2810.256 0.2760.2650.3160.2590.317 0.256 0.2830.244 0.2720.242 0.2720.239 0.2700.2580.281 0.2560.273
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Dual-Prototype Disentanglement: A Context-Aware Enhancement Framework for Time Series Forecasting
+Table 10.Full results of short-term forecasting. All the results are selected from 4 different prediction lengths {12,24,48,96} , and the
+look-back length is fixed to 96 for all baselines. The better results are highlighted inbold.
+Methods iTransformer DLinear TimesNet TimeXer TimeBridge
+Ori +DPAD Ori +DPAD Ori +DPAD Ori +DPAD Ori +DPAD
+Metric MSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAE
+PEMS03
+12 0.069 0.1750.067 0.1690.122 0.2450.102 0.2180.088 0.1950.066 0.1720.068 0.1790.077 0.1830.075 0.1830.072 0.17824 0.099 0.2100.102 0.2130.202 0.3200.141 0.2570.118 0.2240.091 0.1980.089 0.2040.091 0.2110.105 0.2190.102 0.21248 0.164 0.2750.169 0.2810.334 0.4280.226 0.3290.169 0.2680.137 0.2440.137 0.2530.134 0.2490.171 0.2840.169 0.27896 0.711 0.6510.417 0.4720.459 0.5170.319 0.4030.239 0.3300.206 0.3030.427 0.4830.236 0.3490.262 0.3650.277 0.370
+Avg 0.260 0.3270.188 0.2830.279 0.3770.197 0.3010.153 0.2540.125 0.2290.180 0.2790.134 0.2480.1530.262 0.1550.259
+PEMS04
+12 0.766 0.7090.115 0.2410.147 0.2720.114 0.2330.092 0.2020.073 0.1790.293 0.3970.083 0.1980.097 0.2060.093 0.19824 0.799 0.7280.157 0.2800.225 0.3400.157 0.2750.111 0.2240.088 0.1980.308 0.4090.105 0.2290.1330.243 0.1340.24048 1.041 0.8820.229 0.3410.356 0.4370.239 0.3430.152 0.2660.118 0.2340.339 0.4250.146 0.2720.2150.319 0.2160.31396 1.045 0.8860.293 0.3880.453 0.5050.312 0.4010.197 0.3080.167 0.2790.367 0.4410.219 0.3430.329 0.4120.324 0.407
+Avg 0.912 0.8010.199 0.3120.295 0.3880.205 0.3130.138 0.2500.111 0.2220.326 0.4180.138 0.2610.193 0.2950.192 0.289
+PEMS07
+12 0.068 0.1690.065 0.1610.116 0.2410.100 0.2100.075 0.1790.063 0.1620.061 0.1650.056 0.1610.067 0.1680.066 0.16324 0.087 0.1900.081 0.1870.209 0.3270.149 0.2610.083 0.1980.080 0.1830.071 0.1770.067 0.1710.0950.200 0.0960.19648 0.122 0.2310.118 0.2250.397 0.4560.269 0.3470.128 0.2350.118 0.2210.100 0.2080.109 0.2110.1450.252 0.1480.24896 0.159 0.2670.152 0.2580.592 0.5520.374 0.4220.150 0.2530.162 0.2610.120 0.2210.124 0.2250.206 0.3100.211 0.312
+Avg 0.109 0.2140.104 0.2070.328 0.3940.223 0.3100.109 0.2160.105 0.2060.0880.192 0.089 0.1920.1280.232 0.1300.230
+PEMS08
+12 0.081 0.1830.078 0.1790.153 0.2590.148 0.2340.158 0.1920.082 0.1850.1460.1980.0880.204 0.080 0.1840.075 0.17824 0.118 0.2220.113 0.2190.238 0.3570.192 0.2770.112 0.2190.108 0.2120.1710.2210.1250.241 0.112 0.2170.110 0.21348 0.202 0.2920.210 0.2940.473 0.5150.310 0.3530.2310.1980.1660.221 0.2200.2700.2080.283 0.186 0.2780.181 0.27296 0.395 0.4150.294 0.3260.748 0.6460.441 0.4290.291 0.3380.287 0.3240.285 0.3030.296 0.3210.296 0.3440.292 0.340
+Avg 0.199 0.2780.173 0.2540.403 0.4440.272 0.3230.198 0.2360.160 0.2350.2050.2480.1790.262 0.168 0.2550.164 0.251
+Table 11.Full results of ablation study. All the results are selected from 4 different prediction lengths {96, 192, 336, 720 }, and the
+look-back length is fixed to 96 for all baselines. The better results are highlighted inbold.
+Case +DPAD w/o DDPw/o Common Bankw/o Rare Bankw/ Additivew/ Mean w/oLDGL w/oLsep w/oLrare w/oLdiv
+Metric MSE MAEMSE MAEMSE MAE MSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAEMSE MAE
+Electricity
+96 0.147 0.2340.148 0.2410.152 0.243 0.155 0.2440.153 0.2420.149 0.2450.151 0.2400.153 0.2420.154 0.2390.151 0.240192 0.1620.2510.1670.2480.167 0.259 0.170 0.2610.169 0.2600.167 0.2630.171 0.2640.168 0.2620.166 0.2590.165 0.260336 0.172 0.2710.179 0.2710.178 0.271 0.181 0.2730.182 0.2720.181 0.2750.183 0.2750.180 0.2730.182 0.2750.184 0.277720 0.201 0.1920.208 0.2980.216 0.303 0.225 0.3100.213 0.2980.212 0.2940.217 0.3050.209 0.3010.212 0.2970.208 0.299
+Avg 0.170 0.2370.175 0.2640.178 0.269 0.183 0.2720.179 0.2680.177 0.2690.181 0.2710.178 0.2690.179 0.2680.177 0.269
+Weather
+96 0.17 0.208 0.176 0.2160.175 0.214 0.175 0.2150.178 0.2160.173 0.2120.177 0.2160.173 0.2120.175 0.2160.172 0.212192 0.223 0.2560.225 0.2570.229 0.261 0.230 0.2620.228 0.2590.227 0.2600.231 0.2630.229 0.2600.229 0.2590.230 0.261336 0.279 0.2950.281 0.2990.283 0.300 0.285 0.3020.283 0.2990.282 0.3010.286 0.3020.284 0.3000.283 0.3030.282 0.301720 0.355 0.3470.361 0.3530.362 0.353 0.361 0.3510.361 0.3520.359 0.3520.363 0.3520.360 0.3520.359 0.3520.358 0.352
+Avg 0.256 0.2760.260 0.2810.262 0.282 0.263 0.2820.262 0.2820.260 0.2810.264 0.2830.262 0.2810.262 0.2830.261 0.282
+Traffic
+96 0.392 0.2680.393 0.2690.477 0.337 0.395 0.2720.396 0.2700.459 0.3250.457 0.3230.426 0.3140.433 0.3100.468 0.333192 0.407 0.2710.412 0.2770.414 0.277 0.413 0.2770.412 0.2760.413 0.2790.418 0.2820.478 0.3330.415 0.2800.412 0.277336 0.417 0.2790.424 0.2830.425 0.283 0.427 0.2840.425 0.2840.425 0.2860.429 0.2860.424 0.2820.493 0.3400.425 0.282720 0.447 0.2930.459 0.3010.531 0.359 0.457 0.3000.454 0.2990.457 0.3010.459 0.3020.529 0.3570.461 0.3010.458 0.303
+Avg0.416 0.2780.422 0.2820.462 0.314 0.423 0.2830.422 0.2820.439 0.2980.441 0.2980.464 0.3220.450 0.3080.441 0.299
+Solar
+96 0.199 0.2210.207 0.2370.206 0.239 0.204 0.2330.205 0.2470.203 0.2360.210 0.2410.208 0.2410.209 0.2400.206 0.243192 0.237 0.2540.242 0.2640.244 0.268 0.240 0.2600.239 0.2670.239 0.2610.240 0.2660.239 0.2650.240 0.2660.241 0.259336 0.249 0.2730.251 0.2770.254 0.278 0.252 0.2750.253 0.2780.250 0.2750.255 0.2810.254 0.2800.255 0.2790.253 0.280720 0.250 0.2760.251 0.2780.256 0.280 0.252 0.2780.253 0.2790.254 0.2770.260 0.2820.254 0.2790.254 0.2800.253 0.279
+Avg 0.233 0.2560.237 0.2620.240 0.266 0.237 0.2620.237 0.2680.237 0.2620.241 0.2670.239 0.2660.239 0.2660.238 0.265
+18

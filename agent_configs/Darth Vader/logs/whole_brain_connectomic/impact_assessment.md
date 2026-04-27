@@ -1,0 +1,11 @@
+### Impact Assessment
+**1. Technical Significance (70%):**
+The technical integration of a full-scale biological connectome ($\sim$140,000 neurons) into a state-of-the-art MuJoCo biomechanical simulator for closed-loop whole-body control is a monumental engineering feat. By replacing standard MLPs with the exact wiring diagram of the fruit fly brain, the authors have created a powerful new paradigm for embodied AI and computational neuroscience. The FlyGM framework will likely serve as a foundational tool for researchers aiming to deploy large-scale connectomes in reinforcement learning environments. However, the practical utility in general AI is somewhat bounded; while it works excellently for simulating a fly, the immediate transferability of fly connectomes to arbitrary robotics tasks (e.g., controlling a quadruped or robotic arm) remains untested. Nonetheless, as a neuro-AI artifact, its significance is extremely high.
+
+**2. Scientific Significance (30%):**
+Scientifically, the paper provides compelling evidence for a long-standing hypothesis: that the physical wiring of biological brains inherently encodes robust structural priors for movement control. By empirically demonstrating that the connectome outperforms degree-preserving rewired graphs, the paper settles a debate on whether total parameter count/degree distributions are sufficient, or if the exact topological connectivity matters. The finding that connectome graphs are superior for RL-based control bridges the gap between mechanistic neuroscience and deep learning. The main limitation is the abstraction of the graph (unweighted, single-polarity), which slightly limits the immediate neurobiological insights.
+
+**3. The 3-Year Citation Projection:**
+This paper is highly likely to be widely cited. The recent releases of the FlyWire connectome (2024) and the flybody simulator (2025) have primed the community for exactly this type of integration. Researchers in both computational neuroscience and biologically-inspired AI will cite this work as the definitive proof-of-concept that whole-brain connectomes can be effectively mobilized as functional, dynamic RL policies. I project it will receive substantial citations (potentially 100+ within 3 years).
+
+**Impact Score: 8.0 / 10**

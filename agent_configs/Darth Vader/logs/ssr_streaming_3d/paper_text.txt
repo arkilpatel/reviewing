@@ -1,0 +1,1400 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Self-Expressive Sequence Regularization:
+A Training-Free Approach for Streaming 3D Reconstruction
+Anonymous Authors1
+Abstract
+Streaming 3D reconstruction demands long-
+horizon state updates under strict latency con-
+straints, yet stateful recurrent models often suf-
+fer from geometric drift as errors accumulate
+over time. We revisit this problem from a Grass-
+mannian manifold perspective: the latent per-
+sistent state can be viewed as a subspace repre-
+sentation, i.e., a point evolving on a Grassman-
+nian manifold, where temporal coherence implies
+the state trajectory should remain on (or near)
+this manifold. Based on this view, we propose
+Self-expressive Sequence Regularization (SSR),
+a plug-and-play,training-freeoperator that en-
+forces Grassmannian sequence regularity during
+inference. Given a window of historical states,
+SSR computes an analytical affinity matrix via
+the self-expressive property and uses it to regular-
+ize the current update, effectively pulling noisy
+predictions back toward the manifold-consistent
+trajectory with minimal overhead. Experiments
+on long-sequence benchmarks demonstrate that
+SSR consistently reduces drift and improves re-
+construction quality across multiple streaming 3D
+reconstruction tasks.
+1. Introduction
+Humans possess the remarkable ability to construct and
+refine a coherent 3D mental model of their environment
+from a continuous stream of visual observations. In com-
+puter vision, this capability is pursued through streaming
+3D reconstruction (Wu et al., 2025; Wang et al., 2025b),
+which aims to estimate camera poses and dense geometry in
+real-time. While offline methods (Wang et al., 2023; 2025a)
+leveraging global alignment achieve high accuracy, they suf-
+fer from quadratic computational growth and cannot process
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+sequences of arbitrary length. In contrast, state recurrent
+models, such as CUT3R (Wang et al., 2025b), maintain
+a constant-sized persistent state to encode scene context,
+offering low complexity and high-speed inference.
+Despite their efficiency, state recurrent models are plagued
+by geometric drift and catastrophic forgetting. As the se-
+quence length exceeds the training context, the recurrent
+update mechanism often fails to reconcile new observations
+with historical context, leading to broken trajectories and
+distorted pointmaps. Recent work attempts to mitigate this,
+TTT3R (Chen et al., 2026) deems frame reconstruction as
+an online learning problem, Long3r (Chen et al., 2025b)
+designed a spatio-temporal unified feature to preserve long-
+range contextual information. Although these approaches
+are highly innovative, we believe they have yet to fully
+leverage the inherent properties of sequence structure. Such
+properties enable trained models to maintain information
+consistency across long-range data, thereby reducing recon-
+struction drift and enhancing overall performance.
+In this work, we cast streaming 3D reconstruction as the
+problem of maintaining atrajectory on a Grassmannian
+manifold, rather than simply updating a hidden memory.
+Specifically, each latent state summarizes the scene using
+a low-dimensional subspace representation and thus corre-
+sponds to a point on the Grassmannian, i.e., the space of
+k-dimensional subspaces. Under this formulation, temporal
+coherence naturally imposes a geometric constraint: the
+latent states should evolve smoothly over time and remain
+on, or close to, the underlying manifold. This perspective
+is further motivated by classical Non-Rigid Structure-from-
+Motion (NRSfM), where coherent shape deformations or
+smoothly varying viewpoints are known to admit low-rank
+subspace structures that evolve along a Grassmannian mani-
+fold (Kumar et al., 2018).
+A key consequence of this viewpoint is theself-expressive
+property on the manifold: a state in a coherent sequence
+can be expressed as a linear combination of other states
+within the same sequence. Let S= [S 1, . . . ,St]⊤ ∈R t×d
+denote the latent state sequence. Self-expressive implies the
+existence of an affinity matrix C∈R t×t such that S=CS .
+In a streaming context, the current predicted state St may
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+drift offthe Grassmannian due to occlusion, low texture, or
+poor parallax. By computing an analytical affinity matrix
+C from similarities between the current observation and a
+historical window, we obtain a closed-form, training-free
+way to pull the state back toward the self-expressive Grass-
+mannian structure, thereby reducing accumulated drift.
+We introduceSelf-expressive Sequence Regularization
+(SSR), a training-free, plug-and-play operator that enforces
+Grassmannian sequence regularity during the inference time.
+SSR uses thestatesequence within a historical window to
+compute C and regularize the update process so that the la-
+tent trajectory better respects the self-expressive constraint.
+This operation performs a temporal “consensus” on the man-
+ifold, using the collective information of nearby states to
+suppress geometric inconsistencies in the current frame. By
+imposing explicit Grassmannian structure on the latent up-
+dates of 3D foundation models, we can achieve an efficient
+and structurally grounded perception system.
+Our contributions are summarized as follows:
+• A Grassmannian View of State Persistence:We con-
+nect NRSfM subspace theory to streaming 3D recon-
+struction and interpret the persistent latent state as a
+point evolving on a Grassmannian manifold, rather
+than a generic hidden memory.
+• Self-expressive Sequence Regularization (SSR):We
+propose an analytical, training-free correction mecha-
+nism derived from Grassmannian self-expressive, miti-
+gating drift and forgetting without backpropagation or
+additional parameters.
+•Empirical Validation:We validate SSR across many
+tasks, including video depth estimation and camera
+pose estimation, and demonstrate consistent improve-
+ments on long-sequence and dynamics scenarios.
+2. Related Works
+Conventional Reconstruction.Reconstructing the corre-
+sponding 3D structure from a set of ordered or unordered ob-
+servation sequences has long been a significant challenge in
+the field of computational vision. From early self-calibrating
+reconstruction systems (Mohr et al., 1995; Pollefeys et al.,
+2004; Beardsley et al., 1996; Fitzgibbon & Zisserman, 1998)
+to large-scale reconstruction systems, 3D reconstruction al-
+gorithms have made significant strides. In the early stages of
+3D reconstruction, various strategies were explored, includ-
+ing incremental reconstruction (Agarwal et al., 2011; Frahm
+et al., 2010; Wu, 2013) and global reconstruction (Wilson
+& Snavely, 2014; Sweeney et al., 2015). Nowadays, based
+on factors such as applicability and practical performance,
+incremental reconstruction has emerged as the most widely
+adopted and effective solution. Among these, the introduc-
+tion of COLMAP (Schonberger & Frahm, 2016) standard-
+ized the computational framework for incremental Structure
+from motion(SfM), with the PnP-centered image registra-
+tion loop becoming the primary workflow for traditional
+SfM. However, SfM can only compute sparse scene point
+clouds and camera poses. To obtain a denser and more accu-
+rate scene model, Multi-View Stereo (Furukawa et al., 2015)
+computation must be performed. Inverse rendering-based re-
+construction methods have entered the mainstream spotlight
+with their remarkable expressive power. A representative
+method in this category is NERF (Mildenhall et al., 2021),
+and NERF-based techniques have gradually expanded into
+diverse application scenarios, from initial small-scale imple-
+mentations (Deng et al., 2022; Ma et al., 2022; Barron et al.,
+2022) to subsequent large-scale deployments (Tancik et al.,
+2022). Later reconstruction methods centered on Gaussian
+Splating (Kerbl et al., 2023) also share similar underlying
+principles.
+Learning-based Reconstruction.With the advancement
+of deep learning technology, many studies have begun to ex-
+plore its application in 3D reconstruction. SfMLeaner (Zhou
+et al., 2017) pioneered fully end-to-end learning-based
+reconstruction, followed by numerous subsequent meth-
+ods (Zhang et al., 2023; Zhao et al., 2022) adhering to
+this paradigm. Another approaches (Bloesch et al., 2018;
+Czarnowski et al., 2020) adopted the strategy of integrat-
+ing depth estimation networks with optimization structure.
+With the widespread adoption of Transformer (Vaswani
+et al., 2017), fully data-driven end-to-end models regained
+prominence. Methods like Dust3R (Wang et al., 2023), uti-
+lizing image pairs, enabled networks to autonomously learn
+spatial-planar geometric relationships, successfully imple-
+menting data-driven 3D reconstruction algorithms (Leroy
+et al., 2024; Zhang et al., 2024; Chen et al., 2025a; Zhu et al.,
+2025). Approaches such as VGGT (Wang et al., 2025a) fur-
+ther demonstrated that well-designed network models, when
+paired with massive datasets, can directly learn geometric
+knowledge from sequences. However, due to the limited
+capability of such methods to handle long sequence inputs,
+reconstruction (Wang & Agapito, 2024; Wu et al., 2025;
+Wang et al., 2025b) approaches employing online updates
+have begun to emerge. This paper aims to explore how to
+enhance the reconstruction capabilities of streaming recon-
+struction methods for long-range sequences.
+Non-rigid Reconstruction.The purpose of non-rigid recon-
+struction is to view dynamic and static objects through a uni-
+fied perspective. This implies that geometric or physical con-
+straints applicable to specific scenarios cannot be utilized.
+Consequently, non-rigid reconstruction methods typically
+opt for solutions based on numerical structure. Bregleret
+al. (Bregler et al., 2000) first introduced factorization frame-
+work (Tomasi & Kanade, 1992) for Non-rigid Structure-
+from-Motion. When confronted with an ambiguity cri-
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+sis (Xiao et al., 2004), Akhteret al. (Akhter et al., 2009)
+demonstrated obtaining approximately unique solutions un-
+der orthogonal constraints. Subsequent approaches built
+upon this foundation, proposing different solutions, includ-
+ing using DCT basis to recover motion trajectory (Akhter
+et al., 2008; Gotardo & Martinez, 2011), using low-rank con-
+straint to regularize 3D structure recovery (Paladini et al.,
+2010; Dai et al., 2014; Kumar, 2020; Kumar & Van Gool,
+2022), Novotnyet al. (Novotny et al., 2019) proposed the
+first deep learning framework for NRSfM. Subsequently,
+single-frame reconstruction methods (Kong & Lucey, 2021;
+Wang et al., 2020; Park et al., 2020) designed from differ-
+ent angles emerged.However, when dealing with sequential
+input, a better approach for achieving superior results is to
+seek the ability to extract information from context (Zeng
+et al., 2021; Wang & Lucey, 2021; Zeng et al., 2022; Choi
+et al., 2019; Sidhu et al., 2020; Deng et al., 2024). Self-
+expressive models, serve as a valuable tool for constraining
+sequence reconstruction. However, their application in other
+domains remains limited. The proposed method explores
+how to leverage this tool within streaming reconstruction
+frameworks.
+3. Methodology
+In this section, we introduce Self-expressive Sequence Reg-
+ularization (SSR), a training-free, plug-and-play operator
+designed to enforce contextual consistency during inference.
+We start from a brief introduction to the Grassmannian Man-
+ifold in § 3.1, then discuss self-expressive in § 3.1 and § 3.2,
+and finally outline the proposed method in § 3.4.
+3.1. Grassmannian Manifold View
+The Grassmann manifold, denoted as G(n, r) with n > r , is
+the set of all r-dimensional linear subspaces of Rn. A point
+on G(n, r) is an equivalence class [U] represented by any
+n×r matrix U whose columns form an orthonormal basis
+spanning that subspace, i.e.,[U]≜span(U).
+To compare two subspaces [U1] and [U2], we use thepro-
+jection metric:
+dproj
+ 
+[U1],[U 2]
+
+= 1√
+2
+U1U⊤
+1 −U 2U⊤
+2
+
+F .(1)
+Which is convenient since it embeds each Grassmann point
+into a Euclidean space through the mapping U7→UU ⊤.
+For more information, please refer to (Kumar et al., 2018).
+With this definition in hand, our key viewpoint is to inter-
+pret the persistent latent state in streaming reconstruction
+as a compactsubspace descriptorof the scene. That is,
+each state corresponds to a point on G(n, r), and the online
+recurrent update induces a temporaltrajectoryon the man-
+ifold. This provides a structural prior: for coherent scene
+evolution, successive states should remain close under dproj
+(equivalently, have similar projection matrices), whereas
+long-horizon drift can be viewed as the state trajectory devi-
+ating from this manifold-consistent evolution.
+3.2. Recurrent Streaming Reconstruction
+We consider RNN-style streaming reconstruction models
+that process a continuous RGB stream {It} to estimate cam-
+era poses and 3D geometry online. In addition to their
+constant-memory state design, we emphasize a manifold
+interpretation: the persistent state can be treated as a com-
+pactsubspace representationof the scene, i.e., a point on a
+Grassmannian manifold. Thus, streaming inference induces
+a latenttrajectory on the Grassmannian, where a desirable
+update should preserve temporal coherence by remaining
+on (or near) the manifold instead of drifting arbitrarily.
+Concretely, the standard forward pass consists of three steps:
+Tokenization.Each frame It is patchified and encoded into
+visual tokensF t by a shared-weight ViT encoder Enc:
+Ft =Enc(I t).(2)
+Recurrent State Update and Context Interaction.The
+model maintains a persistent state St−1 (initialized by learn-
+able tokens). At time t, the interaction module fuses the
+incoming observationF t with historical context inS t−1 to
+produce the updated stateS t and output tokensY t:
+[St,Y t] =Interaction(S t−1,F t).(3)
+Dense Regression.Task heads (e.g., DPT or MLP) decode
+Yt into metric-scale 3D pointmaps ˆXt, confidence masks
+ˆNt, and 6-DoF camera poses ˆPt:
+{ ˆXt, ˆPt, ˆNt}=Head(Y t).(4)
+While the recurrent formulation is efficient, its state tra-
+jectory is typically unconstrained. Over long horizons, St
+can gradually deviate from the manifold implied by coher-
+ent scene evolution, manifesting as geometric drift in both
+structure and pose.
+3.3. Revisit Self-Expressive Property
+To motivate our regularization, we revisit a classic viewpoint
+from NRSfM through the lens of the Grassmannian mani-
+fold. A long-standing observation in NRSfM is that shapes
+in a temporal sequence are not independent; instead, they
+evolve within low-dimension subspaces, yielding structure
+constraints across time. Early methods (Bregler et al., 2000)
+exploited low-rank structure, and Dai et al. (Dai et al., 2014)
+established a standard optimization formulation. Building
+on this line, Zhu et al. (Zhu et al., 2014) proposed aunion-
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+Figure 1.Illustration of the Self-expressive Sequence Regularization (SSR).We introduce a training-free regularization scheme for
+CUT3R. Specifically, we refine the frame-wise states calculated by foundation models through a sliding-window reconstruction process.
+By leveraging the affinity between temporal states, our method achieves sequence regularization without introducing learnable parameters,
+making it directly applicable to off-the-shelf pre-trained foundation model.
+of-subspacesmodel to capture richer sequence structure:
+arg min
+X,C,E
+∥C∥∗ +α∥X∥ ∗ +∥E∥ l,
+s.t.X=XC,
+W=MX ♯ +E.
+(5)
+Where C∈R F×F is the affinity matrix for an F -frame
+sequence. ∥ · ∥ ∗ denote nuclear norm and ∥ · ∥ l denote
+l2-norm. Here, X is the target shape sequence, E is an er-
+ror term,Mdenotes the projection matrix, andWdenotes
+the observation (image sequence or 2D keypoint track) se-
+quence. The rearrangement X♯ (from (Dai et al., 2014)) is
+designed to better impose low-rank constraints. Crucially,
+the union-of-subspaces assumption implies that a sequence
+can be modeled as multiple locally coherent subspaces; in
+particular, within a short temporal neighborhood Wτ , the
+shapes are assumed to lie in a local shape subspace spanned
+by the shapes in that neighborhood:
+Xt ∈span
+ 
+{Xi}i∈Wτ
+
+,∀t∈ W τ .(6)
+Kumar et al. (Kumar et al., 2018) further pointed out that
+such locally coherent subspaces can be represented aspoints
+on the Grassmannian manifold G(n, r), enabling continuous
+sequences to admit a locally self-expressing structure. Deng
+et al. (Deng et al., 2024) subsequently brought this idea into
+deep learning by applying self-expressive in a learned latent
+space. For a sequence X= [X 1, . . . ,XF ]⊤ with shapes
+Xi ∈R 1×3P , self-expressive states that each element can
+be reconstructed as a linear combination of others:
+Xt =f shape(Enc(It)),
+ˆX=g(X),X={X 1,· · ·,X F },
+s.t.g(X) =f dec(C·f enc(X)),
+C=H(f enc(X)).
+(7)
+Where C∈R F×F is the affinity matrix as in Equation 5.
+ˆX is the regularized output sequence, fshape(·) maps an
+image to a per-frame shape, fenc(·) embeds the sequence,
+andf dec(·)decodes it back.
+Importantly, this formulation suggests that a model’s latent
+representations can be interpreted as an evolvingGrass-
+mannian trajectory. They encode the scene’s geometric
+subspace at each time step. This observation motivates our
+design, we can enforce Grassmannian self-expressive as an
+inference-time constraint on the streaming state trajectory.
+3.4. Self-expressive Sequence Regularization
+We propose Self-expressive Sequence Regularization (SSR),
+a training-free correction scheme for streaming 3D recon-
+struction as Figure 1. SSR is motivated by the classic obser-
+vation that a deforming object evolves through a sequence
+of states that adhere totemporal local subspaces. When the
+deformation is smooth over time, consecutive latent states re-
+main close on G(n, r), a short neighborhood of recent states
+can be treated as samples from the same local subspace (i.e.,
+a local region of the manifold). This motivates asliding
+window: rather than enforcing a global constraint across
+the entire past, we regularize the trajectory using only the
+most recent k states, which captures local coherence while
+keeping memory and computation bounded.
+Under this view, SSR imposeslocal self-expressiveness: the
+current state should be well approximated by a linear combi-
+nation of its neighbors within the window. Equivalently, we
+seek affinity that reconstruct each point from nearby points
+on G(n, r). Concretely, at time t we collect a temporal win-
+dow Wt ∈[t−k,· · ·, t] with size k and stack states in the
+temporal window as:
+St =C (t)St,S t = [S t−k,· · ·,S t]⊤ (8)
+here, we denote C(t) ∈R k×k as the affinity matrix withk as
+the total length of temporal windowSt. In the ideal case (i.e.,
+when the recurrent update remains on a locally consistent
+trajectory), the state sequence should approximately satisfy
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+Table 1.Video depth estimation. Benchmarking on synthetic (Sintel), dynamic (Bonn), and outdoor (KITTI) sequences. We evaluate the
+proposed SSR framework against state-of-the-art methods using both scale-invariant and metric depth protocols. Our training-free method
+demonstrates the state-of-the-art/highly competitive performance across diverse settings. Compared to another training-free method,
+TTT3R, our approach also exhibits superior performance.
+Sintel Bonn KITTI
+Alignment Method Venue Online Abs Rel↓δ <1.25↑Abs Rel↓δ <1.25↑Abs Rel↓δ <1.25↑
+Per-sequence
+scale
+DUSt3R CVPR’24✗0.656 45.2 0.155 83.3 0.144 81.3
+MASt3R ECCV’24✗0.641 43.9 0.252 70.1 0.183 74.5
+MonSTR3R ICLR’25✗0.378 55.8 0.067 96.3 0.168 74.4
+Easi3R ICCV’25✗0.377 55.9 0.059 97.0 0.102 91.2
+AETHER ICCV’25✗0.324 50.2 0.273 59.4 0.056 97.8
+VGGT CVPR’25✗0.287 66.1 0.055 97.1 0.070 96.5
+Spann3R 3DV’25✓0.622 42.6 0.144 81.3 0.198 73.4
+Point3R NeurIPS’25✓0.452 48.9 0.060 96.0 0.136 84.2
+CUT3R CVPR’25✓0.421 47.9 0.078 93.7 0.118 88.1
+StreamVGGT ArXiv’25✓0.323 65.7 0.059 97.20.173 72.1
+TTT3R ICLR’26✓0.404 50.1 0.068 95.4 0.113 90.4
+Ours Ours✓0.402 50.6 0.061 96.8 0.109 91.1
+Metric scale
+MASt3R ECCV’24✗1.022 14.3 0.272 70.6 0.467 15.2
+CUT3R CVPR’25✓1.029 23.8 0.103 88.5 0.122 85.5
+Point3R NeurIPS’25✓0.77717.1 0.137 94.7 0.191 73.8
+TTT3R ICLR’26✓0.977 24.5 0.090 94.20.110 89.1
+Ours Ours✓0.920 25.3 0.068 96.50.113 89.0
+the self-expressive relation in Equation 8.
+However, in practice the unconstrained update may drift,
+and St can deviate from this local subspace structure; SSR
+therefore computes the affinity and performs an analytic
+correction to project the trajectory back toward a locally self-
+expressive configuration. We compute the affinity matrix
+C by measuring similarity. We utilize a mapping function
+H(·) that encodes feature similarity. For any two frames i
+andjin temporal groupt, the affinityC ij is computed as:
+C(t) =H(S t),
+C (t)
+ij = ϕ(SWi ,S Wj )P
+k ϕ(SWi ,S Wj ) , i, j∈[0, k]
+(9)
+where ϕ(·) computes similarity by non-normalized dot prod-
+ucts. This matrix captures the context of the sequence. As
+in Equation 8, we reconstruct the state sequence St using
+the affinity matrixC (t) in a local temporal windowS t.
+Given C(t), SSR performs an analytic correction by re-
+constructing states from their neighbors; for example, the
+corrected state at timetis:
+ˆSt =
+kX
+j=0
+C (t)
+kj ·S j.(10)
+Finally, regularizing the state trajectory onG(n, r) stabilizes
+the head predictions for both scene geometry and camera
+motion (Equation 4). We summarize the full inference-time
+update in Algorithm 1.
+Algorithm 1Self-expressive Sequence Regularization
+inputI t,S t−1 {Current image and previous state}
+Ft ←Encoder(I t){Feature Encoding}
+[St,Y t]←Interaction(S t−1,X t){Recurrent Update}
+Wt ←[t−k, . . . , t]{Maintain temporal window}
+computeC (t) via similarity:
+C(t)
+ij = ϕ(Si,Sj )P
+k(ϕ(Si,Sk)
+ˆSt ←C (t) · St {Analytical Correction}
+output ˆSt,Y t
+4. Experiments
+In this section, we evaluate the effectiveness of our training-
+free Self-expressive Sequence Regularization framework
+across camera pose estimation, video depth estimation, and
+3D reconstruction tasks.
+Baseline.We selected CUT3R as our baseline and regu-
+larized its state sequences using SSR. To validate the ef-
+fectiveness of our proposed method, we first conducted
+foundational quantitative experiments in line with CUT3R.
+Implementation Details.By utilizing a window size (k=8)
+of historical state features to compute the affinity matrix C
+as Algorithm 1, the model can outperform the base CUT3R
+model without the computational overhead of gradient-
+based updates or test-time training.
+4.1. Video Depth Estimation
+Our experiments are based on the setup of CUT3R. We con-
+ducted video depth estimation on the KITTI (Geiger et al.,
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+Table 2.Pose estimation. Overall, our method demonstrates the best comprehensive performance among online methods. On datasets with
+highly dynamics and long sequences(TUM-D/ScanNet), our method demonstrates superior performance in camera trajectory estimation,
+reflecting its ability to suppress cumulative drift and adapt to dynamic scenes.
+Sintel TUM-dynamics ScanNet
+Method ATE↓RPE trans↓RPE rot↓ATE↓RPE trans↓RPE rot↓ATE↓RPE trans↓RPE rot↓
+DUSt3R 0.290 0.132 7.869 0.140 3.286 7.869 0.246 0.108 8.210
+MASt3R 0.185 0.060 1.496 0.038 0.012 0.448 0.078 0.020 0.475
+MonST3R 0.111 0.044 0.869 0.098 0.019 0.935 0.077 0.018 0.529
+Easi3R 0.110 0.042 0.758 0.105 0.022 1.064 0.061 0.017 0.525
+AETHER 0.189 0.054 0.694 0.092 0.012 1.106 0.176 0.028 1.204
+VGGT 0.172 0.062 0.471 0.012 0.010 0.310 0.035 0.015 0.377
+Spann3R 0.329 0.110 4.471 0.056 0.021 0.591 0.096 0.023 0.661
+CUT3R 0.213 0.066 0.6210.046 0.015 0.473 0.099 0.022 0.600
+Point3R 0.351 0.128 1.822 0.075 0.029 0.642 0.106 0.035 1.946
+TTT3R0.201 0.0630.671 0.028 0.0120.379 0.064 0.021 0.592
+Ours 0.209 0.077 0.631 0.0260.013 0.378 0.059 0.0210.721
+Table 3.Sparse view 3D reconstruction. When input data is extremely sparse and sequence lengths are very short, our method
+experiences performance degradation to the point where it underperforms baseline methods. This occurs because the proposed method
+aims to aggregate meaningful information from historical context, whereas such extreme input settings directly contradict this objective.
+We explore this issue in depth in the analysis section.
+7 Scenes NRGBD
+Acc↓Comp↓N C↑Acc↓Comp↓N C↑
+Method Mean Med. Mean Med. Mean Med. Mean Med. Mean Med. Mean Med.
+StreamVGGT 0.132 0.058 0.116 0.042 0.749 0.863 0.085 0.044 0.079 0.038 0.862 0.986
+XStreamVGGT 0.142 0.068 0.125 0.048 0.734 0.848 0.085 0.049 0.075 0.038 0.850 0.986
+DUSt3R-GA 0.146 0.077 0.181 0.067 0.736 0.839 0.144 0.019 0.154 0.018 0.870 0.982
+MASt3R-GA 0.185 0.081 0.180 0.069 0.701 0.792 0.085 0.033 0.063 0.028 0.794 0.928
+MonST3R-GA 0.248 0.185 0.266 0.167 0.672 0.759 0.272 0.114 0.287 0.110 0.758 0.843
+Spann3R 0.298 0.226 0.205 0.112 0.650 0.730 0.416 0.323 0.417 0.285 0.684 0.789
+CUT3R 0.126 0.047 0.154 0.031 0.727 0.834 0.099 0.031 0.076 0.026 0.837 0.971
+TTT3R 0.156 0.054 0.196 0.046 0.719 0.823 0.105 0.032 0.080 0.027 0.835 0.970
+Ours 0.132 0.047 0.167 0.031 0.724 0.832 0.100 0.036 0.078 0.032 0.835 0.970
+2013), Sintel (Butler et al., 2012), and Bonn (Palazzolo et al.,
+2019) datasets. These experiments primarily evaluated the
+model’s ability to perform frame-by-frame depth estimation
+while maintaining consistency between frames. Consistent
+with CUT3R, our reported scale-invariant relative depth and
+metric scale absolute depth accuracy. We adopt evaluation
+metrics with both online and offline baselines, specifically
+Absolute Relative Error (Abs Rel) and δ <1.25 (the per-
+centage of pixels for which the ratio between the predicted
+depth ˆd and the ground-truth depth d∗ is within a factor of
+1.25) following (Zhang et al., 2024).
+As shown in Table 1, the proposed method achieved bet-
+ter results than the baseline model on all three benchmark
+datasets and also outperformed another untrained method,
+TTT3R (Chen et al., 2026). Furthermore, the proposed
+method did not significantly reduce inference speed despite
+a slight increase in computational overhead. Notably, the
+proposed method achieves better performance gains on the
+longer-sequence Bonn dataset. This demonstrates its ca-
+pability to preserve and utilize long-range information, en-
+hancing the foundation model’s ability to leverage long-term
+contextual information without requiring training.
+4.2. Pose Estimation
+To determine whether our method can suppress long-range
+drift issues, we also followed the experimental setup of
+CUT3R and conducted pose estimation experiments on the
+TUM-Dynamics (Sturm et al., 2012), Sintel (Palazzolo et al.,
+2019), and ScanNet (Dai et al., 2017) datasets to assess the
+model’s ability to estimate continuous camera trajectories.
+This task validates the model’s ability to infer spatial posi-
+tions from continuous inputs. We report Absolute Transla-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+Table 4.Sequence view 3D reconstruction. Compared to the content in Table 3, when we input the same dataset into the proposed
+method in the form of longer, more continuous sequences, the proposed method achieves better results than the baseline method. This
+indicates that the performance degradation shown in Table 3, is primarily caused by the input configuration.
+7 Scenes NRGBD
+Acc↓Comp↓N C↑Acc↓Comp↓N C↑
+Method Mean Med. Mean Med. Mean Med. Mean Med. Mean Med. Mean Med.
+CUT3R 0.032 0.017 0.032 0.0090.6410.7200.090 0.045 0.035 0.011 0.743 0.906
+Ours0.024 0.011 0.024 0.0060.625 0.6950.075 0.029 0.029 0.008 0.758 0.914
+Table 5.The impact of window length on experimental results ex-
+hibits diminishing returns. For typical experiments, we actually do
+not require excessively long window lengths to obtain satisfactory
+outcomes. Therefore, the computational overhead associated with
+SSR can be considered fixed and relatively small.
+BONN KITTI
+Method Abs Rel↓δ <1.25↑Abs Rel↓δ <1.25↑
+CUT3R 0.078 93.7 0.118 88.1
+TTT3R 0.064 96.2 0.110 90.6
+Ours (k=2) 0.064 96.6 0.112 90.2
+Ours (k=4) 0.062 96.8 0.10991.2
+Ours (k=16) 0.061 96.8 0.111 90.6
+Ours (k=32) 0.061 96.8 0.111 90.6
+Ours (k=64) 0.062 96.7 0.112 90.6
+Ours0.061 96.8 0.10991.1
+tion Error (ATE), Relative Translation Error (RPE Trans),
+and Relative Rotation Error (RPE Rot).
+As shown in Table 2, the proposed method demonstrates sig-
+nificant performance advantages over others across most
+metrics. Compared to another training-free TTT3R, it
+also achieves notable improvements. By leveraging self-
+expressive to construct effective reconstruction constraints,
+our approach inherently filters dynamic noise on TUM-D,
+leading to more accurate and reliable depth estimation. For
+ScanNet, the proposed method also demonstrates improve-
+ments, indicating that our approach effectively mitigates
+information drift caused by long-range information.
+4.3. 3D Reconstrcution
+Since sparse inputs of short lengthcontradictsthe core
+objective of the proposed method, its performance under
+this configuration warrants our primary analytical focus. To
+validate the model’s scene reconstruction capability from
+discrete viewpoints, we followed CUT3R’s configuration
+and conducted tests using the 7-Scenes (Shotton et al., 2013)
+and NRGBD (Azinovi ´c et al., 2022) datasets. For the
+7-Scenes dataset, we selected 3–5 frames per sequence.
+For the NRGBD dataset, we selected 2–4 frames per se-
+quence. In line with (Zhang et al., 2024), we reported the
+Accuracy (ACC), Completion (Comp), and Normal consis-
+tency (NC) scores.
+As shown in Table 3, when confronted with sparse inputs
+of short length, the proposed method exhibits some per-
+formance degradation compared to the baseline. This is
+primarily because the core idea of the proposed method
+lies in determining the affinity matrix by computing the
+self-correlation of historical state sequences. Ideally, when
+dealing with sparse inputs, the affinity matrix should de-
+generate into the identity matrix. However, in practice, if
+inputs are not explicitly timestamped, states separated by
+large intervals in the historical sequence may still exhibit
+some degree of similarity. Resulting in an affinity matrix
+that is close to but not exactly the identity matrix. Conse-
+quently, some unrelated states are erroneously merged into
+the current state, leading to performance degradation.
+It is worth noting that TTT3R, which shares a similar con-
+ceptual approach to our method (incorporating historical
+information in some form), exhibited more severe degrada-
+tion. We speculate this stems from the choice of a different
+historical information fusion strategy. To further validate
+whether this degradation stems from inherent dataset issues
+or, as hypothesized, from differences in input structures, we
+conducted new experiments in the analysis section.
+4.4. Analysis
+Degradation in Reconstruction.We first confirmed that
+this performance degradation was not caused by the data
+being incompatible with the proposed method. We tested
+7-Scenes and the NRGBD dataset with denser continuous
+sequence (sampling rate of 1/20 on original sequence). As
+shown in Table 4, under this setting, our method achieved
+better results than the baseline. This indicates that the degra-
+dation in performance is not attributable to the distribution
+of the dataset, but stems from input formats that conflict
+with the objectives of the proposed method.
+Furthermore, we validated 3D reconstruction capabilities on
+casual videos. As shown in the visualization results in Fig-
+ure 2, the proposed method achieved superior performance
+for inputs with looping observation and longer trajectories.
+Window Size.Longer window size isn’t necessarily bet-
+ter. As shown in Table 5, when the sequence exceeds a
+certain length (temporal window size 32 asOurs (k=32)),
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+TTT3RCUT3R OursInput sequences
+Figure 2.Qualitative Comparison.As shown in the figure, for long trajectories prone to cumulative drift and for loop trajectories, our
+method achieves loop closure more effectively than CUT3R and TTT3R, thereby yielding relatively superior reconstruction results.
+it may not improve results and could even have a negative
+effect (temporal window size 64 asOurs (k=64)). As shown
+in Figure 3, contextual relevance exhibits distinct segmen-
+tation patterns, indicating that the size of local subspaces
+is bounded. Consequently, as demonstrated in the table, a
+larger window size does not necessarily yield better results.
+Affinity Matrix.Compared to the baseline, both TTT3R
+and our method demonstrate a superior capacity for lever-
+aging long-range contextual information. As illustrated
+in Figure 3, our method effectively captures long-distance
+temporal similarities, which is visually manifested as dis-
+tinct structures block on the affinity heatmap. This capability
+allows the algorithm to achieve historical states recall, thus
+mitigating cumulative drift. These off-diagonal responses
+remain stable over time, indicating that the model can re-
+trieve relevant earlier observations rather than relying on
+adjacent frames.
+Limitation.The most significant limitation of the pro-
+posed method has been demonstrated in the preceding
+discussion. Our approach exhibits detrimental effects on
+the model when confronted with extremely sparse input
+data. While this issue can be mitigated through engineering
+workarounds, it underscores a fundamental shortcoming in
+our method: the inability to effectively fuse long-range con-
+textual information and to accurately discern the relevance
+of contextual data to the current context. This represents a
+key area for future improvement.
+CUT3R TTT3R Ours
+Figure 3.Affinity matrix visualization. The off-diagonal ac-
+tivations in the affinity matrix clearly indicate that our method
+maintains strong contextual relationship on early frames even as
+the sequence progresses, providing a robust context constraint for
+the current estimation.
+5. Conclusion
+We have proposed a novel Grassmannian manifold perspec-
+tive to mitigate state drift in streaming 3D reconstruction.
+Our Self-expressive Sequence Regularization (SSR) is a
+training-free, plug-and-play operator that ensures temporal
+coherence by constraining state trajectories. By exploiting
+the self-expressive of sequence, SSR suppresses cumulative
+errors, consistently improving reconstruction precision as
+demonstrated in our evaluations.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+6. Impact Statement
+This paper presents work whose goal is to advance the field
+of 3D Vision. There are many potential societal conse-
+quences of our work, none which we feel must be specifi-
+cally highlighted here.
+References
+Agarwal, S., Furukawa, Y ., Snavely, N., Simon, I., Curless,
+B., Seitz, S. M., and Szeliski, R. Building rome in a day.
+Communications of the ACM, 54(10):105–112, 2011.
+Akhter, I., Sheikh, Y ., Khan, S., and Kanade, T. Nonrigid
+structure from motion in trajectory space. InAdv. Neural
+Inform. Process. Syst. (NIPS), pp. 41–48, 2008.
+Akhter, I., Sheikh, Y ., and Khan, S. In defense of orthonor-
+mality constraints for nonrigid structure from motion.
+InIEEE Conf. Comput. Vis. Pattern Recog. (CVPR), pp.
+1534–1541, 2009.
+Azinovi´c, D., Martin-Brualla, R., Goldman, D. B., Nießner,
+M., and Thies, J. Neural rgb-d surface reconstruction.
+InIEEE Conf. Comput. Vis. Pattern Recog. (CVPR), pp.
+6290–6301, 2022.
+Barron, J. T., Mildenhall, B., Verbin, D., Srinivasan, P. P.,
+and Hedman, P. Mip-nerf 360: Unbounded anti-aliased
+neural radiance fields. InProceedings of the IEEE/CVF
+conference on computer vision and pattern recognition,
+pp. 5470–5479, 2022.
+Beardsley, P., Torr, P., and Zisserman, A. 3d model ac-
+quisition from extended image sequences. InEur . Conf.
+Comput. Vis. (ECCV), pp. 683–695. Springer, 1996.
+Bloesch, M., Czarnowski, J., Clark, R., Leutenegger, S., and
+Davison, A. J. Codeslam—learning a compact, optimis-
+able representation for dense visual slam. InIEEE Conf.
+Comput. Vis. Pattern Recog. (CVPR), pp. 2560–2568,
+2018.
+Bregler, C., Hertzmann, A., and Biermann, H. Recovering
+non-rigid 3d shape from image streams. InIEEE Conf.
+Comput. Vis. Pattern Recog. (CVPR), pp. 690–696, 2000.
+Butler, D. J., Wulff, J., Stanley, G. B., and Black, M. J. A
+naturalistic open source movie for optical flow evaluation.
+In A. Fitzgibbon et al. (Eds.) (ed.),Eur . Conf. Comput.
+Vis. (ECCV), Part IV , LNCS 7577, pp. 611–625. Springer-
+Verlag, October 2012.
+Chen, X., Chen, Y ., Xiu, Y ., Geiger, A., and Chen, A. Easi3r:
+Estimating disentangled motion from dust3r without train-
+ing.arXiv preprint arXiv:2503.24391, 2025a.
+Chen, X., Chen, Y ., Xiu, Y ., Geiger, A., and Chen, A. Ttt3r:
+3d reconstruction as test-time training. InInt. Conf. Learn.
+Represent. (ICLR), 2026.
+Chen, Z., Qin, M., Yuan, T., Liu, Z., and Zhao, H. Long3r:
+Long sequence streaming 3d reconstruction. InInt. Conf.
+Comput. Vis. (ICCV), pp. 5273–5284, 2025b.
+Choi, J., Gao, C., Messou, J. C., and Huang, J.-B. Why
+can’t i dance in the mall? learning to mitigate scene bias
+in action recognition.Adv. Neural Inform. Process. Syst.
+(NIPS), 32, 2019.
+Czarnowski, J., Laidlow, T., Clark, R., and Davison, A. J.
+Deepfactors: Real-time probabilistic dense monocular
+slam.IEEE Robotics and Automation Letters, 5(2):721–
+728, 2020.
+Dai, A., Chang, A. X., Savva, M., Halber, M., Funkhouser,
+T., and Nießner, M. Scannet: Richly-annotated 3d recon-
+structions of indoor scenes. InIEEE Conf. Comput. Vis.
+Pattern Recog. (CVPR), 2017.
+Dai, Y ., Li, H., and He, M. A simple prior-free method
+for non-rigid structure-from-motion factorization.Int. J.
+Comput. Vis. (IJCV), 107(2):101–122, 2014.
+Deng, H., Zhang, T., Dai, Y ., Shi, J., Zhong, Y ., and Li, H.
+Deep non-rigid structure-from-motion: A sequence-to-
+sequence translation perspective.IEEE Trans. Pattern
+Anal. Mach. Intell. (PAMI), 46(12):10814–10828, 2024.
+Deng, K., Liu, A., Zhu, J.-Y ., and Ramanan, D. Depth-
+supervised nerf: Fewer views and faster training for free.
+InIEEE Conf. Comput. Vis. Pattern Recog. (CVPR), pp.
+12882–12891, 2022.
+Fitzgibbon, A. W. and Zisserman, A. Automatic camera
+recovery for closed or open image sequences. InEur .
+Conf. Comput. Vis. (ECCV), pp. 311–326. Springer, 1998.
+Frahm, J.-M., Fite-Georgel, P., Gallup, D., Johnson, T.,
+Raguram, R., Wu, C., Jen, Y .-H., Dunn, E., Clipp, B.,
+Lazebnik, S., et al. Building rome on a cloudless day. In
+Eur . Conf. Comput. Vis. (ECCV), pp. 368–381. Springer,
+2010.
+Furukawa, Y ., Hern´andez, C., et al. Multi-view stereo: A
+tutorial.F oundations and trends® in Computer Graphics
+and Vision, 9(1-2):1–148, 2015.
+Geiger, A., Lenz, P., Stiller, C., and Urtasun, R. Vision
+meets robotics: The kitti dataset.International Journal
+of Robotics Research (IJRR), 2013.
+Gotardo, P. F. and Martinez, A. M. Computing smooth time
+trajectories for camera and deformable shape in structure
+from motion with occlusion.IEEE Trans. Pattern Anal.
+Mach. Intell. (PAMI), 33(10):2051–2065, 2011.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+SSR: A Training-Free Approach for Streaming 3D Reconstruction
+Kerbl, B., Kopanas, G., Leimk¨uhler, T., and Drettakis, G. 3d
+gaussian splatting for real-time radiance field rendering.
+ACM Trans. Graph., 42(4):139–1, 2023.
+Kong, C. and Lucey, S. Deep non-rigid structure from
+motion with missing data.IEEE Trans. Pattern Anal.
+Mach. Intell. (PAMI), 43(12):4365–4377, 2021.
+Kumar, S. Non-rigid structure from motion: Prior-free fac-
+torization method revisited. InIEEE Winter Conference
+on Applications of Computer Vision (WACV), pp. 51–60,
+2020.
+Kumar, S. and Van Gool, L. Organic priors in non-
+rigid structure from motion. InEur . Conf. Comput. Vis.
+(ECCV), pp. 71–88, 2022.
+Kumar, S., Cherian, A., Dai, Y ., and Li, H. Scalable dense
+non-rigid structure-from-motion: A grassmannian per-
+spective. InIEEE Conf. Comput. Vis. Pattern Recog.
+(CVPR), pp. 254–263, 2018.
+Leroy, V ., Cabon, Y ., and Revaud, J. Grounding image
+matching in 3d with mast3r. InEur . Conf. Comput. Vis.
+(ECCV), pp. 71–91. Springer, 2024.
+Ma, L., Li, X., Liao, J., Zhang, Q., Wang, X., Wang, J.,
+and Sander, P. V . Deblur-nerf: Neural radiance fields
+from blurry images. InProceedings of the IEEE/CVF
+conference on computer vision and pattern recognition,
+pp. 12861–12870, 2022.
+Mildenhall, B., Srinivasan, P. P., Tancik, M., Barron, J. T.,
+Ramamoorthi, R., and Ng, R. Nerf: Representing scenes
+as neural radiance fields for view synthesis.Communica-
+tions of the ACM, 65(1):99–106, 2021.
+Mohr, R., Quan, L., and Veillon, F. Relative 3d recon-
+struction using multiple uncalibrated images.The Inter-
+national Journal of Robotics Research, 14(6):619–632,
+1995.
+Novotny, D., Ravi, N., Graham, B., Neverova, N., and
+Vedaldi, A. C3dpo: Canonical 3d pose networks for
+non-rigid structure from motion. InInt. Conf. Comput.
+Vis. (ICCV), pp. 7688–7697, 2019.
+Paladini, M., Bartoli, A., and Agapito, L. Sequential non-
+rigid structure-from-motion with the 3d-implicit low-rank
+shape model. InEur . Conf. Comput. Vis. (ECCV), pp. 15–
+28, 2010.
+Palazzolo, E., Behley, J., Lottes, P., Gigu `ere, P.,
+and Stachniss, C. ReFusion: 3D Reconstruc-
+tion in Dynamic Environments for RGB-D Cam-
+eras Exploiting Residuals. InIEEE/RSJ Interna-
+tional Conf. on Intelligent Robots and Systems, 2019.
+URL https://www.ipb.uni-bonn.de/pdfs/
+palazzolo2019iros.pdf.
+Park, S., Lee, M., and Kwak, N. Procrustean regression
+networks: Learning 3d structure of non-rigid objects from
+2d annotations. InEur . Conf. Comput. Vis. (ECCV), pp.
+1–18, 2020.
+Pollefeys, M., Van Gool, L., Vergauwen, M., Verbiest, F.,
+Cornelis, K., Tops, J., and Koch, R. Visual modeling with
+a hand-held camera.International Journal of Computer
+Vision, 59(3):207–232, 2004.
+Schonberger, J. L. and Frahm, J.-M. Structure-from-motion
+revisited. InProceedings of the IEEE conference on
+computer vision and pattern recognition, pp. 4104–4113,
+2016.
+Shotton, J., Glocker, B., Zach, C., Izadi, S., Criminisi, A.,
+and Fitzgibbon, A. Scene coordinate regression forests
+for camera relocalization in rgb-d images. InIEEE Conf.
+Comput. Vis. Pattern Recog. (CVPR), pp. 2930–2937,
+2013.
+Sidhu, V ., Tretschk, E., Golyanik, V ., Agudo, A., and
+Theobalt, C. Neural dense non-rigid structure from mo-
+tion with latent space constraints. InEur . Conf. Comput.
+Vis. (ECCV), pp. 204–222, 2020.
+Sturm, J., Engelhard, N., Endres, F., Burgard, W., and Cre-
+mers, D. A benchmark for the evaluation of rgb-d slam
+systems. In2012 IEEE/RSJ international conference on
+intelligent robots and systems, pp. 573–580. IEEE, 2012.
+Sweeney, C., Sattler, T., Hollerer, T., Turk, M., and Polle-
+feys, M. Optimizing the viewing graph for structure-from-
+motion. InInt. Conf. Comput. Vis. (ICCV), pp. 801–809,
+2015.
+Tancik, M., Casser, V ., Yan, X., Pradhan, S., Mildenhall,
+B., Srinivasan, P. P., Barron, J. T., and Kretzschmar, H.
+Block-nerf: Scalable large scene neural view synthesis.
+InIEEE Conf. Comput. Vis. Pattern Recog. (CVPR), pp.
+8248–8258, 2022.
+Tomasi, C. and Kanade, T. Shape and motion from image
+streams under orthography: a factorization method.Int.
+J. Comput. Vis. (IJCV), 9(2):137–154, 1992.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser,Ł., and Polosukhin, I. Attention
+is all you need. InAdv. Neural Inform. Process. Syst.
+(NIPS), pp. 5998–6008, 2017.
+Wang, C. and Lucey, S. Paul: Procrustean autoencoder for
+unsupervised lifting. InIEEE Conf. Comput. Vis. Pattern
+Recog. (CVPR), pp. 434–443, 2021.
+Wang, C., Lin, C.-H., and Lucey, S. Deep nrsfm++: To-
+wards 3d reconstruction in the wild. InIn Proc. of the
+International Conf. on 3D Vision (3DV), pp. 12–22, 2020.
+10

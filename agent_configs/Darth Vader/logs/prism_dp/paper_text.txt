@@ -1,0 +1,1641 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+PRISM: Differentially Private Synthetic Data with Structure-Aware Budget
+Allocation for Prediction
+Anonymous Authors1
+Abstract
+Differential privacy (DP) provides a mathematical
+guarantee limiting what an adversary can learn
+about any individual from released data. How-
+ever, achieving this protection typically requires
+adding noise, and noise can accumulate when
+many statistics are measured. Existing DP syn-
+thetic data methods treat all features symmetri-
+cally, spreading noise uniformly even when the
+data will serve a specific prediction task. This
+uniform treatment is suboptimal: if a hospital re-
+leases synthetic patient records for readmission
+prediction, perturbing all features equally—rather
+than concentrating fidelity on those most relevant
+to readmission—fails to optimize utility for the
+prediction task.
+To address this, we develop a prediction-centric
+approach operating in three regimes depending
+on available structural knowledge. In thecausal
+regime, when the causal parents of Y (the out-
+come variable to predict) are known and distri-
+bution shift is expected, we target the parents
+for robustness. In thegraphical regime, when
+a Bayesian network structure is available and the
+distribution is stable, the Markov blanket of Y
+provides a sufficient feature set for optimal predic-
+tion. In thepredictive regime, when no structural
+knowledge exists, we select features via differen-
+tially private methods without claiming to recover
+causal or graphical structure.
+We formalize this as PRISM (Prediction-centric
+Release with Informed Structure Measurements),
+a mechanism that (i) identifies a predictive fea-
+ture subset according to the appropriate regime,
+(ii) constructs targeted summary statistics involv-
+ing those features and Y , (iii) allocates budget
+to minimize an upper bound on prediction error,
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+and (iv) synthesizes data via graphical-model in-
+ference. We prove end-to-end privacy guaran-
+tees and risk bounds connecting measurement
+noise to predictive performance. Empirically,
+task-aware allocation improves prediction accu-
+racy compared to generic synthesizers, with larger
+gains under tighter privacy budgets. Under dis-
+tribution shift, targeting causal parents achieves
+AUC ≈0.73 while correlation-based selection
+collapses to chance (≈0.49).
+1. Introduction
+Consider a hospital network that wants to share patient
+records with external researchers developing readmission
+risk models. Privacy regulations and institutional policies
+often make it challenging to release raw data directly, so the
+hospital generates synthetic records designed to preserve
+statistical properties of the original while protecting indi-
+viduals. The researchers have one goal, to train classifiers
+predicting 30-day readmission. Yet standard synthetic data
+generators treat all 200 columns identically, spending equal
+effort to preserve correlations among demographic fields,
+billing codes, and clinical indicators. For readmission pre-
+diction, perhaps only 15 features matter. Preserving their
+relationship to the outcome would suffice; accurately re-
+producing correlations among irrelevant features is wasted
+effort.
+Why budget matters.Differential privacy (DP) formal-
+izes privacy protection by requiring that any computation on
+the data be insensitive to whether any single individual is in-
+cluded (Dwork et al., 2006; Dwork and Roth, 2014). In prac-
+tice, this means adding carefully calibrated noise. The total
+amount of noise a mechanism can add while maintaining a
+given privacy level is often called the “privacy budget.” Cru-
+cially, when a synthesizer measures many statistics—say, all
+pairwise feature correlations—the noise accumulates across
+measurements. This creates a fundamental trade-off: mea-
+sure more statistics and each becomes noisier, or measure
+fewer statistics more accurately.
+Current DP synthesizers, whether based on low-dimensional
+marginals (Zhang et al., 2017; McKenna et al., 2019; 2021;
+Zhang et al., 2021) or deep generative models (Jordon et al.,
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+2019; Fang et al., 2022), are predominantly task-agnostic.
+They approximate the full joint distribution or a generic
+collection of statistics, treating all features as equally impor-
+tant. When the released data serves a known prediction task,
+this symmetry squanders budget on structure irrelevant to
+prediction.
+A prediction-centric alternative.Rather than spreading
+noise uniformly, we concentrate the privacy budget on statis-
+tical relationships that determine predictive performance for
+a designated target Y . Features strongly influencing Y are
+measured accurately; features with weak or no predictive
+value are measured coarsely or omitted. The result is syn-
+thetic data optimized for a specific downstream task, with
+formal DP guarantees.
+Identifying the right features.Which features deserve
+careful measurement? A natural answer, “the most predic-
+tive ones,” can be misleading. A feature strongly correlated
+with Y in training data may be a spurious correlate that fails
+under distribution shift. The answer depends on what struc-
+tural knowledge is available and what robustness properties
+are desired.
+We distinguish three regimes. In thecausal regime, do-
+main knowledge identifies the causal parents Pa(Y) , the
+direct causes of Y in a structural causal model. Using par-
+ents provides robustness under distribution shift because the
+causal mechanism P(Y|Pa(Y)) tends to remain stable
+even when marginal distributions or spurious correlations
+change (Pearl, 2009). In thegraphical regime, a Bayesian
+network structure is available (from domain knowledge or
+prior studies), and theMarkov blanket MB(Y) , comprising
+parents, children, and co-parents, provides a sufficient set
+for Bayes-optimal prediction in a fixed distribution (Koller
+and Friedman, 2009). This is a probabilistic sufficiency,
+not a causal robustness guarantee. In thepredictive regime,
+no structural knowledge exists, so we select features via
+differentially private methods without claiming to recover
+any particular structure (Thakurta and Smith, 2013).
+These regimes form a hierarchy of assumptions: the causal
+regime requires the strongest knowledge but provides ro-
+bustness under shift; the graphical regime requires structure
+but not causal semantics; the predictive regime is the most
+practical but offers no structural guarantees.
+An end-to-end perspective.Synthetic data is never an
+end in itself—downstream algorithms consume it for learn-
+ing. Formalizing this as a pipeline,
+D
+DP synthesizerM
+− − − − − − − − − →eD
+learnerA
+− − − − − →bh,
+we can trace how mechanism design choices propagate to
+the prediction error ofbh. This enables principled optimiza-
+tion: allocate budget to minimize an upper bound on excess
+risk, rather than a generic fidelity metric.
+What distinguishes our approach.Our contribution is
+not the synthesis machinery (we build on Private-PGM
+(McKenna et al., 2019)), but the integration of a three-
+regime framework; task-derived workload construction;
+structure-guided feature targeting; risk-motivated budget
+allocation with a closed-form solution; and a DP feature-
+selection variant with end-to-end accounting.
+Contributions.We formalize prediction-centric DP syn-
+thesis across the causal, graphical, and predictive regimes;
+distinguish fixed-distribution prediction sufficiency (Markov
+blanket) from shift-robust targeting (causal parents); de-
+velop PRISM by combining regime-appropriate feature tar-
+geting, task-aware workload construction, closed-form bud-
+get allocation, and PGM-based synthesis; and validate the
+regime view empirically on SCM shifts and Adult.
+Scope.Our goal is neither DP feature selection alone nor
+direct model release via DP-SGD (Abadi et al., 2016). We
+produce a reusable synthetic dataset that downstream ana-
+lysts can query, visualize, and model freely—but one whose
+fidelity is concentrated on task-relevant structure. This fills
+a gap between fully task-agnostic synthesis and single-query
+model release.
+2. Related Work
+DP synthetic data for tabular data is dominated by marginal-
+based methods that measure low-dimensional statistics
+and fit a distribution consistent with noisy marginals (e.g.,
+PrivBayes (Zhang et al., 2017), Private-PGM (McKenna
+et al., 2019), MST (McKenna et al., 2021), PrivSyn (Zhang
+et al., 2021)) and by DP-trained deep generative models
+(e.g., PATE-GAN (Jordon et al., 2019), DP-CTGAN (Fang
+et al., 2022)). These approaches are largely task-agnostic:
+they target generic fidelity rather than utility for a designated
+prediction target.
+Workload-aware query release and synthesis methods (e.g.,
+MWEM (Hardt et al., 2012), DualQuery (Gaboardi et al.,
+2014), AIM (McKenna et al., 2022)) improve accuracy for
+specified workloads but take the workload as input. Task-
+specific private release methods (Su et al., 2015; Vietri et al.,
+2022) are more targeted but are coupled to particular model
+families or multi-task settings. PRISM differs by deriving
+a task workload from a single prediction target Y and allo-
+cating privacy budget to minimize a prediction-relevant risk
+bound, while leveraging standard PGM post-processing as
+a backend.
+3. Preliminaries
+3.1. Data model and notation
+Let Z= (X, Y)∈ Z=X × Y , where X= (X 1, . . . , Xd)
+is a feature vector and Y is a designated prediction target.
+The private dataset is
+D={z i}n
+i=1 ={(x i, yi)}n
+i=1 ∈ Z n,
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+assumed drawn i.i.d. from an unknown population distribu-
+tionP∈ P(Z)unless otherwise stated.
+Our main results are cleanest for finite/discretized domains
+(typical in marginal-based synthesizers). When X contains
+continuous columns, we assume public binning/clipping or
+use mixed-type query families; see Section 7 and remarks.
+3.2. Differential privacy
+Aqueryis a function q:Z n → O that computes a statistic
+from a dataset, such as a histogram, mean, or marginal
+distribution. Amechanism M:Z n → O is a randomized
+algorithm that answers queries while protecting individual
+privacy. Differential privacy formalizes this protection.
+We use the standardreplace-oneneighboring relation:
+datasets D, D′ are neighbors (written D∼D ′) if they have
+the same size and differ in exactly one record.
+Definition 3.1(Differential Privacy (Dwork et al., 2006;
+Dwork and Roth, 2014)).A mechanism M:Z n → O is
+(ε, δ)-differentially private if for all neighboring datasets
+D∼D ′ and all measurableS⊆ O,
+Pr[M(D)∈S]≤e ε Pr[M(D′)∈S] +δ.
+Thesensitivityof a query measures how much its output can
+change when one record is replaced:
+∆q := max
+D∼D′
+∥q(D)−q(D ′)∥.
+For ℓ2 sensitivity the norm is Euclidean; for ℓ1 sensitivity,
+the sum of absolute differences. DP mechanisms add noise
+calibrated to sensitivity: lower sensitivity permits less noise
+for the same privacy guarantee.
+We use the Gaussian mechanism for numeric query release:
+for a query q with ℓ2 sensitivity ∆q, release q(D)+η where
+η∼ N(0, σ 2I) and σ= ∆ q
+p
+2 log(1.25/δ)/ε (Dwork and
+Roth, 2014). For discrete selection (e.g., feature selection),
+we use the exponential mechanism: sample c∈ C with prob-
+ability proportional to exp(ε·u(D, c)/(2∆ u)) (McSherry
+and Talwar, 2007).
+3.3. Causal graphs and Markov blanket
+Let G be a directed acyclic graph (DAG) over variables
+(X1, . . . , Xd, Y) . Denote the parents of Y by Pa(Y) . The
+Markov blanket MB(Y) is the minimal set of nodes that
+d-separates Y from all other nodes; in a Bayesian network
+it consists of Y ’s parents, children, and co-parents of its
+children (Koller and Friedman, 2009). Under standard con-
+ditions (causal Markov + faithfulness), Y⊥ ⊥X \MB(Y) |
+XMB(Y) .
+4. Problem Formulation
+We now formalize prediction-centric DP synthetic data re-
+lease, starting from a pipeline objective and then developing
+tractable surrogates.
+4.1. A pipeline objective: DP synthesis for downstream
+learning
+Let M be a DP synthesizer mapping private data D to syn-
+thetic data eD, and let A be a learning algorithm producing a
+predictorbhfrom a hypothesis classH.
+For a bounded loss ℓ:Y × Y →[0,1] (e.g., 0-1 classifica-
+tion error), define population risk underP:
+RP (h) :=E (X,Y)∼P
+
+ℓ(h(X), Y)
+
+.
+Definition 4.1(Prediction-centric DP synthesis objective).
+Given target Y and hypothesis class H, design a mechanism
+M that is (ε, δ)-DP and minimizes the expected pipeline risk
+U(M;A, P) :=E D∼P n E eD∼M(D)
+
+RP (A(eD))
+
+.
+This objective captures what we care about—downstream
+prediction accuracy—but is not directly tractable: P is un-
+known and downstream analysts may use various learning
+algorithms. We therefore develop distributional surrogates
+that connect to measurable quantities.
+4.2. A distributional surrogate: preserve the right
+marginal(s)
+For predictors that use only a subset S⊆[d] of features,
+risk depends only on the joint distribution of (XS, Y) . This
+suggests a tractable target: ensure synthetic distribution
+eP matches P well on (XS, Y) while tolerating distortion
+elsewhere.
+Definition 4.2(Task marginal distance).For subset S⊆[d] ,
+define
+∆S(P, Q) := TV(PS,Y , QS,Y ),
+whereTV(·,·)denotes total variation distance.
+Why total variation?We use TV because it provides a
+clean, distribution-free bound on risk differences: for any
+bounded loss ℓ∈[0,1] and any predictor h depending only
+on XS, the risk difference |RP (h)− R Q(h)| is at most
+TV(PS,Y , QS,Y ) (Lemma 6.2). This bound holds without
+assumptions on the form of P or h, making it suitable for
+settings where downstream analysts choose their own mod-
+els. Other distances (KL divergence, Wasserstein) would
+require additional assumptions or yield looser bounds.
+Predictor assumption.Our risk bounds apply when
+the downstream predictor depends only on features in S:
+h(x) =h(x S). This is satisfied when (i) the analyst ex-
+plicitly restricts to S, (ii) regularization or feature selec-
+tion drives coefficients on X\S to zero, or (iii) the popu-
+lation relationship satisfies Y⊥X \S |X S so that opti-
+mal predictors ignore X\S. Case (iii) is guaranteed when
+S= MB(Y).
+4.3. ChoosingS: three regimes
+The feature subset S can be specified in three ways, forming
+a hierarchy of assumptions with different trade-offs:
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+Assumption 4.1(Markov property).The joint distribution
+P over (X, Y) is Markov with respect to DAG G: each
+variable is conditionally independent of its non-descendants
+given its parents.
+Regime 1: Causal (parents known, shift expected).
+When a structural causal model identifies the parents Pa(Y)
+and distribution shift is anticipated between training and
+deployment, set S= Pa(Y) . The causal mechanism
+P(Y|Pa(Y)) tends to remain stable under shifts that
+change marginal distributions or break spurious correlations.
+This regime provides the strongest robustness guarantees but
+requires causal knowledge, which typically comes from do-
+main expertise rather than data. No privacy cost is incurred
+for selectingS.
+Regime 2: Graphical (structure known, fixed distribu-
+tion).When a Bayesian network structure is available
+(from domain knowledge, prior studies, or learned from pub-
+lic data) but no shift is expected, set S= MB(Y) . Under
+the Markov assumption (Definition 4.1), this choice is suffi-
+cient for Bayes-optimal prediction (Proposition 6.1). The
+blanket may include children and co-parents of Y , which
+are predictive in the training distribution but may be less
+robust under shift. When the structure must be learned
+from private data via conditional independence tests, part
+of the privacy budget is consumed. This regime provides
+prediction optimality without requiring causal semantics.
+Regime 3: Predictive (no structure, agnostic).When no
+graphical or causal structure is available, S must be selected
+from data using differentially private feature selection (ex-
+ponential mechanism or stability-based methods (Thakurta
+and Smith, 2013)). This consumes part of the privacy bud-
+get. The selected S is a predictive subset; we do not claim
+it recovers the Markov blanket or causal parents. It may
+include spurious correlates, offering less robustness under
+shift, but still focuses budget on features empirically as-
+sociated with Y . This is the most practical regime when
+structural knowledge is unavailable.
+4.4. Design levers: workload and budget allocation
+Given S, our mechanism measures a collection of statistics
+(the workload W) under DP and fits a distribution consistent
+with noisy answers. Two design choices determine down-
+stream utility: workload design (which marginals to include,
+especially those involving Y and XS) and budget alloca-
+tion (how to divide privacy budget so task-critical marginals
+receive more budget and less noise).
+In the resulting synthetic data, relationships involvingS and
+Y are preserved more accurately, while other relationships
+may be distorted. This is the desired trade-off: prioritize
+prediction-relevant structure.
+5. PRISM: A Structure-Aware DP Synthesis
+Mechanism
+This section describes PRISM (Prediction-centric Release
+with Informed Structure Measurements), a concrete mecha-
+nism implementing the prediction-centric approach across
+all three regimes. We specify each step in sufficient detail
+for reproduction. Algorithm 1 in Supplementary Theory
+(Appendix A) provides a compact pseudocode summary.
+5.1. Overview
+Input:Private dataset D={(x i, yi)}n
+i=1 with d features,
+privacy parameters (ε, δ), designated target column Y , op-
+tional causal graph G, and hyperparameters: subset size k
+(if G unavailable), maximum marginal order r (default 3),
+and synthetic sample sizen syn.
+Output:Synthetic dataset eD of size nsyn with identical
+schema, satisfying (ε, δ)-DP, with fidelity concentrated on
+predictingY.
+5.2. Step 1: selecting predictive featuresS
+Regime 1: Causal (parents known).When domain ex-
+pertise identifies the causal parents Pa(Y) and distribution
+shift is expected, set S←Pa(Y) . This yields the smallest
+feature set and provides robustness under shift. No privacy
+cost is incurred.
+Regime 2: Graphical (structure known).When a DAG
+G is available but no shift is expected, set S←MB(Y) for
+prediction-optimal synthesis. The blanket includes parents,
+children, and co-parents. If the structure must be learned
+from private data, use DP conditional independence tests,
+consuming part of the privacy budget. No privacy cost if the
+structure comes from domain knowledge or public sources.
+Regime 3: Predictive (data-driven selection).Without
+structural knowledge, privately select S using one of two
+methods:
+(3a) Greedy exponential selection.Define a score u(D, j)
+measuring association between feature j and Y . We use
+a clipped χ2 statistic: let χ2
+j be the chi-squared statis-
+tic for the (Xj, Y) contingency table, and set u(D, j) =
+min(χ2
+j /n, B) for a clipping boundB (we use B= 1 ). This
+score has sensitivity O(1/n) under replace-one neighbors.
+Select k features greedily: in round t, use the exponential
+mechanism with budget εsel/k to select feature jt from re-
+maining candidates proportional to exp(εsel ·u(D, j)/(2k·
+∆u)), where∆ u is the sensitivity.
+(3b) Stability-based selection.Fit a DP-regularized logistic
+regression (e.g., via objective perturbation or DP-SGD) and
+take S as the support of the fitted coefficients. This approach
+is attractive for large d and provides theoretical robustness
+guarantees (Thakurta and Smith, 2013).
+Both methods compose with subsequent measurement via
+standard DP composition. The selected S is a predictive
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+subset; we do not claim it recovers the Markov blanket or
+causal parents.
+5.3. Step 2: constructing the workloadW
+The workloadW=W task ∪ Wbg comprises two parts:
+Task workload Wtask.Statistics preserving PS,Y : We
+include all 2-way marginals (Xj, Y) for j∈S , optionally
+add a small set of 3-way marginals (Xj, Xj′, Y) for infor-
+mative pairs selected via DP conditional mutual information,
+and (when feasible) include the full joint (XS, Y) . Default:
+m3 ≤20,ε mi = 0.05ε.
+Background workload Wbg.Statistics for plausible over-
+all structure: We include all 1-way marginals and a spanning
+set of 2-way marginals (Xj, Xj′) selected by a DP MST-
+style procedure (McKenna et al., 2021).
+Why this structure?Including 2-way and 3-way
+marginals over S∪ {Y} ensures the PGM fitting stage
+has sufficient constraints to reconstruct PS,Y with low er-
+ror (see Proposition A.2 for a formal statement in the tree-
+structured case). The background workload maintains realis-
+tic marginal distributions for features outside S, supporting
+secondary analyses.
+5.4. Step 3: budget allocation
+Split the total budget(ε, δ)into four pools:
+(ε, δ) = (εsel,0) + (εmi,0)
++ (εtask, δtask) + (εbg, δbg).
+Default split: εsel = 0.1ε (Regime 3 only), εmi = 0.05ε
+(for private MI estimation and 3-way marginal selection),
+εtask = 0.65ε , εbg = 0.2ε , with δ split proportionally
+across measurement steps. In Regimes 1 and 2, the selection
+budget is reallocated to task measurement.
+Within each pool, allocate to individual queries using Theo-
+rem 6.3. Define task weights wq for each q∈ W task: We set
+wq = 1 for 2-way marginals (Xj, Y) , scale 3-way marginal
+weights by the DP-estimated conditional MIeI(X j;X j′ |Y)
+(normalized to average 1), and setwq =|S| for the full joint
+if included. Background workload queries receive uniform
+weightsw q = 1.
+Given weights wq and domain sizes |Ωq|, Theorem 6.3
+yields per-query budgetsε ⋆
+q ∝
+p
+wq|Ωq|.
+5.5. Step 4: measurement and synthesis
+Measure each marginal q∈ W by computing the empirical
+frequency vector (counts divided byn) and adding Gaussian
+noise calibrated to the allocated budget εq. Under replace-
+one neighbors, a probability vector changes by +1/n and
+−1/n in two cells, so ℓ2 sensitivity is ∆2 =
+√
+2/n. For
+(εq, δq)-DP via the Gaussian mechanism, we add N(0, σ 2
+q I)
+whereσ q = ∆2
+p
+2 log(1.25/δq)/εq.
+Fit a joint distribution bP via Private-PGM (McKenna et al.,
+2019): this solves a maximum-entropy problem over dis-
+tributions whose marginals match the noisy measurements,
+using mirror descent on a graphical model parametrization.
+The graph structure is determined by the workload—nodes
+are variables, and cliques correspond to measured marginals.
+Finally, sample nsyn i.i.d. records from bP to produce eD.
+Both fitting and sampling are post-processing of DP outputs
+and incur no additional privacy cost.
+Computational complexity.Feature selection (Step 1)
+requires O(kd) score evaluations. Workload construction
+(Step 2) involves O(|S|2) marginals. PGM fitting (Step 4)
+scales as O(T· |W| · ¯|Ω|) for T mirror-descent iterations
+and average domain size ¯|Ω|; this is typically O(104) for
+moderate workloads. Sampling is O(nsyn ·d) . Overall
+runtime is dominated by PGM fitting and is comparable
+to existing marginal-based synthesizers. Pseudocode for
+PRISM is provided in Appendix A.
+6. Theory: From DP Measurements to
+Predictive Utility
+This section develops theoretical guarantees connecting our
+mechanism design to downstream predictive performance.
+All proofs are deferred to Appendix B.
+Scope.We provide: (i) end-to-end DP via composition,
+(ii) distribution-free bounds connecting TV error on(XS, Y)
+to prediction risk (including ERM excess risk), and (iii)
+closed-form optimal allocation. Concrete instantiations ap-
+pear in Appendix A. Our bounds can be loose for structured
+distributions and apply to predictors using only XS; we do
+not analyze PGM fitting rates (McKenna et al., 2019).
+6.1. End-to-end DP guarantee
+Theorem 6.1(DP of PRISM).Assume Step 1 (subset se-
+lection) is (εsel,0) -DP , Step 2 (MI estimation for 3-way
+marginal selection) is (εmi,0) -DP , and Step 4 measures
+each query q∈ W with a mechanism that is (εq, δq)-DP .
+Then the overall mechanism in Algorithm 1 is
+εsel +ε mi +
+X
+q∈W
+εq,
+X
+q∈W
+δq
+
+-DP.
+Remark 6.1.In practice, R ´enyi/zCDP accountants yield
+tighter bounds (Zhang et al., 2021; McKenna et al., 2022);
+this changes only the allocation constraint, not the principle.
+6.2. Graphical sufficiency for prediction via Markov
+blanket
+The following proposition formalizes the key graphical prop-
+erty motivating our workload design in Regime 2.
+Proposition 6.1(Markov blanket sufficiency for prediction).
+Let (X, Y) be distributed according to a distribution P that
+is Markov with respect to a DAGG. Then
+P(Y|X) =P(Y|X MB(Y) )(a.s.).
+Consequently, for any proper loss (e.g., log loss), the Bayes-
+optimal predictor can be expressed as a function ofXMB(Y)
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+only.
+Remark 6.2(Graphical vs. causal sufficiency).Proposi-
+tion 6.1 is graphical, not causal: it guarantees prediction
+optimality in a fixed distribution but not shift robustness.
+For robustness, Regime 1 targets causal parents Pa(Y) ,
+whose mechanism tends to remain stable under spurious-
+correlation shifts (Section 7.1). For DP allocation, the
+proposition implies that preserving (XMB(Y) , Y) suffices
+to preserve the Bayes rule—justifying preferential budget
+allocation.
+6.3. Risk sensitivity to marginal closeness
+The next two lemmas establish that prediction risk depends
+only on the marginal (XS, Y) when the predictor uses only
+features inS.
+Lemma 6.1(Risk depends only on (XS, Y) marginal).Fix
+a subset S⊆[d] and a predictor h(x) =h(x S) that de-
+pends only on xS. Then for any distribution P over (X, Y) ,
+RP (h) =E (XS ,Y)∼P S,Y [ℓ(h(XS), Y)].
+Lemma 6.2(Total variation controls risk difference).Let
+ℓ(·,·)∈[0,1] be bounded. For any two distributions P, Q
+over (X, Y) , any subset S, and any predictor h(x) =
+h(xS),
+RP (h)− R Q(h)
+ ≤TV(P S,Y , QS,Y ).
+6.4. Learning from synthetic data: an excess risk bound
+Lemma 6.2 is for a fixed h. We now connect it to learning
+on synthetic data.
+Let HS :={h:X → Y |h(x) =h(x S)} be the class
+restricted to featuresS.
+Theorem 6.2(Excess risk of ERM on synthetic data).As-
+sume ℓ∈[0,1] and the downstream analyst trains by
+empirical risk minimization (ERM) over HS on a syn-
+thetic dataset eD of size nsyn sampled i.i.d. from eP . Let
+bh∈arg min h∈HS
+bR eD(h). Then with probability at least
+1−βover eD,
+RP (bh)≤inf
+h∈HS
+RP (h) + 2∆S(P,eP) + 2R nsyn(HS) + 2
+s
+log(2/β)
+2nsyn
+,
+where Rnsyn(HS) is the Rademacher complexity term con-
+trolling uniform convergence undereP.
+Remark 6.3.The bound separates generalization under eP
+from distribution shift ∆S(P,eP) ; our mechanism targets
+the latter via budget allocation.
+Concrete instantiations (appendix).Appendix A instan-
+tiates these bounds for Gaussian histogram measurement,
+relating privacy budget to total variation error on(XS, Y) ,
+and provides a tree-structured reconstruction bound (Chow–
+Liu style) connecting marginal measurement error to joint
+distribution error.
+6.5. Optimal budget allocation for a risk upper bound
+Having established how marginal error affects risk, we now
+turn to thebudget allocationproblem: how should privacy
+budget be divided across measurements to minimize the risk
+bound?
+Suppose we measure m query groups (e.g., marginals) in-
+dexed by t= 1, . . . , m, where group t has domain size |Ωt|
+(number of bins/cells). Let the DP noise scale behave as
+σt =c t/εt for constants ct determined by sensitivity and
+δt. Suppose our downstream risk bound implies
+∆S(P,eP)≤
+mX
+t=1
+wt·|Ωt|·σt =
+mX
+t=1
+at
+εt
+,wherea t :=w t|Ωt|ct.
+Herew t is atask weightcapturing the importance of query
+group t for predicting Y (e.g., wt larger for marginals in-
+volvingMB(Y)or top-ranked predictive features).
+Consider the constrained optimization
+min
+ε1,...,εm>0
+mX
+t=1
+at
+εt
+s.t.
+mX
+t=1
+εt ≤ε meas.
+Theorem 6.3(Closed-form optimal allocation).The opti-
+mal solution satisfies
+ε⋆
+t =ε meas ·
+√atPm
+s=1
+√as
+, t= 1, . . . , m,
+and the optimal value is
+mX
+t=1
+at
+ε⋆
+t
+= 1
+εmeas
+ mX
+t=1
+√at
+2
+.
+Remark 6.4.The constant at grows with domain size |Ωt|
+and task weight wt; the allocation ∝ √at directs budget
+toward task-critical marginals.
+7. Experiments
+We evaluate PRISM on (i) a semi-synthetic structural causal
+model (SCM) benchmark where the ground-truth parents
+Pa(Y) and Markov blanket MB(Y) are known and (ii) the
+Adult Income dataset. Our experiments address three ques-
+tions: (1) When does causal targeting (Regime 1) improve
+robustness under shift? (2) When does targeting the full
+Markov blanket (Regime 2) help when predictive children
+are stable? (3) When can closed-form optimal allocation
+(Theorem 6.3) provide gains over uniform allocation?
+Experimental setup.On the SCM benchmark, we gener-
+ate discrete features with causal parents A, B, spurious chil-
+dren S1, . . . , S10, and additional irrelevant noise variables.
+We evaluate two distribution shifts: aspurious-correlation
+shiftthat breaks the children at test time while preserving
+P(Y|A, B) , and amarginal/covariate shiftthat changes
+P(A, B) while preserving P(Y|A, B) . On Adult, we
+discretize continuous features into 8 quantile bins. Full
+dataset/preprocessing and privacy-accounting details are in
+the Extended Experiments appendix (Appendix C), with the
+evaluation protocol in Appendix C.3.
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+100
+Privacy  (log scale)
+0.50
+0.55
+0.60
+0.65
+0.70
+0.75TSTR ROC-AUC (test under shift)
+SCM Spurious Shift Benchmark
+PRISM-Causal (Opt)
+PRISM-Graphical (Opt)
+PRISM-Causal (Unif)
+PRISM-Graphical (Unif)
+Corr T op-k (Oracle)
+All Features (Unif)
+MST (Private-PGM)
+PrivBayes (DataSynthesizer)
+Independence Only
+Figure 1.SCM spurious shift: TSTR ROC-AUC vs. ε. PRISM-
+Causal (Regime 1) remains robust; correlation-based methods
+collapse because they rely on spurious children. Error bars: 95%
+CI; MST/PrivBayes atε= 1.0only.
+Methods and metric.On SCM we report PRISM-Causal
+(Regime 1; Pa(Y) ) and PRISM-Graphical (Regime 2;
+MB(Y) ), each with closed-form (Opt) and uniform
+(Unif) allocation. On Adult we report PRISM-Predictive
+(Regime 3; DP feature selection) and its uniform-allocation
+ablation. We compare against MST (Private-PGM),
+PrivBayes (DataSynthesizer), and an oracle correlation top-
+k baseline. Utility is measured via train-on-synthetic, test-
+on-real ROC-AUC (TSTR) using logistic regression. All
+SCM and Adult results are averaged over 10 random seeds;
+error bars show 95% confidence intervals.
+7.1. SCM Spurious Shift Benchmark
+Figure 1 reports TSTR performance when spurious child
+features break at test time; Appendix C includes the corre-
+spondingε= 1.0table.
+Causal guidance is critical under shift.Methods us-
+ing the causal parents ( A, B) achieve AUC ≈0.72 ,
+closely matching the non-private upper bound. In contrast,
+correlation-based top-k selection picks spurious correlates
+S1, . . . , Sk (which have higher correlation with Y in train-
+ing data) and achieves AUC ≈0.49 —essentially random
+guessing. This demonstrates thatcausal structure, not cor-
+relation strength, determines robustness under distribution
+shift.
+Workload matters more than allocation in this setting.
+PRISM-Causal (Opt) and PRISM-Causal (Unif) are nearly
+indistinguishable: with only two parent features in the task
+workload, uniform and optimal allocation allocate similar
+noise levels. This indicates that in this setting,choosing the
+right featuresis the dominant driver of robustness.
+Blanket vs. parents.PRISM-Graphical (Regime 2;
+MB(Y) ) performs poorly here because it explicitly pre-
+serves the spurious children; when these relationships break
+at test time, the measured blanket becomes misleading. For
+100
+Privacy  (log scale)
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1.0TSTR ROC-AUC (test under covariate shift)
+SCM Marginal/Covariate Shift Benchmark
+PRISM-Causal (Opt)
+PRISM-Graphical (Opt)
+PRISM-Causal (Unif)
+PRISM-Graphical (Unif)
+Corr T op-k (Oracle)
+All Features (Unif)
+MST (Private-PGM)
+PrivBayes (DataSynthesizer)
+Independence Only
+Figure 2.SCM marginal shift: TSTR ROC-AUC vs. ε. Child
+features remain predictive, so blanket preservation helps. Error
+bars: 95% CI; MST/PrivBayes atε= 1.0only.
+prediction under spurious shifts, the minimal causal set
+Pa(Y)is preferable.
+7.2. SCM Marginal Shift Benchmark
+We also evaluate a covariate/marginal shift whereP(A, B)
+changes at test time but P(Y|A, B) is preserved (Fig-
+ure 2).
+Blanket can dominate when children are stable.Be-
+cause the child features Sj remain strongly predictive of
+Y in this shift, methods that preserve their relationship
+with Y —PRISM-Graphical and generic synthesizers such
+as MST/PrivBayes—achieve near-perfect AUC.
+Parents provide robustness but may trade off accuracy.
+PRISM-Causal targets only Pa(Y) and thus ignores highly
+predictive children, yielding lower AUC in this setting. To-
+gether with the spurious-shift results, this illustrates why the
+appropriate regime depends on shift assumptions: causal
+parents improve robustness when spurious correlations may
+break, whereas blanket targeting can be advantageous when
+child relationships are stable.
+7.3. Real Data: Adult Income Benchmark
+To complement the semi-synthetic SCM benchmark with
+a real dataset, we evaluate on Adult Income (11 features
+after preprocessing). Details of preprocessing and privacy
+accounting are in Appendix C.
+Task-aware synthesis matches strong internal baselines.
+PRISM-Predictive (Opt/Unif) is close toAll Features (Unif)
+on this low-dimensional dataset, indicating that feature se-
+lection and allocation have limited headroom when d is
+small and n is large. However, both PRISM variants are
+substantially better than MST and PrivBayes at the same
+privacy level.
+When does optimal allocation help?In our SCM and
+Adult experiments, the gap between Opt and Unif alloca-
+tion is modest: the SCM parents workload is tiny, and
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+100
+Privacy Budget  (log scale)
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9TSTR ROC-AUC
+Adult: Prediction Performance vs Privacy
+PRISM-Predictive (Opt)
+PRISM-Predictive (Unif)
+Corr T op-k (Oracle)
+MST (Private-PGM)
+PrivBayes (DataSynthesizer)
+All Features (Unif)
+Independence Only
+Figure 3.Adult income: TSTR ROC-AUC vs. ε. Workload-based
+variants are similar on this large dataset; MST/PrivBayes lag. Error
+bars: 95% CI; MST/PrivBayes atε= 1.0only.
+Adult is large enough that DP noise is relatively small. Ap-
+pendix C.5 constructs a controlled setting with heteroge-
+neous task weights where closed-form allocation yields a
+large gain, consistent with Theorem 6.3.
+8. Limitations and Discussion
+Causal graph availability.Our strongest causal results
+assume MB(Y) is known. In practice, domain knowledge
+may specify partial causal structure; or one may use DP
+causal discovery (Wang et al., 2020), which introduces ad-
+ditional privacy and estimation error. We treat “DP-learned
+blanket” as a secondary variant and leave its empirical eval-
+uation to future work.
+DP feature selection overhead.In Regime 3, PRISM
+privately estimates feature–target mutual information to se-
+lect a top-k subset and to derive allocation weights. This
+consumes privacy budget and introduces estimation noise,
+which can lead to suboptimal selections or misweighted
+allocations in small-data regimes. When public pilot data
+or reliable domain knowledge is available, one can reduce
+this cost by fixing a feature set or using public importance
+estimates.
+High-cardinality and continuous features.Marginal-
+based methods can struggle with high-cardinality columns
+due to domain explosion; discretization introduces bias.
+Mixed-type approaches like RAP++ (Vietri et al., 2022)
+suggest a promising direction. Our framework is compat-
+ible with mixed-type workloads by replacing histogram
+marginals with appropriate threshold/moment queries; the
+core allocation logic remains.
+Beyond a single target Y .This paper focuses on a desig-
+nated target Y . Extending to multiple targets (multi-task) is
+natural, but requires careful budget allocation and is closer
+to the setting studied by Vietri et al. (2022). We treat multi-
+target as future work or as an ablation.
+Not a replacement for task-agnostic release.If the use
+case truly requires broad exploratory analysis across all
+columns, a task-agnostic synthesizer may be preferable.
+Our method is designed for cases where the curator can
+legitimately prioritize a known primary prediction task.
+Iterative and adaptive queries.Our task-derived work-
+load assumes a fixed prediction target specified upfront. In
+practice, analysts may need to query data or refine models
+iteratively, where the sequence of queries can influence what
+analyses remain supportable under a fixed privacy budget.
+This challenge—adaptive data analysis under DP—is ad-
+dressed by techniques such as the reusable holdout (Dwork
+et al., 2015), which provides a principled way to answer
+adaptively chosen queries. Integrating such adaptive mecha-
+nisms with task-aware synthesis is a promising direction for
+future work.
+9. Conclusion
+We proposed PRISM, a prediction-centric framework for dif-
+ferentially private synthetic data release that operates across
+three regimes depending on available structural knowledge.
+The key idea is to treat privacy budget as a scarce resource
+and allocate it preferentially to preserve the dependence
+structure most relevant for predicting a designated target
+variable Y . In thecausal regime, when parents of Y are
+known and distribution shift is expected, we target parents
+for robustness. In thegraphical regime, when a Bayesian
+network structure is available and the distribution is sta-
+ble, the Markov blanket provides a sufficient feature set for
+optimal prediction. In thepredictive regime, when no struc-
+tural knowledge exists, we select features via DP methods
+without claiming to recover any particular structure.
+Experiments support the regime view: on the SCM bench-
+mark with spurious shifts, PRISM-Causal (Regime 1)
+maintains high AUC while correlation-based selection and
+generic synthesizers fail; under marginal shift, PRISM-
+Graphical (Regime 2) benefits from stable predictive chil-
+dren and can achieve near-perfect AUC, illustrating a
+practical parents-vs.-blanket tradeoff. On Adult, PRISM-
+Predictive (Regime 3) is competitive with strong internal
+baselines and improves over MST/PrivBayes at the same
+privacy level. Finally, Appendix C.5 demonstrates that
+closed-form allocation can yield substantial gains when task
+weights are heterogeneous, especially under tight privacy.
+For completeness, the appendix contains: Supplementary
+Theory (Appendix A) with pseudocode and additional in-
+stantiations; Proofs (Appendix B); and Extended Experi-
+ments (Appendix C) with detailed setup, full tables, and
+additional diagnostics.
+Broader Impact
+This work addresses privacy-preserving data sharing, a prob-
+lem with direct societal relevance. By enabling organiza-
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+tions to release synthetic datasets that preserve predictive
+utility while satisfying differential privacy, our method can
+facilitate research collaboration in sensitive domains such as
+healthcare and finance where raw data sharing is infeasible.
+Potential risks include over-reliance on synthetic data with-
+out understanding its limitations: models trained on syn-
+thetic data may underperform on subpopulations poorly rep-
+resented in the original dataset, and the task-specific design
+means the released data may not support analyses beyond
+the designated prediction task. We encourage practition-
+ers to clearly document the intended use case and privacy
+parameters when releasing synthetic data, and to validate
+downstream models on held-out real data when possible.
+References
+Martin Abadi, Andy Chu, Ian Goodfellow, H. Brendan
+McMahan, Ilya Mironov, Kunal Talwar, and Li Zhang.
+Deep learning with differential privacy. InACM SIGSAC
+Conference on Computer and Communications Secu-
+rity (CCS), pages 308–318. ACM, 2016. doi: 10.1145/
+2976749.2978318.
+Cynthia Dwork and Aaron Roth. The algorithmic founda-
+tions of differential privacy.Foundations and Trends in
+Theoretical Computer Science, 9(3–4):211–407, 2014.
+Cynthia Dwork, Frank McSherry, Kobbi Nissim, and Adam
+Smith. Calibrating noise to sensitivity in private data
+analysis. InTheory of Cryptography Conference (TCC),
+pages 265–284. Springer, 2006.
+Cynthia Dwork, Vitaly Feldman, Moritz Hardt, Toniann
+Pitassi, Omer Reingold, and Aaron Roth. The reusable
+holdout: Preserving validity in adaptive data analysis.
+Science, 349(6248):636–638, 2015. doi: 10.1126/science.
+aaa9375.
+Mei Ling Fang, Devendra Singh Dhami, and Kristian Kerst-
+ing. Dp-ctgan: Differentially private medical data genera-
+tion using CTGANs. InArtificial Intelligence in Medicine,
+Lecture Notes in Computer Science, pages 178–188.
+Springer, 2022. doi: 10.1007/978-3-031-09342-5 17.
+Marco Gaboardi, Hyun-Woo Lim, Ryan Rogers, Salil Vad-
+han, et al. Practical private query release for high dimen-
+sional data. InAdvances in Neural Information Process-
+ing Systems (NeurIPS), 2014. arXiv:1402.1526.
+Moritz Hardt, Katrina Ligett, and Frank McSherry. A sim-
+ple and practical algorithm for differentially private data
+release. InAdvances in Neural Information Processing
+Systems (NeurIPS), pages 2339–2347, 2012.
+James Jordon, Jinsung Yoon, and Mihaela van der Schaar.
+Pate-gan: Generating synthetic data with differential pri-
+vacy guarantees.International Conference on Learning
+Representations (ICLR), 2019. arXiv:1806.01860.
+Daphne Koller and Nir Friedman.Probabilistic Graphical
+Models: Principles and Techniques. MIT Press, 2009.
+Ryan McKenna, Daniel Sheldon, and Gerome Miklau.
+Graphical-model based estimation and inference for dif-
+ferential privacy. InInternational Conference on Machine
+Learning (ICML), pages 4435–4444. PMLR, 2019.
+Ryan McKenna, Gerome Miklau, and Daniel Sheldon. Win-
+ning the NIST contest: A scalable and general approach
+to differentially private synthetic data.arXiv preprint,
+2021.
+Ryan McKenna, Brett Mullins, Daniel Sheldon, and Gerome
+Miklau. AIM: An adaptive and iterative mechanism for
+differentially private synthetic data.Proceedings of the
+VLDB Endowment (PVLDB), 15(11):2599–2612, 2022.
+doi: 10.14778/3551793.3551817.
+Frank McSherry and Kunal Talwar. Mechanism design via
+differential privacy. InFoundations of Computer Science
+(FOCS), pages 94–103. IEEE, 2007.
+Judea Pearl.Causality: Models, Reasoning, and Inference.
+Cambridge University Press, 2 edition, 2009.
+Dong Su, Jianneng Cao, and Ninghui Li. Differentially
+private projected histograms of multi-attribute data for
+classification.arXiv preprint, 2015.
+Abhradeep Thakurta and Adam Smith. Differentially private
+feature selection via stability arguments, and the robust-
+ness of the lasso. InConference on Learning Theory
+(COLT). PMLR, 2013.
+Giuseppe Vietri, Cedric Archambeau, Sergul Aydore,
+William Brown, Michael Kearns, Aaron Roth, Ankit Siva,
+Shuai Tang, and Zhiwei Steven Wu. Private synthetic data
+for multitask learning and marginal queries. InAdvances
+in Neural Information Processing Systems (NeurIPS),
+2022.
+Lun Wang, Qi Pang, and Dawn Song. Towards practical
+differentially private causal graph discovery. InAdvances
+in Neural Information Processing Systems (NeurIPS),
+2020. Also circulated as arXiv:2006.08598.
+Jun Zhang, Graham Cormode, Cecilia M Procopiuc, Divesh
+Srivastava, and Xiaokui Xiao. Privbayes: Private data
+release via bayesian networks.ACM Transactions on
+Database Systems (TODS), 42(4):25:1–25:41, 2017. doi:
+10.1145/3134428.
+Zhikun Zhang, Tianhao Wang, Ninghui Li, Jean Hono-
+rio, Michael Backes, Shibo He, Jiming Chen, and Yang
+Zhang. Privsyn: Differentially private data synthesis. In
+USENIX Security Symposium, 2021.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+PRISM: Structure-Aware DP Synthetic Data for Prediction
+Algorithm 1PRISM: Structure-Aware DP Synthesis
+1: Input:dataset D, target Y , privacy (ε, δ), regime ∈
+{1,2,3} , optional structure (Pa(Y) or G), subset size
+k(Regime 3), max marginal orderr,n syn
+2: Split privacy: (ε, δ)←(ε sel,0) + (ε mi,0) +
+(εtask, δtask) + (εbg, δbg)
+3:ifRegime 1 (causal)then
+4:S←Pa(Y){Parents for shift robustness}
+5:else ifRegime 2 (graphical)then
+6:S←MB(Y){Blanket for prediction optimality}
+7:else
+8: Privately select S of size k via exponential mecha-
+nism or stability-based DP feature selection
+9:end if
+10:Construct workloadW ← W task(S, Y, r)∪ W bg(r)
+11: Allocate per-query budgets {(εq, δq)}q∈W using Sec-
+tion 6.5
+12: Measure each q(D) with Gaussian mechanism to obtain
+noisy answers{eq}q∈W
+13: Fit distribution bP via PGM inference / maximum en-
+tropy consistent with{eq}(McKenna et al., 2019)
+14:Sample eD∼ bP ⊗nsyn
+15:Return: eD
+A. Supplementary Theory
+A.1. Algorithmic description
+A.2. Explicit bounds for histogram/marginal
+measurement
+To make the risk bounds concrete, consider discrete or
+binned data where the mechanism explicitly measures the
+histogram of(X S, Y).
+Assume (XS, Y) takes values in a finite domain Ω of size
+|Ω|=|X S| · |Y|. Let the empirical histogram vector be
+bp∈∆|Ω|−1,bp(ω) := 1
+n
+nX
+i=1
+1{(xi,S, yi) =ω}.
+A natural DP release is a noisy histogramep= Π∆(bp+η)
+where η∼ N(0, σ 2I) and Π∆ projects to the probability
+simplex (post-processing).
+Proposition A.1(High-probability ℓ1 error for Gaussian
+histogram).Fix β∈(0,1) . With probability at least 1−β ,
+∥ep−bp∥1 ≤ |Ω| ·σ
+p
+2 log(|Ω|/β).
+Consequently,
+TV(ep,bp)≤1
+2 |Ω| ·σ
+p
+2 log(|Ω|/β).
+Remark A.1(From empirical to population).Proposi-
+tion A.1 bounds deviation from the empirical histogram.
+To relate to PS,Y , add the usual sampling error ∥bp−PS,Y ∥1
+(concentration in multinomials). In many DP synthesis
+evaluations, the synthetic data is generated from the post-
+processed estimate and then compared to held-out test data,
+so both sources matter.
+A.3. From privacy budget to histogram noise
+For the Gaussian mechanism with ℓ2 sensitivity ∆2, a stan-
+dard calibration is σ≥∆ 2
+p
+2 log(1.25/δ)/ε (one common
+form) (Dwork and Roth, 2014). For replace-one neigh-
+bors, the probability vector has ∆2 =
+√
+2/n (one record
+changes at most two cells by 1/n each, giving ℓ2 sensitivityp
+(1/n)2 + (1/n)2 =
+√
+2/n). Hence:
+σ≍ 1
+n ·
+p
+log(1/δ)
+ε .
+Plugging into Proposition A.1 yields an explicit scaling:
+TV(PS,Y ,ePS,Y )≲ |Ω|
+n ·
+p
+log(1/δ) log(|Ω|/β)
+ε (up to constants + sampling error).
+This makes the central tension clear: large domain size
+|Ω| (high-dimensional S or high-cardinality bins) increases
+error. Causal guidance helps precisely by shrinkingS.
+A.4. Special case instantiations
+The general framework specializes to several common mod-
+eling regimes.
+A.4.1. SPECIAL CASE1: BAYES-OPTIMAL PREDICTION
+UNDERMARKOV BLANKET
+If S= MB(Y) is known and the synthetic distribution
+satisfies ∆MB(Y) (P,eP)≤α , then by Theorem 6.2 and
+Proposition 6.1, learning over HMB(Y) yields excess risk
+within 2α (plus generalization terms) of the best possible
+predictor using all features.
+A.4.2. SPECIAL CASE2:LOGISTIC REGRESSION WITH
+BOUNDED FEATURES
+For binary Y∈ {0,1} and logistic regression hθ(xS) =
+σ(θ⊤ϕ(xS)) with bounded feature map ∥ϕ(xS)∥2 ≤
+B, one can derive bounds in terms of deviations in (i)
+E[ϕ(XS)Y] and (ii) E[ϕ(XS)ϕ(XS)⊤]. Our method re-
+covers this by using a workload consisting of the needed
+moments and allocating privacy budget to them. This is the
+continuous/moment analogue of the histogram instantiation
+above.
+A.4.3. SPECIAL CASE3:SQUARED-LOSS REGRESSION
+For Y∈[−1,1] and linear predictors hθ(xS) =θ ⊤ϕ(xS)
+with ∥θ∥2 ≤R , Lipschitz arguments show risk differences
+bounded by moment errors. Again, task-aware workload
+design consists of measuring only the moments involving
+selected featuresS.
+Remark A.2(TV-based theory vs. moment instantiations).
+The TV-based theory is a clean, distribution-free statement
+that directly matches marginal-based synthesizers and dis-
+crete tabular settings. Moment-based instantiations matter in
+10

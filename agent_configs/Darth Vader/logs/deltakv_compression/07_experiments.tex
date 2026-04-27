@@ -1,0 +1,177 @@
+\section{Experiments}
+\label{sec:expt}
+
+\input{tables/longbench_main}
+
+\subsection{Experimental Setup}
+\label{sec:expt:setup}
+
+\paragraph{Training Configuration}
+We evaluate DeltaKV on \textbf{Llama3.1-8B-Instruct}~\cite{grattafiori2024llama3}, \textbf{Qwen2.5-7B-Instruct-1M}~\cite{yang2025qwen2_1m}, \textbf{Qwen2.5-32B-Instruct}~\cite{team2024qwen2}, and \textbf{DeepSeek-R1-Distill-Qwen-7B}~\cite{guo2025deepseekr1}. 
+%%%
+DeltaKV is lightweight to train, requiring only \textbf{160M tokens} and can be fully trained in \textbf{8 GPU hours} for standard 7B/8B models on a single NVIDIA RTX PRO 6000.
+%%%
+Full hyperparameters, hardware details, and training overhead are provided in Appendix~\ref{subsec:detailed_settings}.
+
+\paragraph{Baselines}
+We compare against three categories of strong baselines:
+%%%
+(1) \textit{Static eviction} methods (\textbf{SnapKV}~\cite{li2024snapkv}, \textbf{PyramidKV}~\cite{cai2024pyramidkv}, and \textbf{AdaKV}~\cite{feng2025adakv}), which permanently remove tokens identified as unimportant and may lose critical information in multi-turn dialogues or complex reasoning scenarios. 
+%%%
+(2) \textit{Dynamic sparsity} methods (\textbf{Quest}~\cite{tang2024quest} and \textbf{OmniKV}~\cite{hao2025omnikv}), which select tokens adaptively for sparse attention during computation but retain the full KV Cache. 
+%%%
+(3) \textit{KV cache compression}, where \textbf{Palu}~\cite{chang2025palu} is most related but only considers individual token information and ignores inter-token similarity. 
+
+\paragraph{Evaluation}
+To comprehensively evaluate DeltaKV, we conduct experiments on \textbf{LongBench}~\cite{bai2024longbench} (general long-context understanding), \textbf{SCBench}~\cite{li2024scbench} (multi-turn dialogue), and \textbf{AIME}~\cite{maa_aime} (complex reasoning). 
+%%%
+To quantify the efficiency gains in terms of memory and computation, we report the KV Cache Keep Ratio (\textbf{KR}) and KV Cache Compute Ratio (\textbf{CR}). 
+Dataset details and metric definitions are provided in Appendix~\ref{app:sect:eval_details}.
+\vspace{-0.25em}
+
+\subsection{Downstream Performance}
+\label{sec:expt:performance}
+
+\vspace{-0.25em}
+\paragraph{Simple Single-step LongBench} 
+Table~\ref{tab:longbench_perf} shows that DeltaKV achieves competitive performance across various models and scales on LongBench, matching the results of OmniKV. 
+%%%
+Furthermore, compared to OmniKV, DeltaKV is more memory-efficient, typically reducing KR by about half. It can also be combined with KV quantization for further memory savings without noticeable performance loss.
+
+\paragraph{Complex Multi-turn SCBench} 
+Results in Table~\ref{tab:scbench_perf} indicate that DeltaKV preserves most of its performance in multi-turn settings. 
+%%%
+In contrast, static eviction methods like SnapKV often discard tokens that may become critical later, leading to significant performance degradation, particularly on Retrieval KV (\textbf{R.KV}).
+%%%
+Although DeltaKV shows slightly larger drops on this task, it still outperforms static eviction baselines. We attribute the gap mainly to distribution mismatch, as R.KV contains many complex SSID-like strings.
+
+\paragraph{Complex Reasoning AIME} 
+Table~\ref{tab:aime_perf} demonstrates that DeltaKV remains effective on mathematical reasoning benchmarks, maintaining strong performance on AIME and confirming its applicability to reasoning-oriented models.
+
+\input{tables/scbench}
+\input{tables/AIME24}
+
+
+\subsection{Inference Efficiency}
+\label{sec:expt:efficiency}
+
+\paragraph{Heavy Compressor, Light Decompressor}
+\label{para:light_decompressor}
+Since KV cache compression is performed once per token while reconstruction occurs repeatedly during decoding, we adopt an asymmetric design to minimize runtime overhead. The compressor uses a SwiGLU block,
+\vspace{-0.25em}
+\begin{displaymath}
+  f_\mathrm{c}(x) = (\mathrm{Swish}(x \bm{W}_1) \otimes (x \bm{W}_2)) \bm{W}_3,
+  \vspace{-0.25em}
+\end{displaymath} 
+whereas the decompressor is a bias-free linear projection, 
+\vspace{-0.25em}
+\begin{displaymath}
+  f_\mathrm{d}(x)=x\bm{W}_d.
+  \vspace{-0.25em}
+\end{displaymath} 
+Our experiments demonstrate that this design improves inference efficiency with negligible performance impact (Tables~\ref{tab:longbench_perf} and~\ref{tab:scbench_perf}) and yields a 1.26$\times$ decoding speedup (Table~\ref{tab:decode_tp}).
+
+\input{tables/decode_throughput}
+
+\begin{figure}[t]
+  \centering
+  % 第一张子图
+  \begin{subfigure}[b]{0.55\columnwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/visuals/comp_kv_range/comp_kv_3d_abs_dist.pdf}
+    \caption{Visualization of absolute values.}
+    \label{fig:comp_kv_abs_3d}
+  \end{subfigure}
+  \hfill % 在两图之间插入弹性间距
+  % 第二张子图
+  \begin{subfigure}[b]{0.43\columnwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/visuals/comp_kv_range/comp_kv_global_dist.pdf}
+    \caption{Value distribution.}
+    \label{fig:comp_kv_global_dist}
+  \end{subfigure}
+  \caption{\textbf{Analysis of compressed KV cache values.} (a) The heatmap validates a highly uniform distribution across tokens and channels; (b) The histogram reveals concentration near 0.}
+  \label{fig:comp_kv_combined}
+  \vspace{-0.5em}
+\end{figure}
+
+\paragraph{Sparse-vLLM Inference Performance}
+We measure decoding throughput of DeltaKV within Sparse-vLLM on a single NVIDIA RTX PRO 6000 (Blackwell), summarized in Table~\ref{tab:decode_tp}. 
+Sparse-vLLM introduces minimal overhead: under full attention with 128k context, it achieves 135.0 tokens/s versus 143.2 tokens/s for native vLLM.
+
+Enabling DeltaKV yields consistent throughput gains, especially at long contexts. At 128k, DeltaKV reaches 187.0 tokens/s, already exceeding vLLM. The advantage grows with sequence length: at 256k, DeltaKV provides a $1.7\times$ speedup, and at 512k it achieves 67.7 tokens/s versus 33.1 tokens/s for vLLM (\textbf{2}$\times$ improvement). 
+
+Although static eviction methods (e.g., SnapKV) can achieve higher raw throughput by aggressively reducing computation, they incur significant accuracy degradation on complex tasks. DeltaKV instead offers a more favorable efficiency-accuracy trade-off.
+
+Finally, our current implementation does not yet use a fully fused reconstruction–attention kernel. Fusing reconstruction into attention is a promising direction for further speedups. Sparse-vLLM also offers additional GPU memory savings, discussed in Appendix~\ref{app:sect:mem_eff}.
+
+% \paragraph{开启prefill加速和省显存}
+
+% \paragraph{RoPE}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.99\textwidth]{figures/visuals/ablation_combined.pdf}
+  \vspace{-0.5em}
+  \caption{Ablation studies on model configurations.} 
+  \label{fig:all_ablations}
+  \vspace{-0.5em}
+\end{figure*}
+
+\begin{figure*}[hbt]
+  \centering 
+  \includegraphics[width=0.99\textwidth]{figures/visuals/detach_ablation_comparison.pdf} 
+  \vspace{-0.75em}
+  \caption{Ablation on NTP and MSE losses.}
+  \label{fig:ablation_on_ntp_mse}
+  \vspace{-0.75em}
+\end{figure*}
+
+\subsection{Design Analysis and Ablations}
+\label{sec:expt:analysis}
+
+\paragraph{Compatibility with Quantization}
+We analyze the value distribution of compressed KV representations produced by Qwen2.5-7B (Figure~\ref{fig:comp_kv_combined}).
+%%%
+The distribution is highly uniform across channels and tokens, with no prominent spikes (Figure~\ref{fig:comp_kv_abs_3d}). Most values concentrate near zero (Figure~\ref{fig:comp_kv_global_dist}), indicating strong suitability for quantization.
+%%%
+Applying token-wise quantization from KIVI~\cite{liu2024kivi} to $\bm{z}_\Delta$ yields near-lossless performance (Tables~\ref{tab:longbench_perf}, \ref{tab:scbench_perf}), confirming that DeltaKV's residual codes are quantization-friendly.
+
+
+\paragraph{Train Short, Test Long} 
+Although compressors are trained only on sequences of length 8,192, they generalize well to contexts beyond 100K tokens. 
+This suggests strong length generalization. We hypothesize that this arises from performing compression before positional encoding, making the learned mapping largely position-invariant.
+
+
+\paragraph{Ablation on Modules}
+We conduct module ablations on Llama-3.1-8B-Inst ($2d_k=2048$). 
+DeltaKV has two core components:
+(1) residual construction using reference tokens, and
+(2) residual compression via a lightweight module.
+%%%
+To ensure fair comparison, we increase $d_c$ from 512 to 768 for a $\sim$35\% KV keep ratio. Table~\ref{tab:ablation_module} shows that removing either component causes substantial degradation, confirming that both residualization and compression are essential.
+
+\input{tables/ablation_two_module}
+
+
+\paragraph{Hyperparameter Sensitivity}
+We further investigate the sensitivity of DeltaKV to key hyperparameters, as illustrated in Figure~\ref{fig:all_ablations}. 
+Specifically, we evaluate the throughput performance under various hyperparameters using a 128k sequence length and a batch size of 16, demonstrating the trade-off between precision and inference efficiency.
+\vspace{-0.5em}
+\begin{itemize}[nolistsep, left=0pt]
+  \item \textbf{Compressed KV Size ($d_c$):} Increasing the dimension $d_c$ consistently yields lower NTP loss; however, excessively large dimensions lead to diminishing returns and eventually trigger Out-Of-Memory (OOM) errors. 
+  
+  \item \textbf{Number of Reference Tokens ($k$):} The performance gain saturates rapidly. While selecting a small number of reference tokens can lead to high average similarity, it often introduces more noise; conversely, selecting too many tokens reduces the average similarity. Thus, values of 4 or 8 serve as effective and efficient hyperparameters.
+
+  \item \textbf{Compressor Intermediate Size ($d_h$):} While larger MLP hidden dimensions improve reconstruction quality by reducing loss, they introduce additional parameters and result in poorer inference efficiency.  
+
+  \item \textbf{Reference Stride ($s$):} A smaller stride $s$ for reference tokens improves accuracy but linearly degrades inference throughput due to higher storage and retrieval overheads.
+\end{itemize}
+
+\vspace{-0.5em}
+\paragraph{Ablation of Reconstruction and NTP Loss}
+Figure~\ref{fig:ablation_on_ntp_mse} evaluates our dual-loss objective.
+%%%
+Since NTP loss on Fineweb-Edu~\cite{penedo2024fineweb} correlates with downstream performance, combining losses improves training effectiveness. 
+%%%
+Interestingly, MSE-only training reduces NTP loss, but NTP-only training does not reduce MSE. This suggests that while numerical reconstruction helps language modeling, exact KV reconstruction is not strictly required.

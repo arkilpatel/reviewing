@@ -1,0 +1,3138 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness
+Maximization
+Anonymous Authors1
+Abstract
+Reinforcement Learning with Verifiable Rewards
+(RLVR) has markedly improved the performance
+of Large Language Models (LLMs) on tasks re-
+quiring multi-step reasoning. However, most
+RLVR pipelines rely on sparse outcome-based
+rewards, providing little supervision over interme-
+diate steps and thus encouraging over-confidence
+and spurious reasoning, which in turn increases
+hallucinations. To address this, we propose
+FaithRL, a general reinforcement learning frame-
+work that directly optimizes reasoning faithful-
+ness. We formalize a faithfulness-maximization
+objective and theoretically show that optimizing it
+mitigates over-confidence. To instantiate this ob-
+jective, we introduce a geometric reward design
+and a faithfulness-aware advantage modulation
+mechanism that assigns step-level credit by penal-
+izing unsupported steps while preserving valid
+partial derivations. Across diverse backbones
+and benchmarks, FaithRL consistently reduces
+hallucination rates while maintaining (and often
+improving) answer correctness. Further analysis
+confirms that FaithRL increases step-wise reason-
+ing faithfulness and generalizes robustly. Our
+code is available at https://github.com/
+aintdoin/FaithRL.
+1. Introduction
+Reinforcement Learning with Verifiable Rewards (RLVR)
+has substantially advanced LLM reasoning capabilities in
+complex domains such as mathematics and coding (Guo
+et al., 2025). However, current paradigms relying on sparse
+outcome-based rewards often neglect intermediate process
+validity. Since successfully guessing the answer yields a pos-
+itive reward while explicit refusal is often penalized, models
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+When did the headquarters city of the Fireball Cinnamon 
+Whiskey manufacturer elect its first black mayor?
+Thought Step t: "New
+Orleans elected its
+first female mayor ,
+LaToya Cantrell, in
+2017 ." Provided Knowledge
+2017
+Initial Output
+Evidence
+Factuality-Driven Methods blindly reward 
+factually correct but irrelevant steps.
+FaithRL correctly penalizes steps 
+that are irrelevant to the query.
+Encourage Step t
+Penalize Step t
+Figure 1.Comparison between factuality-driven methods and
+FaithRL. Unlike factuality-driven methods that induce hallucina-
+tions by rewarding correct but unfaithful steps, FaithRL penalizes
+such irrelevance to ensure a faithful and correct answer.
+are incentivized towardover-confidence, favoring specula-
+tive answering rather than acknowledging uncertainty (Chen
+et al., 2025b; Kalai et al., 2025). Furthermore, the scalar
+nature of the reward obscures step-level fidelity, reinforcing
+erroneous steps that coincidentally yield correct answers
+while penalizing valid partial derivations (Agarwal et al.,
+2024; Huang et al., 2025b). Consequently, restoring faith-
+fulness necessitates that models act honestly by refusing to
+predict when evidentiary support is insufficient, and logi-
+cally by ensuring every reasoning step contributes validly
+to the final result (Wang et al., 2025b; Chen et al., 2025a).
+Recently, numerous approaches have been proposed to im-
+prove model faithfulness. A prominent line of work con-
+structs refusal datasets by treating consistent model failures
+as unanswerable instances and supervising models to gener-
+ate explicit refusals (Zhang et al., 2024a). However, tying
+refusal behavior to early-stage failures ignores the fact that
+model capabilities evolve during training. As a result, such
+methods can bias models towardover-conservativeness, de-
+grading reasoning performance while inflating refusal rates.
+Complementary efforts focus on verifying intermediate rea-
+soning steps, typically using factuality-driven metrics (Ren
+et al., 2025; Li & Ng, 2025). While effective at enforc-
+ing factual correctness, these approaches often struggle to
+guarantee logical soundness: as illustrated in Figure 1, mod-
+els may produce chains composed of factually correct but
+irrelevant statements, failing to form a valid deductive path.
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+To address these challenges, we propose Faithfulness-aware
+Reinforcement Learning (FaithRL), a general reinforce-
+ment learning (RL) framework that promotes faithful rea-
+soning. Instead of rewarding only the final answer, it encour-
+ages trajectories whose intermediate steps are supported by
+the required evidence and discourages unsupported steps
+even when they accidentally lead to a correct outcome. Con-
+cretely, we (i) formalizemaximizing reasoning faithfulness
+as an objective and show that it avoids degenerate behaviors
+such as over-confidence and over-conservativeness; (ii) de-
+sign ageometric rewardthat balances answering and refusal
+according to baseline capability, preventing both reward-
+hacking via guessing and blanket refusal; and (iii) introduce
+faithfulness-aware advantage modulation, which assigns
+step-level credit by filtering positive updates to faithful steps
+and concentrating penalties on unfaithful ones.
+FaithRL yields consistent gains across benchmarks. Com-
+pared with prior RLVR methods, it reduces hallucination
+rates by an average of4.7points while improving cor-
+rectness by1.6points on thefullvariants of 2WikiMulti-
+HopQA (Ho et al., 2020), HotpotQA (Yang et al., 2018), and
+MuSiQue (Trivedi et al., 2022). It also generalizes strongly:
+on out-of-distribution tasks such as MATH500 (Hendrycks
+et al., 2021) and GSM8k (Cobbe et al., 2021), FaithRL im-
+proves accuracy by over 10.8 points on average and reduces
+hallucination rates by 8.4 points. Finally, FaithRL steadily
+increases the faithful reasoning ratio during training, im-
+proving the proportion of faithful steps by 31.1% in-domain
+and 6.5% out-of-distribution.
+• We propose the novel optimization objective ofmaxi-
+mizing reasoning faithfulness, theoretically proving
+that it prevents the model from lapsing into over-
+confidence or over-conservativeness.
+• We introduce FaithRL, a unified RL framework de-
+signed to strictly align model incentives with this objec-
+tive. To the best of our knowledge, we are the first work
+to propose mitigating hallucinations by directly opti-
+mizing reasoning faithfulness via objective evidence
+verification, laying a foundation for future research.
+• FaithRL consistently outperforms strong baselines
+across three tasks, achieving an average4.7points
+reduction in hallucination and a1.6points gain in cor-
+rectness over RLVR methods, yielding a16.0points
+improvement in the truthful helpfulness score defined
+in Section 4.2.
+2. Related Work
+Hallucination MitigationMitigating hallucinations ne-
+cessitates a delicate balance between maximizing response
+correctness and ensuring effective refusal of unanswer-
+able queries. Refusal-Aware Instruction Tuning (RAIT)
+explicitly trains models to generate specific refusal indi-
+cators for unknown questions, such as outputting ”I don’t
+know” (Cheng et al., 2024; Yang et al., 2024) or append-
+ing uncertainty markers (Zhang et al., 2024a). Although
+advanced methods like CRaFT (Zhu et al., 2025) attempt
+to alleviate over-refusal by concurrently fine-tuning on
+high-certainty and unsolvable samples, these supervised
+approaches may inadvertently constrain general reasoning
+capabilities. Confidence-based strategies leverage model
+uncertainty to determine abstention decisions at inference
+time (Jurayj et al., 2025). Implementing these strategies
+effectively necessitates precise calibration techniques (Sun
+et al., 2025; Wang et al., 2025a; Damani et al., 2025), and the
+reliance on fixed thresholds can be sensitive to specific task
+distributions, potentially affecting generalization. Recently,
+RLVR methods have explored incentivizing refusal by penal-
+izing hallucinations through multi-dimensional (Chen et al.,
+2025a) or multi-level rewards (Wei et al., 2025); neverthe-
+less, such coarse-grained outcome rewards might provide
+limited guidance for optimizing the fine-grained intermedi-
+ate reasoning process.
+Reasoning Process VerificationIn multi-hop QA, LLMs
+optimized via outcome-driven RL often generate reasoning
+chains that are irrelevant to the target objective. Existing
+literature frequently attributes this faithfulness issue pri-
+marily to factual errors (Huang et al., 2025a; Agarwal et al.,
+2024; Chen et al., 2025c). To address this, prevalent verifica-
+tion methods decompose responses into independent atomic
+claims for retrieval-based fact-checking, as exemplified by
+HalluMeasure (Akbar et al., 2024), KnowHalu (Zhang et al.,
+2024b), and others (Paul et al., 2024; Ren et al., 2025; Li &
+Ng, 2025). While effective at mitigating hallucinations aris-
+ing from factual inaccuracies, these claim-centric strategies
+may be less effective in addressing invalid logical processes.
+3. Preliminary
+3.1. Problem Formulation
+We define the multi-hop QA task over a universal knowledge
+base S, a set of questions Q, and an answer space A. For
+each query q∈ Q , we designate a specific context K(q)⊂
+S, which consists of a set of documents associated with
+the query. An LLM M takes the pair (q,K(q)) as input
+to generate a sequence of tokens τ= (t 1, . . . , tL). To
+facilitate step-level analysis, we structurally decompose the
+trajectory into discrete reasoning steps and a final answer,
+denoted as τ= (s 1, . . . , sk, a), where s1:k represents the
+reasoning process. LetA ∗ ∈ Abe the ground truth.
+We postulate thatSis informationally complete:
+Assumption 3.1(Knowledge Completeness).For any q∈
+Q, S contains sufficient information to derive the correct
+answerA ∗.
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Based on this assumption, we define the evidence set E(q)
+as the minimal subset of S required to answer q. In standard
+multi-hop reasoning tasks, the reasoning chain is universally
+designed to be unique, thereby ensuring the uniqueness of
+E(q) . From this definition, we derive the following corollary
+regarding the answerability of a question:
+Corollary 3.2(Answerability Partition).Based on the
+evidence availability, the query set Q is partitioned into two
+disjoint subsets: the Answerable Set Qans and the Unan-
+swerable SetQ unans.
+Qans ={q∈ Q | E(q)⊆ K(q)}(1)
+Qunans =Q \ Q ans (2)
+For queries identified as unanswerable (q∈ Q unans), we
+explicitly modify the ground truth to A∗ =“IDK” and the
+evidence set toE(q) =E(q)∪ {IDK}.
+3.2. Process-Outcome Consistency
+Let T denote the sample space of all possible reasoning
+trajectories. We define two operators for anyτ∈ T:
+1. Knowledge extraction ϕ:T →2 S (the power set of
+S) identifies the set of knowledge items used inτ.
+2. Answer Parsing ψ:T → A ∪ {IDK} extracts the
+final derived answer.
+We further define the set ofhallucinated answersas H=
+A \ {A∗,IDK} . Modeling the LLM as a stochastic policy
+πθ, we propose dual assumptions bridging evidence and
+answers. First, we consider correctness sufficiency. We
+posit that covering the evidence set guarantees the derivation
+of the correct answer, regardless of redundant steps:
+Assumption 3.3(Correctness Sufficiency).
+E(q)⊆ϕ(τ) =⇒ψ(τ) =A ∗ (3)
+Conversely, we consider hallucination prevention. We as-
+sume that restricting the reasoning trajectory strictly to veri-
+fied evidence precludes the generation of hallucinations:
+Assumption 3.4(Hallucination Prevention).
+ϕ(τ)⊆ E(q) =⇒ψ(τ)/∈ H(4)
+We acknowledge that Assumptions 3.3 and 3.4 represent
+theoretical idealizations of LLM behavior required to con-
+struct a tractable optimization framework. While logical
+entailment does not strictly guarantee probabilistic gener-
+ation in all stochastic scenarios, empirical verification on
+standard benchmarks (detailed in Appendix B) demonstrates
+that these assumptions hold with high probability (validity
+>80%), confirming their high applicability in practice.
+3.3. Group Relative Policy Optimization (GRPO)
+GRPO (Shao et al., 2024) serves as the foundation for our
+RL framework, characterized by its elimination of the value
+function in favor of group-based advantage estimation. For
+a given query q, GRPO samples a group of N outputs
+{τ1, . . . , τN } from the old policy πθold. A reward func-
+tion r(τi) evaluates the final outcome, typically providing a
+sparse binary signal:
+r(τi) =
+(
+1,ifψ(τ i) =A ∗
+0,otherwise (5)
+The advantage Ai for the i-th output is computed by nor-
+malizing rewards within the group: Ai = (r(τi)−µ r)/σr,
+where µr and σr denote the mean and standard deviation of
+the group rewards, respectively.
+GRPO adapts the PPO surrogate objective to this group
+setting. Formally, the optimization objective is defined as
+the expectation over the token-level clipped surrogate loss:
+JGRP O(θ) =E q,{τi}
+
+ 1
+N
+NX
+i=1
+1
+|τi|
+|τi|X
+t=1
+LCLIP
+i,t (θ)
+
+ (6)
+Here, LCLIP
+i,t (θ) denotes the standard clipped objective
+term: LCLIP
+i,t (θ) = min (ρi,tAi,clip(ρ i,t,1−ϵ,1 +ϵ)A i),
+where ρi,t = πθ(τi,t|q, τi,<t)
+πθold(τi,t|q, τi,<t) represents the probability
+ratio between the current and reference policies. The KL
+divergence regularization term is omitted here for brevity.
+4. Methodology
+In this section, we introduce the FaithRL framework in
+detail, with the overall process illustrated in Figure 2.
+4.1. Optimization Objectives
+We assess model performance by partitioning the trajectory
+space T into three distinct outcomes. Thecorrect set Sc =
+{τ∈ T |ψ(τ) =A ∗} includes trajectories where the
+model provides the correct answer or properly refuses an
+unanswerable query. Themiss set Sm ={τ∈ T |ψ(τ) =
+IDK∧A ∗ ̸=IDK} represents false refusals, occurring
+only when the model incorrectly declines to answer a valid
+question. All other errors fall into thehallucination Set
+Sh ={τ∈ T |ψ(τ)∈ H} . We denote the probabilities of
+these outcomes for a policy πθ as correctness P(C) , miss
+rateP(M), and hallucination rateP(H).
+Conventional optimization paradigms in QA typically prior-
+itize one of the following objectives:
+• Objective A (maximize correctness):Maximize
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Online Group Rollout
+Query
+Provided 
+Knowledge 𝑲 
+Policy Model
+𝒔𝟐
+(𝟏)
+Evidences 𝓔
+… 𝒂(𝟏)
+𝒔𝟏
+(𝟐) 𝒔𝟐
+(𝟏) … 𝒂(𝟐)
+𝒔𝟏
+(𝑵) 𝒔𝟐
+(𝑵) … 𝒂(𝑵)
+Offline Validation
+𝑃 𝐶 = 𝑥0
+𝑃 𝐻 = 𝑦0
+Advantage
+𝑴𝟏
+(𝑵)
+𝑴𝟐
+(𝑵)
+…
+𝑴𝒏
+(𝑵)
+Faithfulness-Aware 
+Advantage Modulation
+LLM Judge
+Faithfulness-aware 
+Reinforcement Learning
+Geometric Reward
+𝑅 = ቐ
+ 𝑦0,
+0,
+ −𝑥0,
+if correct
+if miss
+if hallucinate
+𝑅1 
+𝑅2 
+𝑅𝑁 
+normalize
+𝐴1 
+𝐴2 
+𝐴𝑁 
+Verifier 𝓥
+Policy Update
+ℒ 𝑖
+𝐹𝑎𝑖𝑡ℎ = 𝑀𝑖
+(𝑁) ∙ ℒ 𝑖
+𝐶𝐿𝐼𝑃
+𝒔𝟏
+(𝟏)
+Figure 2.Overall framework of FaithRL. Taking a query and knowledge K, the model first uses offline validation to set baseline rates
+(x0, y0). During online group rollout, these rates form a geometric reward based on answer correctness. Simultaneously, the verifier V
+checks alignment with evidenceEto derive token-level advantage modulation for the policy update.
+P(C) . This is the standard objective for general
+QA (Li et al., 2024; Huang et al., 2025a).
+• Objective B (minimize hallucination):Minimize
+P(H) . This is often prioritized in safety-critical appli-
+cations (Liu et al., 2024; Luo et al., 2024).
+In contrast, we proposeobjective C (maximize reason-
+ing faithfulness). This objective targets thereasoning-
+faithful set Sf ={τ∈ T |ϕ(τ) =E(q)} , which
+consists of trajectories where the used knowledge strictly
+matches the required evidence. Our goal is to maximize
+P(F) =P(τ∈S f). Based on Assumptions 3.3 and 3.4,
+this objective naturally unifies accuracy and honesty because
+strict adherence to evidence guarantees the correct answer
+while precluding hallucination. This formulation ensures
+that every step in the reasoning chain makes a necessary
+contribution to the deduction, rather than merely supporting
+a correct final guess.
+The following theorem demonstrates that while standard
+objectives push models toward extreme behaviors, optimiz-
+ing for reasoning faithfulness aligns refusal decisions with
+model capability.
+Theorem 4.1(Asymptotic stability of refusal strategy).
+Consider a model with imperfect intrinsic capability. Opti-
+mizing the three defined objectives leads to distinct asymp-
+totic behaviors for the miss rateP(M):
+1. Objective A (maximize correctness)forces P(M)→
+0. This results inover-confidence, where the model
+speculates on all queries to maximize rewards.
+2. Objective B (minimize hallucination)drives P(M)→
+1. This leads toover-conservativeness, causing the
+model to refuse answerable queries to avoid hallucina-
+tion risks.
+3. Objective C (maximize reasoning faithfulness)en-
+suresstability. It maintains the miss rate at a stable
+equilibrium determined by the model’s intrinsic capa-
+bility, effectively preventing the degenerate collapse
+observed in objectives A and B.
+Detailed proofs are provided in Appendix C.
+4.2. Faithfulness-aware Reinforcement Learning
+We propose FaithRL, a RL framework designed to maximize
+the faithfulness objectiveP(F) . To achieve this, FaithRL in-
+tegrates a geometric reward mechanism that aligns outcome-
+level optimization with the model’s intrinsic capability, and
+a faithfulness-aware advantage modulation strategy that en-
+forces step-level process supervision.
+4.2.1. GEOMETRICREWARDDESIGN
+Existing strategies for optimizing reasoning tasks often rely
+on independent metrics for correctness and hallucination,
+which may fail to accurately quantify the genuine perfor-
+mance gain after optimization. To simultaneously address
+helpfulness and honesty without relying on arbitrary hy-
+perparameters, we adopt thetruthful helpfulness score
+(THS)(Zhu et al., 2025) as a higher-order metric that pro-
+vides a geometrically intuitive fusion of utility and honesty.
+As seen in Figure 3, we represent the model’s capability
+as a point on a two-dimensional plane, where the x-axis
+denotes the correctness rate and the y-axis represents the
+hallucination rate. Let E0 = (x 0, y0) be the initial capa-
+bility point corresponding to the baseline, E1 be the point
+after optimization, and O be the origin. The ideal strategy
+E∗(1,0) denotes 100% correctness with zero hallucinations.
+THS is defined as thenormalized signed area:
+THS=
+⃗S△OE0E1
+⃗S△OE0E∗
+(7)
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+𝑂 𝑃(𝐶)
+𝑃(𝐻)
+𝐸∗ (1,0)
+𝐸0 (𝑥0, 𝑦0)
+𝐸1 (𝑥1, 𝑦1)
+(0,1)
+𝑇𝐻𝑆 =
+𝑆Δ𝑂𝐸0𝐸1
+𝑆Δ𝑂𝐸0𝐸∗
+Figure 3.Truthful Helpfulness Score (THS).
+This metric effectively captures the degree of model re-
+finement. Crucially, maximizing this signed area aligns
+perfectly with the dual goals of increasing correctness and
+reducing hallucinations, providing a robust measure of op-
+timization quality. Detailed mathematical definitions are
+provided in Appendix D.
+Guided by THS, we derive a novel reward mechanism where
+the coefficients are not arbitrary hyperparameters but are
+derived directly from the baseline coordinates(x 0, y0):
+Rgeo(τ) =
+
+
+
++y0,ifτ∈S c
+0,ifτ∈S m
+−x0,ifτ∈S h
+(8)
+This formulation naturally implements an adaptive regula-
+tion strategy. For a model with a high hallucination rate, the
+reward structure assigns a substantial weight to correctness,
+which prioritizes improving accuracy. Conversely, for a
+model that is already proficient with high accuracy, the dom-
+inant penalty term compels the model to focus on precision,
+strictly suppressing the risk of hallucination.
+Crucially, this design is not merely heuristic but has a
+geometric interpretation. We prove that optimizing this
+capability-dependent reward guarantees that the model
+strictly follows the optimization trajectory of THS.
+Theorem 4.2(Geometric alignment with THS).Let
+J(θ) =E τ∼π θ[Rgeo(τ)] be the expected return under the
+proposed geometric reward. The optimization gradient is
+strictly proportional to the gradient of THS with a positive
+scalar coefficientC:
+∇θJ(θ) =C· ∇ θTHS(πθ),whereC >0(9)
+This implies that maximizing the geometric reward is mathe-
+matically equivalent to maximizing the signed area improve-
+ment relative to the baseline capability.
+The complete proof is provided in Appendix E.
+4.2.2. FAITHFULNESS-AWAREADVANTAGE
+MODULATION
+Geometric rewards optimize the final outcome, but they treat
+the reasoning process as a black box. To ensure faithfulness,
+we must verify that every single step contributes validly to
+the result. This requires supervision at the process level.
+We introducefaithfulness-aware advantage modulation
+(FAAM)to strictly enforce this step-wise fidelity.
+Adopting the structure from Section 3.1, we decompose
+the trajectory τ into discrete reasoning steps (s1, . . . , sk)
+and a final answer. We then employ a verifier V to assess
+whether each step sj is strictly supported by the evidence
+E(q) . Formally, we define V(s j) =I[ϕ(s j)⊆ E(q)] , where
+1 signifies a faithful step and 0 denotes an unfaithful one.
+This verification is merely an objective check for the utiliza-
+tion of evidence fromE(q)in the step.
+We integrate this verification mechanism into the GRPO
+framework. First, we calculate the advantage Ai for each
+trajectory using the geometric rewards Rgeo(τi) from Equa-
+tion 8. To apply supervision at the step level, we introduce
+a modulation scalar Mi,t for each token. Let α∈[0,1) be
+the faithfulness coefficient. For any token t within step sj,
+we define the modulation term as:
+Mi,t =
+(
+(1−α)V(s j) +α,ifA i >0
+(1−α)(1− V(s j)) +α,ifA i ≤0 (10)
+This design functions as a credit assignment filter. For tra-
+jectories with a positive advantage (Ai >0 ), we reinforce
+valid reasoning: faithful steps get the full reward (Mi,t = 1),
+and unfaithful steps a discounted reward (Mi,t =α ). For
+trajectories with a negative advantage, by contrast, unfaith-
+ful steps face the full penalty, while faithful steps incur a
+reduced one. This prevents the model from being unfairly
+penalized for correct partial reasoning steps, even if the final
+outcome is wrong.
+Building upon the GRPO surrogate objective (Eq. 6), we
+incorporate this modulation to define the FaithRL objective:
+JFaithRL(θ) =E q,{τi}
+
+ 1
+N
+NX
+i=1
+1
+|τi|
+|τi|X
+t=1
+Mi,t · LCLIP
+i,t (θ)
+
+
+This objective effectively adjusts the importance of each
+step during training. By dynamically re-weighting the learn-
+ing signal, FaithRL ensures that the model is reinforced
+primarily for reasoning that is both correct and faithful.
+We substantiate the effectiveness of this modulation strategy
+through the following theorem:
+Theorem 4.3(Optimization Consistency and Bias Rectifi-
+cation).We prove that under the regime of strict faithfulness
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Table 1.Main results comparingFaithRLagainst strong baselines across three multi-hop QA benchmarks. We reportcorrect rate
+(C)andtruthful helpfulness score (THS)where higher is better ( ↑), andhallucination rate (H)where lower is better ( ↓). The best
+performance is highlighted inbold, and the second best is underlined .
+2WikiMultihopQA-Full HotpotQA-Full MuSiQue-Full Average
+Method C(↑)H(↓)THS(↑)C(↑)H(↓)THS(↑)C(↑)H(↓)THS(↑)C(↑)H(↓)THS(↑)
+Llama3.1-8B-Instruct
+PROMPTINGBASELINE
+Prompting 69.2 24.4 0.0 63.7 33.9 0.0 54.1 32.8 0.0 62.3 30.4 0.0
+REFUSAL-AWARESFT
+R-Tuning 56.9 12.7 20.9 64.2 10.9 43.7 65.8 12.4 45.3 62.3 12.0 37.7
+CRaFT 49.1 14.9 6.8 63.010.044.2 59.26.249.0 57.1 10.4 35.8
+CONFIDENCE-BASEDABSTENTION
+CTSF 63.5 14.8 21.5 66.6 10.8 46.3 56.8 9.0 42.0 62.3 11.5 38.7
+RLCR 60.6 35.8 -40.9 59.3 40.0 -15.9 50.6 41.5 -17.8 56.8 39.1 -23.3
+GRPO + CTSF 50.6 46.7 -81.8 68.0 28.3 14.8 58.8 30.7 8.2 59.1 35.2 -13.0
+RLVR METHODS
+GRPO 86.2 12.2 51.6 76.1 22.9 33.1 79.7 13.1 58.1 80.7 16.1 47.7
+TruthRL 85.3 11.6 52.4 78.1 18.0 44.380.19.7 64.1 81.2 13.1 54.4
+FACTUALITY-DRIVENRL
+FSPO 77.7 9.2 51.6 78.3 14.0 52.0 63.2 12.4 42.7 73.0 11.8 48.8
+KnowRL 78.8 19.5 23.5 81.9 16.7 50.5 75.3 16.9 47.4 78.7 17.7 42.4
+FaithRL(Ours) 87.5 9.1 61.7 85.5 11.4 64.1 80.0 8.8 65.5 84.3 9.8 64.2
+Qwen2.5-7B-Instruct
+PROMPTINGBASELINE
+Prompting 71.5 13.1 0.0 72.7 19.3 0.0 59.2 16.3 0.0 67.8 16.2 0.0
+REFUSAL-AWARESFT
+R-Tuning 59.2 21.9 -60.3 64.8 15.2 7.5 65.5 13.8 27.2 63.2 16.9 -7.5
+CRaFT 51.3 10.9 -8.2 64.5 10.3 25.7 58.25.343.5 58.0 8.8 21.2
+CONFIDENCE-BASEDABSTENTION
+CTSF 55.7 24.1 -75.8 63.3 11.4 20.4 53.8 7.5 33.0 57.6 14.3 -2.2
+RLCR 64.9 27.0 -82.5 67.1 29.7 -44.8 52.0 29.1 -53.7 61.3 28.5 -58.0
+GRPO + CTSF 64.8 29.2 -94.6 76.1 15.3 18.5 63.5 13.2 26.9 68.1 19.2 -12.3
+RLVR METHODS
+GRPO 84.9 13.1 13.4 84.2 14.8 28.479.415.3 37.082.814.4 22.5
+TruthRL 83.8 9.8 30.3 85.1 10.2 46.7 77.7 8.0 55.5 82.2 9.3 43.3
+FACTUALITY-DRIVENRL
+FSPO 72.4 14.9 -8.9 67.2 26.1 -31.1 58.6 13.9 8.1 66.0 18.3 -10.6
+KnowRL 73.8 23.9 -5.7 79.7 18.9 8.5 73.8 17.6 9.9 75.8 20.1 -8.3
+FaithRL(Ours) 85.4 7.9 42.3 86.1 8.0 56.0 75.7 5.9 59.3 82.4 7.3 51.8
+modulation (α= 0 ), FaithRL achievesoptimization con-
+sistency, ensuring that the expected policy gradient aligns
+strictly with the faithful objective JC(θ). Conversely, stan-
+dard outcomes-based RL (vanilla RL) suffers fromprocess-
+outcome mismatch, resulting inbiased optimizationby
+indiscriminately reinforcing spurious correctness and pe-
+nalizing faltered reasoning.
+The detailed proof is provided in Appendix F.
+5. Experiments
+5.1. Experimental Setup
+DatasetsWe conduct evaluations on three multi-hop
+reasoning benchmarks: 2WikiMultiHopQA (Ho et al.,
+2020), HotpotQA (Yang et al., 2018), and MuSiQue-
+Full (Trivedi et al., 2022). MuSiQue-Full naturally in-
+cludes a mix of answerable and unanswerable questions.
+In contrast, the 2WikiMultiHopQA and HotpotQA datasets
+only contain answerable queries. To bridge this gap, we
+synthesize unanswerable samples for them, resulting in
+the 2WikiMultiHopQA-Full and HotpotQA-Full datasets.
+Specifically, for each question q, we remove exactly one
+evidence document from K(q), which is the set of discrete
+documents. This manipulation ensures that the reasoning
+chain is logically broken, while the remaining knowledge
+retains high semantic relevance to q. This design strictly
+compels the model to determine answerability through gen-
+uine reasoning, effectively preventing it from exploiting
+superficial heuristics (e.g., keyword matching) or reward
+hacking to shortcut the judgment process. We strictly filter
+these samples to ensure validity (see Appendix G.1). We
+train our model on the MuSiQue-Full dataset and evaluate
+performance on the test sets of all threefullbenchmarks.
+MetricsWe adopt THS as our primary evaluation metric,
+as defined in Section 4.2. Additionally, we report the cor-
+rectness rate P(C) and hallucination rate P(H) to provide
+a complete performance profile.
+Models and baselinesWe evaluate FaithRL against four
+categories of strong baselines:(1) refusal-aware SFT:We
+select R-Tuning (Zhang et al., 2024a) and CRaFT (Zhu
+et al., 2025). These methods explicitly incorporate refusal
+data into instruction tuning to teach the model when to
+abstain.(2) confidence-based abstention:We apply the
+CTSF thresholding strategy (Jurayj et al., 2025) to three
+distinct models: the original backbone, a GRPO-optimized
+model, and an RLCR-calibrated model (Damani et al., 2025).
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+(3) RLVR methods:We include GRPO and TruthRL (Wei
+et al., 2025). These approaches optimize outcomes using
+sparse rewards, focusing on maximizing correctness and
+penalizing hallucinations.(4) factuality-driven RL:We
+evaluate FSPO (Li & Ng, 2025) and KnowRL (Ren et al.,
+2025). These methods utilize factuality-centric rewards to
+guide the reasoning process.
+5.2. Main Results
+Table 1 shows the overall experimental results, providing a
+comprehensive comparison between FaithRL and various
+baselines.
+FaithRL consistently demonstrates superior performance in
+terms of THS across all settings. Compared with RLVR
+methods, FaithRL achieves an average improvement of+9.0
+points on the in-domain MuSiQue-Full dataset and+18.5
+points on the other two QA datasets. Specifically, FaithRL
+achieves a remarkable THS of 64.2% using the Llama-3.1-
+8B-Instruct backbone, outperforming the strongest baseline,
+TruthRL (54.4%), by a margin of 9.8 points. This advan-
+tage is particularly pronounced on HotpotQA-Full, where
+FaithRL leads the next best methods by absolute margins
+of 13.6 and 9.3 points on the Llama and Qwen backbones,
+respectively. These outcomes empirically support the effi-
+cacy of our geometric reward design in achieving an optimal
+equilibrium between helpfulness and honesty.
+Beyond the aggregate THS metric, FaithRL achieves the
+highest average correctness while simultaneously maintain-
+ing the lowest hallucination rate. Compared with other
+RLVR methods, FaithRL achieves an average correctness
+improvement of1.6points and a hallucination reduction
+of4.7points. For instance, averaging across Llama-3.1-
+8B-Instruct tasks, FaithRL records 84.3% correctness and
+a 9.8% hallucination rate, surpassing GRPO with a 3.6%
+increase in accuracy and a 6.3% reduction in hallucinations.
+This Pareto optimality powerfully demonstrates that our
+method does not merely seek a trade-off between utility
+and honesty, but rather achieves a fundamental elevation in
+intrinsic model capability driven by faithful reasoning.
+The performance of baseline methods reveals distinct char-
+acteristics. While refusal-aware SFT (e.g., CRaFT) and
+confidence-based abstention (e.g., CTSF) effectively curtail
+hallucinations compared to prompting baselines, they fail to
+yield significant gains in correctness. Conversely, RL meth-
+ods like TruthRL and KnowRL enhance performance on
+the in-domain MuSiQue-Full dataset but exhibit diminished
+gains on other QA benchmarks. For example, using the
+Llama model, TruthRL experiences a THS drop of 11.7 and
+19.8 points on 2WikiMultihopQA-Full and HotpotQA-Full
+respectively compared to in-domain performance. In con-
+trast, FaithRL maintains stability with a negligible drop of
+2.6 points. This highlights the robust generalization capabil-
+0 20 40 60 80 100 120
+Step
+0.4
+0.5
+0.6
+0.7
+0.8
+Faithful Step Ratio
+FaithRL
+GRPO
+TruthRL
+Figure 4.Comparison of the faithful step ratio among FaithRL,
+TruthRL, and GRPO during training.
+ities of FaithRL across diverse reasoning tasks. We provide
+more detailed experimental results in Appendix H.1.
+5.3. FaithRL Enhances Reasoning Faithfulness
+Dynamic Evolution of Reasoning Faithfulness during
+Training.We first investigate the ability of FaithRL to
+dynamically refine reasoning patterns throughout the opti-
+mization process. In this experiment, we train the Qwen-2.5-
+7B-Instruct model on the MuSiQue-Full dataset with 15,000
+samples. For every training step, we monitor the reasoning
+trajectories of each sample and calculate thefaithful step
+ratio, defined as the proportion of reasoning steps strictly
+supported by evidence relative to the total steps. As illus-
+trated in Figure 4, our analysis reveals that FaithRL stands
+out as the only method capable of driving a significant and
+sustained increase in reasoning faithfulness. Specifically,
+the overall ratio of faithful steps increased from an initial
+baseline of 51.4% to 82.5% after training. In contrast, stan-
+dard RL baselines, including GRPO and TruthRL, did not
+show meaningful improvements in faithfulness ratios. This
+disparity highlights the fundamental advantage of our ap-
+proach. Unlike traditional outcome-oriented optimization,
+FaithRL provides precise step-level guidance to effectively
+shape the underlying reasoning process of the model. We
+also provide a comprehensive breakdown of the training
+dynamics, categorized by sample correctness and step faith-
+fulness, in Appendix H.2.
+Generalization to out-of-distribution domains.To
+demonstrate that the faithfulness learned by FaithRL is a
+robust cognitive capability rather than a dataset-specific arti-
+fact, we evaluate the models on two Out-of-Distribution
+(OOD) benchmarks, GSM8k (Cobbe et al., 2021) and
+MATH500 (Hendrycks et al., 2021), comparing FaithRL
+against the GRPO baseline. To obtain faithfulness metrics,
+we employ an LLM to perform sentence-wise comparisons
+against the ground-truth solution processes. These evalu-
+ations are strictly inference-only, ensuring that no answer
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+GSM8k MATH500
+0
+20
+40
+60
+80
+100Percentage (%)
+72.3
+26.5
+46.6
+6.2
+47.2
+86.9
+12.2
+53.6
+44.8
+Correct Miss Hallucination
+(a)Outcome
+GSM8k MATH500
+0
+20
+40
+60
+80
+100Percentage (%)52.3
+15.2
+32.5
+24.0
+21.2
+54.8
+68.3
+5.8
+25.9
+32.6
+19.8
+47.7
+Faith(Correct) Faith(Other) Unfaithful (b)Process
+Figure 5.Model performance on OOD tasks. (a) illustrates the
+outcome correctness distribution across datasets. (b) displays the
+faithfulness of the reasoning process. For each dataset, theleft
+bar in each pair represents the GRPO baseline, and therightbar
+represents FaithRL.Faithful (Correct)denotes reasoning steps that
+are verified as faithful within correctly answered samples.
+Method Cor. Hal. THS
+Prompting 67.8 16.2 0.0
+GRPO82.814.4 22.5
++R geo 79.8 8.8 43.0
++ FAAM 77.8 12.0 27.5
+Ours 82.4 7.3 51.8
+0.00 0.25 0.50 0.75 1.00
+Hyperparameter α
+79.0
+79.5
+80.0
+80.5
+81.0
+81.5
+82.0
+82.5
+83.0Correctness Rate (%)
+Correctness Rate
+Hallucination Rate
+6.0
+6.5
+7.0
+7.5
+8.0
+8.5
+9.0
+9.5
+10.0
+Hallucination Rate (%)
+Figure 6.Ablation studies.(Left) Component analysis confirming
+the effectiveness of each module compared to baselines. (Right)
+Sensitivity analysis of α, showing optimal performance at α= 0 .
+leakage or training signals are provided. Details regarding
+the experimental setup are provided in Appendix G.3.
+As shown in Figure 5, FaithRL consistently outperforms
+GRPO. In terms of performance, FaithRL achieves signif-
+icantly higher accuracy, surpassing GRPO by 14.6% on
+GSM8k, while simultaneously maintaining a substantially
+lower hallucination rate. Regarding faithfulness, FaithRL
+exhibits a marked improvement in the overall faithful step
+ratio. Breakdown analysis shows this increase is primarily
+driven by improved faithfulness within correctly answered
+samples (rising from 52.3% to 68.3% on GSM8k). This
+suggests that the performance gains stem from genuine rea-
+soning improvements rather than lucky guesses. We provide
+detailed results in Appendix H.3.
+5.4. Ablations
+Component Analysis.We verify the effectiveness of the
+two core components in FaithRL: the geometric reward
+(Rgeo) and the faithfulness-aware advantage modulation
+(FAAM). As detailed inFigure 6 (Left), incorporating ei-
+ther Rgeo or FAAM individually yields improvements in
+THS compared to the GRPO baseline. Specifically, adding
+Rgeo alone results in a substantial THS gain of 20.5 points.
+However, deploying either component in isolation leads to a
+marked decline in correctness. In contrast, combining both
+modules enables FaithRL to achieve the lowest hallucination
+0 50 100 150 200 250 300
+Training Steps
+0
+1
+2
+3
+4
+5
+6Cumulative FLOPs
+×1019
+GRPO
+FaithRL
+0 25 50 75 100 125 150
+Total Training Time (GPU Hours)
+GRPO
+FaithRL
+89.6h
+99.2h
+99.6h
+113.2h
+Param Update Judge Overhead
+Figure 7.Training efficiency analysis.(Left) Comparison of
+cumulative FLOPs throughout training, showing that FaithRL in-
+curs only a 4.7% increase. (Right) Breakdown of total GPU hours,
+demonstrating that FaithRL limits the overhead to 13.7%.
+rate while maintaining high correctness, ultimately securing
+the highest THS. This demonstrates that Rgeo and FAAM
+work synergistically to enforce faithful reasoning. For de-
+tailed experimental configurations and specific numerical
+results, please refer to Appendix H.5.
+Hyperparameter Sensitivity.We further evaluate the sen-
+sitivity of our method to the hyperparameter α by varying
+it across {0,0.25,0.5,0.75,1.0} . The results, visualized in
+Figure 6 (Right), show that decreasing α consistently miti-
+gates hallucinations. In particular, α= 0 yields the optimal
+performance profile, effectively minimizing the hallucina-
+tion rate compared to the vanilla RL baseline ( α= 1.0 )
+while preserving high correctness. We provide detailed
+results in Appendix H.4.
+5.5. Computational Cost
+To quantify the computational overhead introduced by our
+method, we conducted a comparative analysis of FaithRL
+against GRPO using the Qwen-2.5-7B-Instruct backbone
+over one training epoch. We employed FLOPs and GPU
+hours as primary metrics to ensure a fair comparison of
+resource consumption across the entire training lifecycle.
+As shown in Figure 7, empirical results indicate that despite
+FaithRL incorporating step-level supervision, the additional
+computational cost remains contained within 15% relative
+to GRPO. This efficiency is primarily attributed to effective
+KV-cache reuse and the concurrent processing of verifica-
+tion requests. Detailed experimental setups and a theoretical
+complexity analysis are provided in Appendix I.
+6. Conclusion
+We presented FaithRL, a novel RL framework that enhances
+reasoning faithfulness by step-level verification. By strictly
+aligning model incentives with the validity of the reasoning
+process, our approach effectively bridges the gap between
+capability and honesty. Our extensive experiments confirm
+that FaithRL not only achieves superior performance in
+terms of correctness and hallucination reduction but also
+successfully internalizes faithful reasoning patterns.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Impact Statement
+This paper presents work aimed at advancing the reliability
+and faithfulness of Large Language Models (LLMs). By in-
+troducing a framework that incentivizes reasoning grounded
+strictly in provided evidence, our approach addresses critical
+issues related to hallucinations and over-confidence in AI
+systems. The potential societal impact is primarily positive,
+as it fosters the development of more trustworthy AI assis-
+tants suitable for deployment in high-stakes domains such
+as healthcare, law, and education, where factual accuracy
+is non-negotiable. Furthermore, by promoting transparent
+and verifiable reasoning processes, this work supports the
+broader goal of interpretable AI, helping to mitigate the
+spread of misinformation generated by confident but incor-
+rect models. While the training process incurs a marginal
+increase in computational resources, the long-term bene-
+fits of deploying safer, hallucination-resistant models likely
+outweigh these costs.
+References
+Agarwal, C., Tanneru, S. H., and Lakkaraju, H. Faith-
+fulness vs. plausibility: On the (un) reliability of ex-
+planations from large language models.arXiv preprint
+arXiv:2402.04614, 2024.
+Akbar, S. A., Hossain, M. M., Wood, T., Chin, S.-C., Sali-
+nas, E. M., Alvarez, V ., and Cornejo, E. Hallumeasure:
+Fine-grained hallucination measurement using chain-of-
+thought reasoning. InProceedings of the 2024 Confer-
+ence on Empirical Methods in Natural Language Pro-
+cessing, pp. 15020–15037, 2024.
+Chen, X., Kulikov, I., Berges, V .-P., O˘guz, B., Shao, R.,
+Ghosh, G., Weston, J., and Yih, W.-t. Learning to reason
+for factuality.arXiv preprint arXiv:2508.05618, 2025a.
+Chen, Y ., Benton, J., Radhakrishnan, A., Uesato, J., Deni-
+son, C., Schulman, J., Somani, A., Hase, P., Wagner, M.,
+Roger, F., et al. Reasoning models don’t always say what
+they think.arXiv preprint arXiv:2505.05410, 2025b.
+Chen, Y ., Benton, J., Radhakrishnan, A., Uesato, J., Deni-
+son, C., Schulman, J., Somani, A., Hase, P., Wagner, M.,
+Roger, F., et al. Reasoning models don’t always say what
+they think.arXiv preprint arXiv:2505.05410, 2025c.
+Cheng, Q., Sun, T., Liu, X., Zhang, W., Yin, Z., Li, S., Li,
+L., He, Z., Chen, K., and Qiu, X. Can ai assistants know
+what they don’t know?arXiv preprint arXiv:2401.13275,
+2024.
+Cobbe, K., Kosaraju, V ., Bavarian, M., Chen, M., Jun, H.,
+Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+R., et al. Training verifiers to solve math word problems.
+arXiv preprint arXiv:2110.14168, 2021.
+Damani, M., Puri, I., Slocum, S., Shenfeld, I., Choshen,
+L., Kim, Y ., and Andreas, J. Beyond binary rewards:
+Training lms to reason about their uncertainty.arXiv
+preprint arXiv:2507.16806, 2025.
+Guo, D., Yang, D., Zhang, H., Song, J., Zhang, R., Xu, R.,
+Zhu, Q., Ma, S., Wang, P., Bi, X., et al. Deepseek-r1: In-
+centivizing reasoning capability in llms via reinforcement
+learning.arXiv preprint arXiv:2501.12948, 2025.
+Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart,
+S., Tang, E., Song, D., and Steinhardt, J. Measuring math-
+ematical problem solving with the math dataset.arXiv
+preprint arXiv:2103.03874, 2021.
+Ho, X., Nguyen, A.-K. D., Sugawara, S., and Aizawa,
+A. Constructing a multi-hop qa dataset for compre-
+hensive evaluation of reasoning steps.arXiv preprint
+arXiv:2011.01060, 2020.
+Huang, L., Feng, X., Ma, W., Fan, Y ., Feng, X., Ye, Y .,
+Zhong, W., Gu, Y ., Wang, B., Wu, D., et al. Improv-
+ing contextual faithfulness of large language models via
+retrieval heads-induced optimization.arXiv preprint
+arXiv:2501.13573, 2025a.
+Huang, L., Yu, W., Ma, W., Zhong, W., Feng, Z., Wang, H.,
+Chen, Q., Peng, W., Feng, X., Qin, B., et al. A survey on
+hallucination in large language models: Principles, taxon-
+omy, challenges, and open questions.ACM Transactions
+on Information Systems, 43(2):1–55, 2025b.
+Jurayj, W., Cheng, J., and Van Durme, B. Is that your final
+answer? test-time scaling improves selective question
+answering.arXiv preprint arXiv:2502.13962, 2025.
+Kalai, A. T., Nachum, O., Vempala, S. S., and Zhang,
+E. Why language models hallucinate.arXiv preprint
+arXiv:2509.04664, 2025.
+Li, J. and Ng, H. T. Reasoning models hallucinate more:
+Factuality-aware reinforcement learning for large reason-
+ing models. InThe Thirty-ninth Annual Conference on
+Neural Information Processing Systems, 2025.
+Li, X., He, S., Lei, F., JunYang, J., Su, T., Liu, K., and
+Zhao, J. Teaching small language models to reason for
+knowledge-intensive multi-hop question answering. In
+Findings of the Association for Computational Linguis-
+tics: ACL 2024, pp. 7804–7816, 2024.
+Liu, Y ., Liu, G., Zhang, R., Niyato, D., Xiong, Z., Kim, D. I.,
+Huang, K., and Du, H. Hallucination-aware optimization
+for large language model-empowered communications.
+arXiv preprint arXiv:2412.06007, 2024.
+Luo, J., Xiao, C., and Ma, F. Zero-resource hallucination
+prevention for large language models. InFindings of
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+the Association for Computational Linguistics: EMNLP
+2024, pp. 3586–3602, 2024.
+Paul, D., West, R., Bosselut, A., and Faltings, B. Mak-
+ing reasoning matter: Measuring and improving faith-
+fulness of chain-of-thought reasoning.arXiv preprint
+arXiv:2402.13950, 2024.
+Ren, B., Qiao, S., Zheng, D., Chen, H., and Zhang, N.
+Knowrl: Exploring knowledgeable reinforcement learn-
+ing for factuality.arXiv preprint arXiv:2506.19807, 2025.
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang,
+H., Zhang, M., Li, Y ., Wu, Y ., et al. Deepseekmath: Push-
+ing the limits of mathematical reasoning in open language
+models.arXiv preprint arXiv:2402.03300, 2024.
+Sun, Z., Wang, Q., Wang, H., Zhang, X., and Xu, J. De-
+tection and mitigation of hallucination in large reason-
+ing models: A mechanistic perspective.arXiv preprint
+arXiv:2505.12886, 2025.
+Trivedi, H., Balasubramanian, N., Khot, T., and Sabharwal,
+A. Musique: Multihop questions via single-hop ques-
+tion composition.Transactions of the Association for
+Computational Linguistics, 10:539–554, 2022.
+Wang, C., Su, W., Ai, Q., and Liu, Y . Joint evaluation
+of answer and reasoning consistency for hallucination
+detection in large reasoning models.arXiv preprint
+arXiv:2506.04832, 2025a.
+Wang, Y ., Yu, Y ., Liang, J., and He, R. A comprehensive sur-
+vey on trustworthiness in reasoning with large language
+models.arXiv preprint arXiv:2509.03871, 2025b.
+Wei, Z., Yang, X., Sun, K., Wang, J., Shao, R., Chen, S.,
+Kachuee, M., Gollapudi, T., Liao, T., Scheffer, N., et al.
+Truthrl: Incentivizing truthful llms via reinforcement
+learning.arXiv preprint arXiv:2509.25760, 2025.
+Yang, Y ., Chern, E., Qiu, X., Neubig, G., and Liu, P. Align-
+ment for honesty.Advances in Neural Information Pro-
+cessing Systems, 37:63565–63598, 2024.
+Yang, Z., Qi, P., Zhang, S., Bengio, Y ., Cohen, W., Salakhut-
+dinov, R., and Manning, C. D. Hotpotqa: A dataset for
+diverse, explainable multi-hop question answering. In
+Proceedings of the 2018 conference on empirical methods
+in natural language processing, pp. 2369–2380, 2018.
+Zhang, H., Diao, S., Lin, Y ., Fung, Y ., Lian, Q., Wang, X.,
+Chen, Y ., Ji, H., and Zhang, T. R-tuning: Instructing large
+language models to say ‘i don’t know’. InProceedings of
+the 2024 Conference of the North American Chapter of
+the Association for Computational Linguistics: Human
+Language Technologies (Volume 1: Long Papers), pp.
+7106–7132, 2024a.
+Zhang, J., Xu, C., Gai, Y ., Lecue, F., Song, D., and
+Li, B. Knowhalu: Hallucination detection via multi-
+form knowledge based factual checking.arXiv preprint
+arXiv:2404.02935, 2024b.
+Zhu, R., Ma, Z., Wu, J., Gao, J., Wang, J., Lin, D., and
+He, C. Utilize the flow before stepping into the same
+river twice: Certainty represented knowledge flow for
+refusal-aware instruction tuning. InProceedings of the
+AAAI Conference on Artificial Intelligence, volume 39,
+pp. 26157–26165, 2025.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+A. Limitations
+Despite the promising results, we acknowledge two primary limitations. First, FaithRL relies on datasets with process-level
+annotations, such as evidence chains. While our OOD experiments indicate that the acquired reasoning capabilities are
+highly transferable, reducing the dependency on granular supervision remains an important direction for future work.
+Second, the integration of an external verifier introduces additional computational overhead. However, empirical analysis
+confirms that this cost is acceptable (within 15%) given the substantial gains in reliability. We leave it to future work to
+further optimize the verification efficiency.
+B. Experimental Validation of Assumptions
+To empirically validate the soundness of the theoretical assumptions posited in Section 3, we conduct a rigorous analysis on
+the MuSiQue-Full dataset (N= 39,876 ). To fully capture the dynamic satisfaction of these assumptions throughout the
+training lifecycle, we evaluate both the initial pre-trained model Qwen-2.5-7B-Instruct and the finalFaithRL-optimized
+model derived from it.
+We design two experimental protocols to verify the causal links between evidence sufficiency, reasoning faithfulness, and
+outcome validity. ForAssumption 3.3 (Correctness Sufficiency), we employ an LLM Judge to assess evidence utilization,
+isolating trajectories that fully incorporate the complete evidence set E(q) to measure answer accuracy. ForAssumption 3.4
+(Hallucination Prevention), we evaluate the logical consistency of reasoning steps against the provided context, filtering
+for strictly faithful trajectories to measure the hallucination rate. Llama-3.3-70B-Instruct serves as the unified judge. For
+inference, we set the temperature to 0 and the maximum output length to 4096. All prompt templates used for evaluation are
+detailed in Appendix K.
+The results are summarized in Table 2.
+Table 2.Statistical Validation of Theoretical Assumptions on MuSiQue-Full.
+Model Assumption Condition Met Result Satisfied Ratio
+Qwen-2.5-7B-Inst Asm. 3.3 (Correctness) 10,288 7,497 72.9%
+Asm. 3.4 (Hallucination) 14,355 12,840 89.5%
+FaithRL (Ours) Asm. 3.3 (Correctness) 15,392 14,036 91.2%
+Asm. 3.4 (Hallucination) 10,208 9,809 96.1%
+As demonstrated in Table 2, the empirical results strongly support our theoretical framework. For the pre-trained model,
+the adherence ratios are 72.9% and 89.5%. Post-training with FaithRL, these ratios improve significantly to 91.2% and
+96.1%, respectively. Averaging these states to approximate the conditions during training, we find a mean Correctness
+Sufficiency ratio of82.0%and a mean Hallucination Prevention ratio of92.8%. These high aggregate metrics confirm that
+our theoretical assumptions hold statistically significant validity within the domain of knowledge-intensive reasoning.
+C. Proofs of Theorem 1
+Let Π be the space of stochastic policies parameterized byθ. For a given input q, πθ induces a distribution over trajectoriesT .
+Consistent with Section 4.1, the sample space is partitioned into disjoint sets: Sc (Correct), Sm (Miss), Sh (Hallucination).
+We analyze the asymptotic behavior of the Miss Rate P(M) =P(τ∈S m). Note that Sm is only defined for answerable
+queries (Qans), as refusal is correct forQ unans.
+C.1. Analysis of Objective A: Maximize Correctness
+Proposition:Optimizing solely for correctness (J A(θ) =P θ(Sc)) drives the Miss RateP(M)asymptotically to 0.
+Proof.Consider the reward structure:r(τ) = 1ifτ∈S c, and0otherwise. For any answerable queryq∈ Q ans:
+•Action: Refuse (τ∈S m).By definition of Miss, the answer is IDK butA ∗ ̸=IDK. Thusτ /∈S c. Rewardr= 0.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+• Action: Attempt.The model generates a candidate answer. Even if the model is uncertain, there exists a non-zero
+probability that the generated answer matches A∗ (either through knowledge or lucky guessing). Thus, the expected
+rewardE[r|Attempt] =P(Correct|Attempt)>0.
+Since E[r|Attempt]> E[r|Refuse] = 0 , the policy gradient consistently pushes the probability mass away from refusal
+(Sm) towards attempting. Asymptotically, P(M)→0 .Consequence:This creates Over-Confidence. The model learns
+that ”trying” is always strictly better than ”missing”, encouraging hallucination on difficult or unanswerable queries (where
+it might also get lucky).
+C.2. Analysis of Objective B: Minimize Hallucination
+Proposition:Optimizing solely to minimize hallucination ( JB(θ) =−P θ(Sh)) drives the Miss Rate P(M) asymptotically
+to 1 (Degenerate Solution).
+Proof. The objective is to minimize P(H) , or equivalently maximize likelihood of Non-Hallucination (Sc ∪S m). For any
+answerable queryq∈ Q ans:
+• Action: Refuse (τ∈S m).By definition, Sm involves outputting ”IDK”. Since ”IDK” is not in the Hallucination set
+H, the risk of hallucination is strictly 0.
+• Action: Attempt.Due to model imperfection, any attempt to answer carries a risk ϵ >0 of generating an incorrect
+answer (τ∈S h).
+To strictly minimize the hallucination rate to 0, the optimal policy is to choose the action with 0 risk. Refusal (Sm) is a ”safe
+haven” that guarantees zero penalty under Objective B. Thus, the gradient favors shifting probability mass from Attempt to
+Refuse. Asymptotically, the model learns to refuse all queries to achieve perfect safety, driving P(M)→1 .Consequence:
+This creates Over-Conservativeness. Usefulness is sacrificed for safety.
+C.3. Analysis of Objective C: Maximize Adherence
+Proposition:Maximizing adherence (J C(θ) =P θ(Sf)) stabilizes the Miss RateP(M).
+Proof. Objective C rewards membership in Sf ={τ|ϕ(τ) =E(q)} . We analyze the gradient direction for answerable
+queriesq∈ Q ans (whereS m exists):
+• Refusal (Sm):If the model refuses, it outputs ”IDK”. However, for q∈ Q ans, the evidence set E(q) consists of
+specific knowledge facts required to derive the answer. A refusal trajectory generally fails to utilize/cite these specific
+facts (or cites them but fails to derive the answer). Thusϕ(τ)̸=E(q), soτ /∈S f . Rewardr= 0.
+•Faithful Attempt (S f ):If the model correctly uses evidenceE(q)to deriveA ∗, thenτ∈S f . Rewardr= 1.
+For these queries, Objective C behaves like Objective A: it penalizes Misses (r= 0 ) and rewards Faithful Attempts (r= 1 ).
+Thus, it exerts a downward pressure onP(M), preventing the Over-Conservativeness of Objective B.
+However, unlike Objective A, Objective C does not drive the model to speculative extremes. For queries where the model
+cannot find evidence (e.g., due to capability limits or unanswerable nature), it cannot satisfy the condition ϕ(τ) =E(q) . In
+such cases, attempting to answer often leads to Sextra (spurious) or Sh, which are not rewarded (r= 0 ) or penalized. By
+strictly tying reward to evidence presence, Objective C ensures thatP(M) is reducedonlywhen the model is capable of
+faithful reasoning, thereby stabilizing the refusal strategy at a level consistent with the model’s actual capability.
+D. Metric Details: Truthful Helpfulness Score (THS)
+Due to the shortcomings of existing metrics, we employ the Truthful Helpfulness Score (THS).
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Geometric Definition.To rigorously ground the definition of THS, we consider the polar characteristics of the performance
+plane. The angle θ of a capability vector relative to the positive x-axis, representing the Correctness Rate, inversely correlates
+with model quality. A smaller angle implies a lower ratio of hallucinations to correct answers. The ray ⃗OE0 thus establishes
+an ”iso-capability” threshold. Geometrically, the perpendicular distance of a new stateE1 from this ray serves as a direct
+measure of capability enhancement. Since the area of △OE0E1 is proportional to this altitude given a fixed base ⃗OE0, the
+signed area naturally quantifies the magnitude of improvement. Points to the right of the ray yield a positive area, indicating
+capability gain, while those to the left yield a negative area, signaling degradation.
+Operationally, we calculate this signed area using the cross product in 2D space. Let E0 = (x0, y0) and E1 = (x1, y1). The
+THS is computed as the ratio of the achieved signed area to the maximum potential area:
+THS=
+⃗OE1 × ⃗OE0
+⃗OE ∗ × ⃗OE0
+= x1y0 −x 0y1
+1·y 0 −x 0 ·0 = x1y0 −x 0y1
+y0
+(11)
+This formulation ensures that the metric is strictly monotonic with respect to the geometric distance from the baseline.
+As referenced in Figure 3, the area of the triangle △OE0E1 represents the magnitude of capability improvement. The
+THS effectively normalizes this area, providing a metric with a theoretical upper bound of 1, where positive values indicate
+improvement over the baseline.
+Effectiveness Analysis.To illustrate the necessity of THS, consider the specific example involving two models: Model A
+with Pc = 0.7, Ph = 0.1 and Model B with Pc = 0.8, Ph = 0.2. While Model B has higher accuracy, its hallucination rate
+is double that of Model A. By establishing Model A as the baseline E0, Model B yields a THS of -60%, clearly indicating a
+negative impact on trustworthiness despite the accuracy gain.
+We further validate the metric through controlled variable analysis to demonstrate its robustness. When the Hallucination
+Rate is held constant, an increase in the Correctness Rate naturally expands the signed area of the capability triangle,
+resulting in a higher THS. Conversely, when the Correctness Rate is fixed, a reduction in the Hallucination Rate similarly
+increases the signed area and improves the score. This confirms that maximizing THS is theoretically consistent with the
+dual goals of enhancing utility and reducing hallucination, without conflict.
+For more comprehensive details, please refer to Appendix C.3 of CRaFT (Zhu et al., 2025).
+E. Proof of Theorem 2
+Proof. Let the performance of the model be represented in a 2D Cartesian plane where the x-axis denotes the Correctness
+Rate and the y-axis denotes the Hallucination Rate. We define the baseline capability vector asv0 = (x0, y0) and the current
+policy’s performance vector asvπ = (Pπ(C), Pπ(H)).
+1. Geometric Interpretation of the ObjectiveThe Truthful Helpfulness Score (THS) measures the capability gain as the
+ratio of the signed area swept by the performance vector relative to the baseline. The signed area of the triangle formed by
+the originO, the baselinev 0, and the current statev π is given by half the magnitude of the 2D cross product:
+Area(O,v 0,v π) = 1
+2(vπ ×v 0) = 1
+2(Pπ(C)·y 0 −P π(H)·x 0)(12)
+By definition, THS is the normalized area relative to the ideal areaS ideal (determined by the perfect statev ∗):
+THS(πθ) = Area(O,v 0,v π)
+Sideal
+(13)
+Crucially, Sideal is determined solely by the baseline v0 and the task ground truth, making it a constant positive scalar with
+respect to the policy parametersθ.
+2. Formulation of the Expected ReturnThe expected return J(θ) under our proposed reward scheme r(τ) is calculated by
+summing the probability-weighted rewards for each outcome setS c, Sm, Sh:
+J(θ) =E τ∼π θ[r(τ)](14)
+=P π(Sc)·(+y 0) +P π(Sm)·0 +P π(Sh)·(−x 0)(15)
+=y 0Pπ(C)−x 0Pπ(H)(16)
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+3. Equivalence and Gradient AlignmentComparing the expressions, we observe that the expected return is exactly double
+the signed area:
+J(θ) = 2·Area(O,v 0,v π)(17)
+Substituting the definition of THS:
+J(θ) = (2S ideal)·THS(π θ)(18)
+Since Sideal >0 , the coefficient C= 2S ideal is a strictly positive constant. Calculating the gradient with respect to θ yields:
+∇θJ(θ) =C· ∇ θTHS(πθ)(19)
+This establishes a strict positive proportionality (collinearity). It implies that the gradient vector of our reward function points
+in the exact same direction as the gradient of the Truthful Helpfulness Score, ensuring identical optimization paths.
+F. Proof of Theorem 3
+Assumption:We analyze the theoretical properties under the strict faithfulness enforcement regime ( α= 0 ). Consistent
+with Theorem 1, we partition the trajectory space T based on the alignment between reasoning quality (V) and outcome
+correctness (r). We identify two critical subsets ofProcess-Outcome Mismatch:
+• Spurious Set (Lucky Guesses) Sspur ={τ|ψ(τ) =A ∗ ∧ V(τ) = 0} . The answer is correct, but reasoning is
+unfaithful.
+• Faltered Set (Incidental Failures) Sf ail ={τ|ψ(τ)̸=A ∗ ∧ V(τ) = 1} . The reasoning is faithful (evidence
+covered), but the final answer is incorrect (e.g., calculation error or token generation slip).
+The remaining sets are theFaithful SetS f (Both correct) and theHallucination SetS h (Both wrong).
+1. Failure Analysis of Vanilla RL (Dual Bias).Consider a standard RL baseline optimizing solely for correctness
+(Objective A). The expected gradient is approximately:
+∇JV anilla ∝E τ[r(τ)∇logπ(τ)](20)
+This leads to two types of optimization errors:
+1. Positive Bias (Reinforcing Bad Logic):For τ∈S spur, r(τ) = 1 . The model is encouraged to repeat flawed reasoning
+or shortcuts.
+2. Negative Bias (Suppressing Good Logic):For τ∈S f ail, r(τ)≤0 (typically 0 or negative). The model is discouraged
+from performing the correct reasoning steps simply because the final token was wrong.
+Thus,
+∇JV anilla ∝ ∇P(S f) +∇P(S spur)| {z }
+Noise
+− ∇P(S f ail)| {z }
+Damage
+.
+2. Dual Rectification in FaithRL.FaithRL introduces the modulation term M(τ) (via FAAM). We analyze how it
+handles the two mismatch cases underα= 0:
+Case A: Spurious Correctness (Sspur)
+• Outcome is positive (A >0), but Verifier is negative (V= 0).
+• Modulation:M= (1−0)·0 + 0 = 0.
+• Effect: The reward is filtered out.∇J ←0. The modeldoes not learnfrom lucky guesses.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Case B: Faltered Reasoning (Sf ail)
+• Outcome is negative (A≤0), but Verifier is positive (V= 1).
+• Modulation:M= (1−α)(1− V) +α. Here, for negative samples, we want to penalize invalid steps.
+• SinceV= 1,M= (1−0)(0) + 0 = 0.
+• Effect: The penalty is filtered out/mitigated. ∇J ←0 . The modelis not punishedfor correct reasoning chains that
+accidentally failed at the end.
+Conclusion.Combining these effects, the FaithRL gradient becomes:
+∇JF aithRL ∝y 0∇P(S f)−x 0∇P(S h) + 0· ∇P(S spur)−0· ∇P(S f ail)(21)
+By effectively zeroing out the contributions from both types of mismatch, FaithRL ensures the optimization is purely driven
+by the alignment of process and outcome (Sf andS h), proving strict consistency with the faithful objective.
+G. Experimental Details
+G.1. Datasets
+G.1.1. DATASETOVERVIEW
+We evaluate our framework on three multi-hop QA benchmarks selected for their distinct complexity profiles.
+HotpotQAis a large-scale multi-hop QA dataset with 112,779 Wikipedia-based question-answer pairs, constructed via
+crowdsourcing. Each sample includes sentence-level supporting facts to enable explainable reasoning, and all questions
+require multi-hop inference across multiple documents. It features diverse questions (covering entities, dates, locations,
+etc.) and a novel type of factoid comparison questions (including yes/no and numerical comparison tasks), without being
+constrained by pre-existing knowledge bases or schemas, supporting comprehensive evaluation of models’ multi-hop
+reasoning and explainability.
+2WikiMultiHopQAis a large-scale multi-hop QA dataset with 192,606 samples, constructed by integrating unstructured
+text from Wikipedia and structured triples from Wikidata. Each sample includes explicit evidence in the form of structured
+triples to illustrate the reasoning path, ensuring all questions require multi-hop inference to answer. It covers four question
+types (comparison, inference, compositional, bridge comparison) generated via predefined templates and logical rules,
+facilitating comprehensive evaluation of models’ reasoning capabilities.
+MuSiQue-Fullis a challenging multi-hop QA dataset with 25K 2–4 hop questions, constructed via a bottom–up approach
+by composing single-hop questions from 5 Wikipedia-based datasets. It enforces strict connected reasoning (each step
+relies on previous outputs) through stringent filters, minimizing train-test leakage and including hard-to-identify distractors.
+Featuring six reasoning graph structures, it has a 3× larger human–machine gap and lower cheatability (single-hop models
+drop 30 F1 points) than existing datasets, with natural question decompositions to support interpretable reasoning model
+development.
+G.1.2. EVIDENCECONSTRUCTION
+For the MuSiQue-Full dataset, each sample includes a ‘question decomposition‘ field representing prior knowledge. We
+leverage this structured data to construct the target evidence setE(q). For example, a raw decomposition might appear as:
+[{"id": 42543, "question": "who wrote crazy little thing called love original
+artist", "answer": "Freddie Mercury"},
+{"id": 20093, "question": "In what year did #1 die?", "answer": "1991"]
+To transform these pairs into a coherent evidence set, we utilize Llama-3.3-70B-Instruct with the prompt defined in Appendix
+K. The model resolves references (e.g., “#1”) and synthesizes declarative statements, resulting in the finalE(q):
+[’Freddie Mercury wrote crazy little thing called love original artist’, ’Freddie Mercury died in year 1991.’]
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+G.1.3. DATASETCONSTRUCTION FOR2WIKIMULTIHOPQA-FULL ANDHOTPOTQA-FULL
+To construct the unanswerable subsets for our Out-of-Domain test sets (2WikiMultiHopQA-Full and HotpotQA-Full), we
+employ a two-stage process consisting of strategic pruning and rigorous filtering.
+Phase 1: Evidence PruningBoth datasets provide a supporting facts field for each query q, formatted as a list of
+indices (e.g., [["Arthur’s Magazine", 0], ["First for Women", 0]] ) that point to specific sentences
+within the context documents. We utilize this ground truth to identify the complete evidence set E(q) within the retrieved
+context K(q). The initial generation of unanswerable samples involves randomly pruning documents referenced by these
+indices, thereby creating reasoning gaps.
+Phase 2: Rigorous Quality ControlTo ensure the constructed samples are genuinely unanswerable due to missing logic
+rather than trivial irrelevance, and to prevent model shortcuts (reward hacking), we enforce three strict technical constraints
+during a secondary filtering stage:
+1. Context Density Maintenance:If the number of remaining evidence documents in E(q) exceeds 3 after the initial
+pruning, we iteratively prune an additional document. This ensures that the remaining context K(q) maintains high
+semantic density and relevance to the query, preventing the model from identifying unanswerable questions simply by
+detecting a lack of relevant keywords (a common form of reward hacking).
+2. Hop-Sensitive Pruning:We strictly prohibit the pruning of documents corresponding to the first hop of the reasoning
+chain. Instead, we randomly target intermediate or final hops. This is because first-hop entities are often explicitly
+mentioned in the question itself, making them easily recoverable or hallucinated. Removing later hops ensures the
+break in reasoning occurs deep within the logic chain.
+3. Empirical Solvability Verification:We employ a verification step using Qwen2.5-7B-Instruct with aBest-
+of-32inference strategy. For every generated unanswerable candidate, we sample 32 reasoning paths. If the model
+succeeds in deriving the correct answer inanyof the 32 attempts (indicating the reasoning gap was bypassed via
+hallucination or leakage), the sample is discarded. We retain only those samples where all 32 attempts fail, ensuring
+the target output is strictly “I don’t know”.
+G.2. Implementation Details of the Baselines
+Below, we provide implementation details for the baseline methods:
+• R-Tuning:We apply R-Tuning (Zhang et al., 2024a) on the MuSiQue-Full training set using the backbone model for
+inference. We append ”I am sure” to the model’s response for correct reasoning trajectories and ”I am unsure” for
+incorrect ones. The backbone model is then supervised fine-tuned (SFT) on this augmented dataset using full-parameter
+updates with a cosine learning rate schedule for 3 epochs. During evaluation, responses containing ”I am unsure” are
+mapped to ”IDK”, while answers are extracted from those marked ”I am sure”.
+• CRaFT:Following Zhu et al. (2025), we first sample 10 responses for each training query to compute accuracy and
+certainty scores. We select samples in the top 10% of both metrics for Rehearsal Training to obtain a rehearsal model.
+This model is then employed for a two-stage data filtering process, and the final model is obtained by SFT on the
+filtered dataset.
+• CTSF:We implement the Confidence-Based Thresholding strategy (Jurayj et al., 2025) using the cumulative log-
+probability of the generated sequence as the confidence metric. We set the refusal threshold to -15; responses falling
+below this value are converted to ”IDK”.
+• RLCR:We calibrate the initial model via RL using the reward function R= 1−(cr−conf) 2, where cr∈ {0,1}
+denotes correctness (1 for Correct, 0 for Error/Miss) and conf∈[0,1] is extracted from a generated <confidence>
+tag (Damani et al., 2025). Post-training, we use a fixed confidence threshold of 0.5 to determine refusal.
+• TruthRL:We train the model using PPO with the ternary reward scheme proposed by Wei et al. (2025), assigning
+rewards of +1 for correct answers, -1 for hallucinations, and 0 for other outcomes.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+• FSPO:We fully reproduce the original implementation by directly adopting the official code of Fine-Grained Step-
+Level Policy Optimization (Li & Ng, 2025), with only the train batch size adjusted to 128 to enhance the stability and
+reproducibility of the training process.
+• KnowRL:Following Ren et al. (2025), we design a composite reward function comprising format, factuality, and
+correctness components. We set the weighting coefficients for these three terms to a ratio of 1:1:1.
+G.3. Training Details
+Implementation & Hardware.We implement our framework using the verl library on a computational node equipped
+with 4 NVIDIA H200 GPUs (141GB VRAM each). Models undergo full-parameter fine-tuning with a global training batch
+size of 128 and a validation batch size of 512. Maximum sequence lengths are set to 8192 tokens for prompts and 2048
+tokens for responses.
+Optimization Hyperparameters.Optimization utilizes a cosine learning rate scheduler with a peak learning rate of
+1×10 −6, a warmup ratio of 0.1, and a minimum learning rate ratio of 0.1. For PPO training, we set the mini-batch size
+to 64 and the micro-batch size per GPU to 16. The KL divergence penalty is disabled (use kl loss=False), and the
+rollout sampling temperature is set to 1.0.
+Oracle & Verification.To accurately categorize outcomes into Correct ( Sc), Miss ( Sm), and Hallucination ( Sh) as
+required by our geometric reward, we implement a hierarchical evaluation protocol. We first employ rigorous string
+matching to detect explicit refusals (e.g., “I don’t know”), classifying such instances as Miss (Sm) in answerable queries and
+Correctness (Sc) in unanswerable queries. For non-refusal responses, Llama-3.3-70B-Instruct serves as the oracle
+judge to distinguish between Correct (Sc) and Hallucination (Sh). This model also conducts step-wise evidence verification
+(V), where we segment the reasoning process into steps based on sentence boundaries. We select a strong model for this
+verification primarily to leverage shared context caching with the outcome judge, thereby minimizing additional overhead
+(see Section I). Crucially, this task is distinct from reasoning distillation; it constitutes an objective check of evidence
+attribution rather than a complex evaluation of logical validity, ensuring the task is computationally simpler and more robust
+than the reasoning process itself. The verifier is deployed on a dedicated server utilizing 2 GPUs with a temperature of 0.0.
+We present the specific prompt templates in Appendix K.
+Evidence for OOD Benchmarks.To evaluate the out-of-distribution (OOD) generalization of our approach, we conduct
+inference-only evaluations on GSM8k and MATH500. For these benchmarks, we utilize the ground-truth solution steps
+as the evidence set solely to verify the generated reasoning chains during the testing phase. This setup ensures a rigorous
+assessment of how well our verification mechanism, trained on multi-hop QA, generalizes to unseen mathematical reasoning
+tasks in a zero-shot manner. The specific prompts used for verification are detailed in Appendix K.
+H. Extended Experimental Results
+H.1. Additional Results for Main Experiments
+We present a more granular analysis of Multi-hop QA performance, specifically examining the model’s behavior on
+answerable versus unanswerable subsets of the test data in Table 3.
+H.2. Extended Analysis of Training Dynamics
+We visualize the training dynamics of step-wise faithfulness in Figure 8. We track the evolution of reasoning steps for
+TruthRL, GRPO, and FaithRL, dividing the metrics into four categories based on the sample polarity (Positive vs. Negative)
+and step validity (Faithful vs. Unfaithful). As illustrated, FaithRL demonstrates superior reasoning alignment capabilities: it
+achieves the highest proportion of faithful steps on positive samples (Figure 8a) while successfully suppressing unfaithful
+reasoning steps on negative samples to the lowest level among all baselines (Figure 8d).
+H.3. Extended Results on OOD Generalization
+We also provide a comprehensive breakdown of the OOD generalization experiments on GSM8k and MATH500 datasets.
+Table 4 details the performance metrics and step-wise reasoning validity for both FaithRL and the GRPO baseline.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Table 3.Fine-grained results comparingFaithRLagainst strong baselines across three multi-hop QA benchmarks. We reportAccuracy
+(Acc)andTruthful Helpfulness Score (THS)where higher is better ( ↑), andError Rate (Err)where lower is better ( ↓). The performance
+is reported separately for Answerable (Ans.) and Unanswerable (Unans.) subsets. The best performance is highlighted inbold, and the
+second best is underlined.
+2WikiMultihopQA-Full HotpotQA-Full MuSiQue-Full Average
+Ans. Unans. Ans. Unans. Ans. Unans. A H T
+Method A H T A H T A H T A H T A H T A H T
+Llama3.1-8B-Instruct
+PROMPTINGBASELINE
+Prompting 56.6 30.4 0.0 81.7 18.3 0.0 70.5 24.6 0.0 56.8 43.2 0.0 41.6 32.3 0.0 66.6 33.4 0.0 62.3 30.4 0.0
+REFUSAL-AWARESFT
+R-Tuning 18.7 20.5 -19.495.14.9 73.234.2 15.8 -11.194.1 5.9 86.335.5 21.0 8.596.3 3.7 88.962.3 12.0 37.7
+CRaFT 9.7 18.2 -24.2 88.5 11.5 37.2 34.5 11.4 1.8 91.5 8.5 80.3 22.28.411.4 96.1 3.9 88.3 57.1 10.4 35.8
+CONFIDENCE-BASEDABSTENTION
+CTSF 37.4 19.1 1.8 89.5 10.5 42.6 43.4 11.4 10.7 89.8 10.2 76.4 20.6 10.9 6.6 93.0 7.0 79.0 62.3 11.5 38.7
+RLCR 64.4 28.3 11.7 56.7 43.3 -136.6 72.3 26.3 -3.1 46.3 53.7 -24.3 45.1 39.0 -5.1 56.1 43.9 -31.4 56.8 39.1 -23.3
+GRPO + CTSF 67.6 27.0 17.3 33.6 66.4 -262.8 77.0 15.5 32.5 58.9 41.1 4.9 61.9 17.1 39.9 55.7 44.3 -32.6 59.1 35.2 -13.0
+RLVR METHODS
+GRPO83.513.3 58.7 88.8 11.2 38.888.19.8 60.0 64.1 35.9 16.9 68.9 16.7 47.4 90.5 9.5 71.6 80.7 16.1 47.7
+TruthRL 81.8 12.0 59.5 88.8 11.2 38.8 84.57.5 63.071.6 28.4 34.370.09.5 57.890.2 9.8 70.7 81.2 13.1 54.4
+FACTUALITY-DRIVENRL
+FSPO 62.810.842.7 92.5 7.5 59.0 73.1 11.3 40.7 83.4 16.6 61.6 36.1 15.1 16.7 90.3 9.7 71.0 73.0 11.8 48.8
+KnowRL 82.6 13.8 56.9 74.9 25.1 -37.2 87.1 10.0 58.4 76.7 23.3 46.1 67.4 17.0 45.5 83.2 16.8 49.7 78.7 17.7 42.4
+FaithRL(Ours) 81.7 11.6 60.1 93.3 6.7 63.4 83.9 9.8 55.8 87.0 13.0 69.9 65.3 12.4 49.3 94.7 5.3 84.1 84.3 9.8 64.2
+Qwen2.5-7B-Instruct
+PROMPTINGBASELINE
+Prompting 50.4 18.8 0.0 92.6 7.4 0.0 66.2 17.7 0.0 79.2 20.8 0.0 31.2 19.7 0.0 87.2 12.8 0.0 67.8 16.2 0.0
+REFUSAL-AWARESFT
+R-Tuning 26.6 35.4 -68.3 91.7 8.3 -12.2 36.8 23.2 -50.092.8 7.2 65.434.9 23.6 -2.5 96.1 3.9 69.5 63.2 16.9 -7.5
+CRaFT 9.8 14.5 -29.192.7 7.3 1.438.0 11.5 -5.0 90.9 9.1 56.3 19.8 7.2 8.4 96.6 3.4 73.4 58.0 8.8 21.2
+CONFIDENCE-BASEDABSTENTION
+CTSF 43.8 15.7 1.71 67.5 32.5 -339.2 39.3 10.0 1.89 87.2 12.8 38.5 15.47.14.16 92.1 7.9 38.3 57.6 14.3 -2.2
+RLCR 60.5 23.2 -1.7 69.3 30.7 -314.9 71.9 21.6 -8.9 62.3 37.7 -81.3 33.6 28.5 -11.5 70.4 29.6 -131.3 61.3 28.5 -58.0
+GRPO + CTSF 71.0 16.9 25.7 58.5 41.5 -460.8 71.9 10.7 31.9 80.2 19.8 4.81 42.6 10.7 25.7 84.3 15.7 -22.7 68.1 19.2 -12.3
+RLVR METHODS
+GRPO82.014.1 44.2 87.9 12.1 -63.586.811.1 45.3 81.6 18.4 11.565.923.5 28.7 92.9 7.1 44.582.814.4 22.5
+TruthRL 78.1 8.9 54.2 89.4 10.6 -43.2 82.1 8.4 50.788.1 11.9 42.8 59.6 11.741.195.7 4.3 66.4 82.2 9.3 43.3
+FACTUALITY-DRIVENRL
+FSPO 56.4 18.1 7.9 88.3 11.7 -58.1 70.4 16.2 9.8 64.0 36.0 -73.1 31.1 13.7 9.4 86.0 14.0 -9.4 66.0 18.3 -10.6
+KnowRL 70.4 24.8 3.9 77.1 22.9 -209.5 82.0 15.1 25.5 77.4 22.6 -8.7 56.5 26.3 14.8 91.1 8.9 30.5 75.8 20.1 -8.3
+FaithRL(Ours) 78.0 8.6 54.9 92.7 7.3 1.4 79.8 8.3 48.8 92.4 7.6 63.5 54.2 9.1 39.8 97.2 2.8 78.1 82.4 7.3 51.8
+H.4. Extended Results on Hyperparameter Sensitivity
+We also provide a comprehensive breakdown of the hyperparameter sensitivity analysis regardingα on the Qwen-2.5-7B-
+Instruct model. Table 5 details the performance metrics across all three multi-hop QA benchmarks asαvaries from 0 to 1,
+illustrating the impact of the trade-off between standard rewards and faithfulness constraints.
+H.5. Extended Results on Component Analysis
+We utilize the Qwen-2.5-7B-Instruct model as the backbone for these ablation studies. Table 6 details the performance
+metrics across all three multi-hop QA benchmarks, illustrating the contribution of each module to the overall performance.
+I. Experimental Computational Cost
+Experimental Setup Details.To ensure a rigorous and fair evaluation, we tracked resource consumption across the full
+training pipeline. ForFLOPs, we recorded the ‘flops/total‘, representing the cumulative floating-point operations since
+the start of training. This metric encompasses all major stages: actor/critic updates, log-probability/value forward passes,
+vLLM rollout generation, and server-side LLM-judge computations (estimated via API usage tokens). ForGPU Hours, we
+calculated the total usage of the 4 NVIDIA H200 GPUs dedicated to model training and gradient updates. Additionally, to
+account for the overhead of the external reward model, we included the consumption of the 2 H200 GPUs hosting the LLM
+server, scaled by their average Streaming Multiprocessor (SM) Utilization. This approach ensures that the reported cost
+reflects the actual hardware burden rather than just wall-clock time.
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+0 20 40 60 80 100 120
+Step
+0.05
+0.10
+0.15
+0.20
+0.25
+0.30
+0.35
+0.40
+0.45
+Faithful Step Ratio
+FaithRL
+GRPO
+TruthRL
+(a)Faithful Step Ratio (Positive)
+0 20 40 60 80 100 120
+Step
+0.2
+0.3
+0.4
+0.5
+0.6
+Faithful Step Ratio
+FaithRL
+GRPO
+TruthRL (b)Unfaithful Step Ratio (Positive)
+0 20 40 60 80 100 120
+Step
+0.05
+0.10
+0.15
+0.20
+0.25
+0.30
+Unfaithful Step Ratio
+FaithRL
+GRPO
+TruthRL
+(c)Faithful Step Ratio (Negative)
+0 20 40 60 80 100 120
+Step
+0.15
+0.20
+0.25
+0.30
+0.35
+0.40
+Unfaithful Step Ratio
+FaithRL
+GRPO
+TruthRL (d)Unfaithful Step Ratio (Negative)
+Figure 8.Analysis of Faithful and Unfaithful Step Ratios on positive and negative samples. TruthRL, GRPO, and FaithRL are compared
+across different steps.
+Extended Results on GPU Hours.We provide a detailed breakdown of the computational cost comparison between
+GRPO and FaithRL. The total GPU hours are composed of two parts: the time spent on model parameter updates (using 4
+GPUs) and the equivalent time cost for the LLM Judge server.
+Table 7 presents the detailed calculation for the total GPU hours consumed by both methods.
+The ”Update Time” refers to the wall-clock time for training on 4 GPUs. The ”Judge Server Cost” is calculated by converting
+the active judge server usage (percentage of training time×number of judge GPUs, here assumed to be 2) into equivalent
+GPU hours. FaithRL incurs slightly higher costs due to the additional verification steps, but the overall increase remains
+modest.
+Theoretical analysis of efficiency.To explain why FaithRL maintains high efficiency despite increased verification
+frequency, we formalize the total training time per iteration Ttotal. We define the following notation: G denotes the number
+of rollouts per prompt; N represents the average number of reasoning steps (empirically N≈3.5 ); Tgen and Tupdate
+represent the time consumed by the policy model for generation and parameter updates, respectively; and Treq denotes the
+latency for interactions with the Judge Server.
+The cost models for the baseline and our method are formulated as follows:
+•GRPO (baseline):Performs a single outcome verification per sample.
+TGRP O ≈T gen +G×T outcome
+req +T update
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Table 4.Detailed Performance and Faithfulness Analysis on OOD Datasets. The table presents outcome metrics (Correct Rate, Miss
+Rate, Hallucination Rate) and process-level metrics (Step Validity across different outcome types). Values in parentheses indicate the raw
+counts (numerator/denominator).
+Outcome Metrics Process Validity
+Dataset Method Correctness Miss Hallucination Faith. (Correct) Faith. (Miss) Faith. (Hallu.) Overall Faith.
+GSM8k
+FaithRL 86.9%0.9%12.2% 79.5%21.7% 42.6%74.1%
+(1146/1319) (12/1319) (161/1319) (3303/4156) (10/46) (271/636) (3584/4838)
+GRPO 72.3% 1.2% 26.5% 72.7% 35.3% 55.4% 67.5%
+(954/1319) (16/1319) (349/1319) (2994/4120) (30/85) (843/1523) (3867/5728)
+MATH500
+FaithRL 53.6%1.6%44.8% 64.2%19.5% 41.0%52.3%
+(268/500) (8/500) (224/500) (683/1064) (8/41) (407/993) (1098/2098)
+GRPO 46.6% 6.2% 47.2% 55.0% 17.9% 41.0% 45.2%
+(233/500) (31/500) (236/500) (765/1391) (48/268) (628/1532) (1441/3191)
+Table 5.Hyperparameter sensitivity analysis of α on Qwen2.5-7B-Instruct. α balances the trade-off between standard reinforcement
+learning rewards and our proposed faithfulness constraints. Note that α= 1.0 is equivalent to the vanilla RL method with our geometric
+reward. The chosen setting for our main experiments is highlighted in gray.
+2WikiMultihopQA-Full HotpotQA-Full MuSiQue-Full Average
+Ans. Unans. Ans. Unans. Ans. Unans. A H
+Setting A H A H A H A H A H A H
+Prompting 50.4 18.8 92.6 7.4 66.2 17.7 79.2 20.8 31.2 19.7 87.2 12.8 67.8 16.2
+α= 0(Ours) 78.0 8.6 92.7 7.3 79.8 8.3 92.4 7.6 54.2 9.1 97.2 2.8 82.4 7.3
+α= 0.2576.8 8.9 90.5 9.5 81.6 8.1 90.3 9.7 51.0 9.5 96.7 3.3 81.1 8.2
+α= 0.574.5 7.7 94.3 5.7 78.2 7.8 89.6 10.4 50.0 9.3 95.8 4.2 80.4 7.5
+α= 0.7574.2 8.0 93.3 6.7 80.5 7.5 88.5 11.5 44.0 9.6 96.4 3.6 79.5 7.8
+α= 1.0(Vanilla) 73.2 6.8 93.2 6.8 82.0 7.5 85.6 14.4 50.7 12.2 94.5 5.5 79.8 8.8
+Table 6.Detailed ablation results on component effectiveness.
+2WikiMultihopQA-Full HotpotQA-Full MuSiQue-Full Average
+Ans. Unans. Ans. Unans. Ans. Unans. A H
+Setting A H A H A H A H A H A H
+Prompting 50.4 18.8 92.6 7.4 66.2 17.7 79.2 20.8 31.2 19.7 87.2 12.8 67.8 16.2
+GRPO 82.0 14.1 87.9 12.1 86.8 11.1 81.6 18.4 65.9 23.5 92.9 7.1 82.8 14.4
++Rgeo 73.2 6.8 93.2 6.8 82.0 7.5 85.6 14.4 50.7 12.2 94.5 5.5 79.8 8.8
++FAAM 78.2 8.5 88.1 11.9 83.2 7.1 73.1 26.9 52.4 9.5 91.7 8.3 77.8 12.0
+FaithRL 78.0 8.6 92.7 7.3 79.8 8.3 92.4 7.6 54.2 9.1 97.2 2.8 82.4 7.3
+•FaithRL (ours):Performs one outcome verification plusNstep verifications per sample.
+TF aithRL ≈T gen +G×(T outcome
+req +T steps
+overhead) +T update
+While the verification term appears to scale by N, two critical factors mitigate the actual wall-clock impact, keeping the
+overhead below 15%:
+1. KV-cache reuse (context caching):This is the dominant factor. In GRPO, the outcome judge processes the full
+context (document + question + reasoning chain), incurring a costly prefill (context encoding) operation. In FaithRL,
+the outcome judge and step judges share the identical document context. Once the server (e.g., vLLM) processes
+the initial request, the Key-Value (KV) cache for the context is resident in VRAM. Consequently, subsequent step
+verifications primarily involve the much faster decoding phase, bypassing the expensive prefill. Thus, the marginal cost
+of a step verification is significantly lower than an outcome verification (Tstep
+req < T outcome
+req ).
+2. Server concurrency and utilization:Our Judge Server is configured with a high concurrency limit
+(MAX NUM SEQS=64). Empirical monitoring reveals that the GPU utilization on the server side remains relatively low
+(approximately 20%–30%) for both GRPO and FaithRL. This indicates that the server is not compute-bound and has
+ample capacity. Therefore, increasing the request frequency from 1 (outcome only) to 1 +N (outcome + steps) does
+not introduce a linear latency penalty. The server can efficiently process these additional, lightweight step-verification
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Table 7.Breakdown of total GPU hours calculation.
+Method Update Time (h) Judge Server Cost (h) Total GPU Hours Increase
+GRPO4×22.4 = 89.6 22.4×22.37%×2≈10.099.6 -
+FaithRL4×24.8 = 99.2 24.8×28.17%×2≈14.0113.2 +13.7%
+requests concurrently without significant queuing delay, resulting in a sub-linear increase in total verification time
+(T steps
+overhead < N×T step isolated
+req ).
+In conclusion, due to efficient caching and the server’s capacity to handle increased concurrency without saturation, the
+additional computational overhead of FaithRL remains marginal.
+J. Case Study
+To provide concrete insights into the behavioral differences between FaithRL and GRPO, we present two representative
+cases from the HotpotQA-Full dataset. These examples illustrate how our method enhances both reasoning capability and
+faithfulness compared to outcome-driven baselines.
+J.1. Analysis of Answerable Scenarios
+In the answerable case (Table 8), the model is required to perform multi-hop reasoning: identifying a specific compilation
+album, finding a track on it, and verifying its sampling source.
+• FaithRL (Ours):Our model successfully synthesizes information from multiple documents. It correctly identifies
+that “Fantastic V oyage: The Greatest Hits” contains tracks from “Gangsta’s Paradise”, and links this to the sampling
+information of Stevie Wonder. The reasoning chain is logically sound and leads to the correct answer.
+• GRPO (Baseline):The baseline model fails to make the necessary logical connection. Although it retrieves relevant
+information about “Gangsta’s Paradise”, it fails to link the compilation album context correctly, leading to an unneces-
+sary refusal (“I don’t know”). This highlights the issue of over-conservativeness or reasoning failure in standard RL
+approaches when faced with complex evidence integration.
+J.2. Analysis of Unanswerable Scenarios
+In the unanswerable case (Table 9), the model must identify a specific location of an uprising. While the general context
+(Haitian Revolution) is present, the specific location “Saint-Domingue” is missing from the provided evidence.
+• FaithRL (Ours):Our model demonstrates superior faithfulness. It correctly identifies the event and the general context
+(Haiti) but crucialy notes that “the documents do not provide a specific location within Haiti”. Consequently, it refuses
+to answer, adhering strictly to the provided knowledge.
+• GRPO (Baseline):The baseline model succumbs to hallucination or internal knowledge bias. It attempts to answer
+with “Haiti”, which is technically the resulting state but not the specific answer required by the ground truth context
+(which was pruned). This illustrates the tendency of standard RL to “guess” based on partial associations, violating the
+faithfulness constraint.
+J.3. Reasoning Faithfulness and Step-wise Contribution
+Beyond correctness, we observe a significant disparity in reasoning efficiency. As demonstrated in the examples, FaithRL
+typically resolves complex multi-hop queries within approximately 3 concise steps. In contrast, the GRPO-trained model
+often requires more than double the number of steps to arrive at a conclusion. Crucially, regarding reasoning faithfulness,
+every step generated by FaithRL validly contributes to the final derivation, achieving a 100% valid step ratio in these cases.
+Conversely, the GRPO baseline exhibits a high proportion of redundant or irrelevant reasoning steps, diluting the logical
+density and indicating a reliance on search-based trial-and-error rather than systematic deduction.
+21
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Question:What song by the American rapper Coolio is on his greatest hits album “Fantiastic V oyage” and samples from a Stevie
+Wonder song?
+FaithRL (Ours) Output:
+1. First, identify the greatest hits album by Coolio that is mentioned. From Document ’Fantastic V oyage: The Greatest Hits’, we
+learn ”Fantastic V oyage: The Greatest Hits is a compilation album by rapper Coolio, released in 2001. It includes the track ’Aw
+Here it Goes’ he contributed as a main theme to TV series ’Kenan & Kel’. Other songs originally appear on his first three albums,
+’It Takes a Thief’, ’Gangsta’s Paradise’ and ’My Soul’. ” This sentence mentions that the album is ”Fantastic V oyage” and that it
+includes tracks from Coolio’s other albums. However, it does not directly state which song samples a Stevie Wonder song.
+2. Next, identify a song by Coolio that samples a Stevie Wonder song. From Document ’Gangsta’s Paradise’, we learn ”’Gangsta’s
+Paradise” is a song by American rapper Coolio, featuring singer L.V . The song was released on Coolio’s album of the same name,
+as well as the soundtrack for the 1995 film ”Dangerous Minds”. It samples the chorus and instrumentation of Stevie Wonder’s 1976
+song ”Pastime Paradise”. ” This sentence states that ”Gangsta’s Paradise” by Coolio samples a Stevie Wonder song. Therefore,
+”Gangsta’s Paradise” is the song by Coolio that samples a Stevie Wonder song.
+3. Verify if ”Gangsta’s Paradise” is on the greatest hits album ”Fantastic V oyage”. From Document ’Fantastic V oyage: The Greatest
+Hits’, we learn ”Fantastic V oyage: The Greatest Hits is a compilation album by rapper Coolio, released in 2001. It includes the
+track ’Aw Here it Goes’ he contributed as a main theme to TV series ’Kenan & Kel’. Other songs originally appear on his first
+three albums, ’It Takes a Thief’, ’Gangsta’s Paradise’ and ’My Soul’. ” This sentence mentions that ”Gangsta’s Paradise” is one of
+the songs originally appearing on his first three albums, implying it is on the greatest hits album ”Fantastic V oyage”.
+Answer:Gangsta’s Paradise(Reward:y 0)
+GRPO (Baseline) Output:
+1. First, we need to identify a song by Coolio that is on his greatest hits album ”Fantastic V oyage” and samples from a Stevie
+Wonder song. From the document ”Fantastic V oyage: The Greatest Hits”, we learn that this album by Coolio includes the track
+”Aw Here it Goes” which he contributed as a main theme to the TV series ”Kenan & Kel”.
+2. Next, we need to find out if this song or any other song by Coolio samples from a Stevie Wonder song. The document ”Gangsta’s
+Paradise” states that ”Gangsta’s Paradise” by Coolio samples the chorus and instrumentation of Stevie Wonder’s 1976 song
+”Pastime Paradise”.
+3. Given that ”Gangsta’s Paradise” is a Coolio song that samples a Stevie Wonder song, and it is also mentioned that ”Gangsta’s
+Paradise” is featured on the album of the same name, which is not ”Fantastic V oyage”, we need to find another Coolio song on
+”Fantastic V oyage” that samples a Stevie Wonder song.
+4. The document ”Fantastic V oyage (Coolio song)” tells us that ”Fantastic V oyage” by Coolio samples ”Fantastic V oyage” by
+Lakeside, and it is on his debut album ”It Takes a Thief”.
+5. The document ”Curtain Falls” mentions that the background music of ”Curtain Falls” is almost identical to that of Coolio’s 1995
+hit, ”Gangsta’s Paradise”, as they both share usage of a sample of Stevie Wonder’s ”Pastime Paradise”.
+6. Given the information, it is not explicitly stated that a song on ”Fantastic V oyage” samples a Stevie Wonder song, but ”Gangsta’s
+Paradise” does.
+Answer:I don’t know(Reward: 0)
+Table 8.Comparison on an Answerable Case. FaithRL correctly bridges the evidence, whereas GRPO fails to link the compilation album
+to the original track.
+K. Prompt Template
+We provide the comprehensive prompt templates utilized throughout our framework: Table 10 details the transformation
+of question decompositions into declarative evidence; Table 11 defines the instruction for the reasoning policy; Table 12
+and Table 13 outline the step-level faithfulness verification protocol for multihop reasoning tasks and OOD math tasks,
+respectively; Table 14 specifies the criteria for judging final answer correctness .
+22
+1210
+1211
+1212
+1213
+1214
+1215
+1216
+1217
+1218
+1219
+1220
+1221
+1222
+1223
+1224
+1225
+1226
+1227
+1228
+1229
+1230
+1231
+1232
+1233
+1234
+1235
+1236
+1237
+1238
+1239
+1240
+1241
+1242
+1243
+1244
+1245
+1246
+1247
+1248
+1249
+1250
+1251
+1252
+1253
+1254
+1255
+1256
+1257
+1258
+1259
+1260
+1261
+1262
+1263
+1264
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Question:Where did Henri Christophe and other slaves hold an uprising from 1791 to 1804 that led to the founding of a state
+which was both free from slavery and ruled by non-whites and former captives?
+FaithRL (Ours) Output:
+1. First, identify the state founded by the uprising. From Document ’State of Haiti’, we learn ”The State of Haiti (French:´Etat
+d’Ha¨ıti, Haitian: Leta an Ayiti) was the name of the state in northern Haiti. It was created on October 17, 1806 following the
+overthrow of the Empire of Haiti following the assassination of Emperor Jacques I. The northern State of Haiti was ruled by Henri
+Christophe originally as ’Provisional Chief of the Haitian Government’ from October 17, 1806 until February 17, 1807 when
+he became ’President of the State of Haiti’. The 1807 constitution for the State of Haiti made the post of president a position
+for life with the president having the power to appoint his successor. On March 28, 1811 President Henri was proclaimed King
+Henry I, thereby dissolving the State of Haiti and creating the Kingdom of Haiti.” This document mentions the State of Haiti but
+does not directly state it was free from slavery and ruled by non-whites and former captives. However, it does refer to the Haitian
+Revolution, which is mentioned in other documents. Document ’Jean-Baptiste Sans Souci’ states ”Jean-Baptiste Sans-Souci was a
+leader of rebel slaves during the Haitian Revolution. He was assassinated by rival black rebel leader, Henri Christophe, in 1803,
+shortly before Haiti won its independence.” This suggests the Haitian Revolution led to the founding of Haiti, which was free
+from slavery and ruled by non-whites and former captives. Document ’Henri Christophe’ confirms Henri Christophe was a ”key
+leader in the Haitian Revolution, which succeeded in gaining independence from France in 1804.” Document ’State of Haiti’ also
+mentions the Haitian Revolution in relation to the founding of the State of Haiti. Therefore, the Haitian Revolution is the uprising
+referred to in the question.
+2. The question asks where Henri Christophe and other slaves held an uprising. From Document ’Jean-Baptiste Sans Souci’, we
+learn ”Jean-Baptiste Sans-Souci was a leader of rebel slaves during the Haitian Revolution. He was assassinated by rival black
+rebel leader, Henri Christophe, in 1803, shortly before Haiti won its independence.” This suggests the uprising took place in Haiti.
+However, the document does not specify a particular location within Haiti. Given the information, it is clear the uprising occurred
+in Haiti, but the exact location is not specified.
+3. The question asks for the location of the uprising, but the documents do not provide a specific location within Haiti. Therefore, I
+do not have enough information to pinpoint the exact location of the uprising.
+Answer:I don’t know(Reward:y 0)
+GRPO (Baseline) Output:
+1. First, we need to identify the region where Henri Christophe and other slaves held an uprising from 1791 to 1804. From the
+document ”Henri Christophe”, we learn that Henri Christophe was a key leader during the Haitian slave rebellion (1791–1804).
+2. The Haitian Revolution is the uprising we are looking for. Next, we need to find out if the state that was founded was free from
+slavery and ruled by non-whites and former captives.
+3. The document ”Jean-Baptiste Sans Souci” mentions that Jean-Baptiste Sans-Souci was a leader of rebel slaves during the Haitian
+Revolution, and that Haiti won its independence from France in 1804.
+4. The document ”State of Haiti” provides more information about the State of Haiti, which was created in northern Haiti after the
+overthrow of the Empire of Haiti following the assassination of Emperor Jacques I. It was ruled by Henri Christophe.
+5. The document ”Kingdom of Haiti” confirms that Henri Christophe established the Kingdom of Haiti in 1811, which was in the
+north of Haiti.
+6. Given that Henri Christophe was a former slave and a key leader in the Haitian Revolution, and that the documents mention Haiti
+gaining independence and becoming a state ruled by non-whites (former slaves), we can conclude that the state in question is Haiti.
+Answer:Haiti(Reward:−x 0)
+Table 9.Comparison on an Unanswerable Case. FaithRL recognizes the missing specific evidence and refuses, while GRPO halluci-
+nates/guesses a related entity.
+Table 10.Prompt for converting question decomposition into declarative evidence statements.
+Evidence Construction Prompt
+System Input:
+You are an expert at turning subquestion-answer pairs into one clear, natural English statement.
+Instructions: 1. Produce ONE grammatically correct declarative sentence using the given subquestion and its answer. 2. Preserve the
+semantic relationship between entities. 3. If the subquestion contains references like #1, #2, etc., resolve them using the list of prior
+answers (1-indexed). 4. Return ONLY the resulting sentence, nothing else.
+Examples: Q: who wrote crazy little thing called love original artist — A: Freddie Mercury → Freddie Mercury wrote Crazy Little
+Thing Called Love.
+Q: In what year did #1 die? — A: 1991 — prior: [’Freddie Mercury’]→Freddie Mercury died in 1991.
+User Input:
+Convert the following pair into a single statement.
+Subquestion:{question}
+Answer:{answer}
+Prior answers (for # references):{prior answers}
+23
+1265
+1266
+1267
+1268
+1269
+1270
+1271
+1272
+1273
+1274
+1275
+1276
+1277
+1278
+1279
+1280
+1281
+1282
+1283
+1284
+1285
+1286
+1287
+1288
+1289
+1290
+1291
+1292
+1293
+1294
+1295
+1296
+1297
+1298
+1299
+1300
+1301
+1302
+1303
+1304
+1305
+1306
+1307
+1308
+1309
+1310
+1311
+1312
+1313
+1314
+1315
+1316
+1317
+1318
+1319
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Table 11.Prompt used for generating reasoning chains (Reasoning Policy).
+Reasoning Prompt
+System Prompt:
+You are a helpful assistant. You are given a Question and References. The references may or may not help answer the question. Your
+task is to answer the question based on factual information in the references or your own knowledge. If, after examining and reasoning
+over the References, you are uncertain or don’t know the answer, output I don’t know as specified below.
+CRITICAL - You MUST follow this EXACT format:
+<think>Your thinking process</think>
+<answer>Your final answer</answer>
+Rules (STRICTLY ENFORCED):1. Put reasoning in <think></think> tags 2. NEVER start with anything other than <think> or
+<answer>3. The<answer>tag MUST contain your final answer or ”I don’t know”
+User Prompt:
+References:
+{documents context}
+Question:
+{question}
+Table 12.Prompt for the LLM-based Faithfulness VerifierV(Step-level).
+FaithfulnessVerification Prompt
+System Input:
+You are a strict reasoning consistency judge. Decide if the reasoning segment is FULLY SUPPORTED by the provided evidences.
+Rules: 1) Output only one digit: 1 if the segment contains meaningful reasoning AND is strictly supported by the evidences; 0
+otherwise. 2) Give 0 if the segment adds NO new information, is just a plan/re-statement, or lacks specific details (e.g., ’We should
+review the list...’). 3) Give 1 ONLY if the segment’s key assertion semantically matches or is directly inferred from an evidence. 4)
+Base the decision strictly on the evidences; ignore world knowledge. 5) Do not provide explanations.
+User Input:
+Evidences:
+{evd text}
+Reasoning Segment:
+{seg text}
+Output (only 0 or 1):
+Table 13.Prompt for the LLM-based Faithfulness VerifierV(OOD tasks).
+Faithfulness Verifier Prompt
+Input:
+You are a strict reasoning consistency judge. Decide if the reasoning segment is FULLY SUPPORTED by the provided evidences.
+Rules:
+1) Output only one digit: 1 if the segment contains meaningful reasoning AND is strictly supported by the evidences; 0 otherwise.
+2) Give 0 if the segment adds NO new information, is just a plan/re-statement, or lacks specific details (e.g., ’We should review the
+list...’).
+3) Give 1 ONLY if the segment’s key assertion semantically matches or is directly inferred from an evidence.
+4) Base the decision strictly on the evidences; ignore world knowledge.
+5) Do not provide explanations.
+Output ONLY one digit: -1 or 1. No text, no explanation.
+You should make the judgment based on provided examples.
+User Input:
+Evidences:{evidence}
+Reasoning Segment:{reasoning segment}
+Output (only 0 or 1):
+24
+1320
+1321
+1322
+1323
+1324
+1325
+1326
+1327
+1328
+1329
+1330
+1331
+1332
+1333
+1334
+1335
+1336
+1337
+1338
+1339
+1340
+1341
+1342
+1343
+1344
+1345
+1346
+1347
+1348
+1349
+1350
+1351
+1352
+1353
+1354
+1355
+1356
+1357
+1358
+1359
+1360
+1361
+1362
+1363
+1364
+1365
+1366
+1367
+1368
+1369
+1370
+1371
+1372
+1373
+1374
+FaithRL: Learning to Reason Faithfully through Step-Level Faithfulness Maximization
+Table 14.Prompt for the Outcome Correctness Judge.
+Outcome Judge Prompt
+Input:
+Assume you are a human expert in grading predictions given by a model. You are given a question and a model prediction. Judge if the
+prediction matches the ground truth answer by following these steps:
+1: Take it as granted that the Ground Truth is always correct.
+2: If the Prediction exactly matches the Ground Truth, “score” is 1.
+3: If the Prediction does not exactly match the Ground Truth, go through the following steps and likely give a score as -1.
+4: If the Ground Truth is a number, “score” is 1 if and only if the Prediction gives a number that almost exactly matches the ground
+truth.
+5: If the Prediction is self-contradictory, “score” must be -1.
+6: If the prediction is not answering the question, “score” must be -1.
+7: If the prediction is a concise and correct summary of the ground truth, “score” is 1.
+8: If ground truth contains a set of items, prediction must contain exactly same items for the score to be 1.
+9: Otherwise, “score” is -1.
+Output ONLY one digit: -1 or 1. No text, no explanation.
+You should make the judgment based on provided examples.
+Examples:
+Question: When did the director of film Lord Richard In The Pantry die?
+Ground Truth: 7 January 1984
+Prediction: January 7, 1984
+Output: 1
+Question: Who is older, Charles Badham or M´ed´eric De Vasselot De R´egn´e?
+Ground Truth: Charles Badham
+Prediction: M´ed´eric De Vasselot De R´egn´e
+Output: -1
+User Input:
+Question:{question}
+Ground Truth:{ground truth answer}
+Prediction:{predicted answer}
+Output:
+25

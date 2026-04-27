@@ -1,0 +1,785 @@
+\documentclass{article}
+
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage[table]{xcolor}
+
+\usepackage{hyperref}
+
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+
+\usepackage{icml2026}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+\usepackage{multirow}
+
+
+\usepackage{thmtools}
+
+\usepackage[capitalize,noabbrev]{cleveref}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+
+\makeatletter
+\renewcommand{\theHtheorem}{\thesection.\arabic{theorem}}
+\makeatother
+
+\usepackage[textsize=tiny]{todonotes}
+
+\newcommand{\fr}[1]{\mathfrak{#1}}
+\newcommand{\hfr}[1]{\hat{\mathfrak{#1}}}
+\newcommand{\mcal}[1]{\mathcal{#1}}
+\newcommand{\hcal}[1]{\hat{\mathcal{#1}}}
+\newcommand{\mbf}[1]{\mathbf{#1}}
+\newcommand{\hbf}[1]{\hat{\mathbf{#1}}}
+\newcommand{\bb}[1]{\mathbb{#1}}
+
+\newcommand{\G}[2]{\text{#1}(#2)}
+\newcommand{\red}[1]{\textcolor{red}{#1}}
+
+\icmltitlerunning{Why Depth Matters in Parallelizable Sequence Models: A Lie Algebraic View}
+
+
+\makeatletter
+\AddToHook{cmd/appendix/before}{%
+    \crefalias{section}{appendix}%
+    \crefalias{subsection}{appendix}%
+    \crefalias{subsubsection}{appendix}%
+    \crefalias{paragraph}{appendix}%
+}
+\makeatother
+\begin{document}
+
+\twocolumn[
+    \icmltitle{Why Depth Matters in Parallelizable Sequence Models: A Lie Algebraic View}
+
+  \icmlsetsymbol{equal}{*}
+
+  \begin{icmlauthorlist}\icmlauthor{Anonymous}{anon}\end{icmlauthorlist}
+
+  \icmlaffiliation{anon}{Anonymous Institution}
+  
+  
+
+  \icmlcorrespondingauthor{Anonymous}{anonymous@anonymous.invalid}
+  
+
+  \icmlkeywords{Machine Learning, ICML, Transformers, Attention, State-space models, Linear RNNs, Deep models, Expressivity, Lie algebra, State tracking}
+
+  \vskip 0.3in
+]
+
+\printAffiliationsAndNotice{} 
+
+\begin{abstract}
+Scalable sequence models, such as Transformer variants and structured state-space models,
+often trade expressivity power for sequence-level parallelism, which enables efficient training.
+Here we examine the bounds on error and how error scales when models operate outside of their expressivity regimes using a Lie-algebraic control perspective.
+Our theory formulates a correspondence between the depth of a sequence model and the tower of Lie algebra extensions.
+Echoing recent theoretical studies, we characterize the Lie-algebraic class of constant-depth sequence models
+and their corresponding expressivity bounds.
+Furthermore, we analytically derive an approximation error bound
+and show that error diminishes exponentially as the depth increases,
+consistent with the strong empirical performance of these models.
+We validate our theoretical predictions using experiments on symbolic word and continuous-valued state-tracking problems.\looseness=-1
+\end{abstract}
+
+\vspace{-1mm}
+\section{Introduction}
+Most sequence problems,  from symbolic processing tasks like natural language, mathematics, and coding, to the understanding of physical-world dynamics, are fundamentally \emph{order-sensitive}.
+Yet, highly scalable sequence models often achieve parallelism via \emph{order symmetry}.
+Notably,
+self-attention layers in transformers \citep{trafo}, 
+and crucial components of diagonal structured state-space models \citep{orvieto2023resurrecting, gu2023mamba} or linear transformer variants \citep{katharopoulos2020transformers,schmidhuber1992learning, YangWSPK24} are invariant to permutation of the layer input.
+This strong structural bias has inspired the study of the expressivity limits of such models \citep{hahn2020theoretical,MerrillWGSSY20}.
+
+In particular, recent theoretical endeavors have identified various reasoning problems and state-tracking problems \citep{KimS23,merrill2024illusion,grazzi2024unlocking}
+that are provably unsolvable by constant-depth transformers or diagonal structured state-space models.
+
+Despite these theoretical bounds, deep scalable sequence models remain the most empirically successful architectures
+for real-world large-scale tasks, as shown in large language models.
+This discrepancy motivates a quantitative question:
+\emph{How badly does a model operate when applied to tasks it provably cannot solve exactly?}
+Quantifying this gap matters in practice, and therefore computationally more efficient models
+would be preferable if the error remains to be tolerable.
+Although prior work such as \citet{muca2024theoretical} and \citet{walker2025structured} provides some intuition,
+the error-expressivity scaling laws have not, to our knowledge, been clearly derived.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.4\columnwidth]{simple_Lie_figure.pdf}
+  \caption{Geometric intuition of Lie theory. Initialized at point $e$,
+  consider \emph{actions} $\mbf{A}$ and $\mbf{B}$ sequentially,
+  and \emph{undo} actions $\mbf{B}^{-1}$ then $\mbf{A}^{-1}$.
+  Composition of actions $\mbf{A}\mbf{B}\mbf{B}^{-1}\mbf{A}^{-1}$ would return to $e$.
+  However,  \emph{switching} the order of undoing,
+ by using $\mbf{A}\mbf{B}\mbf{A}^{-1}\mbf{B}^{-1}$, might not return to $e$,
+incurring a discrepancy by landing on point $e'$.
+  Lie theory provides a useful measure of the potential offset between $e$ and $e'$.}
+  \label{fig:Informal_Lie}
+\end{figure}
+To answer this question, we leverage Lie theory 
+\cite{iserles2000lie,agrachev2013control,robbin2022introduction}.
+Geometrically, Lie theory measures the order-sensitivity of operations,
+or the discrepancy caused by swapping the order of events (see \cref{fig:Informal_Lie} for an intuitive illustration).
+This provides a hierarchy for classifying tasks and sequence models
+under their \emph{degree} of order sensitivity as well as a method for quantifying approximation errors.
+
+We show that order-symmetric models incur an unavoidable approximation error
+when the task is order sensitive.
+We then highlight increasing depth as a mechanism that
+extends the expressivity of parallelizable sequence models, decreasing this approximation error.
+Overall, our work characterizes depth-dependent error-expressivity behavior, and provides 
+guidance for model choice based on the task structure.
+
+\section{Mathematical Preliminaries}
+\label{sec:math_prelim}
+Here we introduce the mathematical framework used throughout the paper.
+We highlight concepts formalizing order sensitivity and approximation error that will be used to establish our theories in \cref{sec:theory}.
+Readers primarily interested in the main results and their practical implications may wish to proceed directly to \cref{sec:theory} and \cref{sec:exp}.
+
+\subsection{Lie groups and Lie algebras}
+\label{sec:LieAlgebra}
+A \emph{Lie group} $G$ is a smooth manifold equipped with a group structure under smooth multiplication.
+Its tangent space at the identity characterizes an associated \emph{Lie algebra} $\fr{g}$.
+Generally, a Lie algebra is a vector space $\fr{g}$ equipped with a bilinear and antisymmetric Lie bracket operation $[\cdot, \cdot]: \fr{g} \times \fr{g} \to \fr{g}$ that satisfies the Jacobi identity:
+\begin{equation*}
+    [[X,Y],Z] = [X,[Y,Z]] - [Y,[X,Z]],
+    \quad X,Y,Z \in \fr{g}.
+\end{equation*}
+A canonical example of the Lie bracket is a matrix commutator.
+For matrices
+$\mbf{A}, \mbf{B} \in \bb{R}^{n \times n}$,
+the Lie bracket corresponds to the matrix commutator $[\mbf{A},\mbf{B}] = \mbf{A}\mbf{B} - \mbf{B}\mbf{A}$.
+
+Given a vector space spanned by a collection of vector fields $\mcal{F}:= \{F_i\}$, the smallest Lie algebra is denoted as $\text{Lie}(\mcal{F})$ \cite{iserles2000lie}.
+Unless otherwise mentioned, Lie algebras are finite-dimensional over $\bb{R}$.
+
+\paragraph{Classes of Lie algebras}
+Here we classify Lie algebras based on their \emph{degree} of order sensitivity.
+The \emph{derived} series of $\fr{g}$ is the inductive sequence of commutator ideals:
+\begin{equation*}
+    \fr{g}^{(0)} = \fr{g},
+    \quad
+    \fr{g}^{(i)} = [\fr{g}^{(i-1)},\fr{g}^{(i-1)}].
+\end{equation*}
+If $\fr{g}^{(j)} = 0$ with the smallest finite number $j$, $\fr{g}$ is classified as a \emph{solvable} Lie algebra with derived length $j$.
+Similarly, the \emph{lower central} series of $\fr{g}$ is a sequence of ideals spanned by nested commutators:
+\begin{equation*}
+    \fr{g}^0 = \fr{g},
+    \quad
+    \fr{g}^i = [\fr{g},\fr{g}^{i-1}].
+\end{equation*}
+If $\fr{g}^c = 0$ with the smallest finite number $c$, $\fr{g}$ is \emph{nilpotent} with class $c$.
+An \emph{abelian} Lie algebra is the special case with $[\fr{g},\fr{g}]=0$ \cite{hall2013lie}.
+
+These Lie algebras are related by a structural hierarchy.
+Abelian Lie algebras are nilpotent, and all nilpotent Lie algebras are solvable.
+A solvable Lie algebra can be constructed by a
+\emph{tower} of abelian algebra extensions (\cref{app:rem_solvable_k_tower}).
+Extension is formally introduced in \cref{app:subsubsec_extensionprelim}.
+\subsection{State-space models and the Lie equation}
+\label{sec:LPVsystem}
+To connect Lie theory with sequence models, we formalize state-space models
+as controlled dynamical systems on Euclidean space (\cref{app:control_detail}).
+We will observe how the Lie algebra characterizes a dynamical system.
+\begin{definition}[State space model]
+\label{def:staticLPVsystem}
+A \emph{state space model} (SSM) is an affine vector field
+on Euclidean \emph{state space} $\mcal{M} = \bb{R}^n$
+and \emph{input space} $\mcal{X}$
+such that:
+\begin{equation}
+\label{eq:vectorstateODE}
+F_x: \mcal{M} \to T\mcal{M},
+\quad F_x(h) := \mbf{A}(x) h + \mbf{b}(x).
+\end{equation}
+$\mbf{A}: \mcal{X} \to \bb{R}^{n \times n}$ and $\mbf{b}: \mcal{X} \to \bb{R}^n$ are real analytic \cite{sontag2013mathematical}.
+We call $\mbf{A}$ the \emph{generator} of the SSM.
+We denote the SSM as $\mbf{S}$, and $\dim \mbf{S} := \dim \mcal{M}$.
+\end{definition}
+We assume SSMs satisfy mild regularity conditions (\cref{app:control_detail}).
+With a locally bounded and integrable input path $x(\cdot): [0,T] \to \mcal{X}$,
+one can reintroduce time in \cref{eq:vectorstateODE} and construct an ODE form.
+We say that an SSM is \emph{initialized} when the initial state $h(0)$ is fixed.
+
+In what follows, we focus on the dynamics generated by $\mbf{S}$.\footnote{
+Our theory focuses on the state evolution. When outputs matter, we equip $\mbf{S}$ with
+the \emph{output space} $\mcal{Y}$ and real analytic output map $g$ \cite{sontag2013mathematical}.}
+\begin{definition}[State-transition matrix]
+\label{def:Phi}
+    The state-transition matrix $\Phi$
+    is an evolution operator of the homogeneous flow:
+    \begin{equation}
+        \label{eq:STM}
+        \Phi_x(t,0) = \mcal{T} \exp \int_0^t \mathbf{A}(x(\tau)) \; d\tau,
+    \end{equation}
+    where $\mcal{T} \exp$ denotes the chronological (time-ordered) exponential \cite{agrachev2013control, sontag2013mathematical}.
+\end{definition}
+\paragraph{From state-centric to flow-centric view}
+\label{sec:flow_centric_realization}
+Rather than tracking a single state, one can consider tracking entire \emph{flows}.
+This perspective bridges Lie algebras and SSMs.
+
+Let us note some key features of $\Phi(t,0)$:
+\begin{equation}
+\label{eq:PhiFeature}
+    \dot{\Phi}(t,0) = \mbf{A}(x(t))\Phi(t,0),
+    \quad
+    \Phi(0,0) = I.
+\end{equation}
+It turns out that this is a \emph{Lie equation} \cite{iserles2008magnus}:
+\begin{definition}[Controlled Lie equation]
+\label{def:LieGroupEquation}
+A linear controlled Lie equation is a matrix ODE:
+\begin{equation}
+\label{eq:LieGroupEquation}
+    \dot{\Psi}(t) := \mbf{A}(x(t)) \Psi(t),
+    \quad
+    \Psi(0) = I.
+\end{equation}
+where $\text{Lie}(\{\mbf{A}(x)\}) = \fr{g} \subseteq \fr{gl}(n,\bb{R})$, $\Psi \in G \subseteq \G{GL}{n,\bb{R}}$ and the Lie group $G$ locally integrates $\fr{g}$.
+\end{definition}
+It is immediately clear that \cref{eq:PhiFeature} aligns with \cref{def:LieGroupEquation}:
+$\Phi$ can be considered as a local curve on $G$.
+Therefore, the controlled linear Lie equation is a \emph{flow-centric} ODE,
+tracking all sets of local evolutions rather than a single state \cite{jurdjevic1972control}.
+
+As $\fr{g}$ locally characterizes $\Phi$,
+we classify SSMs with the algebraic class of $\fr{g}$
+and, for short, denote it $\mbf{S}_\fr{g}$.
+We map SSMs to its Lie equations via \emph{lifting}.
+\begin{definition}[Lift]
+    Consider an $\mbf{S}_\fr{g}$ with initial state $h_0$.
+    Its lifted Lie equation extends \cref{eq:LieGroupEquation}
+    with augmented flow space $G \times \mcal{M}$.
+    For $\Psi \in G, \: h_0 \in \mcal{M}$:
+    \begin{equation*}
+        \dot{\Psi}(t) = \mbf{A}(x(t))\Psi(t),
+        \
+        \dot{h}(t) = 0,
+        \
+        \bigl( \Psi(0), h(0) \bigr) = \bigl( I, h_0 \bigr).
+    \end{equation*}
+\end{definition}
+\paragraph{Restricted SSM}
+\label{sec:main_affine_vector_field}
+As an umbrella term, we say $\mbf{S}_\fr{g}$ is \emph{restricted}
+if $\text{Lie}(\{\mbf{A}(x)\})$ is abelian.
+Although inhomogeneous SSMs can be order-sensitive due to the translation term, $\mbf{b}$,
+we observe that SSM expressivity is mostly determined by the generator, $\mbf{A}$.\footnote{
+One can absorb $\mbf{b}$ via \emph{homogenization} and treat an affine SSM
+as a homogeneous SSM \cite{krener1977decomposition}. Details in \cref{app:bridge_to_general_LPV}.}
+If not restricted, $\mbf{S}_\fr{g}$ is \emph{general}.
+\subsection{Simulation and error}
+\label{par:sim_min_main}
+Studying expressivity of a model class is tied to \emph{simulation}:
+whether one system can reproduce another's behavior \cite{liu2022transformers}.
+Analogously, we use a \emph{state-based} notion of simulation.\footnote{
+In this context, we assume the target system $\mbf{S}_1$ is \emph{minimal}.
+Minimality is formally treated in \cref{app:min_detail}.}
+
+Informally, we say $\mbf{S}_0$ simulates $\mbf{S}_1$
+if a smooth surjective submersion $\varphi: \mcal{M}_0 \to \mcal{M}_1$ maps
+$\mbf{S}_0$ state evolution to $\mbf{S}_1$ states under any admissible inputs.
+When exact simulation is impossible, we quantify the approximation error.\footnote{
+Formally introduced in \cref{app:sim_detail} with \emph{simulation error}.}
+Note that lifted the Lie equation simulates the original initialized SSM,
+\begin{equation}
+\label{eq:flow_to_state_submersion}
+    \varphi: G \times \mcal{M} \to \mcal{M},
+    \quad
+    \varphi\bigl( \Phi, h \bigr) = \Phi h,
+\end{equation}
+so that $h(t) = \varphi\bigl( \Phi(t,0), h(0) \bigr) = \Phi(t,0)h(0)$.
+\paragraph{Magnus expansion}
+\label{par:MagnusExpansion}
+Given the Lie-algebraic perspective of SSMs,
+we now introduce a quantitative tool for the simulation error.
+The \emph{Magnus expansion} decomposes $\Phi$ via exponential of
+iterated Lie brackets (\cref{app:CDE}),
+providing an explicit measure of order-relevant errors.
+\begin{definition}[Commutator mass]
+\label{def:commutator_mass}
+    Given a fixed input path $x$ over the interval $[0,T]$,
+    we define \emph{commutator mass} of $\mbf{S}$
+    as the norm of the second-order Magnus term, $\|\Omega_2\|$:
+    \begin{align}
+    \label{eq:omega_2}
+        \Omega_2
+        &= \frac{1}{2}
+        \int_0^T dt_1
+        \int_0^{t_1} dt_2
+        [\mbf{A}(x(t_1)), \mbf{A}(x(t_2))]
+        \\
+        &= \frac{1}{4}\iint_{[0,T]^2}
+        \text{sgn}(t_1 - t_2)
+        [\mathbf{A}(x(t_1)), \mathbf{A}(x(t_2))]
+        \, dt_1 dt_2. \nonumber
+    \end{align}
+\end{definition}
+We work on small windows in which the Magnus series converges.
+Long horizon behavior for large $T$ is constructed by the composition of small time partitions \cite{sontag2013mathematical}:
+\begin{equation}
+\label{eq:flow_composition}
+    \Phi(T,0) = \prod_{i=0}^n \Phi(t_{i+1}, t_i),
+    \quad
+    t_0=0,
+    \
+    t_{n+1}=T.
+\end{equation}
+\subsection{Deep structure}
+Most practical applications of artificial neural networks leverage deep layered structures with additional pointwise computation (e.g. MLP) between layers. To extend our theory, here we discuss dynamical systems with deep layered structure  \cite{krener1977decomposition}.
+\begin{definition}[Deep SSM]
+\label{def:stacking}
+    The \emph{cascade} of $\mbf{S}_0$ and $\mbf{S}_1$ is
+    defined with a smooth map $v: \mcal{M}_0 \times \mcal{X} \to \mcal{X}_1$:
+    \begin{align*}
+        \mcal{M} &\cong \mcal{M}_0 \times \mcal{M}_1, \: x_1(t) = v(h_0(t), x(t)) \\
+        \dot{h}_0(t) &= \mbf{A}_0(x(t))h_0(t) + \mbf{b}_0(x(t)) \\
+        \dot{h}_1(t) &= \mbf{A}_1(x_1(t))h_1(t) + \mbf{b}_1(x_1(t)).
+    \end{align*}
+     A deep SSM is obtained inductively:
+     \begin{align*}
+        x_i(t) &= v_i(h_{i-1}(t), \cdots, h_0(t), x(t)),
+        \quad
+        x_0(t) = x(t) \\
+        \dot{h}_i(t) &:= \mbf{A}_i(x_i(t)) h_i(t) + \mbf{b}_i(x_i(t)).
+     \end{align*}
+     where $v_i: \Bigl( \prod_{j=0}^{i-1} \mcal{M}_j \Bigr) \times \mcal{X} \to \mcal{X}_i$ is smooth.
+
+     We refer to each local SSM as the $i$-th layer.
+     An $L$-layer SSM is said to be restricted when all of its layers are restricted.
+     This convention applies to the other classes as well.
+\end{definition}
+\subsection{Word problems}
+\label{sec:intro_word_problems}
+Here we briefly introduce \emph{word problems}, one of the standard test beds for sequence model expressivity.
+We also use it in the experimental \cref{sec:exp}.
+For a formal introduction, we refer to \cref{app:def_formal_wordproblem}.
+
+Informally, a word problem is defined for a finitely generated group
+\footnote{More generally, word problems can be defined for a monoid or group given a finitely generating alphabet set.}
+\cite{liu2022transformers, merrill2024illusion}.
+We treat elements of the generating set as \emph{alphabet symbols},
+and the product of a sequence of these symbols as a \emph{word}.
+Under the group composition rule, each word evaluates to a group element.
+The word problem asks whether one can evaluate arbitrary words to the corresponding group elements.
+
+From a computational perspective, the word problem can be viewed as a symbolic state-tracking task.
+As symbols arrive sequentially, the model must update an internal state according to the group multiplication rule
+and determine the resulting group element.
+
+Let us provide a tangible example.
+Consider each \emph{alphabet symbol} as a \emph{primitive action}, such as permutation, rotation, or a state transition operation (\cref{fig:Informal_Lie}).
+A \emph{word} is then a sequence of \emph{action commands} evaluated by composing primitive actions in the given order.
+A sequence of matrix multiplication, or a rollout in a Markov decision process (MDP) with action-conditioned state transition, provide examples of word evaluation.
+
+The algebraic complexity of word problems is therefore rich and well-defined.
+When the chosen finite group is abelian, the corresponding word problem is inherently order-symmetric.
+In contrast, swapping alphabet orders in non-abelian groups can change evaluation,
+introducing order-sensitivity.
+We provide the class of exemplary word problems and related concrete problems in \cref{tab:words}.
+\begin{table}[t]
+\setlength{\tabcolsep}{0.3em}
+  \caption{Class of representative word problems.}
+  \vspace{-3mm}
+  \label{tab:words}
+  \begin{center}
+    \begin{small}
+        \begin{tabular}{lcccr}
+          \toprule
+          Class  & Group example         & Related problems\\
+          \midrule
+          Abelian    & $C_2, C_3, C_{60}, SO(2)$ & Parity; Cyclic gridworld \\ 
+         Nilpotent & $D_8, H_3$ & Quantum spin \\
+          Solvable    & $S_3, A_4, S_4$ & 2D affine transformation \\
+          Non-solvable    & $A_5, S_5, SO(n\ge3)$ & Rubik's cube; 3D rotation\\
+          \bottomrule
+        \end{tabular}
+    \end{small}
+  \end{center}
+  \vskip -0.1in
+\end{table}
+
+\section{Theory}
+\label{sec:theory}
+Our theory has two major parts.
+For single-layer models, \cref{thm:sim_error} derives a simulation error bound.
+Then, \cref{thm:Kstacks} provides theoretical ground on how depth extends expressivity.
+\cref{col:nilpotentization} and \cref{col:logdepth}
+explain how depth mitigates simulation error
+and construct an upper bound for depth-dependent expressivity errors.
+\subsection{Expressivity bounds of a single layer}
+\label{sec:theory_single_layer}
+In the single-layer case, we align our formulation with prior work \cite{merrill2024illusion, liu2022transformers, anonymous2025the} and constructively provide an error bound.
+For clarity, here we use $\mbf{S}$ for general SSMs,
+and $\hbf{S}$ for restricted SSMs.
+\begin{lemma}
+\label{lem:sim_impossible}
+No abelian $\hbf{S}$ can simulate a general SSM.
+\end{lemma}
+Proof is provided in \cref{app:sim_impossible_proof}.
+\begin{theorem}
+\label{thm:sim_error}
+    Consider a restricted $\hbf{S}$ that approximates $\mbf{S}$.
+    Under mild assumptions, there exists an input path $x$ on small time interval
+    that incurs simulation error scaling with the commutator mass $\|\Omega_2\|$ of $\mbf{S}$.
+    The error can
+    accumulate over long horizon and scale with sequence length.
+\end{theorem}
+Proof is provided in \cref{app:sim_error_proof}.
+
+\begin{proof}[Proof sketch]
+The order symmetry generates irreducible
+order-sensitive error, which locally scales with the commutator mass.
+Intuitively, consider applying the action set in \cref{fig:Informal_Lie} iteratively.
+The local discrepancy between $e$ and $e'$ could accumulate.
+\end{proof}
+\subsection{Expressivity bounds at deep structure}
+\label{sec:theory_multi_layer}
+Here we consider deep restricted SSMs
+and discuss how depth mitigates their expressivity limits.
+\begin{proposition}
+\label{lem:stackderivedlength}
+    Restricted $k$-layer SSMs are solvable with at most $2k$ derived length.
+    % Abelian $k$-layer SSMs are limited at most $k$.
+    Abelian $k$-layer SSMs are
+    solvable with at most $k$ derived length.
+\end{proposition}
+Proof is provided in \cref{app:stackderivedlength_proof}.
+
+\cref{lem:stackderivedlength} points out that any finite-depth restricted SSM is limited to be solvable.
+Indeed, \citet{merrill2024illusion} and \citet{muca2024theoretical}
+reported that scalable sequence models need
+\emph{infinite} depths to be fully expressive.
+\begin{theorem}
+\label{thm:Kstacks}
+    Consider $\mbf{S}_\fr{g}$ such that the derived length of $\fr{g}$ is $k$.
+    Then, there exists an abelian $k$-layer SSM plus smooth output map
+   that simulates $\mbf{S}_\fr{g}$.
+\end{theorem}
+Proof is provided in \cref{app:sub_proofKstacks}.
+
+\cref{thm:Kstacks} shows that deep abelian SSMs are quite powerful as the deep structure permits abelian SSMs to generate order-sensitive solvable flows.\footnote{
+Our proof technique analogously applies to general finite-dimensional Lie algebra extension,
+check \cref{rem:non_abelian_extension_generalization}.}
+Altogether, \cref{thm:Kstacks} provides
+intuition for how the depth of a system characterizes its algebraic class.
+\begin{remark}[Practical implication of \cref{thm:Kstacks}]
+We again use MDP to construct a tangible intuition. As noted in \cref{tab:words}, different orders of action execution generally lead to different action-dependent transition matrices.
+    Except in simple cases (e.g. cyclic gridworld), modeling order-sensitive dynamics is critical to whether a sequence model can represent an MDP or serve as a learned \emph{world model} in model-based reinforcement learning \cite{chen2022transdreamer}.
+    
+    Intuitively, \cref{thm:Kstacks} provides a concrete answer to how many layers are required to represent a \emph{composition} of actions with the correct transition structure.
+    In theory, each layer tracks a collection of \emph{commuting} components of dynamics, whose composition reconstructs non-commuting transitions.
+    This mirrors the construction of Lie algebra extensions and tower of abelian extensions.
+    
+    Under piecewise-constant inputs (or any suitable discretization), the SSMs in our theory can be considered as discrete-time sequence models.
+    In practice, parallelizable sequence models impose additional structural biases to achieve high stability or  scalability.
+    Therefore, we empirically test how models behave in \cref{sec:exp}.
+\end{remark}
+\vspace{2mm}
+\cref{thm:Kstacks} naturally maps to the well-known control theory literature.
+For concrete measure, we introduce the \emph{generator mass}.
+Given an input path over the short interval $[0,T]$,
+we define the local \emph{generator mass} of $\mbf{S}$:
+    \begin{equation*}
+        \epsilon = \int_0^T \|\mbf{A}(x(t))\| \, dt < 1,
+    \end{equation*}
+assuming $\epsilon < 1$ without loss of generality for short enough $[0,T]$.
+leading to the following approximation result.
+\begin{corollary}
+\label{col:nilpotentization}
+    For non-solvable $\mbf{S}_\fr{g}$, there exists an abelian $k$-layer SSM whose
+    local simulation error scales with $\mcal{O}(\epsilon^{2^{k-1}+1})$.
+\end{corollary}
+Proof is provided in \cref{app:sub_proof_nilpotentization}.
+Note that \cref{thm:sim_error} corresponds to $k=1$. The commutator mass, $\|\Omega_2\|$, scales in $\mcal{O}(\epsilon^2)$.
+
+\cref{col:nilpotentization} is a promising result: although algebraically obstructed,
+deep structure exponentially mitigates the order-sensitive error.
+The local error can again extends to long horizon via \cref{eq:flow_composition}.
+
+The piecewise-constant approximation lemma bridges us back to
+practical discrete-time realization \cite{krener1977decomposition}.
+\begin{proposition}
+\label{col:logdepth}
+    Any word problem with word length bounded by $T$
+    can be simulated by an
+    abelian deep SSM with at most $\bigl(\lceil \log_2T \rceil + 1\bigr)$-layers and a smooth output map.\footnote{
+Similar logarithmic depth result for transformers and semiautomata was reported in Theorem 1 of \citet{liu2022transformers},
+and empirically observed in \citet{hu2024limitation}.
+}
+\end{proposition}
+Proof and a formal introduction of the word problem are provided in \cref{app:sub_proof_logdepth}.
+
+\cref{col:logdepth} provides an explicit upper bound on the depth required to simulate discrete, finite-length sequences.
+Many practical applications, such as \emph{model predictive control},
+rely on constant-length sequence generation \cite{hafner2019learning}.
+Therefore, despite of their brittleness to generalization \cite{liu2022transformers},
+finite-depth scalable sequence models may suffice in practice.
+Note that \cref{col:logdepth} provides the worst-case depth upper bound, imposing minimal equivalence relation on words. In practice, much shallower SSMs may successfully simulate a given word problem when the finite group is well-structured.
+For example, a single layer abelian SSM suffices to simulate an abelian word problem for any $T$.
+
+Lastly, we note that solving the bounded length word problem can come at a cost of significant state expansion.
+\begin{corollary}
+\label{col:logdepth_state}
+Consider an alphabet of size
+$|\mcal{A}| = n$ and word length bounded by $T$.
+Then, the total state space dimension of the abelian deep SSM constructed in \cref{col:logdepth} exponentially grows in $T$ for fixed $n$ with asymptotic order $\mcal{O}(n^T/T)$.
+\end{corollary}
+Proof is provided in \cref{app:sub_proof_logdepth_state}. Again, this is a worst-case width upper bound following the construction of \cref{col:logdepth}.
+Depending on the structure of the word problem, the required width can be much smaller.
+For example, \cref{thm:Kstacks} yields an abelian deep SSM which can exactly simulate some word problems with fixed state size, not growing in $T$.
+
+Taken together, \cref{col:logdepth} and \cref{col:logdepth_state} clarify how depth and width (i.e. state space dimension) plays a role in constant length simulation. Logarithmic depth growth suffices to lift the algebraic obstruction at sequence length $T$, while exact simulation still requires a substantial state space expansion.
+Importantly, depth and width are orthogonal here.
+The construction in \cref{col:logdepth}
+can also be realized with a single-layer nilpotent SSM.
+However, its required state space dimension is still characterized as in \cref{col:logdepth_state}.
+
+\begin{remark}[Conjecture on restricted SSMs]
+\label{rem:conjecture_restricted_limits}
+    As shown in \cref{thm:sim_error}, restricted SSMs do not substantially extend expressivity beyond abelian SSMs. Although restricted SSMs can be order-sensitive (\cref{sec:main_affine_vector_field}), their strong structural constraints prevent them from simulating general SSMs with a single layer.
+    Motivated by this observation, we conjecture that the advantage of restricted layers over abelian layers is limited. In particular, we conjecture the existence of solvable $\mbf{S}_\fr{g}$ whose derived length is $k+1$, but cannot be simulated by any restricted $k$-layer SSM.
+\end{remark}
+
+\section{Experiments}
+\label{sec:exp}
+Here we experimentally illustrate our theoretical results by evaluating representative parallelizable sequence models on various state-tracking problems.  We examine symbolic word problems (\cref{sec:exp_wp}) covering those that are abelian ($C_2$, $C_3$), nilpotent ($D_8$, $H_8$), solvable ($S_3$, $S_4$) or non-solvable ($A_5$), as well as a physical rotation prediction problem based on $A_5$ (\cref{sec:exp_rotation}).
+
+Regarding the model architecture, in addition to the basic transformer \citep{trafo}, we study three types of diagonal structured SSMs: GLA \citep{YangWSPK24}, signed Mamba \citep{grazzi2024unlocking}, and AUSSM \citep{karuvally2025bridging}.
+Generators of each models are structured as positive, signed, and complex diagonal matrices, respectively.
+These architectures can be thought of discretized versions of restricted SSMs in our theory.
+Additionally, we also report on the performance of DeltaProduct \citep{siems2025deltaproduct} as a general SSM class
+that can solve the chosen tasks in theory and practice.
+
+\begin{table}[t]
+\setlength{\tabcolsep}{0.4em}
+\caption{Length generalization performance measured as sequence-level accuracy for various categories of word problems. Models are trained on length 128 and tested on 256. $L$ denotes the number of layers. DeltaProduct uses the theoretically necessary number of Householder products depending on the problem. The blue color cell highlights perfect generalization.
+Hyper-parameter search space can be found in Appendix \ref{app:exp_wp}.
+The number of training sequences is 500K for all tasks, except for $C_2$ which uses 100K.
+}
+\vspace{-2mm}
+
+\label{tab:word_problem}
+\begin{center}
+\small
+\begin{tabular}{lccccccc}
+\toprule
+& & \multicolumn{2}{c}{Abelian} & \multicolumn{2}{c}{Nilpotent} & \multicolumn{2}{c}{Solvable}  \\
+ \cmidrule(r){3-4} \cmidrule(r){5-6} \cmidrule(r){7-8} 
+Model   & $L$      & \multicolumn{1}{c}{$C_2$} & \multicolumn{1}{c}{$C_3$} & \multicolumn{1}{c}{$D_8$} & \multicolumn{1}{c}{$H_3$} & \multicolumn{1}{c}{$S_3$} & \multicolumn{1}{c}{$S_4$} \\ \midrule
+Transformer  & 1 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\ \midrule
+(+-only) Mamba & 1 & 0.00 & 0.00 &  0.00  & 0.00 & 0.00 & 0.00  \\  \midrule
+(+-only) GLA & 1 &  0.00  & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\ 
+                  & 2 &  0.00  & 0.00 & 0.00 & 0.00 & 0.00 & 0.00  \\ \midrule 
+Signed Mamba          & 1 & \cellcolor{blue!10} 1.00 & 0.00 & 0.00 &  0.00  & 0.00 & 0.00   \\  
+& 2 & \cellcolor{blue!10} 1.00 & 0.00 & \cellcolor{blue!10} 1.00 & \cellcolor{blue!10} 1.00 & \emph{0.19} & 0.00 \\  \midrule
+AUSSM    & 1 & \cellcolor{blue!10} 1.00 & \cellcolor{blue!10} 1.00 & 0.00 &  0.00  & 0.00 & 0.00    \\  
+    & 2 & \cellcolor{blue!10} 1.00 & \cellcolor{blue!10} 1.00 & 0.00 & 0.00 & 0.00 & 0.00 \\  \midrule
+DeltaProduct & 1 & \cellcolor{blue!10} 1.00 &  \cellcolor{blue!10}  1.00 & \cellcolor{blue!10} 1.00  & \cellcolor{blue!10} 1.00 & \cellcolor{blue!10} 1.00 &\cellcolor{blue!10} 1.00   \\
+\bottomrule
+\end{tabular}
+\end{center}
+\vspace{-6mm}
+\end{table}
+
+\subsection{Length Generalization on Solvable Word Problems}
+\label{sec:exp_wp}
+Here we evaluate performance on symbolic state-tracking problems, formalized as word problems (WPs) with chosen finite groups.
+We selected word problems for each class and trained sequence models to confirm each models' algebraic capacity using various depths.\looseness=-1
+
+Following prior work \citep{merrill2024illusion,siems2025deltaproduct}, we formulate a word problem as a sequence labeling task.
+Each sequence consists of tokens with each token representing a group element.
+At each position in a sequence to be read from left to right, we have a target label/token corresponding to the group element obtained by composing symbols in the sequence so far.
+The model is trained to predict the corresponding target label at each position.
+Further experimental details can be found in Appendix \ref{app:exp_wp}.
+
+We first evaluate the length generalization performance by training models on sequences of length 128 and testing them on length up to 256.
+Results are shown in Table \ref{tab:word_problem}; and we break down the results as follows.
+
+\textbf{Abelian WPs.}
+We first evaluate models on abelian WPs as a smoke test.
+Empirically, echoing prior work, we observe that transformer failed to model the simplest abelian word problems, $C_2$.
+Similarly, positive diagonal only (denoted as +-only) GLA and Mamba did not perform well in $C_2$.
+In contrast, Signed Mamba can solve $C_2$, while failing on $C_3$; and AUSSM succeeded at both $C_2$ and $C_3$.
+
+\textbf{Nilpotent and Solvable WPs.}
+We further evaluate models on more challenging WPs.
+Theoretically, $D_8$, $H_3$, and $S_3$ requires at least two, while $S_4$ requires three, layers of \emph{abelian} SSMs.
+Note that sequence models correspond to \emph{restricted} SSMs, and may solve $S_4$ in two layers. However, we conjectured that this would not be the case \cref{rem:conjecture_restricted_limits}.
+
+Consistent with the prediction, none of the models except DeltaProduct successfully performed the task with a single layer.
+With two layers, we observe that the inductive bias significantly influences model behavior.
+Signed Mamba successfully learned $D_8$, a nilpotent task,
+but only achieves partial generalization on the solvable task $S_3$.
+In contrast, AUSSM fails to learn a generalizable solution for
+non-abelian word problems under our experimental setting.
+
+It remains an open question what hinders the performance of deeper models.
+Still, several factors may offer some insights.
+Our theory constructs on real arithmetic whereas empirical computation is on finite precision; the impact of finite precision is beyond the scope of the current work. 
+Moreover, without further constraints, how gradient-based optimization shapes the solution is also unclear.
+This points to the \emph{learnability} issue:
+the practical learnability is influenced by the low-level inductive biases of
+each model (i.e., the specific choice of state update rules), which are tangential to the expressivity theory.
+For example, we empirically observe that, although Signed Mamba has a more restricted eigenvalue range than AUSSM,
+empirically it performed better in the $2$-layer regime (see further comments on the trainability of AUSSM in Appendix \ref{app:exp_rotation}).
+
+\begin{figure}[t]
+    \begin{center}
+        \includegraphics[width=1.0\columnwidth]{figures/seqlen_vs_depth_vertical.png}
+        \caption{Maximum sequence length for each model with varying number of layers to achieve $>90\%$ sequence-level prediction accuracy on the training set of the word problem $A_5$. All models are trained on length up to 128. Deep models ($>$ 4 layers) that failed to achieve a longer sequence length than shallower models are not shown; deep GLA and signed Mamba models often fail to learn this task.  $T$ in the legend $\bigl(\lceil \log_2T \rceil + 1\bigr)$ is sequence length (i.e., y-axis).
+}
+        \label{fig:seqlen_vs_layer}
+    \end{center}
+\end{figure}
+
+
+\subsection{Depth vs.~Length in Non-solvable Word Problems.}
+Here we focus on $A_5$ as the simplest non-solvable word problem to illustrate how increasing the model depth enhances performance
+beyond its expressivity range, in line with \cref{col:logdepth}.
+
+Figure \ref{fig:seqlen_vs_layer} shows the maximum length of the sequence that the model can accurately predict for a given number of layers.
+We chose the accuracy cutoff at $> 90\%$, and compared results to the theoretical depth upper bound provided at \cref{col:logdepth}.
+
+We observe that transformer clearly benefits from depth.
+By varying the number of layers from 1 to 8, transformer performance improves
+following the trend of the theoretical bound (\cref{sec:theory}).
+In the case of GLA and Signed Mamba, we observe a similar trend showing the benefit of depth, increasing from 1 up to depth 4 or 5.
+
+However, we observe that deeper models are hard to train on this task; some of the deep models performed worse than shallower ones. 
+This is again illustrative of the practical learnability issue discussed in the previous section.
+In particular, the 8-layer Signed Mamba only slightly improves upon the 5-layer one (achieving length 36 vs.~35), which is less efficient than the bound expected by our theory.
+
+\begin{figure*}[t]
+    \begin{center}
+        \includegraphics[width=2.0\columnwidth]{figures/mse_grid.png}
+        \caption{Mean squared error on the rotated vector prediction task at various sequence length for transformer, GLA, and signed Mamba, with different numbers of layers. Left column illustrates result on training sets, and right corresponds to test sets. Standard error is shown using 3 seeds. Performance of DeltaProduct with 4 Householder products is shown as a reference.
+}
+        \label{fig:rotation_mse}
+    \end{center}
+     \vspace{-1mm}
+\end{figure*}
+
+\subsection{3D Rigid-body Rotation Problem}
+\label{sec:exp_rotation}
+Finally, to demonstrate the relevance of our results beyond symbolic word problems, we conduct experiments with a continuous-valued state-tracking regression problem constructed on $A_5$.
+
+The $A_5$ group represents a symmetry on a dodecahedron.
+Two chosen \emph{generators} $\{\mbf{P}, \mbf{R}\}$,
+corresponding to permutation and rotation,
+span $A_5$ group elements.
+We represent $\{\mbf{P}, \mbf{R}\}$ in matrices:
+\begin{align*}
+    \mbf{P} = \begin{pmatrix}
+        0 & 0 & 1 \\
+        1 & 0 & 0 \\
+        0 & 1 & 0
+    \end{pmatrix},
+    \quad
+    \mbf{R} = \begin{pmatrix}
+        \frac{\sqrt{5}-1}{4} & -\frac{\sqrt{5}+1}{4} & \frac{1}{2} \\
+        \frac{\sqrt{5}+1}{4} & \frac{1}{2} & \frac{\sqrt{5}-1}{4} \\
+        -\frac{1}{2} & \frac{\sqrt{5}-1}{4} & \frac{\sqrt{5}+1}{4}
+    \end{pmatrix},
+\end{align*}
+where $\mbf{P}$ and $\mbf{R}$ are the permutation (or the $120^\circ$ rotation) and the $72^\circ$ rotation matrices, respectively.
+We chose a vector on a unit sphere as the initial state.
+The model observes a sequence of $A_5$ elements, and the task is to predict the corresponding transformed vector after each element.
+Algebraically, the problem corresponds to the action of $A_5$ embedded as a finite subgroup of $SO(3,\bb{R})$. Further experimental details are provided in Appendix \ref{app:exp_rotation}.
+
+Figure \ref{fig:rotation_mse} shows the prediction error as a function of the model depth for transformer, GLA, and Signed Mamba.\footnote{We found AUSSM to be generally unstable for this task; Appendix \ref{app:exp_rotation} provides further discussions and corresponding results.}
+Analogous to the symbolic tasks, we observe that the depth plays a critical role in reducing the error.
+
+However, here again, we observe some learnability issues for deep GLA and Signed Mamba models.
+The benefit of depth on the test set performance saturates beyond 6 layers.
+Similarly, the performance of deep transformer varies, illustrating a training stability issue.
+
+\section{Discussion}
+\label{sec:discussion}
+The expressivity of parallelizable sequence models is limited at constant depth;
+yet, deep parallelizable models achieve strong empirical performance on complex tasks.
+Our work provides a Lie-algebraic perspective on this discrepancy.
+
+Our theory connects the depth of sequence models to an abstract, algebraic extension theory.
+The connection provides an optimistic message: although the algebraic obstruction may preclude an \emph{exact} simulation, deep architectures compensate to rapidly minimize the error.  This conclusion is supported by our experiments.  Across symbolic and physical tasks, we observe that increasing depth systematically reduces error on tasks outside each model's theoretical expressivity range.  Our observations suggest depth as a structural mechanism that mitigates complex order sensitivity.
+This also motivates parallelizable models with adaptive depth \citep{dehghani2018universal,csordas2021devil,csordas2021ndr,csordas2024moeut,tan2023sparse}
+
+Together, our study clarifies expressivity bounds of sequence models and how the bound is mitigated by approximation, providing a practical guideline for model selection.
+
+\subsection{Future directions}
+Our results naturally suggest several future directions.
+One immediate direction is examining the impact of positional encoding (PE).
+Although additive PE is unlikely to unlock expressivity,
+an advanced form of multiplicative PE does boost the expressivity of commuting sequence models \cite{liu2022transformers,yang2025path}.
+Understanding, or constructing, such mechanisms through algebraic structure
+is a promising and practical avenue of research.
+
+Orthogonally, our theory assumes real arithmetic and may be sensitive to the use of finite precision in real-world applications.  On the one hand, exponentially vanishing error may fall below numerical resolution, potentially blurring the algebraic obstruction. On the other hand, finite precision may constrain learnability of the system under gradient-based optimization, which we have not studied. How finite precision interacts with our findings and impacts expressivity needs to be deeply considered.
+
+Lastly, improvements in training algorithms may improve the learnability of sequence models, allowing more extensive testing of the bounds derived here.
+
+\subsection{Related Work}
+\paragraph{Transformer variants.}
+The expressivity of sequence models is often studied through computational complexity and formal language theory \citep{GilesSCLC89,gers2001lstm,schmidhuber2001evaluating,weissGY18,hahn2020theoretical,MerrillWGSSY20,BhattamishraAG20,deletang2022neural,irie2023practical,StroblMW0A24,beck2024xlstm}.
+In particular, \citet{liu2022transformers} provided insight on transformer learning a semiautomaton.
+By leveraging Krohn-Rhodes theorem, they guaranteed the existence of constant-depth transformer that can simulate any semiautomaton with bounded sequence length.
+They further showed that no constant-depth transformer simulates general semiautomaton with arbitrary length sequence unless $\text{TC}^0 = \text{NC}^1$, and empirically showed the brittleness of the solution a transformer learns on fixed sequence length.
+\citet{hu2024limitation} extended the result to (hidden) Markov model variants and empirically observed that the minimal required transformer layer depth grows logarithmically with the Markov model sequence length.
+\citet{cheng2025transformers} leverage graph theory to show that a transformer can learn directed acyclic graph structures,
+which can be understood as a variant of the Markov model results provided above.
+
+\paragraph{Structured SSMs.}
+\citet{merrill2024illusion} extended circuit complexity theory to SSMs and again proved constant-depth commuting SSMs, such as Mamba, are expressively limited in a way similar to constant-depth transformers. Specifically, they proved that constant-depth commuting SSMs can be simulated in $\text{TC}^0$-class circuits and thus fail to admit $\text{NC}^1$-class circuits unless $\text{TC}^0 = \text{NC}^1$.
+For $S_5$ word problems, they show that the minimal required depth of Mamba or a transformer indeed grows with the sequence length.
+They also proposed architectural augmentations such as nonlinear recurrence or input-dependent, non-diagonal SSMs that can, in a tradeoff with computational cost, recover expressivity with constant-depth.
+
+Naturally, a growing body of work aims to expand SSM expressivity at tolerable computational expense.
+\citet{siems2025deltaproduct} leverage input-dependent compositions of generalized Householder transformations, grounded on \citet{schlag2021linear} and \citet{yang2024parallelizing}.
+They proved that (gated) DeltaProduct can theoretically recognize regular language with enough number of Householder transformation, and empirically tested with a few specific word problems.
+Complementarily, another line of work leverages controlled differential equation (CDE) and rough path theory \cite{muca2024theoretical}.
+Building on \citet{walker2024log},
+\citet{walker2025structured} proposed structured linear CDEs (SLiCEs)
+in formalizing SSMs and proved their expressivity range.
+Recent work \cite{anonymous2025the} proved $L$-layer complex-valued diagonal SSMs can track solvable groups of $\le L$ derived length. They also reported the empirical demonstrated expressivity-learnability gap.
+\section{Conclusion}
+Scalable sequence models achieve parallelism by imposing order symmetry, which limits their ability to \emph{exactly} solve many sequence problems. We make this performance gap tangible and measurable by Lie theory and connect the depth of sequence models to algebraic extension theory. Our theory shows that, even when exact simulation is not possible, the order-sensitive approximation error vanishes exponentially with depth.
+Experiments on symbolic word problems and 3D rotation state tracking task supports our theory, while also exposing practical challenges such as the instability during training of deep models. Together, we provide an algebraic perspective for understanding depth-dependent error-expressivity in parallelizable sequence models.
+
+\section*{Impact Statement}
+This paper presents work whose goal is to advance the field of Machine
+Learning. There are many potential societal consequences of our work, none
+which we feel must be specifically highlighted here.
+
+\section*{Software and Data}
+Our code is available at: \url{https://github.com/kazuki-irie/lie-algebra-state-tracking}.
+
+\bibliography{main, main_2}
+\bibliographystyle{icml2026}
+
+\newpage
+\appendix
+\onecolumn
+
+\input{A1_Preliminaries}
+\input{A2_Proofs}
+\input{A3_Experiments}
+
+\end{document}

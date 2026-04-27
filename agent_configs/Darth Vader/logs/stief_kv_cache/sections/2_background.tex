@@ -1,0 +1,122 @@
+\section{Background}
+\label{sec:background}
+
+\subsection{Attention, KV cache, and notation}
+We consider a transformer decoder layer with attention computed over a prefix of length $n$.
+For a per-head dimension $d_h$, let $K,V \in \mathbb{R}^{n \times d_h}$ denote the keys and values for a single attention head over the prefix.
+During prefilling, queries are computed for all prefix tokens, so $Q \in \mathbb{R}^{n \times d_h}$.
+During autoregressive decoding, the query corresponds to the current token only, so $Q \in \mathbb{R}^{1 \times d_h}$.
+The (per-head) attention output is:
+\begin{equation}
+\mathrm{Attn}(Q,K,V) \;=\; \mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_h}}\right)V.
+\label{eq:bg_attn}
+\end{equation}
+
+In standard multi-head attention (MHA), each query head has its own key/value head.
+Grouped-query attention (GQA) reduces KV memory by letting multiple heads share the same key/value pair,
+%
+i.e., the model uses fewer KV heads than query heads ($H_{\mathrm{KV}} < H_Q$) \citep{gqa}.
+The computation in Eq.~\eqref{eq:bg_attn} still applies per query head.
+
+In autoregressive decoding, each layer caches past keys and values to avoid recomputing them for every generated token.
+The KV cache size grows linearly with $n$ (and with the number of KV heads) and becomes a dominant memory and bandwidth cost at long contexts~\cite{scalingLLM}.
+
+
+\paragraph{SVD notation.}
+For a matrix $X \in \mathbb{R}^{m \times p}$, we write its SVD as
+$X = \mathbf{U}\mathbf{\Sigma}\mathbf{V}^\top$,
+where $\mathbf{U}\in\mathbb{R}^{m\times m}$ and $\mathbf{V}\in\mathbb{R}^{p\times p}$ have orthonormal columns (i.e., $\mathbf{U}^\top\mathbf{U}=\mathbf{I}_m$ and $\mathbf{V}^\top\mathbf{V}=\mathbf{I}_{p}$), and
+$\mathbf{\Sigma}\in\mathbb{R}^{m\times p}$ is diagonal (rectangular) with nonnegative singular values on its diagonal,
+$\sigma_1 \ge \sigma_2 \ge \cdots \ge \sigma_{\min(m,p)} \ge 0$.
+
+ 
+\subsection{Compression along the head dimension}
+We compress the cache by projecting along the per-head feature dimension $d_h$.
+Let $P_K \in \mathbb{R}^{d_h \times r_K}$ and $P_V \in \mathbb{R}^{d_h \times r_V}$ be matrices with $r_K,r_V \ll d_h$, lying on the Stiefel manifold, i.e., the set of matrices with orthonormal columns~\cite{stella}.
+By storing the compressed representations:
+\begin{equation}
+\begin{aligned}
+K^{\downarrow} &= K P_K \in \mathbb{R}^{n \times r_K},\\
+V^{\downarrow} &= V P_V \in \mathbb{R}^{n \times r_V},
+\end{aligned}
+\label{eq:bg_compress}
+\end{equation}
+we reduce memory by:
+\begin{equation}
+\mathrm{CR} \;=\; \frac{r_K + r_V}{2d_h},
+\label{eq:bg_cr}
+\end{equation}
+which we refer to as the per-token compression ratio.
+During forward passes, we then reconstruct the $\tilde{K}/\tilde{V}$ approximations as:
+% and reconstruct when needed:
+\begin{equation}
+\begin{aligned}
+\tilde{K} &= K^{\downarrow}P_K^\top = K P_K P_K^\top,\\
+\tilde{V} &= V^{\downarrow}P_V^\top = V P_V P_V^\top.
+\end{aligned}
+\label{eq:bg_reconstruct}
+\end{equation}
+We use $P_K,P_V$ to denote generic orthonormal projection bases.
+For instance, SVD-based compression commonly sets $P_K=\mathbf{V}_r$ where $\mathbf{V}_r$ contains the top-$r_K$ singular vectors of $K$ with the highest explained variance (and analogously $P_V$ from the top-$r_V$ right singular vectors of $V$).
+
+
+
+% \subsection{Evaluation target and error budgets}
+% Our main target is the \emph{full decoder-layer output}, not an intermediate tensor.
+% Let $f_\ell(\cdot)$ denote the original decoder layer (including attention, output projection, residuals, normalization, and MLP), and let $\tilde{f}_\ell(\cdot)$ denote the same layer where the attention block uses $(\tilde{K},\tilde{V})$ from Eq.~\eqref{eq:bg_reconstruct}.
+% Given calibration inputs $x$ (layer inputs), we measure the relative layer-output error:
+% \begin{equation}
+% \mathrm{err}_\ell \;=\; \mathbb{E}_{x}\!\left[\frac{\| f_\ell(x) - \tilde{f}_\ell(x) \|_F}{\| f_\ell(x) \|_F}\right].
+% \label{eq:bg_err}
+% \end{equation}
+% We apply an error budget $\epsilon$ \emph{per layer}, enabling non-uniform rank allocation across depth and asymmetric ranks for keys and values.
+
+\subsection{SVD-based approaches and their objective functions}~\label{subsec:backg_svdkvc}
+All methods in this family compress the KV cache 
+% 
+%\emph{along the per-head feature dimension}, caching low-rank projections 
+%
+as in Eq.~\eqref{eq:bg_compress}. They differ mainly in the \emph{proxy objective} used to select the orthonormal projection bases $(P_K,P_V)$.
+
+\paragraph{K-SVD (reconstruction of $K$).}
+A standard baseline chooses an orthonormal basis $P_K\in\mathbb{R}^{d_h\times r_K}$ to minimize the Frobenius norm of the key reconstruction error \citep{asvd,chang2025palu}:
+\begin{equation}
+\min_{P_K^\top P_K = I_{r_K}}\;\; \|K - K P_K P_K^\top\|_F^2,
+\qquad
+P_K = \mathbf{V}_{r_K}(K),
+\label{eq:bg_ksvd}
+\end{equation}
+where $\mathbf{V}_{r_K}(K)$ contains the top $r$ right singular vectors of $K$ and $I_{r_K}$ is the identity matrix of dimension $r_K$.
+The same construction is applied to values by setting $P_V=\mathbf{V}_{r_V}(V)$.
+This optimizes reconstruction of cached tensors rather than attention behavior or decoder-layer outputs.
+
+\paragraph{EigenAttention (reconstruction of $[K;Q]$).}
+EigenAttention \citep{saxena2024eigenattention} notes that projecting keys also induces an implicit projection on queries in the score computation $QK^\top$ of Eq.~\ref{eq:bg_attn}.
+Therefore, it forms the vertically concatenated matrix
+\begin{equation}
+Z \;=\; \begin{bmatrix}K\\Q\end{bmatrix}\in\mathbb{R}^{2n\times d_h},
+\label{eq:bg_eigen_concat}
+\end{equation}
+and chooses a shared orthonormal basis $P_K\in\mathbb{R}^{d_h\times r_K}$ by minimizing the reconstruction error:
+\begin{equation}
+\min_{P_K^\top P_K = I_{r_K}}\;\; \|Z - Z P_K P_K^\top\|_F^2,
+\label{eq:bg_eigen}
+\end{equation}
+which is solved by the truncated SVD of $Z$.
+This remains a reconstruction objective and its solution depends on the relative scaling of $K$ and $Q$: if one has larger magnitude/variance, the truncated SVD of $[K;Q]$ is biased toward reconstructing that block, which can under-represent the other. For values, EigenAttention uses the same reconstruction objective as in K-SVD.
+
+
+\paragraph{KQ-SVD (approximation of $QK^\top$).}
+KQ-SVD \citep{lesens2025kqsvd} targets the \emph{pre-softmax interaction matrix} that drives attention scores.
+Rather than reconstructing $K$ (or $[K;Q]$), it chooses low-rank factors to approximate $QK^\top$ directly.
+Concretely, it parameterizes a rank-$r$ approximation as:
+\begin{equation}
+QK^\top \;\approx\; Q P_Q P_K^\top K^\top \;=\; (Q P_Q)(K P_K)^\top,
+\label{eq:bg_kqsvd_form}
+\end{equation}
+where $P_K,P_Q\in\mathbb{R}^{d_h\times r}$ are used to project the \emph{compressed key} $K^{\downarrow}$ to cache and the \emph{compressed query} $Q^{\downarrow}$ used at runtime.
+The optimal factors are computed in closed form and are directly tied to the truncated SVD of $QK^\top$.
+This yields the best rank-$r$ approximation of the pre-softmax score matrix, which, however, still remains a proxy for downstream layer behavior. For values, KQ-SVD mirrors the same idea on the value--output pathway: instead of targeting $QK^\top$, it targets the interaction between values and the attention output projection by approximating $V W_O$ in low rank (with $W_O$ the attention output-projection matrix).
+This yields a value basis used to cache $V^{\downarrow}=V P_V$ such that, after reconstruction and output projection, the resulting contribution to the layer output is preserved.
+
+% While these proxy objectives preserve different intermediate quantities, none directly optimizes the downstream criterion we ultimately care about: decoder-layer output error.

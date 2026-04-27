@@ -1,0 +1,2002 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Position: The Inevitable End of
+One-Architecture-Fits-All-Domains in Time Series Forecasting
+Anonymous Authors1
+Abstract
+Recent work has questioned the effectiveness and
+robustness of neural network architectures for
+time series forecasting tasks. We summarize these
+concerns and analyze groundly theirinherent lim-
+itations: i.e. theirreconcilable conflictbetween
+single (or few similar) domains SOTA and gen-
+eralizability over general domains for time series
+forecasting neural network architecture designs.
+Moreover, neural networks architectures for gen-
+eral domain time series forecasting are becom-
+ing more and more complicated and their perfor-
+mance has almost saturated in recent years. As
+a result, network architectures developed aiming
+at fitting general time series domains are almost
+not inspiring for real world practices for certain
+single (or few similar) domains such as Finance,
+Weather, Traffic, etc: each specific domain devel-
+ops their own methods that rarely utilize advances
+in neural network architectures of time series com-
+munity in recent 2-3 years. As a result, we call
+for the time series community to shift focus away
+from research on time series neural network ar-
+chitectures for general domains: these researches
+have become saturated and away from domain-
+specific SOTAs over time. We should either (1)
+focus on deep learning methods for certain spe-
+cific domain(s), or (2) turn to the development of
+meta-learning methods for general domains.
+1. Introduction
+Time series forecasting is a cornerstone of decision-making
+in high-stakes environments, including financial markets,
+energy grid management, climate science, and healthcare.
+Driven by the transformative success of large-scale pre-
+training and universal architectures in Natural Language
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Processing (NLP) and Computer Vision (CV), the time se-
+ries research community has recently pivoted toward a sim-
+ilar paradigm (Liang et al., 2024). The prevailing trend
+assumes that increasing model capacity and designing com-
+plex, “general-purpose” neural architectures will eventually
+yield a foundation model for forecasting (Gao et al., 2024;
+Das et al., 2024).
+However, we argue that this pursuit overlooks a fundamen-
+tal structural difference between time series and other com-
+mon domains. Despite the proliferation of sophisticated
+architectures, a significant gap remains between academic
+benchmarks and real-world deployment: when state-of-the-
+art (SOTA) performance is required for specific domains,
+practitioners consistently favor domain-specific models over
+the “universal” architectures promoted in the literature. This
+suggests that the current research trajectory may be reaching
+a point of diminishing returns (Brigato et al., 2026; Wang
+et al., 2025b).
+The central thesis of this paper is that the community
+faces a fundamental conflict ofdomain-specific excel-
+lenceandcross-domain generalizability. Moreover, such
+conflict is irreconcilable for general-domain time series
+forecasting.This tension is rooted in two primary con-
+straints:
+1. Inherent Domain Heterogeneity:Unlike in NLP
+where each domain shares similar linguistic structures,
+time series data across different sectors, such as wind
+power fluctuations versus high-frequency limit order
+books, are governed by entirely different physical pro-
+cesses and causal structures. A search for a single
+architecture that is capable of capturing these disparate
+“logics” optimally is likely a misplaced endeavor (Pfis-
+ter, 2024).
+2. Statistical Limits of Temporal Data:Time series data
+is intrinsically constrained by the temporal window of
+observation. While CV and NLP benefit from nearly
+infinite spatial or linguistic scaling, time series scaling
+is bounded by history. Theoretically, for a data duration
+T , the generalization error is lower-bounded by a factor
+proportional to 1/
+√
+T . No architectural innovation can
+circumvent this statistical bottleneck (Kuznetsov &
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+Mohri, 2014; Shi et al., 2024).
+We argue that it is such conflict that has caused many
+peculiar phenomena observed in time series communi-
+ties (Bergmeir, 2024b; Brigato et al., 2026), and has been
+the reason why advances in general-domain TSF neural net-
+works barely benefits researchers in those specific domains
+(e.g. Traffic, Weather, Electricity, etc.). In this paper, we
+advocate for a strategic redirection of the field. As illus-
+trated in Figure 1, we summarize our core arguments and
+the resulting research redirection. Specifically, we propose
+that:
+• The community should acknowledge the “seesaw” con-
+flict between domain SOTA and cross-domain general-
+ization. General-purpose architectures that are “SOTA”
+on benchmark suites still lag domain-specific models;
+given that practitioners can often deploy domain SOTA
+directly, we should stop optimizing general-purpose
+architectures as an end in itself.
+• Research effort should shift to either (1) online meta-
+learning and continual adaptation that enable models to
+“learn how to learn” from limited domain context (e.g.,
+LLM-as-scientist), or (2) domain-specific forecasting
+models that explicitly incorporate domain context and
+mechanisms (finance, weather, traffic, etc.).
+By pivoting from architecture search to meta-adaptation, our
+community can bridge the gap between theoretical research
+and the practical necessity of domain-specific precision.
+2. Background
+Since 2021, the research community has made great effort
+in developing general domain time series forecasting neural
+network architectures. Starting from paradigm and datasets
+proposed in Informer (Zhou et al., 2021), many neural net-
+works architectures have been proposed for general domain
+time series forecasting performance. A common practice for
+these papers is to propose a neural network architecture to
+achieve as high performance as possible across a wide range
+of datasets of time series like Electricity, Traffic, Weather,
+etc.
+2.1. Neural Network Methods for General-domain Time
+Series Forecasting
+In 2021, Informer (Zhou et al., 2021) set up a multi-dataset
+paradigm (e.g. ETT, ECL, etc.) for neural network based
+general domain long-horizon forecasting, after which a
+burst of “general-domain time series forecasting” architec-
+tures were proposed under a mostly unified task protocol.
+Beyond Transformer variants (decomposition, frequency,
+patching, or de-stationary attention) (Wu et al., 2022b; Zhou
+et al., 2022; Woo et al., 2022; Liu et al., 2022; 2024b; Wu
+et al., 2022a; Nie et al., 2022; Cirstea et al., 2022; Grigsby
+et al., 2021), the community also explored competitive non-
+attention backbones, including lightweight linear variants
+(e.g. FITS, OLinear, CrossLinear, GLinear) (Xu et al.,
+2024b; Yue et al., 2025; Zhou et al., 2025; Rizvi et al.,
+2025), modern CNN-style sequence models (e.g. Mod-
+ernTCN, PatchMixer) (donghao & wang xue, 2024; Gong
+et al., 2023), and MLP-mixer style models (e.g. TSMixer,
+TimeMixer) (Ekambaram et al., 2023; Wang et al., 2024).
+Crucially, some early works already exposed warning signs
+about the “general-domain” time series. DLinear (Zeng
+et al., 2022) shows that, under the same benchmark proto-
+col, a single linear layer can match or nearly match many
+increasingly elaborate architectures; previous context-length
+scaling analyses (Shi et al., 2024) further suggest that simply
+extending the history window can evenhurtperformance
+on small datasets. These pieces of work in previous year
+also questioned the effectiveness of proposed methods and
+metrics.
+2.2. Large Multi-Domain Time Series Datasets and
+Large Foundational Time Series Models
+Large Datasets.A common practice is to propose large
+datasets consisted of several small datasets, represented
+by recent benchmarking efforts such as TFB (Qiu et al.,
+2024b;a), in which 8068 uni-variate time series and 25
+multi-variate time series datasets are included and used for
+benchmarking methods. Aunifiedend-to-end evaluating
+pipeline is offered with standardized metrics and protocols,
+which has also motivated follow-up analyses and surveys
+on evaluation sensitivity and saturation. (Kim et al., 2025;
+Brigato et al., 2026; Wang et al., 2025b)
+Large Models.Inspired from pretrained foundational mod-
+els for NLP, foundational models for time series have been
+proposed. Early representatives include unified or decoder-
+only forecasting backbones trained on multi-source collec-
+tions (Gao et al., 2024; Das et al., 2024). More recently,
+stronger 2025-era foundation models and training objec-
+tives have been explored, e.g., Sundial (Liu et al., 2025),
+LightGTS (Wang et al., 2025a), and UDE (Wang et al.,
+2025d), as well as in-context fine-tuning for time-series
+foundation models. (Faw et al., 2025) In parallel, a growing
+line of work explicitly investigatesLLM+time serieshy-
+brids: digit-tokenization / zero-shot extrapolation with off-
+the-shelf LLMs (Gruver et al., 2023), prompt-based GPT-
+style forecasters (Cao et al., 2024; Liu et al., 2024a; Pan
+et al., 2024; Bumb et al., 2025), “reprogramming” pretrained
+LLMs for forecasting (Jin et al., 2024), and alignment-style
+approaches that adapt LLM representations to numerical
+series (Chang et al., 2025). More recently, integrated hetero-
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+Section 3
+Inherent 
+Irreconcilable 
+conflict
+between general-
+domain and specific 
+domain performance
+Consequences
+Peculiar observations by community
+Diverse SOTA for diverse TSF domains
+Solutions
+Causes
+Cross Domain Diversity
+Data Scarcity
+Section 3.1
+Section 3.2
+Section 4
+Section 4.1
+Section 4.2
+Section 5
+Section 5.1
+Section 5.2
+Domain-specific TSF Neural Nets
+Meta-learning: e.g. LLM scientists
+Error of existing 
+methods for each 
+method type
+Domain-specific 
+Context/Properties 
+Utilized in Network 
+Architecture
+General-Domain, 
+single modality
+General-Domain, 
+multi-modality
+Single-Domain, 
+Specified designs
+Minimum 
+Reachable  Error 
+for each method 
+type
+1. Near Saturation for 
+general-domain neural 
+networks
+2. Huge Gap between 
+general and single-
+domain neural 
+networks
+general-domain NNs which only take 
+the previous part of the sequence as 
+input without extra modalities (e,g, 
+PatchTST, iTransformer, ModernTCN, 
+Dlinear, Glinear, FITS, etc.)
+general-domain NNs which takes 
+extra input modalities but in a unified 
+and general way (e,g, TimeLLM, 
+LLM4TS, GPT4TS, CALF, FPT, etc.)
+NNs specified for a single domain, 
+utilizing domain-specific knowledge 
+and designs (e,g, PANGU, HGEFS, FuXI-
+RTM, Neural-GCM, ClimODE, etc.)
+Figure 1.Left:A mind map of the core arguments in this position paper. We propose that there exists a inherent, irreconcilable conflict
+between general-domain and single-domain performance for time series forecasting neural network architecture designing. We analyze its
+causes, consequences and advocated better research directions. We discuss more about Alternative Views in Section 6.Right:Error
+reached/reachable for a specific domain (e.g. weather forecasting) when utilizing different types of methods with different available
+domain-specific context and properties.
+geneous prompting and cross-modal alignment frameworks
+have also been explored (Wang et al., 2025c). Relatedly,
+language-model-like sequence backbones have also been
+explored for time series tasks beyond Transformers (e.g.,
+RWKV-style models) (Hou & Yu, 2024; Liang et al., 2024).
+Previous Calls for Better Large Datasets and Better Prac-
+tice.Previously there have been calls for more scientific
+and better Large Datasets. For example, (Bergmeir, 2024a)
+states the fact that such a foundational model might perform
+well on average on multiple datasets at the cost of poorer
+performance on certain subsets of datasets (similar to the
+James-Stein Paradox (Stein, 1956; James & Stein, 1961)).
+(Bergmeir, 2024a; Pfister, 2024) also call for future time
+series datasets with multi-modality data, for the reason that
+time series alone (especially uni-variate time series) do not
+have enough information (e.g. electricity and market time
+series might have similar trend in input, but might evolve
+in very different ways, hence more information is needed).
+More recently, some work states other anomalies of the
+time series forecasting community: (Brigato et al., 2026)
+shows the sensitivity of evaluation results of network archi-
+tectures to hyperparameters, (Wang et al., 2025b) shows
+some forecasting benchmarks have been almost saturated.
+In this paper, we analyze the root cause of these phenom-
+ena ground-based. We propose that these phenomena are
+caused by an incompatible conflict between Domain SOTA
+and Cross-Domain Generalizability, which is especially
+irreconcilable for the general domain time series fore-
+casting tasks the community has been working on. Be-
+cause of this irreconcilable conflict, current general-domain
+time series forecasting neural networks lag behind domain-
+specificially designed time series neural networks by enough
+margin that these domains develop their own SOTA neural
+networks (that are irrelevant to general domain time series
+neural networks).
+3. The Irreconcilable Conflict: Single-Domain
+vs. General-Domain SOTA for Time Series
+Neural Networks
+The central thesis of this paper is that any single architecture
+in Time Series Forecasting (TSF) faces an irreconcilable
+conflict between achieving domain-specific State-of-the-Art
+(SOTA) performance and maintaining cross-domain gener-
+alizability. While fields like NLP have converged toward
+a “one-size-fits-all” foundation model, TSF remains stub-
+bornly fragmented. We argue that this is not a temporary
+limitation of current algorithms, but a fundamental conflict
+rooted in the nature of time series forecasting. Specifically, a
+model that generalizes must discard the unique contexts and
+structural priors that are essential for optimal performance
+in specialized fields. In the following sections, we demon-
+strate the irreconcilability of this conflict by analyzing two
+primary catalysts: the inherent cross-domain diversity of
+time series and the natural constraints of data scarcity that
+prevent traditional scaling.
+3.1. Cross-Domain Diversity
+One leading cause of the conflict comes from the diversity
+among different time series domains.
+First, Time series data is rarely “self-contained”; its behav-
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+ioris usually driven by external “context” that varies
+in structure and modality. For instance, weather fore-
+casting relies on spatial-temporal context like geographic
+topography or atmospheric pressure grids, whereas finan-
+cial forecasting depends on unstructured modalities like
+news sentiment or limit order book dynamics. Because it
+is architecturally difficult to build a single model capable
+of accepting such diverse auxiliary inputs, most existing
+works ignore these “extra” contexts to maintain a unified,
+sequence-only structure. Even for some “Multimodal TSF
+Models” which accept more modalities as input (Bergmeir,
+2024b), they can not include all domain-specific modalities.
+For example, geographic topography for weather, stock mar-
+ket in another country for financial market prediction, etc.,
+cannot be well-aligned as input to a single “Multimodal TSF
+Model”. By treating all domains as simple numerical se-
+quences, these models suffer from an inevitable Bayes error.
+They discard the domain-specific information necessary to
+reach the theoretical limit of predictability, trading precision
+for architectural uniformity.
+Furthermore, time series from different domains are gov-
+erned bydistinct mathematical and physical laws, re-
+quiring different feature and structural priors. For example,
+stock prices and tradings in financial markets can be affected
+by Macroeconomic Indicators (e.g. policies, government
+reports) (Chen et al., 1986), Cross-Assets and Inter-Market
+Correlations (e.g. gold price rises when there is a fear in
+stock market) (Longin & Solnik, 2001), Corporate and Fun-
+damental Events, etc; while a city’s temperature can be
+affected by Geographic Baseline, Urban Structure, Anthro-
+pogenic Heat, Blue and Green Infrastructure, etc. (Oke,
+1982; Stewart & Oke, 2012) Domain experts design specific
+rules, features, neural network architectures and structures
+to take into account these factors. An architecture’s specific
+design may become a liability in another domain. Con-
+sequently, a single architecture cannot be simultaneously
+optimal for the rigid cycles of physical systems and the
+stochastic volatility of human-driven markets.
+3.2. Data Scarcity
+While fields like Natural Language Processing (NLP) and
+Computer Vision (CV) have thrived by scaling model param-
+eters alongside massive datasets, TSF faces a fundamental
+bottleneck in data availability. This scarcity is not merely a
+logistical hurdle or budget limitation, but a natural constraint
+that prevents a “one-size-fits-all” scaling approach.
+Natural Scarcity and Augmentation ChallengeCom-
+pared to the trillions of tokens available in language corpora,
+high-quality time series data is naturally scarce. Many criti-
+cal domains, such as macroeconomics or long-term climate
+cycles, produce only a single data point per month or year.
+Furthermore, traditional data augmentation techniques used
+in CV (like flipping or cropping) often destroy the tem-
+poral dependencies and causal structures inherent in time
+series, making it difficult to synthetically expand training
+sets without introducing significant bias.
+Furthermore, there is a significant imbalance in dataset sizes
+across different application domains. For example, the traf-
+fic and electricity domains each have nearly 200,000 total
+timestamps. In contrast, four of the ten domains, including
+prominent fields like stock and healthcare, have an aggre-
+gate dataset size of no more than 2,500 timestamps. Figure 2
+visualizes this disparity in total timestamps across different
+fields for TFB (Qiu et al., 2024b).
+The Temporal Boundary of Approximation Error
+More importantly, TSF is bounded by a unique temporal
+constraint: even if one increases sampling frequency or
+collects data from more sensors within a fixed time span
+T , the information gain is limited. As we demonstrate in
+Appendix A, for a given observation window, the approx-
+imation error of the underlying process is fundamentally
+bounded by O(1/
+√
+T) . Unlike other domains where data
+can be gathered in parallel across the internet, time series
+data is tethered to the linear progression of time. This cre-
+ates an inevitable estimation error that cannot be overcome
+simply by increasing sample density.
+Failure of Scaling and the Need of Human PriorsThe
+consequence of this data limitation is that TSF cannot rely
+on the “scaling laws” that define modern AI. In the absence
+of infinite data to “wash away” architectural inefficiencies,
+there is analmost-inevitable estimation errorfor any sin-
+gle domain. The only way to address it is by injecting
+domain-specific human priors into the model. For example,
+in power grid forecasting, incorporating physical constraints
+like Kirchhoff’s laws or seasonal load patterns allows a
+model to achieve high precision with limited data. However,
+these priors are strictly domain-dependent This necessity
+for specific inductive biases reinforces the irreconcilable
+gap between a unified, general-purpose architecture and a
+domain-specific SOTA model.
+4. Consequences of the conflict and focusing on
+a ‘General Domain Time Series Forecasting’
+4.1. Peculiar observations in Time Series Forecasting
+Community
+In our TSF community, there have been peculiar observa-
+tions and warning signals. These observations can actually
+be explained starting from the irreconcilable conflict we
+proposed. We provide two representative examples.
+TSF Neural Networks do not always beat tradi-
+tional methods.One specific observation by previous
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+Figure 2.Left: Number of total timestamps across different domains for multivariate forecasting datasets in TFB dataset (Qiu et al.,
+2024b); Right: Number of total timestamps across different domains forecasting tasks used by most TSF papers represented by
+ModernTCN (donghao & wang xue, 2024). All are small compared to typical NLP datasets (Yenduri et al., 2023).
+work (Makridakis et al., 2018; Bergmeir, 2024b) is that
+traditional statistical forecasters (e.g., ARIMA (Box et al.,
+2015), exponential smoothing/ETS (Hyndman et al., 2002),
+and the Theta method (Assimakopoulos & Nikolopoulos,
+2000)) excel at general-domain time series forecasting tasks
+even compared with SOTA neural network methods. This
+is because traditional TSF methods are designed to fit gen-
+eral properties of general time series, and have been uti-
+lizing most of the features and properties shared across
+general domain time series. Some deep learning neural
+network methods are actually inspired by these traditional
+methods, for example, FITS (Xu et al., 2024b) proposes an
+FFT-LowPassFilter-Linear-iFFT learning pipeline, which
+connects to classic adaptive/Wiener filtering ideas (Wiener,
+1949; Widrow et al., 1975) that date back more than half a
+century.
+Saturation of metrics of current general domain TSF
+neural network methods.Another observation is that the
+newly proposed neural networks have been making less
+and less progress on benchmarks. For example, (Wang
+et al., 2025b) proposed Accuracy Law, stating that accura-
+cies for ETT, Electricity and Weather datasets are unlikely
+to be improved. As a result shown in (Brigato et al., 2026),
+hyperparameters have great impact on general time series
+forecasting models’ rankings: result variance is too large
+that almost all 8 general domain TSF neural networks tested
+can be made “SOTA on an averaged metric” with a “prop-
+erly set” experiment setting, even on large, general-domain
+datasets that include many time series data samples such as
+TFB (Qiu et al., 2024b) and Gift-eval (Aksu et al., 2024).
+This indicates that simply increasing dataset size would not
+resolve the saturation issue. The devil lies in the inherent
+irreconcilable conflict between single domains performance
+and performance across general domains: a neural network
+designed targeting general time series performance can only
+leverage general domain features and properties, thus such
+direction can be easily exploited by hunderds of researcher
+years.
+4.2. Diverse SOTA proposed by different task
+Communities irrelevant to the time series
+community
+The gap between general-domain time series forecasting
+neural networks and domain-specific TS neural networks
+is so huge that, in most cases, single time series domain
+usually utilizes or develops their own SOTA methods. These
+methods are usually developed from general deep learning
+or machine learning methods, and unfortunately, are usually
+irrelevant to general domain time series forecasting neural
+networks, especially those developed in recent 3-4 years.
+For example, in Table 1 we list some single-domain time se-
+ries forecasting challenges and competitions online. The top
+winning methods are based on, either statistical methods, or
+feature engineering and ML-based methods, or ‘plain’ deep-
+learning methods (rather than DLTSF methods, which are
+architectures designed for general domain raw time series
+inputs).
+Apart from Kaggle time series-related competitions, we
+also check the relevant academic work in domains that are
+related to time series, and appear in the datasets from (Zhou
+et al., 2021). We selected 9 representative academic papers
+on domains including Finance, Weather, Health, Traffic
+from domain-top journals and conferences, and record the
+detailed ML/DL methods they use. Results are shown in
+Table 2. From the table we observe that: researchers in
+these domains develop their own SOTA methods that are
+built from basic building blocks (e.g. MLP, Transformers,
+etc.) and are not utilizing nor adapted from general domain
+time series methods.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+Forecasting Competitions #Teams Top-1/Top-N Methods
+Kaggle & Optiver: 3225 Top1: Feature Engineering +
+Trading at Close Ensembled Model of CatBoost,GRU,Transformers (hyd)
+Kaggle & Jane Street: 4085 Top1: AutoEncoder+MLP+XGBoost (Wang)
+Market Prediction
+M6 Forecasting Competition 226 Top9: 1Judgement, 4TS-based, 3ML-based, 1NS (Makridakis et al., 2023)
+Table 1.Examples of Challenges and Competitions related to time series forecasting.For Kaggle-Optiver Competition: we further check
+top4 open-discussion solutions (all in top 20), which are all based on Feature Engineering and ensemble of traditional ML methods/basic
+DL methods.For Kaggle-Jane Street Competition: we further check top4 open-discussion solutions (all in top 20), which are all
+based on simple nets like MLPs, GBMs, etc.For M6 competition: Judgment: either pure judgmental or judgment-informed; TS-based:
+(traditional) time series approaches, but also their combinations; ML-based: ML approaches integrated with TS and combinations; NS:
+not specified. Though not specifically discussed by M6 (Makridakis et al., 2023) whether the teams use NNs proposed by time series
+forecasting community, but it seems most still use traditional deep-learning approaches, represented by (Mashlakov).
+Work Published at Domain Method Used/Discussed
+(Kaniel et al., 2023) (Ferson et al., 2025) JFE,JFQA Finance Features+MLP
+(Bi et al., 2023) (Price et al., 2024) Nature Weather 3D Transformer,DDPM
+(Zhang et al., 2023) (Li et al., 2025a) ML Conf. Health Foundation model,Transformer
+(Jungel et al., 2024) (Fang et al., 2024) (Li et al., 2025b) ML Conf. Traffic Game Theory,Diffusion RL,Transformer
+Table 2.Examples of academic work published at top journals and conferences, studying typical problems with deep learning in different
+domains, within the past 3 years. ML Conf. refers to ICML, NeurIPS and ICLR. Our time series community has designed general time
+series forecasting neural networks, and they are tested on related datasets like Weather, Traffic (Zhou et al., 2021); however, academic work
+in corresponding domains are not using these general time series forecasting neural nets designed by time series community, implying the
+capability of currently designed general-domain TSF neural networks.
+5. Possible Solutions
+Given the fundamental barriers of diversity and scarcity,
+achieving SOTA performance requires a strategic departure
+from universalism. We propose several solutions which may
+overcome the underlying limitation.
+5.1. Domain-specific Neural Network
+The most direct solution is the development of Domain-
+Specific Neural Networks (DSNNs)—architectures inten-
+tionally narrow in scope but deep in domain integration.
+Unlike general foundation models that prioritize zero-shot
+transfer, DSNNs are engineered to internalize the unique
+contexts, constraints, and data-generating mechanisms of
+a specific field. In practice, this usually means that the
+model is not only trainedona domain, but also designed
+withdomain structure in mind. A few representative exam-
+ples illustrate why such specialization often dominates real
+deployments:
+Physics-Informed Architectures (Weather/Climate).In
+weather and climate forecasting, many important mod-
+els (Kochkov et al., 2024; Verma et al., 2024; Bi et al.,
+2023; Chen et al., 2023; Nguyen et al., 2023) embed physi-
+cal structure (e.g., conservation laws, dynamical constraints,
+spatial fields) into the modeling pipeline, which can out-
+perform generic sequence backbones that must infer these
+priors from limited observations.
+Microstructure- and Regime-Aware Models (Finance).
+Financial time series are heavily non-stationary and driven
+by market microstructure and regime shifts (Xu et al., 2024a;
+Gajamannage et al., 2023; Rahimikia et al., 2025); prior
+work shows that explicitly designed modules for such prop-
+erties can yield clear gains, whereas scaling generic archi-
+tectures provides limited benefit (Huang et al., 2024).
+Task-Specific Efficiency Under Scarcity (En-
+ergy/Operations).In many operational forecasting
+problems (e.g., load forecasting), supervised models
+tailored to the target horizon, covariates, and constraints
+can match or exceed large pretrained models under limited
+data budgets (Tang et al., 2025b; Wu et al., 2025).
+These examples suggest a practical lesson: when domain
+context is available and the goal is domain-level SOTA,
+inductive bias and domain integration matter more than uni-
+versal architectural novelty. DSNNs therefore serve as a
+realistic anchor for what practitioners optimize, and moti-
+vate system-level solutions (e.g., meta-learning) that can
+reuse such experts across domains.
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+5.2. Meta-Learning: A Systemic Alternative to Unified
+Architectures
+Given that the conflict between single-domain precision and
+universal generalizability is irreconcilable within a single ar-
+chitecture, we argue that true cross-domain “generalization”
+should not be sought at the neural network architecture level,
+but at the meta-system level. Instead of a fixed model trying
+to absorb all domain nuances, we propose meta-learning
+frameworks that can dynamically discover and deploy the
+optimal architecture for a given task.
+Agentic Meta-Learning: the ‘LLM Scientist’The most
+flexible approach to this problem is an agentic framework,
+often referred to as an ‘LLM Scientist’. Rather than acting
+as a forecaster itself, where it often struggles with numerical
+precision, the LLM acts as an orchestrator that analyzes
+the “context” and “properties” we identified in Section 3.1.
+Works like (Zhao et al., 2025; Jin et al., 2023; Tang et al.,
+2025a) typically employ specialized agents to perform LLM-
+guided diagnostics on a dataset’s statistics, subsequently
+proposing targeted preprocessing and selecting the best-fit
+model architecture from a library of experts. By utilizing
+the reasoning capabilities of LLMs to “plan” the forecasting
+strategy, these systems can inject human-like domain knowl-
+edge, such as identifying whether a series is stationary or
+cyclical, without requiring the underlying numerical model
+to be universal. This solves the “Bayes error” by allowing
+the system to use the most context-appropriate tools for each
+unique domain.
+Learning-Based Meta-SelectionA more automated al-
+ternative is learning-based meta-learning, where a “meta-
+model” is trained to predict the performance of various base-
+learners across a wide array of datasets. Recent frameworks
+like (Abdallah et al., 2025; Norton et al., 2025; Talagala
+et al., 2022) demonstrate this by mapping the statistical char-
+acteristics of a new, unseen time series to a “performance
+matrix” of hundreds of specialized forecasting models. By
+learning which architectures excel on specific data proper-
+ties (e.g., high-frequency vs. seasonal), these systems can
+recommend a SOTA-level model for a new domain in a
+zero-shot or few-shot manner. Unlike traditional scaling,
+which attempts to build one massive model, this approach
+builds a meta-recommender that leverages the efficiency of
+domain-specific models, thereby bypassing the data scarcity
+bottleneck by focusing on “learning to select” rather than
+“learning to forecast” from scratch.
+Meta-Learning for Automated Feature SelectionIn
+many high-stakes domains, engineered covariates and fea-
+ture selection remain essential because raw temporal se-
+quences often hide the true causal drivers. Yet manual
+feature design is costly and domain-specific. meta-learning
+offers a scalable alternative by learning, from prior tasks,
+which feature constructions tend to help under which data
+regimes.
+For example, Meta-MSGL (Khan et al., 2025) uses a meta-
+learning controller to score high-dimensional meta-features
+and estimate the marginal utility of feature groups across
+datasets. Related meta-learned feature-importance mecha-
+nisms have also been explored in clinical time-series settings
+such as EHR modeling (Aguiar et al., 2022). Together, these
+approaches can prioritize transformations (e.g., seasonal
+Fourier terms) or indicators (e.g., trend/volatility measures)
+consistent with a series’ global statistics, mitigating the
+Bayes error by tailoring the input space to the task without
+manual intervention.
+6. Alternative Views
+6.1. The Universal Scaling Hypothesis
+A prominent alternative view is that the conflict between
+domain-specific SOTA and generalizability is not funda-
+mental, but rather a symptom of insufficient model capacity
+and data volume (Kaplan et al., 2020). Proponents of this
+view argue that if we scale architectures (e.g., to billions
+of parameters) and training corpora (to trillions of time
+points) sufficiently, a “super-model” would eventually in-
+ternalize the diverse properties and latent contexts of all
+domains (Vaswani et al., 2023; Brown et al., 2020). Un-
+der this hypothesis, the model would effectively learn to
+“switch” its internal logic based on the input signal, render-
+ing domain-specific architectures obsolete.
+Our Response:While the universal scaling hypothesis
+has proven transformative for NLP and CV (Kaplan et al.,
+2020; Krizhevsky et al., 2012), we argue it is fundamen-
+tally hindered in TSF by the approximation error bound
+discussed in Section 3.2 (Kuznetsov & Mohri, 2014). In
+text or images, ‘more data’ often translates to higher seman-
+tic coverage; in time series, the dataset size is often limited
+naturally, and even if we manage to collect more data man-
+ually, the available data is strictly limited by the temporal
+span T . Scaling the model size without a corresponding
+linear increase in the temporal horizon does not resolve
+the O(1/
+√
+T) bottleneck; instead, it frequently exacerbates
+overfitting to domain-specific noise (Shi et al., 2024). More-
+over, as we have mentioned, for time series domain diversity
+is more irreconcilable compared to CV/NLP: different time
+series domains follow different or even contradictory evolv-
+ing rules, hence adding more domains/more data might even
+hurt the performance (Bergmeir, 2024a; Pfister, 2024).
+6.2. DL methods are more human-efficient
+A reasonable counterargument is that deep learning methods
+arehuman-efficient: once a generic architecture and train-
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+ing pipeline are established, practitioners can often achieve
+strong performance on a new dataset with minimal manual
+modeling effort (e.g., no hand-crafted feature engineering
+or explicit physical constraints) (Liang et al., 2024). From
+this perspective, the goal of building universal architectures
+is not necessarily to beat the best domain-expert systems in
+every field, but to lower the barrier to entry and provide a
+reliable “default” forecaster across many domains.
+Our Response.We agree that general-purpose neural fore-
+casting systems can be attractive as a low-effort baseline.
+However, in high-stakes domains, the objective is typically
+near-ceilingperformance under domain constraints and co-
+variates; the limiting factor is usually domain context and
+valid inductive bias, not the backbone architecture. Thus, a
+universal sequence-only model can be human-efficient but
+information-inefficient (Bergmeir, 2024a).
+Moreover, meta-learning can beat least as human-efficient
+while offering a more plausible path to higher performance:
+it automates the selection/adaptation of specialized experts
+(and their priors) from data, instead of forcing one back-
+bone to fit all domains (Abdallah et al., 2025; Norton et al.,
+2025). Therefore, the human-efficiency argument strength-
+ens our position: prioritize domain-specific models and
+meta-learning systems over further “universal” architecture
+engineering.
+6.3. General SOTA is also important
+Another alternative view is that it is misguided to compare
+against domain-specific SOTA at all: what the TSF com-
+munity should optimize for isgeneralSOTA—a model that
+performs beston averageacross a broad suite of datasets un-
+der a unified protocol (Qiu et al., 2024b; Aksu et al., 2024).
+Under this lens, incremental gains on cross-domain bench-
+marks are still meaningful, even if a domain expert can
+engineer a stronger system for a particular field. Moreover,
+for researchers attempting to work on a specific domain, they
+might try some simple, neat, effective general-domain meth-
+ods, then try to build or get some more complicated, com-
+plex single-domain SOTA methods. It is very questionable
+whether a complicated, complex, hyperparameter-sensitive
+“general-domain SOTA” is helpful for these specific-domain
+researchers (Brigato et al., 2026).
+Our Response.We agree that strong cross-domain base-
+lines and fair unified benchmarks are valuable—and that
+“generalizability” is a legitimate scientific goal. Our concern
+is that the current “general SOTA” game is increasingly
+dominated by evaluation sensitivity (hyperparameters, pre-
+processing, dataset curation) and yields diminishing prac-
+tical returns: leaderboard gains on averaged benchmarks
+rarely translate to the settings practitioners care about, where
+domain context is available and success is measured against
+a domain-specific ceiling (Brigato et al., 2026).
+Researcher on general-domain 
+TSF network architecture
+Researcher on single-
+domain TSF network 
+architecture Researcher on TSF meta-learning
+…
+Huge Gap with Domain SOTA
+Explore Domain SOTA Autonomous Discovery of
+Domain-Specific Methods
+Figure 3.Suggested practices: from pursuing a neural network ar-
+chitecture that has huge gaps with domain SOTAs to (1) developing
+single-domain SOTA neural network methods, or (2) developing
+meta-learning methods that are generalizable across domains.
+Meta-learning preserves generalizability (a unified interface
+and reuse across datasets) while better matching domain
+practice: rather than forcing one backbone to fit all domains,
+it learns toselect/adaptspecialized pipelines and inductive
+biases (Abdallah et al., 2025; Norton et al., 2025). This
+shifts progress from chasing average-score gains to learning
+better rules for choosing the right expert.
+7. Conclusion
+Time Series Forecasting is a critical task across industries,
+from weather prediction and electricity demand to quanti-
+tative trading. Motivated by these applications, the com-
+munity has pursued neural architectures that achieve SOTA
+across broad, general-domain benchmarks. Yet, as we ar-
+gue, an irreconcilable tension between specific-domain and
+general-domain SOTA means these models often fall short
+of domain-specific ceilings and are rarely used by practition-
+ers who can leverage domain context and tailored inductive
+biases. Because researchers are not aware of thisfunda-
+mental, irreconcilable conflictis previously overlooked
+(e.g. some opinion believes scaling up/better designs can
+solve the problem), substantial effort continues to go into
+general-domain architecture design.
+We suggest that these efforts should be switched to the devel-
+opment of more useful and effective topics: as proposed in
+our work, we call for researchers to focus on(1)developing
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+domain-specific time series forecasting neural networks or
+(2)developing meta-learning methods that are more gener-
+alizable than a certain neural network architecture.
+References
+Abdallah, M., Rossi, R. A., Mahadik, K., Kim, S., Zhao, H.,
+and Bagchi, S. Evaluation-free time-series forecasting
+model selection via meta-learning.ACM Transactions on
+Knowledge Discovery from Data, 19(3):1–41, 2025.
+Aguiar, H., Santos, M., Watkinson, P., and Zhu, T. Learn-
+ing of cluster-based feature importance for electronic
+health record time-series. In Chaudhuri, K., Jegelka,
+S., Song, L., Szepesvari, C., Niu, G., and Sabato, S.
+(eds.),Proceedings of the 39th International Conference
+on Machine Learning, volume 162 ofProceedings of Ma-
+chine Learning Research, pp. 161–179. PMLR, 17–23 Jul
+2022. URL https://proceedings.mlr.press/
+v162/aguiar22a.html.
+Aksu, T., Woo, G., Liu, J., Liu, X., Liu, C., Savarese, S.,
+Xiong, C., and Sahoo, D. Gift-eval: A benchmark for
+general time series forecasting model evaluation, 2024.
+URLhttps://arxiv.org/abs/2410.10393.
+Assimakopoulos, V . and Nikolopoulos, K. The theta model:
+A decomposition approach to forecasting.International
+Journal of Forecasting, 16(4):521–530, 2000.
+Bergmeir, C. Invited talk by christoph bergmeir - fun-
+damental limitations of foundational forecasting mod-
+els: The need for multimodality and rigorous evalua-
+tion. InNeurIPS 2024 Workshop on Time Series in the
+Age of Large Models, NeurIPS ’24 Workshop. NeurIPS,
+2024a. URL https://neurips.cc/virtual/
+2024/108471.
+Bergmeir, C. Invited talk by christoph bergmeir - fun-
+damental limitations of foundational forecasting mod-
+els: The need for multimodality and rigorous evalua-
+tion. InNeurIPS 2024 Workshop on Time Series in the
+Age of Large Models. NeurIPS, 2024b. URL https:
+//neurips.cc/virtual/2024/108471.
+Bi, K., Xie, L., Zhang, H., Chen, X., Gu, X., and Tian, Q.
+Accurate medium-range global weather forecasting with
+3d neural networks.Nature, 619(7970):533–538, 2023.
+Box, G. E. P., Jenkins, G. M., Reinsel, G. C., and Ljung,
+G. M.Time Series Analysis: Forecasting and Control.
+Wiley, 5 edition, 2015.
+Brigato, L., Morand, R., Strømmen, K., Panagiotou, M.,
+Schmidt, M., and Mougiakakou, S. There are no champi-
+ons in supervised long-term time series forecasting, 2026.
+URLhttps://arxiv.org/abs/2502.14045.
+Brown, T. B., Mann, B., Ryder, N., Subbiah, M., Kaplan,
+J., Dhariwal, P., Neelakantan, A., Shyam, P., Sastry, G.,
+Askell, A., Agarwal, S., Herbert-V oss, A., Krueger, G.,
+Henighan, T., Child, R., Ramesh, A., Ziegler, D. M., Wu,
+J., Winter, C., Hesse, C., Chen, M., Sigler, E., Litwin, M.,
+Gray, S., Chess, B., Clark, J., Berner, C., McCandlish,
+S., Radford, A., Sutskever, I., and Amodei, D. Language
+models are few-shot learners, 2020. URL https://
+arxiv.org/abs/2005.14165.
+Bumb, M., Vemulapalli, A., Jella, S. H. V . P., Gupta, A.,
+La, A., Rossi, R. A., Chen, H., Dernoncourt, F., Ahmed,
+N. K., and Wang, Y . Forecasting time series with llms via
+patch-based prompting and decomposition, 2025. URL
+https://arxiv.org/abs/2506.12953.
+Cao, D., Jia, F., Arik, S. O., Pfister, T., Zheng, Y ., Ye,
+W., and Liu, Y . Tempo: Prompt-based generative pre-
+trained transformer for time series forecasting, 2024.
+URLhttps://arxiv.org/abs/2310.04948.
+Chang, C., Wang, W.-Y ., Peng, W.-C., and Chen, T.-F.
+Llm4ts: Aligning pre-trained llms as data-efficient time-
+series forecasters, 2025. URL https://arxiv.org/
+abs/2308.08469.
+Chen, L., Zhong, X., Zhang, F., Cheng, Y ., Xu, Y ., Qi, Y .,
+and Li, H. Fuxi: a cascade machine learning forecasting
+system for 15-day global weather forecast.npj climate
+and atmospheric science, 6(1):190, 2023.
+Chen, N.-F., Roll, R., and Ross, S. A. Economic forces and
+the stock market.Journal of Business, 59(3):383–403,
+1986.
+Cirstea, R.-G., Guo, C., Yang, B., Kieu, T., Dong, X., and
+Pan, S. Triformer: Triangular, variable-specific attentions
+for long sequence multivariate time series forecasting–full
+version, 2022. URL https://arxiv.org/abs/
+2204.13767.
+Das, A., Kong, W., Sen, R., and Zhou, Y . A decoder-only
+foundation model for time-series forecasting, 2024. URL
+https://arxiv.org/abs/2310.10688.
+donghao, L. and wang xue. ModernTCN: A modern pure
+convolution structure for general time series analysis.
+InThe Twelfth International Conference on Learning
+Representations, 2024. URL https://openreview.
+net/forum?id=vpJMJerXHU.
+Ekambaram, V ., Jati, A., Nguyen, N., Sinthong, P., and
+Kalagnanam, J. Tsmixer: Lightweight mlp-mixer model
+for multivariate time series forecasting, 2023. URL
+https://arxiv.org/abs/2306.09364.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+Fang, Y ., Liang, Y ., Hui, B., Shao, Z., Deng, L., Liu, X.,
+Jiang, X., and Zheng, K. Efficient large-scale traffic
+forecasting with transformers: A spatial data manage-
+ment perspective, 2024. URL https://arxiv.org/
+abs/2412.09972.
+Faw, M., Sen, R., Zhou, Y ., and Das, A. In-context
+fine-tuning for time-series foundation models. InIn-
+ternational Conference on Machine Learning (ICML),
+2025. URL https://icml.cc/virtual/2025/
+poster/43707.
+Ferson, W. E., Siegel, A. F., and Wang, J. L. Factor model
+comparisons with conditioning information.Journal of
+Financial and Quantitative Analysis, 60(3):1401–1426,
+2025. doi: 10.1017/S002210902400005X.
+Gajamannage, K., Park, Y ., and Jayathilake, D. I. Real-
+time forecasting of time series in financial markets using
+sequentially trained dual-lstms.Expert Systems with Ap-
+plications, 223:119879, 2023.
+Gao, S., Koker, T., Queen, O., Hartvigsen, T., Tsiligkaridis,
+T., and Zitnik, M. Units: A unified multi-task time se-
+ries model, 2024. URL https://arxiv.org/abs/
+2403.00131.
+Gong, Z., Tang, Y ., and Liang, J. Patchmixer: A patch-
+mixing architecture for long-term time series forecast-
+ing, 2023. URL https://arxiv.org/abs/2310.
+00655.
+Grigsby, J., Wang, Z., Nguyen, N., and Qi, Y . Long-
+range transformers for dynamic spatiotemporal forecast-
+ing, 2021. URL https://arxiv.org/abs/2109.
+12218.
+Gruver, N., Finzi, M., Qiu, S., and Wilson, A. G. Large
+language models are zero-shot time series forecasters.
+InAdvances in Neural Information Processing Systems,
+2023.
+Hou, H. and Yu, F. R. Rwkv-ts: Beyond traditional recurrent
+neural network for time series tasks, 2024. URL https:
+//arxiv.org/abs/2401.09093.
+Huang, H., Chen, M., and Qiao, X. Generative learning
+for financial time series with irregular and scale-invariant
+patterns. InThe Twelfth International Conference on
+Learning Representations, 2024.
+hyd. Optiver - trading at the close 1st solution. In
+Kaggle Optiver - Trading at the Close Competition,
+Kaggle Competition. Kaggle and Optiver. URL
+https://www.kaggle.com/competitions/
+optiver-trading-at-the-close/
+discussion/487446.
+Hyndman, R. J., Koehler, A. B., Snyder, R. D., and Grose,
+S.A State Space Framework for Automatic Forecasting
+Using Exponential Smoothing Methods. International
+Institute of Forecasters, 2002.
+James, W. and Stein, C. Estimation with quadratic loss.
+InProceedings of the Fourth Berkeley Symposium on
+Mathematical Statistics and Probability, volume 1, pp.
+361–379. University of California Press, 1961.
+Jin, M., Wang, S., Ma, L., Chu, Z., Zhang, J. Y ., Shi, X.,
+Chen, P.-Y ., Liang, Y ., Li, Y .-F., Pan, S., et al. Time-llm:
+Time series forecasting by reprogramming large language
+models.arXiv preprint arXiv:2310.01728, 2023.
+Jin, M., Wang, S., Ma, L., Chu, Z., Zhang, J. Y ., Shi, X.,
+Chen, P.-Y ., Liang, Y ., Li, Y .-F., Pan, S., and Wen, Q.
+Time-llm: Time series forecasting by reprogramming
+large language models, 2024. URL https://arxiv.
+org/abs/2310.01728.
+Jungel, K., Paccagnan, D., Parmentier, A., and Schiffer,
+M. Wardropnet: Traffic flow predictions via equilibrium-
+augmented learning, 2024. URL https://arxiv.
+org/abs/2410.06656.
+Kaniel, R., Lin, Z., Pelger, M., and Van Nieuwer-
+burgh, S. Machine-learning the skill of mu-
+tual fund managers.Journal of Financial Eco-
+nomics, 150(1):94–138, 2023. ISSN 0304-405X.
+doi: https://doi.org/10.1016/j.jfineco.2023.07.004.
+URL https://www.sciencedirect.com/
+science/article/pii/S0304405X23001253.
+Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B.,
+Chess, B., Child, R., Gray, S., Radford, A., Wu, J.,
+and Amodei, D. Scaling laws for neural language mod-
+els, 2020. URL https://arxiv.org/abs/2001.
+08361.
+Khan, I., Zhang, X., Ayyasamy, R. K., Alhashmi, S. M., and
+Rahim, A. Enhancing classification algorithm recommen-
+dation in automated machine learning: A meta-learning
+approach using multivariate sparse group lasso.Com-
+puter Modeling in Engineering & Sciences (CMES), 142
+(2), 2025.
+Kim, J., Kim, H., Kim, H., Lee, D., and Yoon, S. A compre-
+hensive survey of deep learning for time series forecast-
+ing: Architectural diversity and open challenges, 2025.
+URLhttps://arxiv.org/abs/2411.05793.
+Kochkov, D., Yuval, J., Langmore, I., Norgaard, P., Smith,
+J., Mooers, G., Kl¨ower, M., Lottes, J., Rasp, S., D¨uben,
+P., et al. Neural general circulation models for weather
+and climate.Nature, 632(8027):1060–1066, 2024.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+Krizhevsky, A., Sutskever, I., and Hinton, G. E. Ima-
+genet classification with deep convolutional neural
+networks. In Pereira, F., Burges, C., Bottou, L., and
+Weinberger, K. (eds.),Advances in Neural Information
+Processing Systems, volume 25. Curran Associates, Inc.,
+2012. URL https://proceedings.neurips.
+cc/paper_files/paper/2012/file/
+c399862d3b9d6b76c8436e924a68c45b-Paper.
+pdf.
+Kuznetsov, V . and Mohri, M. Generalization bounds for
+time series prediction with non-stationary processes. In
+International conference on algorithmic learning theory,
+pp. 260–274. Springer, 2014.
+Li, H., Deng, B., Xu, C., Feng, Z., Schlegel, V ., Huang,
+Y .-H., Sun, Y ., Sun, J., Yang, K., Yu, Y ., and Bian, J.
+Mira: Medical time series foundation model for real-
+world health data, 2025a. URL https://arxiv.
+org/abs/2506.07584.
+Li, M., Wang, J., Yu, G., Wang, X., Chen, Q., Ni, W., Li,
+L., and Peng, H. Robustlight: Improving robustness via
+diffusion reinforcement learning for traffic signal con-
+trol. In Singh, A., Fazel, M., Hsu, D., Lacoste-Julien, S.,
+Berkenkamp, F., Maharaj, T., Wagstaff, K., and Zhu, J.
+(eds.),Proceedings of the 42nd International Conference
+on Machine Learning, volume 267 ofProceedings of Ma-
+chine Learning Research, pp. 36192–36214. PMLR, 13–
+19 Jul 2025b. URL https://proceedings.mlr.
+press/v267/li25cs.html.
+Liang, Y ., Wen, H., Nie, Y ., Jiang, Y ., Jin, M., Song, D.,
+Pan, S., and Wen, Q. Foundation models for time series
+analysis: A tutorial and survey. InProceedings of the 30th
+ACM SIGKDD Conference on Knowledge Discovery and
+Data Mining, KDD ’24, pp. 6555–6565. ACM, August
+2024. doi: 10.1145/3637528.3671451. URL http:
+//dx.doi.org/10.1145/3637528.3671451.
+Liu, H., Zhao, Z., Wang, J., Kamarthi, H., and Prakash, B. A.
+Lstprompt: Large language models as zero-shot time
+series forecasters by long-short-term prompting, 2024a.
+URLhttps://arxiv.org/abs/2402.16132.
+Liu, Y ., Wu, H., Wang, J., and Long, M. Non-stationary
+transformers: Exploring the stationarity in time series
+forecasting, 2022. URL https://arxiv.org/abs/
+2205.14415.
+Liu, Y ., Hu, T., Zhang, H., Wu, H., Wang, S., Ma, L.,
+and Long, M. itransformer: Inverted transformers are
+effective for time series forecasting, 2024b. URLhttps:
+//arxiv.org/abs/2310.06625.
+Liu, Y ., Qin, G., Shi, Z., Chen, Z., Yang, C., Huang, X.,
+Wang, J., and Long, M. Sundial: A family of highly
+capable time series foundation models, 2025. URL
+https://arxiv.org/abs/2502.00816.
+Longin, F. and Solnik, B. Extreme correlation of interna-
+tional equity markets.The Journal of Finance, 56(2):
+649–676, 2001.
+Makridakis, S., Spiliotis, E., and Assimakopoulos, V . The
+M4 competition: Results, findings, conclusion and way
+forward.International Journal of Forecasting, 34(4):
+802–808, 2018.
+Makridakis, S., Spiliotis, E., Hollyman, R., Petropoulos, F.,
+Swanson, N., and Gaba, A. The m6 forecasting compe-
+tition: Bridging the gap between forecasting and invest-
+ment decisions, 2023. URL https://arxiv.org/
+abs/2310.13357.
+Mashlakov, A. Never have i ever . . . won m6 com-
+petition? InMedium, Medium. Medium. URL
+https://medium.com/@alekseimashlakov/
+never-have-i-ever-won-m6-competition-53267e894c63 .
+Nguyen, T., Brandstetter, J., Kapoor, A., Gupta, J. K., and
+Grover, A. Climax: A foundation model for weather and
+climate.arXiv preprint arXiv:2301.10343, 2023.
+Nie, Y ., Nguyen, N. H., Sinthong, P., and Kalagnanam, J.
+A time series is worth 64 words: Long-term forecast-
+ing with transformers, 2022. URL https://arxiv.
+org/abs/2211.14730.
+Norton, D. A., Ott, E., Pomerance, A., Hunt, B., and Girvan,
+M. Tailored forecasting from short time series via meta-
+learning.arXiv preprint arXiv:2501.16325, 2025.
+Oke, T. R. The energetic basis of the urban heat island.
+Quarterly Journal of the Royal Meteorological Society,
+108(455):1–24, 1982.
+Pan, Z., Jiang, Y ., Garg, S., Schneider, A., Nevmyvaka, Y .,
+and Song, D. S2ip-llm: Semantic space informed prompt
+learning with llm for time series forecasting, 2024. URL
+https://arxiv.org/abs/2403.05798.
+Pfister, T. Invited talk by tomas pfister - multimodal time
+series modeling. InNeurIPS 2024 Workshop on Time
+Series in the Age of Large Models, NeurIPS ’24 Work-
+shop. NeurIPS, 2024. URL https://neurips.cc/
+virtual/2024/108469.
+Price, I., Sanchez-Gonzalez, A., Alet, F., Andersson, T.,
+El-Kadi, A., Masters, D., Ewalds, T., Stott, J., Mohamed,
+S., Battaglia, P., Lam, R., and Willson, M. Probabilistic
+weather forecasting with machine learning.Nature, 637:
+84–90, 12 2024. doi: 10.1038/s41586-024-08252-9.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+Qiu, X., Hu, J., Zhou, L., Wu, X., Du, J., Zhang, B., Guo,
+C., Zhou, A., Jensen, C. S., Sheng, Z., and Yang, B.
+Tfb: Towards comprehensive and fair benchmarking of
+time series forecasting methods, 2024a. URL https:
+//arxiv.org/abs/2403.20150.
+Qiu, X., Hu, J., Zhou, L., Wu, X., Du, J., Zhang, B., Guo,
+C., Zhou, A., Jensen, C. S., Sheng, Z., and Yang, B. Tfb:
+Towards comprehensive and fair benchmarking of time
+series forecasting methods.Proc. VLDB Endow., 17(9):
+2363–2377, May 2024b. URL https://www.vldb.
+org/pvldb/vol17/p2363-hu.pdf.
+Rahimikia, E., Ni, H., and Wang, W. Re (visiting) time
+series foundation models in finance.arXiv preprint
+arXiv:2511.18578, 2025.
+Rizvi, S. T. H., Kanwal, N., Naeem, M., Cuzzocrea, A.,
+and Coronato, A. Bridging simplicity and sophistication
+using glinear: A novel architecture for enhanced time
+series prediction, 2025. URL https://arxiv.org/
+abs/2501.01087.
+Shi, J., Ma, Q., Ma, H., and Li, L. Scaling law for time series
+forecasting, 2024. URL https://arxiv.org/abs/
+2405.15124.
+Stein, C. Inadmissibility of the usual estimator for the mean
+of a multivariate normal distribution. InProceedings of
+the Third Berkeley Symposium on Mathematical Statistics
+and Probability, volume 1, pp. 197–206. University of
+California Press, 1956.
+Stewart, I. D. and Oke, T. R. Local climate zones for urban
+temperature studies.Bulletin of the American Meteoro-
+logical Society, 93(12):1879–1900, 2012.
+Talagala, T. S., Li, F., and Kang, Y . Fformpp: Feature-based
+forecast model performance prediction.International
+Journal of Forecasting, 38(3):920–943, 2022.
+Tang, H., Zhang, C., Jin, M., Yu, Q., Wang, Z., Jin, X.,
+Zhang, Y ., and Du, M. Time series forecasting with
+llms: Understanding and enhancing model capabilities.
+ACM SIGKDD Explorations Newsletter, 26(2):109–118,
+2025a.
+Tang, P., Li, Z., Wang, X., Liu, X., and Mou, P. Time series
+data augmentation for energy consumption data based on
+improved timegan.Sensors, 25(2):493, 2025b.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser, L., and Polosukhin, I. Attention
+is all you need, 2023. URL https://arxiv.org/
+abs/1706.03762.
+Verma, Y ., Heinonen, M., and Garg, V . Climode: Climate
+and weather forecasting with physics-informed neural
+odes.arXiv preprint arXiv:2404.10024, 2024.
+Wang, M. Janestreet - market prediction. InKaggle
+JaneStreet Market Prediction, Kaggle Competition.
+Kaggle and JaneStreet. URL https://www.kaggle.
+com/c/jane-street-market-prediction/
+discussion/229623.
+Wang, S., Wu, H., Shi, X., Hu, T., Luo, H., Ma, L., Zhang,
+J. Y ., and Zhou, J. Timemixer: Decomposable multiscale
+mixing for time series forecasting, 2024. URL https:
+//arxiv.org/abs/2405.14616.
+Wang, Y ., Qiu, Y ., Chen, P., Shu, Y ., Rao, Z., Pan, L.,
+Yang, B., and Guo, C. Lightgts: A lightweight general
+time series forecasting model, 2025a. URL https://
+arxiv.org/abs/2506.06005.
+Wang, Y ., Wu, H., Ma, Y ., Fang, Y ., Zhang, Z., Liu, Y .,
+Wang, S., Ye, Z., Xiang, Y ., Wang, J., and Long, M.
+Accuracy law for the future of deep time series fore-
+casting, 2025b. URL https://arxiv.org/abs/
+2510.02729.
+Wang, Z., Lan, L., and Li, Y . Time-prompt: Integrated
+heterogeneous prompts for unlocking llms in time se-
+ries forecasting, 2025c. URL https://arxiv.org/
+abs/2506.17631.
+Wang, Z., Tao, P., Shi, J., Bao, R., Liu, R., and Chen, L.
+A time-series foundation model by universal delay em-
+bedding, 2025d. URL https://arxiv.org/abs/
+2509.12080.
+Widrow, B., Glover, J. R., McCool, J. M., Kaunitz, J.,
+Williams, C. S., Hearn, R. H., Zeidler, J. R., Dong, E.,
+and Goodlin, R. C. Adaptive noise cancelling: Princi-
+ples and applications.Proceedings of the IEEE, 63(12):
+1692–1716, 1975.
+Wiener, N.Extrapolation, Interpolation, and Smoothing of
+Stationary Time Series. MIT Press, 1949.
+Woo, G., Liu, C., Sahoo, D., Kumar, A., and Hoi, S. Ets-
+former: Exponential smoothing transformers for time-
+series forecasting, 2022. URLhttps://arxiv.org/
+abs/2202.01381.
+Wu, H., Hu, T., Liu, Y ., Zhou, H., Wang, J., and Long, M.
+Timesnet: Temporal 2d-variation modeling for general
+time series analysis, 2022a. URL https://arxiv.
+org/abs/2210.02186.
+Wu, H., Xu, J., Wang, J., and Long, M. Autoformer: De-
+composition transformers with auto-correlation for long-
+term series forecasting, 2022b. URL https://arxiv.
+org/abs/2106.13008.
+Wu, S., Wang, Z., Liu, X., Zhao, Y ., Hu, Y ., and Huang, Y .
+Temporal structure-preserving transformer for industrial
+load forecasting.Neural Networks, pp. 107887, 2025.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+Xu, K., Chen, L., Patenaude, J.-M., and Wang, S. Rhine:
+A regime-switching model with nonlinear representation
+for discovering and forecasting regimes in financial mar-
+kets. InProceedings of the 2024 SIAM International
+Conference on Data Mining (SDM), pp. 526–534. SIAM,
+2024a.
+Xu, Z., Zeng, A., and Xu, Q. Fits: Modeling
+time series with 10k parameters. InInterna-
+tional Conference on Learning Representations
+(ICLR), 2024b. URL https://proceedings.
+iclr.cc/paper_files/paper/2024/hash/
+701251e1db4a2e4dd2ef23f5265d5936-Abstract-Conference.
+html.
+Yenduri, G., M, R., G, C. S., Y , S., Srivastava, G., Mad-
+dikunta, P. K. R., G, D. R., Jhaveri, R. H., B, P., Wang,
+W., Vasilakos, A. V ., and Gadekallu, T. R. Generative
+pre-trained transformer: A comprehensive review on
+enabling technologies, potential applications, emerging
+challenges, and future directions, 2023. URL https:
+//arxiv.org/abs/2305.10435.
+Yue, W., Liu, Y ., Li, H., Wang, H., Ying, X., Guo, R., Xing,
+B., and Shi, J. Olinear: A linear model for time series
+forecasting in orthogonally transformed domain, 2025.
+URLhttps://arxiv.org/abs/2505.08550.
+Zeng, A., Chen, M., Zhang, L., and Xu, Q. Are transformers
+effective for time series forecasting?, 2022. URLhttps:
+//arxiv.org/abs/2205.13504.
+Zhang, X., Li, S., Chen, Z., Yan, X., and Petzold, L. Im-
+proving medical predictions by irregular multimodal elec-
+tronic health records modeling, 2023. URL https:
+//arxiv.org/abs/2210.12156.
+Zhao, H., Zhang, X., Wei, J., Xu, Y ., He, Y ., Sun, S., and
+You, C. Timeseriesscientist: A general-purpose ai agent
+for time series analysis.arXiv preprint arXiv:2510.01538,
+2025.
+Zhou, H., Zhang, S., Peng, J., Zhang, S., Li, J., Xiong, H.,
+and Zhang, W. Informer: Beyond efficient transformer
+for long sequence time-series forecasting, 2021. URL
+https://arxiv.org/abs/2012.07436.
+Zhou, P., Liu, Y ., Liang, J., Song, Q., and Li, X. Crosslin-
+ear: Plug-and-play cross-correlation embedding for time
+series forecasting with exogenous variables, 2025. URL
+https://arxiv.org/abs/2505.23116.
+Zhou, T., Ma, Z., Wen, Q., Wang, X., Sun, L., and Jin,
+R. Fedformer: Frequency enhanced decomposed trans-
+former for long-term series forecasting, 2022. URL
+https://arxiv.org/abs/2201.12740.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Position: The Inevitable End of One-Architecture-Fits-All-Domains in Time Series Forecasting
+A. Proof for temporal boundary of estimation error
+This result is mainly based on (Kuznetsov & Mohri, 2014), which bounded the generalization loss for non-stationary
+process. More specifically, let ((X1, Y1), . . . ,(Xm, Ym)) be a sample of pairs from the distribution Z=X × Y , and
+H={h:X → Y} be a class of hypothesis functions that admits some loss function L:X × X →R +. Assume data
+distribution will converge to some stationary distribution:
+β(a) = sup
+t
+E
+
+∥Pt+a(·|Zt
+−∞)−Π∥ T V
+
+→0whena→+∞(1)
+where Zb
+a = (Za, . . . Zb) denotes a vector of data samples, Pt denotes the distribution data sample at time t. Then we have
+the following statement:
+Theorem A.1.Let L be a loss function bounded by M and H be any set of hypotheses functions. Suppose T=ma for
+somem, a >0. Then for anyδ > a(m−1)β(a)with probability1−δ:
+LΠ(h) =E Π[ℓ(h, Z)]≤ 1
+T
+TX
+t=1
+ℓ(h, Zt) + 2Rm(H,Π) +M
+r
+log a
+δ′
+2m ,(2)
+holds for arbitrary hypothesis function h∈H , where δ′ =δ−a(m−1)β(a) and Rm(H,Π) =
+1
+m E[suph∈H
+Pm
+i=1 σiℓ(h,eZΠ,i)]withσ i a sequence of Rademacher random variables.
+We define the series to beexponentially β-mixingif β(a)≤Ce −da for some positive constants C, d. Then, the argument in
+Section 3.2 is actually a direct consequence of Theorem A.1. A proof sketch is provided as follows;
+Proof. To maintain high probability, δ→0 , which gives a(m−1)β(a)→0 . This implies T β(a)→0 . Thus, by the
+exponentiallyβ-mixing condition, we havea=O(logT), then
+q
+log a
+δ′
+2m = ˜O(1/
+√
+T).
+B. LLM Usage
+LLMs are used in this paper for polishing writings.
+14

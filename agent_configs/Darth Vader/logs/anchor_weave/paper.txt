@@ -1,0 +1,2774 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+AnchorWeave: World-Consistent Video Generation
+with Retrieved Local Spatial Memories
+Anonymous Authors1
+https://zunwang1.github.io/AnchorWeave
+Abstract
+Maintaining spatial world consistency over long
+horizons remains a central challenge for camera-
+controllable video generation. Existing memory-
+based approaches often condition generation on
+globally reconstructed 3D scenes by rendering
+anchor videos from the reconstructed geometry
+in the history. However, reconstructing a global
+3D scene from multiple views inevitably intro-
+duces cross-view misalignment, as pose and depth
+estimation errors cause the same surfaces to be
+reconstructed at slightly different 3D locations
+across views. When fused, these inconsisten-
+cies accumulate into noisy geometry that contam-
+inates the conditioning signals and degrades gen-
+eration quality. We introduce AnchorWeave, a
+memory-augmented video generation framework
+that replaces a single misaligned global memory
+with multiple clean local geometric memories
+and learns to reconcile their cross-view incon-
+sistencies. To this end, AnchorWeave performs
+coverage-driven local memory retrieval aligned
+with the target trajectory and integrates the se-
+lected local memories through a multi-anchor
+weaving controller during generation. Extensive
+experiments demonstrate that AnchorWeave sig-
+nificantly improves long-term scene consistency
+while maintaining strong visual quality, with abla-
+tion and analysis studies further validating the ef-
+fectiveness of local geometric conditioning, multi-
+anchor control, and coverage-driven retrieval.
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+1. Introduction
+Building video world models that can consistently generate
+and revisit the same environments over long horizons un-
+der user control (such as keyboard directions (Bruce et al.,
+2024; Parker-Holder et al., 2024; Ball et al., 2025), camera
+viewpoints (Wang et al., 2024b; He et al., 2024; Chen et al.,
+2025b), or human/robot actions (Guo et al., 2025) remains a
+central challenge in generative modeling. Recent image-to-
+video diffusion and Transformer-based models (Wan et al.,
+2025; Kong et al., 2024; HaCohen et al., 2026) have sig-
+nificantly improved short-term coherence and controllabil-
+ity, enabling clip-by-clip autoregressive generation (Huang
+et al., 2025b; Zhang & Agrawala, 2025; Chen et al., 2025a)
+that follows user-specified camera trajectories. However,
+despite these advances, such models lack persistent memory
+mechanisms, causing them to lose consistency with previ-
+ously generated content when revisiting earlier regions of
+the environment (Yu et al., 2025).
+To improve long-horizon world-consistent video generation,
+recent works (Zhao et al., 2025; Li et al., 2025a; Wu et al.,
+2025c) introduce explicit memory mechanisms that recon-
+struct a global 3D scene from historical video clips. Specifi-
+cally, they estimate camera poses and per-frame geometry
+(e.g., depth maps), and fuse them into a unified 3D repre-
+sentation such as a global point cloud. Generation is then
+conditioned on anchor videos (i.e., videos rendered from
+the reconstructed 3D scene under target camera trajectories)
+to enable spatial consistency. However, even state-of-the-
+art 3D reconstruction models struggle to maintain accurate
+global geometry under dense, long-horizon views, making
+precise cross-view alignment difficult. Small pose or depth
+estimation errors cause the same surfaces to be reconstructed
+at slightly different 3D locations across views (Figure 1(a)
+middle artifacts); when fused, these inconsistencies intro-
+duce structured noise into rendered anchor videos, leading
+to ghosting or drift artifacts that degrade generation quality
+(e.g., inconsistent or hallucinated content in Figure 1(b)).
+We proposeAnchorWeave, a 3D-informed, memory-aware
+video generation framework that avoids relying on a glob-
+1
+
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Historical Frames
+ Global 3D
+ Local 3D
+Generated Video
+Anchor1 Anchor2 Anchor3 Anchor4
+Generated VideoGlobal 3D 
+Rendered Anchor
+(c) Ours: Video Generation with 
+Retrieved Local 3D Memories 
+(a) Historical Context and Corresponding Spatial Representations
+OR… …
+(b) Previous: Video Generation 
+with Global 3D Memory
+Frame1 Frame6
+Frame22 Frame30
+Frame1 Frame6 Frame22 Frame30
+Local 3D Rendered Anchors
+Frame1 Frame6
+Frame22 Frame30
+Render Retrieve+Render
+3D 
+Estimator
+Artifacts
+Time 
+🕙
+Time 
+🕙
+Artifacts
+(Hallucinated) (Consistent)
+Figure 1.Global 3D reconstruction accumulates cross-view misalignment, introducing artifacts in the reconstructed geometry ((a),
+middle), which propagate to the generated video as hallucinations ((b), red boxes). In contrast, per-frame local geometry inherently
+avoids cross-view misalignment and therefore remains clean ((a), right). Conditioning on multiple retrieved local geometric anchors,
+AnchorWeave maintains strong spatial consistency with the historical frames ((c), white and green boxes).
+ally fused scene representation. Our key insight is that
+cross-view misalignment artifacts can be mitigated by re-
+placing a single global 3D memory with per-frame local
+point cloud memories, as illustrated in Figure 1(c). Since
+local point clouds do not accumulate ghosting or drift from
+multi-view fusion, they provide cleaner geometric signals
+for rendering-based conditioning. While these rendered an-
+chors may still exhibit residual misalignment, we treat their
+reconciliation during generation as a learnable problem and
+resolve it through a learned multi-anchor weaving module.
+Specifically, given a sequence of previously generated or
+observed frames, AnchorWeave estimates and maintains per-
+frame local geometry as spatial memory for long-horizon
+generation. To synthesize new content under a target camera
+trajectory, AnchorWeave introduces a coverage-driven mem-
+ory retrieval formulation that iteratively selects the local
+memory that maximizes additional visibility coverage along
+the target trajectory. The selected memories are rendered
+as multiple anchor videos for conditioning. A multi-anchor
+weaving controller with shared cross-anchor attention and
+pose-guided fusion thenweavesthese anchors into a unified
+control signal, enabling effective multi-anchor conditioning
+while mitigating residual geometric inconsistencies. The
+newly generated frames are updated to the history for sub-
+sequent generation, enabling AnchorWeave to iteratively
+extend the video through the update–retrieve–generate loop.
+We compare AnchorWeave with multiple baselines span-
+ning different memory conditioning paradigms, including
+global point cloud and implicit cross-view conditioning, on
+RealEstate10K and DL3DV under a history-conditioned
+video generation setting. AnchorWeave significantly im-
+proves visual quality and long-horizon scene consistency,
+while generalizing well to open-domain images and scenes.
+Ablation studies further validate the contribution of each
+component, including local geometric memory, coverage-
+driven retrieval, and the geometry-conditioned multi-anchor
+controller, supporting the effectiveness of conditioning on
+local geometry and learning to handle misalignment.
+2
+
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+2. Related Work
+Camera-controllable video generation.Recent advances
+in camera-controllable video generation span text-to-video
+(T2V), image-to-video (I2V), and video-to-video (V2V)
+settings. Early approaches primarily inject explicit camera
+parameterizations (e.g., Pl¨ucker embeddings or pose tokens)
+into video diffusion models for conditioning (Wang et al.,
+2024b; Hou et al., 2024b; Bahmani et al., 2024b;a; Sun
+et al., 2024; He et al., 2025b; Zheng et al., 2024; Xu et al.,
+2024; Watson et al., 2024; Yu et al., 2025; Li et al., 2025c;
+He et al., 2025a; Zhou et al., 2025a; Li et al., 2024). To
+improve geometric faithfulness, subsequent works introduce
+structured 3D guidance, such as conditioning on rendered
+point clouds or anchor videos (Yu et al., 2024b; Popov et al.,
+2025; Hou et al., 2024a; Ren et al., 2025; Zheng et al., 2025;
+Seo et al., 2024; Cao et al., 2025; M ¨uller et al., 2024; Liu
+et al., 2024; Zhang et al., 2024; 2025c; Zhou et al., 2024;
+Yang et al., 2025b; Bernal-Berdun et al., 2025). Another
+line of research formulates camera control through trajectory
+tracking or motion encoding as intermediate guidance (Jin
+et al., 2025; Feng et al., 2024; Xiao et al., 2024; Gu et al.,
+2025b). In the V2V regime, some methods rely on test-
+time optimization or per-scene fine-tuning (You et al., 2024;
+Zhang et al., 2024), while others construct large-scale paired
+data from simulators such as Unreal Engine5, Kubric, or
+Animated Objaverse (Bai et al., 2025a;b; Greff et al., 2022;
+Van Hoorick et al., 2024; Deitke et al., 2023; Wu et al.,
+2025b; Gao et al., 2024; Yu et al., 2024a; Wang et al., 2024a).
+More recent approaches incorporate structured 3D priors
+for controllable V2V generation (Bian et al., 2025; YU
+et al., 2025). Despite substantial progress, existing camera-
+controllable video models are typically memoryless: they
+condition on per-frame parameters, rendered anchors, or
+short local context, but lack an explicit, robust memory
+mechanism to maintain long-horizon spatial consistency
+under complex camera motions. In contrast, we focus on
+equipping camera control models with a geometry-aware
+and retrieval-based memory design, enabling robust long-
+horizon consistency and controllability beyond single-shot
+or short-context conditioning.
+Memory-augmented video generation.Recent video
+world models extend long-horizon consistency by incor-
+porating memory beyond the limited context window of
+current generators. One line of work adopts retrieval-based
+mechanisms, treating past frames as external memory and
+retrieving relevant history for future synthesis (Yu et al.,
+2025; Li et al., 2025b; Xiao et al., 2025; Gu et al., 2025a;
+Guo et al., 2024). Another line preserves spatial structure
+through explicit 3D memory constructed from historical
+inputs, such as maintaining global point clouds to support
+revisit consistency and camera control (Zhou et al., 2025b;
+Liu et al., 2025b; Zhao et al., 2025; Wu et al., 2025c;a;
+Li et al., 2025a). A third direction leverages recurrent or
+state-space models to enhance long-horizon temporal model-
+ing (Po et al., 2025; Savov et al., 2025; Zhang et al., 2025b;
+Dalal et al., 2025; Lee et al., 2025; Hong et al., 2024). More
+recently, several works improve long-term consistency by
+redesigning attention or key-value memory mechanisms in
+autoregressive or diffusion-based models (He et al., 2025c;
+Huang et al., 2025a; Yang et al., 2025a; Zhang et al., 2025a;
+Mao et al., 2025; Ye et al., 2025; Liu et al., 2025a; Sun
+et al., 2025; Hong et al., 2025). Among them, the closest are
+3D-based approaches including SPMem (Wu et al., 2025c),
+Spatia (Zhao et al., 2025), MagicWorld (Li et al., 2025a) that
+rely on global 3D point cloud as memory. Instead of noisy
+global reconstruction, we represent memory as local geo-
+metric anchors and perform multi-anchor joint conditioning
+for more stable long-horizon consistency.
+3. Methodology: AnchorWeave
+AnchorWeaveis a world-consistent video generation frame-
+work that leverages retrieved local spatial memories for
+long-horizon, camera-controlled generation. It builds upon
+a standard video diffusion backbone (Sec. 3.1) augmented
+with explicit spatial memory. Instead of fusing observations
+into a single global 3D memory (i.e.,global point cloud),
+AnchorWeave maintains a collection of per-frame local ge-
+ometric memories, each represented as a local point cloud
+with an associated camera pose (Sec. 3.2). Given this mem-
+ory bank, relevant memories are selected for a target camera
+trajectory using a coverage-driven, 3D-aware retrieval strat-
+egy (Sec. 3.3) and rendered as anchor videos. These anchor
+videos are integrated into the diffusion process through a
+Multi-anchor Weaving Controller, which jointly reasons
+over multiple anchors via shared attention and pose-guided
+fusion (Sec. 3.4). Finally, following Wu et al. (2025c) that
+condition on global memory, AnchorWeave operates in an
+iterative update–retrieve–generate loop, where newly gener-
+ated frames are converted into local geometric memories to
+support long-horizon and consistent generation (Sec. 3.5).
+3.1. Preliminary: Video Diffusion Models
+We use standard DiT-based latent diffusion models
+(LDMs) (Rombach et al., 2022) as backbone. Specifically,
+given an RGB video with F frames, x∈R F×3×H×W ,
+a pretrained video autoencoder first compresses the in-
+put into a lower-dimensional latent tensor: z=E(x)∈
+RF×C ′×H ′×W ′
+, where H ′ and W ′ denote the spatially
+downsampled resolution. To enable generative modeling,
+noise is injected into the latent representation through a pre-
+defined scheduling strategy, such as DDPM (Ho et al., 2020)
+or Flow Matching (Lipman et al., 2023), producing a noisy
+latent zt at timestep t. A conditional diffusion network
+F θ(zt, t,c text/img) is then trained to recover the underlying
+clean signal by reversing this corruption process, where the
+3
+
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Local Memory 1 Local Memory 2 Local Memory 3
+Global 3D Point Cloud
+Retrieval Step 1 Retrieval Step 2
+ Retrieval Step 3
+ Stopping Criteria
+Coverage 72%
+Uncovered: 
+100%
+Coverage 69%
+S1-M1 S1-M2 S1-M3
+Coverage 43%
+S2-M2 S2-M3
+Coverage 17% Coverage 15% Coverage 13%
+S3-M3
+Uncovered: 
+28%
+Uncovered: 
+13%
+Uncovered: 
+0%
+Candidate Local Memory Pool
+Target
+Camera 
+Candidate Local 
+Memory Selection
+Coverage-Driven
+ Memory Retrieval
+…
+…
+or
+Retrieval Steps 
+reach Maximum K
+or
+Candidate pool fully 
+retrieved
+（FoV Overlap Test) 
+Figure 2.Coverage-driven memory retrieval pipeline. Given a target camera, we first select local memories whose camera FoVs partially
+overlap with the target camera view to form a candidate memory pool. At each retrieval step, we greedily select the memory that
+maximizes the newly covered visible area. Points invisible to the target camera are shown in gray . Si–Mj denotes memory j selected at
+retrieval step i, and the red box indicates the retrieved memory. In Si-Mj, regions already covered by previously retrieved memories are
+highlighted in green and only newly covered regions retain their original RGB colors. No green regions appear in S1-Mj since 1st-step’s
+coverage is empty. Retrieval terminates when the uncovered region is 0%, the retrieval budgetK is exhausted, or the remaining memory
+pool is empty. For clarity, coverage is computed with a single frame here, while in practice is aggregated over multiple frames per chunk.
+model is conditioned on the diffusion timestep and auxiliary
+inputs, including textual descriptions ctext for text-to-video
+generation, and extra camera intrinsics and anchor videos
+ccam for video generation with camera control. Training is
+performed by minimizing the following objective:
+LLDM =E z,ϵ∼N(0,I), t ∥ϵ−ϵ θ(zt, t,c text+cam)∥2
+2 (1)
+where ϵ represents the sampled Gaussian perturbation and
+ϵθ denotes the noise estimate produced by the model. This
+objective is used to train all diffusion components.
+3.2. Local Geometric Memory Construction
+We representspatial memory as a set of per-frame lo-
+cal point cloudsrather than a single global 3D model,
+thereby avoiding the accumulation and propagation of cross-
+view misalignment artifacts. The construction proceeds as
+follows. We assume access to a history context consist-
+ing of previously observed video frames, which can come
+from real-world inputs or earlier generated segments. These
+frames serve as the visual context from which spatial mem-
+ory is constructed and updated throughout long-horizon
+generation. Using this history context, we estimate per-
+frame local geometry and camera pose with a pretrained 3D
+reconstruction model (e.g., TTT3R (Chen et al., 2025c)).
+Each frame’s memory is represented as a local point cloud
+together with its camera pose, which is transformed into a
+shared world coordinate system and stored as an indepen-
+dent spatial memory entry. This update can be performed
+incrementally only for newly generated frames in practice.
+3.3. Coverage-driven Memory Retrieval
+With a large pool of history local memories, we aim to re-
+trieve a compact subset that can effectively guide generation
+for a target camera trajectory. We illustrate the retrieval
+pipeline in Figure 2 and provide the complete retrieval pro-
+cedure in algorithm in Appendix 1.
+Retrieval pipeline.Given a target camera trajectory of
+length T for the next video segment, we divide it into T /D
+temporal chunks, each spanning D frames, and perform
+memory retrieval independently for each chunk. We formu-
+late memory retrieval as avisibility coverage maximization
+problem: the selected local memories should jointly max-
+imize coverage along the target camera trajectory within
+each chunk. Specifically, as shown in the upper part of Fig-
+ure 2, for each chunk, we first construct a candidate local
+memory pool using a coarse field-of-view (FoV) overlap test
+to filter out clearly irrelevant local memories. Among the
+remaining candidates, we iteratively select the local mem-
+ory that provides the largest new coverage of the currently
+uncovered region along the chunk trajectory, shown in the
+bottom part of Figure 2, Retrieval stops when the visible
+region is fully covered, the candidate pool is exhausted, or
+4
+
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Anchor 
+Latent K
+Anchor 
+Latent 1
+Shared Attn Block
+Camera 1
+…
+Camera 
+Encoder
+(MLP)
+Camera K
+Anchor 
+Latent K
+Pose-Guided 
+Fusion
+Anchor
+Latent 1
+VAE
+Encoder
+Anchor 
+Latent N
+Anchor 
+Latent 1
+VAE
+Encoder
+Image  
+Latent
+VAE 
+Encoder
+…First Frame
+Control Block
+Control Block
+DiT Block
+DiT Block
+Multi-anchor
+Weaving Controller
+Video Diffusion 
+Model
+Fused anchor
+Latents
+Noise Latent
+DiT Block Control Block
+Camera 0 Camera 
+Encoder
+(MLP)
+VAE 
+Decoder
+🔥
+Local 3D rendered 
+anchor video 1
+…
+ Camera 
+1…K
+Control Block
+Generated Videos
+Local 3D rendered 
+anchor video K
+…
+❄
+Zoom-inCamera 
+Encoder
+(MLP)
+🔥
+Importance 
+Weight 1
+Importance 
+Weight K
+Figure 3.Architecture of multi-anchor weaving controller. Anchors are encoded and jointly processed by a shared attention block,
+followed by camera-pose-guided fusion to produce a unified control signal injected into the backbone model. Camera 1 to K represent the
+retrieved-to-target camera poses for the 1 to K anchor videos, where each denotes the relative pose between the camera associated with a
+retrieved local point cloud and the target camera, measuring their viewpoint proximity. Camera 0 is the relative target camera trajectory.
+the number of retrieved memories reaches the maximum
+K. This greedy strategy yields a compact and complemen-
+tary set of local memories per chunk, avoiding redundant
+memories that offer little additional guidance.
+Anchor-video construction and pose computation.For
+each chunk, we retrieve up to K local memories. For each
+retrieved memory, we render anchor views along the target
+camera trajectory within the chunk, producing anchor clips
+of length D frames. If fewer than K memories are retrieved,
+we pad the remaining anchor slots with fully-invisible an-
+chor clips to keep a fixed number ofKanchors per chunk.
+For the rendered anchors, we compute the retrieved-to-target
+relative camera pose sequence, defined as the rigid transfor-
+mations between the camera pose at which the local memory
+was captured and the target camera poses within the chunk.
+Anchor clips corresponding to the same retrieval index are
+then concatenated across chunks, resulting in K anchor
+videos of length T with temporally aligned retrieved-to-
+target pose trajectories. These anchor videos and their pose
+sequences are used as conditioning signals for generation.
+3.4. Generation with Multi-Anchor Weaving Controller
+Given K retrieved anchor videos, we condition generation
+on their latents together with retrieved-to-target relative
+camera poses, and the target camera pose, enabling the
+model toweavemultiple anchor conditions into a coherent
+and spatially consistent output video.
+Overall architecture.As shown in Figure 3, each retrieved
+anchor video is first encoded into latent features using the
+same 3D V AE as the backbone diffusion model. These
+anchor latents are then fed into a multi-anchor controller,
+composed of a stack of DiT-based ControlNet blocks that
+operate alongside the backbone model. At each denoising
+layer, we enable joint multi-anchor modeling through two
+key designs: (1) a shared multi-anchor attention module that
+jointly processes all anchor features, and (2) a camera-pose-
+guided fusion module that aggregates anchor features into a
+single control signal. The resulting fused control feature is
+injected into the corresponding layer of the video diffusion
+backbone to provide geometric guidance during generation.
+Details of these designs are presented below.
+Shared multi-anchor attention.Instead of processing an-
+chors independently, we jointly process theK anchor latents
+using a shared-attention block, as shown in Figure 3 inside
+the control block. Concretely, we reshape the K anchor
+latent sequences with shape La ×C a into a single sequence
+of shape 1×(K·L a)×C a (La denotes the number of latent
+tokens per anchor and Ca is the hidden dimension), and ap-
+ply joint attention over the concatenated tokens. This joint
+attention enables information exchange across anchors, al-
+lowing the controller to aggregate complementary geometric
+evidence while suppressing contradictory or noisy signals,
+5
+
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+rather than committing to any single anchor rendering.
+Pose-aware importance estimation and fusion.Since
+not all anchors contribute equally to a target view, we condi-
+tion anchor fusion on the retrieved-to-target relative camera
+poses (Figure 3 right, camera 1 to K). At each control
+layer, the retrieved-to-target camera poses are encoded by
+a lightweight learnable MLP to produce per-anchor impor-
+tance weights, which reflect the geometric proximity be-
+tween the target view and the cameras associated with the
+retrieved local point clouds used to render the anchors. Us-
+ing these importance weights, we perform a weighted sum
+over the anchor-conditioned features to obtain a single fused
+control feature, which is then injected into the corresponding
+backbone block to provide geometric guidance.
+Target camera pose control.We further condition the
+model on the target camera trajectory (denoted as camera
+0 in Figure 3) to handle cases where geometric memories
+provide limited guidance, such as early generation stages
+with rapid camera motion that moves the target view beyond
+all anchor visibility. The target camera pose is encoded by
+a trainable camera encoder to produce camera embeddings,
+which are injected into the backbone DiT blocks as explicit
+camera-motion control signals. This complementary signal
+improves camera following under long-horizon generation.
+Overall, the multi-anchor weaving controller explicitly con-
+ditions generation on geometry through multi-view anchor
+attention, pose-conditioned fusion, and target camera pose
+control, transforming multiple imperfect anchor renderings
+into a coherent conditioning signal.
+3.5. Long-horizon Generation with Updated Memories
+Each iteration of the components described in Sec. 3.2-
+Sec. 3.4 produces one video segment. Repeating this
+process enables long-horizon video generation via anup-
+date–retrieve–generateloop in AnchorWeave.(1) Update
+(Sec. 3.2):Starting from an initial frame or short segment,
+we estimate per-frame local geometry and initialize the spa-
+tial memory bank.(2) Retrieve (Sec. 3.3):Given a target
+camera trajectory, we retrieve relevant local memories us-
+ing our coverage-driven memory retrieval and condition the
+model on both the target pose and retrieved anchors.(3)
+Generate (Sec. 3.4):The backbone model generates the
+next video segment under the control of the multi-anchor
+geometry-aware controller. The newly generated frames
+are then added to the memory bank, enabling memory-
+augmented generation over arbitrarily long trajectories.
+4. Experiments
+4.1. Experiment Setup
+Implementation details.We train AnchorWeave on a
+subset of 10K videos sampled from RealEstate10K (Zhou
+et al., 2018) and DL3DV (Ling et al., 2024). For each video,
+we estimate per-frame local geometry using TTT3R (Chen
+et al., 2025c) and store the resulting point clouds as local
+spatial memories. During training, we use a chunk length
+of D= 8 , retrieving memories once every 8 frames, and
+retrieve at most K= 4 local point clouds for conditioning.
+To improve robustness, we randomly retrieve memory from
+the candidate local memory pool as a form of condition
+augmentation. We apply AnchorWeave to two backbones,
+CogVideoX-I2V-5B (Yang et al., 2024) and Wan2.2-TI2V-
+5B (Wan et al., 2025), both of which are based on DiT
+architecture. The multi-anchor weaving controller is in-
+jected into the first third of the backbone layers to balance
+capacity and efficiency, and is applied during the first 90%
+of denoising steps. We apply random frame masking to
+anchor videos during training to encourage robustness to
+missing or imperfect geometric guidance. The whole model
+is trained using the Adam optimizer with a learning rate of
+2×10 −4 for 10K training steps and a batch size of 8.
+Evaluation setup and dataset.We evaluate the model’s
+ability to condition on historical context under apartial-
+revisitsetting. We sample videos with large camera motion
+(leading to substantial viewpoint changes between frames)
+from RealEstate10K (Zhou et al., 2018) and DL3DV (Ling
+et al., 2024), collecting a total of 500 videos for evalua-
+tion. For each video, we sample 70 frames, uniformly select
+49 frames as the target segment, and use the remaining 21
+frames as historical context available for retrieval during
+generation. This setting enables direct quantitative compari-
+son against ground-truth frames and qualitative comparison
+under the same partial-revisit protocol. In addition, we
+include long-horizon qualitative examples using keyboard-
+style camera actions starting from a single open-domain
+initial frame, which go beyond the revisit setting and assess
+long-term controllability and scene consistency. We provide
+more low-level implementation details in Appendix Sec. A.
+Evaluation metrics.Following Wu et al. (2025c), we use
+PSNR and SSIM to measure reconstruction fidelity and con-
+sistency, computed on paired predicted and ground-truth
+frames. For perceptual quality, the VBench protocol (Huang
+et al., 2024) is adopted, including Subject Consistency,
+Background Consistency, Motion Smoothness, Temporal
+Flickering, Aesthetic Quality, and Imaging Quality.
+4.2. Comparison with Prior Methods
+Baselines.We compare AnchorWeave with state-of-the-
+art camera-controllable, memory-augmented video gener-
+6
+
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Table 1.Quantitative results on RealEstate10K and DL3DV under partial-revisit evaluation. The best numbers are inboldand the second
+best numbers are underlined. The total quality score is the average of all quality dimensions. † denotes our reimplementation based on
+CogVideoX with the same data as ours (due to not open-sourced). K denotes the maximum retrieval per chunk (mentioned in Sec. 3.3).
+Method
+Quality Score (↑) Consistency Score (↑)
+Total Subject Bg Motion Temporal Aesthetic Imaging PSNR SSIMConsist Consist Smooth Flicker Quality Quality
+ViewCrafter (Yu et al., 2024b) 78.58 85.50 90.11 90.91 91.36 46.7166.9216.17 0.5240
+Gen3C (Ren et al., 2025) 77.11 84.22 89.08 93.74 90.43 45.25 59.92 18.23 0.5926
+TrajCrafter (YU et al., 2025) 76.34 83.56 88.94 91.43 88.06 45.85 60.19 16.96 0.5767
+EPiC (Wang et al., 2025) 77.77 85.22 90.08 94.74 90.43 45.25 60.92 17.42 0.5704
+Context-as-Memory† (Yu et al., 2025) 78.07 85.08 89.94 92.36 90.21 46.97 63.88 17.91 0.5884
+SPMem† (Wu et al., 2025c) 76.85 84.52 89.31 91.84 89.67 45.61 60.12 17.25 0.5710
+SEV A (Zhou et al., 2025a) 79.66 87.64 92.31 94.31 91.00 48.90 63.7821.130.6711
+AnchorWeave (Ours, CogVideoX-5B,K=1) 80.07 87.70 92.51 96.33 93.05 47.88 62.94 19.01 0.6145
+AnchorWeave (Ours, CogVideoX-5B) 80.30 87.89 92.34 96.21 93.90 47.87 63.61 20.96 0.6727
+AnchorWeave (Ours, Wan2.2-5B,K=1) 80.76 88.05 92.78 96.5893.3249.4064.45 19.60 0.6180
+AnchorWeave (Ours, Wan2.2-5B)80.98 88.2592.60 96.45 94.1549.35 65.10 21.04 0.6739
+Table 2.Results of conditioning on global or local Memory.
+Method PSNR↑SSIM↑
+AnchorWeave w/ global point cloud 16.31 53.45
+AnchorWeave w/ local point clouds (ours)20.96 67.27
+ation methods, including Gen3C (Ren et al., 2025), Tra-
+jCrafter (YU et al., 2025), ViewCrafter (Yu et al., 2024b),
+SEV A (Zhou et al., 2025a), EPiC (Wang et al., 2025),
+Context-as-Memory (Yu et al., 2025), and SPMem (Wu
+et al., 2025c). Gen3C, TrajCrafter, ViewCrafter, and EPiC
+are designed to condition generation on a single anchor
+video. To provide strong baselines, we construct the an-
+chor video for these methods using our retrieval strategy
+with K=1, where the retrieved local memory corresponds
+to the local point cloud that maximizes spatial coverage for
+each chunk. This allows these baselines to condition on the
+most informative retrieved local memory, in the same spirit
+as our method. We additionally include a single-anchor
+variant of AnchorWeave (K= 1 , one retrieval per chunk)
+to directly compare with these baselines under identical
+conditioning settings. Context-as-Memory and SEV A di-
+rectly take multi-view history as conditions for memory
+consistency, while SPMem conditions generation on global
+point cloud renderings together with selected key historical
+frames. Note that, as Context-as-Memory and SPMem are
+not open-sourced, we reimplement them on the CogVideoX
+backbone using the same training data as our approach for
+fair comparison. We provide additional implementation
+details in Appendix Sec. A.
+Quantitative comparison.Table 1 shows that Anchor-
+Weave achieves the best overall performance across both
+reconstruction and perceptual quality metrics. While An-
+chorWeave and SEV A (Zhou et al., 2025a) obtain compara-
+ble consistency scores, AnchorWeave exhibits significantly
+better temporal quality, including smoother motion and re-
+Table 3.Effect of number of retrievals. We vary the number of
+retrievals K per chunk, resulting in at most 6K retrieved frames
+(i.e., 6, 12, and 24 for K=1,2,4 , respectively). Retrieved frames
+are not necessarily unique across chunks and duplicates may occur.
+Max. # retrieved frames PSNR↑SSIM↑
+6 19.01 0.6145
+12 20.01 0.6435
+24 20.96 0.6727
+duced flickering, benefiting from preserving the pretrained
+video backbone’s motion prior. Compared to single-anchor
+baselines, our single-anchor variant (K= 1 ) consistently
+achieves higher quality and consistency, indicating that our
+design more effectively extracts fine-grained geometric de-
+tails from anchor conditioning and corrects residual errors.
+Our method also consistently surpasses explicit memory-
+augmented baselines, including Context-as-Memory and
+SPMem. Moreover, the full AnchorWeave further improves
+consistency over its K= 1 variant, demonstrating the ef-
+fectiveness of multi-anchor conditioning to improve consis-
+tency. Notably, AnchorWeave already outperforms all base-
+lines when built on the CogVideoX backbone, and replacing
+CogVideoX with Wan2.2 leads to further performance gains.
+Qualitative comparison.Figure 4 shows qualitative com-
+parisons under the partial-revisit setting. We present one
+representative frame for each case. Additional qualitative
+comparisons under free-form, keyboard-controlled cam-
+era trajectories with historical context are provided in Ap-
+pendix Sec. E. Overall, AnchorWeave maintains more con-
+sistent scene structure when revisiting, while baseline meth-
+ods exhibit visible artifacts or misaligned details. Gen3C,
+EPiC, and TrajCrafter often produce frames with degraded
+visual quality, including noticeable blurring or structural
+distortions. ViewCrafter is prone to hallucinated content
+(2nd/3rd example), while SEV A (Zhou et al., 2025a) oc-
+casionally fails to preserve fine-grained details (see high-
+lighted red-box regions). Context-as-Memory maintains
+7
+
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Context-as-MemSPMemOurs (K=1)OursGT
+ViewCrafterTrajCrafterEPiCGen3CSEVA
+Context-as-MemSPMemOurs (K=1)OursGT
+ViewCrafterTrajCrafterEPiCGen3CSEVA
+Context-as-MemSPMemOurs (K=1)OursGT
+ViewCrafterTrajCrafterEPiCGen3CSEVA
+Output Generated Frame
+Input Historical Context
+……
+…
+……
+…
+……
+…
+AWSD ∧<∨>
+Frame 1Frame 4
+Frame 16Frame 21
+Frame 1Frame 4
+Frame 16Frame 21
+Frame 1Frame 4
+Frame 16Frame 21
+Figure 4.Qualitative comparison with baselines on DL3DV . K=1 means one retrieval per chunk. Baseline methods suffer from spatial
+drift and inconsistency in details. In contrast, AnchorWeave (ours) maintains consistency for multiple cases. GT and the historical context
+are shown for reference. For clarity, representative misaligned regions are highlighted with red boxes for strong baselines (e.g., SEV A).
+content and scene consistency but lacks precise camera con-
+trol, often resulting in noticeable deviations from the GT
+viewpoint. SPMem conditions on rendered global point
+clouds, which lead to severe hallucinations that remain diffi-
+cult to mitigate even with additional key-frame conditioning.
+In contrast, AnchorWeave preserves structural details more
+reliably through dense, clean local memory conditioning.
+The single-anchor variant (K= 1 ) sometimes exhibits mis-
+alignment due to limited retrieval (see red boxes), whereas
+the full model achieves stronger consistency by weaving
+multiple anchors. Overall, AnchorWeave produces results
+that are visually closer to the ground truth.
+4.3. Ablations and Analyses
+We conduct a series of ablations to analyze the design
+choices of AnchorWeave, including the use of global vs.
+local 3D memory, pose-conditioned anchor fusion, joint
+vs. separate attention in the controller, and the number of
+retrieved frames. We also provide a detailed visualization
+of AnchorWeave pipeline (retrieve → render → generate)
+in Appendix Sec. D to further illustrate the full process.
+Effect of global vs. local 3D memory.We compare global
+and local 3D memories as conditioning signals for training
+the controller. In the global-memory setting, we render a
+single anchor from the fused global 3D memory, while in the
+local-memory setting, multiple anchors are rendered from
+local memories as conditions. The results in Table 2 show
+that local 3D memory yields improvements in both PSNR
+and SSIM, confirming the advantage of local geometry for
+memory conditioning.
+Effect of pose-conditioned anchor fusion.As shown
+in Figure 5(a), simply averaging multiple retrieved anchor
+views leads to visible artifacts in the generated video when
+the anchors exhibit different pose deviations from the target
+view. In contrast, pose-conditioned fusion assigns higher
+weights to anchors with smaller pose discrepancies, effec-
+tively suppressing misaligned anchors and improving visual
+quality. This result demonstrates that explicitly accounting
+for retrieved-to-target pose differences is crucial for robust
+8
+
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Retrived FramesRendered Anchor ViewsFrame 1
+Frame 2
+𝐴!(Anchor1) Averageweighted sum: 0.5𝐴!+0.5𝐴"
+𝐴"(Anchor2)
+Pose-guided weighted sum: 0.9𝐴!+0.1𝐴"
+low retrieved-to-target pose difference
+high retrieved-to-target pose difference
+Generated FrameAverage fusion
+Pose-guided fusion
+(a) EffectofPose-Guided Fusion
+Anchor VideosWith misalignments(Merged for visualizing errors)
+Separate Attention
+Shared Attention(b) Effect of Attention Design
+Generated Frame
+Figure 5.Ablation study. (a) Pose-guided fusion suppresses misaligned anchors and reduces artifacts compared to simple averaging. (b)
+Joint attention outperforms separate attention, enabling coherent multi-anchor aggregation.
+🕙
+Frame 24 Frame 159Frame 1 Frame 127 Frame 222Frame 80
+Frame 20 Frame 212Frame 1 Frame 159 Frame 241Frame 80
+Frame 72 Frame 180Frame 1 Frame 140 Frame 241Frame 114
+Figure 6.Long-horizon world exploration examples with keyboard-controlled camera actions on open-domain images. AnchorWeave
+preserves consistent object geometry and appearance across frames (highlighted by dashed boxes of the same color).
+multi-anchor conditioning.
+Effect of joint vs. separate attention in the controller.
+Figure 5(b) compares the proposed joint-attention-based
+controller with a baseline that processes each retrieved an-
+chor independently using separate attention blocks. We ob-
+serve that separate attention leads to blurred or inconsistent
+structures due to the absence of cross-anchor information
+exchange. In contrast, joint attention allows the model to ag-
+gregate complementary evidence across anchors, resulting
+in sharper and more coherent geometry in generated frames.
+Effect of the number of retrieved frames.Table 3 studies
+the impact of the number of retrieved frames by varying the
+number of retrievals K per chunk. Increasing the number
+of retrieved frames consistently improves PSNR and SSIM,
+indicating that additional anchors provide complementary
+spatial evidence for generation. This trend is also reflected in
+the qualitative comparisons in Figure 4, where more anchors
+leads to reduced misalignment and improved consistency.
+4.4. Open-Domain Long-Horizon Examples
+We present three open-domain long-horizon exploration ex-
+amples in Figure 6 using AnchorWeave with Wan2.2 back-
+bone. The model generalizes effectively to diverse unseen
+scenarios, such as a wooden cabin, an alley, and a wooden
+sailing ship. While the visual backbone is limited to 81-
+frame video, AnchorWeave enables generation beyond this
+limit by conditioning each new segment on accumulated
+memory. As a result, spatial consistency is preserved across
+multiple segments, demonstrating the effectiveness of An-
+chorWeave for world-consistent video generation. We also
+provide additional long-horizon world exploration exam-
+ples in Figure 12, highlighting long-term consistency, 360°
+panoramic scene generation, and generalization to third-
+person gaming scenarios.
+5. Conclusion
+We present AnchorWeave, a geometry-informed, memory-
+aware video generation framework that improves long-
+9
+
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+horizon generation by replacing brittle global 3D recon-
+struction with multiple clean, view-aligned local geometric
+memories. Through coverage-driven retrieval and adaptive
+multi-anchor fusion, AnchorWeave provides robust spatial
+guidance and significantly improves visual quality, camera
+controllability, and long-term consistency across diverse
+scenes and tasks. Our results show that conditioning on
+local geometric memories and learning to reconcile their in-
+consistencies offers a reliable alternative to global geometric
+fusion for scalable long-horizon video generation.
+References
+Bahmani, S., Skorokhodov, I., Qian, G., Siarohin, A., Mena-
+pace, W., Tagliasacchi, A., Lindell, D. B., and Tulyakov,
+S. Ac3d: Analyzing and improving 3d camera con-
+trol in video diffusion transformers.arXiv preprint
+arXiv:2411.18673, 2024a.
+Bahmani, S., Skorokhodov, I., Siarohin, A., Menapace, W.,
+Qian, G., Vasilkovsky, M., Lee, H.-Y ., Wang, C., Zou, J.,
+Tagliasacchi, A., et al. Vd3d: Taming large video diffu-
+sion transformers for 3d camera control.arXiv preprint
+arXiv:2407.12781, 2024b.
+Bai, J., Xia, M., Fu, X., Wang, X., Mu, L., Cao, J., Liu, Z.,
+Hu, H., Bai, X., Wan, P., et al. Recammaster: Camera-
+controlled generative rendering from a single video.arXiv
+preprint arXiv:2503.11647, 2025a.
+Bai, J., Xia, M., Wang, X., Yuan, Z., Fu, X., Liu, Z., Hu, H.,
+Wan, P., and Zhang, D. Syncammaster: Synchronizing
+multi-camera video generation from diverse viewpoints.
+Proc. ICLR, 2025b.
+Ball, P. J., Bauer, J., Belletti, F., Brownfield, B., Ephrat, A.,
+Fruchter, S., Gupta, A., Holsheimer, K., Holynski, A.,
+Hron, J., Kaplanis, C., Limont, M., McGill, M., Oliveira,
+Y ., Parker-Holder, J., Perbet, F., Scully, G., Shar, J.,
+Spencer, S., Tov, O., Villegas, R., Wang, E., Yung, J.,
+Baetu, C., Berbel, J., Bridson, D., Bruce, J., Buttimore,
+G., Chakera, S., Chandra, B., Collins, P., Cullum, A.,
+Damoc, B., Dasagi, V ., Gazeau, M., Gbadamosi, C., Han,
+W., Hirst, E., Kachra, A., Kerley, L., Kjems, K., Knoepfel,
+E., Koriakin, V ., Lo, J., Lu, C., Mehring, Z., Moufarek,
+A., Nandwani, H., Oliveira, V ., Pardo, F., Park, J., Pier-
+son, A., Poole, B., Ran, H., Salimans, T., Sanchez, M.,
+Saprykin, I., Shen, A., Sidhwani, S., Smith, D., Stanton,
+J., Tomlinson, H., Vijaykumar, D., Wang, L., Wingfield,
+P., Wong, N., Xu, K., Yew, C., Young, N., Zubov, V ., Eck,
+D., Erhan, D., Kavukcuoglu, K., Hassabis, D., Ghara-
+mani, Z., Hadsell, R., van den Oord, A., Mosseri, I.,
+Bolton, A., Singh, S., and Rockt ¨aschel, T. Genie 3: A
+new frontier for world models. 2025.
+Bernal-Berdun, E., Serrano, A., Masia, B., Gadelha, M.,
+Hold-Geoffroy, Y ., Sun, X., and Gutierrez, D. Precise-
+cam: Precise camera control for text-to-image generation.
+arXiv preprint arXiv:2501.12910, 2025.
+Bian, W., Huang, Z., Shi, X., Li, Y ., Wang, F.-Y ., and Li,
+H. Gs-dit: Advancing video generation with pseudo 4d
+gaussian fields through efficient dense 3d point tracking.
+arXiv preprint arXiv:2501.02690, 2025.
+Bruce, J., Dennis, M. D., Edwards, A., Parker-Holder, J.,
+Shi, Y ., Hughes, E., Lai, M., Mavalankar, A., Steiger-
+wald, R., Apps, C., et al. Genie: Generative interactive
+environments. InForty-first International Conference on
+Machine Learning, 2024.
+Cao, C., Zhou, J., Li, S., Liang, J., Yu, C., Wang, F., Xue,
+X., and Fu, Y . Uni3c: Unifying precisely 3d-enhanced
+camera and human motion controls for video generation.
+arXiv preprint arXiv:2504.14899, 2025.
+Chen, B., Mons´o, D. M., Du, Y ., Simchowitz, M., Tedrake,
+R., and Sitzmann, V . Diffusion forcing: Next-token pre-
+diction meets full-sequence diffusion. InThe Thirty-
+eighth Annual Conference on Neural Information Pro-
+cessing Systems, 2025a.
+Chen, T., Hu, X., Ding, Z., and Jin, C. Learning world
+models for interactive video generation.arXiv preprint
+arXiv:2505.21996, 2025b.
+Chen, X., Chen, Y ., Xiu, Y ., Geiger, A., and Chen, A. Ttt3r:
+3d reconstruction as test-time training.arXiv preprint
+arXiv:2509.26645, 2025c.
+Dalal, K., Koceja, D., Xu, J., Zhao, Y ., Han, S., Cheung,
+K. C., Kautz, J., Choi, Y ., Sun, Y ., and Wang, X. One-
+minute video generation with test-time training. InPro-
+ceedings of the Computer Vision and Pattern Recognition
+Conference, pp. 17702–17711, 2025.
+Deitke, M., Schwenk, D., Salvador, J., Weihs, L., Michel,
+O., VanderBilt, E., Schmidt, L., Ehsani, K., Kembhavi,
+A., and Farhadi, A. Objaverse: A universe of annotated
+3d objects. InProceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pp. 13142–
+13153, 2023.
+Feng, W., Liu, J., Tu, P., Qi, T., Sun, M., Ma, T., Zhao, S.,
+Zhou, S., and He, Q. I2vcontrol-camera: Precise video
+camera control with adjustable motion strength.arXiv
+preprint arXiv:2411.06525, 2024.
+Gao, R., Holynski, A., Henzler, P., Brussee, A., Martin-
+Brualla, R., Srinivasan, P., Barron, J. T., and Poole, B.
+Cat3d: Create anything in 3d with multi-view diffusion
+models. InProc. NeurIPS, 2024.
+10
+
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Greff, K., Belletti, F., Beyer, L., Doersch, C., Du, Y ., Duck-
+worth, D., Fleet, D. J., Gnanapragasam, D., Golemo, F.,
+Herrmann, C., et al. Kubric: A scalable dataset generator.
+InProceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pp. 3749–3761, 2022.
+Gu, Y ., Mao, W., and Shou, M. Z. Long-context autoregres-
+sive video modeling with next-frame prediction.arXiv
+preprint arXiv:2503.19325, 2025a.
+Gu, Z., Yan, R., Lu, J., Li, P., Dou, Z., Si, C., Dong, Z.,
+Liu, Q., Lin, C., Liu, Z., et al. Diffusion as shader:
+3d-aware video diffusion for versatile video generation
+control.arXiv preprint arXiv:2501.03847, 2025b.
+Guo, X., Ding, C., Dou, H., Zhang, X., Tang, W., and Wu,
+W. Infinitydrive: Breaking time limits in driving world
+models.arXiv preprint arXiv:2412.01522, 2024.
+Guo, Y ., Shi, L. X., Chen, J., and Finn, C. Ctrl-world: A con-
+trollable generative world model for robot manipulation.
+arXiv preprint arXiv:2510.10125, 2025.
+HaCohen, Y ., Brazowski, B., Chiprut, N., Bitterman, Y .,
+Kvochko, A., Berkowitz, A., Shalem, D., Lifschitz,
+D., Moshe, D., Porat, E., et al. Ltx-2: Efficient
+joint audio-visual foundation model.arXiv preprint
+arXiv:2601.03233, 2026.
+He, H., Xu, Y ., Guo, Y ., Wetzstein, G., Dai, B., Li, H., and
+Yang, C. Cameractrl: Enabling camera control for text-
+to-video generation.arXiv preprint arXiv:2404.02101,
+2024.
+He, H., Xu, Y ., Guo, Y ., Wetzstein, G., Dai, B., Li, H.,
+and Yang, C. Cameractrl: Enabling camera control for
+video diffusion models. InThe Thirteenth International
+Conference on Learning Representations, 2025a.
+He, H., Yang, C., Lin, S., Xu, Y ., Wei, M., Gui, L., Zhao,
+Q., Wetzstein, G., Jiang, L., and Li, H. Cameractrl ii: Dy-
+namic scene exploration via camera-controlled video dif-
+fusion models.arXiv preprint arXiv:2503.10592, 2025b.
+He, X., Peng, C., Liu, Z., Wang, B., Zhang, Y ., Cui, Q.,
+Kang, F., Jiang, B., An, M., Ren, Y ., et al. Matrix-game
+2.0: An open-source real-time and streaming interactive
+world model.arXiv preprint arXiv:2508.13009, 2025c.
+Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-
+bilistic models.Advances in neural information process-
+ing systems, 33:6840–6851, 2020.
+Hong, Y ., Liu, B., Wu, M., Zhai, Y ., Chang, K.-W., Li, L.,
+Lin, K., Lin, C.-C., Wang, J., Yang, Z., et al. Slowfast-
+vgen: Slow-fast learning for action-driven long video
+generation.arXiv preprint arXiv:2410.23277, 2024.
+Hong, Y ., Mei, Y ., Ge, C., Xu, Y ., Zhou, Y ., Bi, S., Hold-
+Geoffroy, Y ., Roberts, M., Fisher, M., Shechtman, E., et al.
+Relic: Interactive video world model with long-horizon
+memory.arXiv preprint arXiv:2512.04040, 2025.
+Hou, C., Wei, G., Zeng, Y ., and Chen, Z. Training-free
+camera control for video generation.arXiv preprint
+arXiv:2406.10126, 2024a.
+Hou, Y ., Zheng, L., and Torr, P. Learning camera movement
+control from real-world drone videos.arXiv preprint
+arXiv:2412.09620, 2024b.
+Huang, X., Li, Z., He, G., Zhou, M., and Shechtman, E.
+Self forcing: Bridging the train-test gap in autoregressive
+video diffusion.arXiv preprint arXiv:2506.08009, 2025a.
+Huang, X., Li, Z., He, G., Zhou, M., and Shechtman, E.
+Self forcing: Bridging the train-test gap in autoregressive
+video diffusion.arXiv preprint arXiv:2506.08009, 2025b.
+Huang, Z., He, Y ., Yu, J., Zhang, F., Si, C., Jiang, Y ., Zhang,
+Y ., Wu, T., Jin, Q., Chanpaisit, N., et al. Vbench: Compre-
+hensive benchmark suite for video generative models. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 21807–21818, 2024.
+Jin, W., Dai, Q., Luo, C., Baek, S.-H., and Cho, S.
+Flovd: Optical flow meets video diffusion model for en-
+hanced camera-controlled video synthesis.arXiv preprint
+arXiv:2502.08244, 2025.
+Kong, W., Tian, Q., Zhang, Z., Min, R., Dai, Z., Zhou, J.,
+Xiong, J., Li, X., Wu, B., Zhang, J., et al. Hunyuan-
+video: A systematic framework for large video generative
+models.arXiv preprint arXiv:2412.03603, 2024.
+Lee, J.-H., Lin, B.-J., Sun, W.-F., and Lee, C.-Y . Enhancing
+memory and imagination consistency in diffusion-based
+world models via linear-time sequence modeling.arXiv
+e-prints, pp. arXiv–2502, 2025.
+Li, G., Zheng, S., Xu, S., Chen, J., Li, B., Hu, X.,
+Zhao, L., and Jiang, P.-T. Magicworld: Interactive
+geometry-driven video world exploration.arXiv preprint
+arXiv:2511.18886, 2025a.
+Li, L., Zhang, Z., Li, Y ., Xu, J., Hu, W., Li, X., Cheng, W.,
+Gu, J., Xue, T., and Shan, Y . Nvcomposer: Boosting
+generative novel view synthesis with multiple sparse and
+unposed images.arXiv preprint arXiv:2412.03517, 2024.
+Li, R., Torr, P., Vedaldi, A., and Jakab, T. Vmem: Consistent
+interactive video scene generation with surfel-indexed
+view memory.arXiv preprint arXiv:2506.18903, 2025b.
+Li, T., Zheng, G., Jiang, R., Wu, T., Lu, Y ., Lin, Y ., Li,
+X., et al. Realcam-i2v: Real-world image-to-video gen-
+eration with interactive complex camera control.arXiv
+preprint arXiv:2502.10059, 2025c.
+11
+
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Ling, L., Sheng, Y ., Tu, Z., Zhao, W., Xin, C., Wan, K., Yu,
+L., Guo, Q., Yu, Z., Lu, Y ., et al. Dl3dv-10k: A large-
+scale scene dataset for deep learning-based 3d vision. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 22160–22169, 2024.
+Lipman, Y ., Chen, R. T., Ben-Hamu, H., Nickel, M., and
+Le, M. Flow matching for generative modeling. InThe
+Eleventh International Conference on Learning Repre-
+sentations, 2023.
+Liu, F., Sun, W., Wang, H., Wang, Y ., Sun, H., Ye, J., Zhang,
+J., and Duan, Y . ReconX: reconstruct any scene from
+sparse views with video diffusion model.arXiv preprint
+arXiv:2408.16767, 2024.
+Liu, K., Hu, W., Xu, J., Shan, Y ., and Lu, S. Rolling forcing:
+Autoregressive long video diffusion in real time.arXiv
+preprint arXiv:2509.25161, 2025a.
+Liu, P., Guo, Z., Warke, M., Chintala, S., Paxton, C., Shafiul-
+lah, N. M. M., and Pinto, L. Dynamem: Online dynamic
+spatio-semantic memory for open world mobile manipula-
+tion. In2025 IEEE International Conference on Robotics
+and Automation (ICRA), pp. 13346–13355. IEEE, 2025b.
+Mao, X., Li, Z., Li, C., Xu, X., Ying, K., He, T., Pang, J.,
+Qiao, Y ., and Zhang, K. Yume-1.5: A text-controlled
+interactive world generation model.arXiv preprint
+arXiv:2512.22096, 2025.
+M¨uller, N., Schwarz, K., R¨ossle, B., Porzi, L., Bul`o, S. R.,
+Nießner, M., and Kontschieder, P. Multidiff: Consistent
+novel view synthesis from a single image. InProc. CVPR,
+2024.
+Parker-Holder, J., Ball, P., Bruce, J., Dasagi, V ., Holsheimer,
+K., Kaplanis, C., Moufarek, A., Scully, G., Shar, J., Shi,
+J., Spencer, S., Yung, J., Dennis, M., Kenjeyev, S., Long,
+S., Mnih, V ., Chan, H., Gazeau, M., Li, B., Pardo, F.,
+Wang, L., Zhang, L., Besse, F., Harley, T., Mitenkova, A.,
+Wang, J., Clune, J., Hassabis, D., Hadsell, R., Bolton, A.,
+Singh, S., and Rockt ¨aschel, T. Genie 2: A large-scale
+foundation world model. 2024. URL https:
+//deepmind.google/discover/blog/
+genie-2-a-large-scale-foundation-world-model/ .
+Po, R., Nitzan, Y ., Zhang, R., Chen, B., Dao, T.,
+Shechtman, E., Wetzstein, G., and Huang, X. Long-
+context state-space video world models.arXiv preprint
+arXiv:2505.20171, 2025.
+Popov, S., Raj, A., Krainin, M., Li, Y ., Freeman, W. T., and
+Rubinstein, M. Camctrl3d: Single-image scene explo-
+ration with precise 3d camera control.arXiv preprint
+arXiv:2501.06006, 2025.
+Ren, X., Shen, T., Huang, J., Ling, H., Lu, Y ., Nimier-
+David, M., M ¨uller, T., Keller, A., Fidler, S., and Gao,
+J. Gen3c: 3d-informed world-consistent video genera-
+tion with precise camera control. InProceedings of the
+Computer Vision and Pattern Recognition Conference, pp.
+6121–6132, 2025.
+Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and
+Ommer, B. High-resolution image synthesis with latent
+diffusion models. InProceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition, pp.
+10684–10695, 2022.
+Savov, N., Kazemi, N., Zhang, D., Paudel, D. P., Wang,
+X., and Van Gool, L. Statespacediffuser: Bringing
+long context to diffusion world models.arXiv preprint
+arXiv:2505.22246, 2025.
+Seo, J., Fukuda, K., Shibuya, T., Narihira, T., Murata, N.,
+Hu, S., Lai, C.-H., Kim, S., and Mitsufuji, Y . Genwarp:
+Single image to novel views with semantic-preserving
+generative warping. InThe Thirty-eighth Annual Confer-
+ence on Neural Information Processing Systems, 2024.
+Sun, W., Chen, S., Liu, F., Chen, Z., Duan, Y ., Zhang, J.,
+and Wang, Y . Dimensionx: Create any 3d and 4d scenes
+from a single image with controllable video diffusion.
+arXiv preprint arXiv:2411.04928, 2024.
+Sun, W., Zhang, H., Wang, H., Wu, J., Wang, Z., Wang, Z.,
+Wang, Y ., Zhang, J., Wang, T., and Guo, C. World-
+play: Towards long-term geometric consistency for
+real-time interactive world modeling.arXiv preprint
+arXiv:2512.14614, 2025.
+Van Hoorick, B., Wu, R., Ozguroglu, E., Sargent, K., Liu,
+R., Tokmakov, P., Dave, A., Zheng, C., and V ondrick,
+C. Generative camera dolly: Extreme monocular dy-
+namic novel view synthesis. InEuropean Conference on
+Computer Vision, pp. 313–331. Springer, 2024.
+Wan, T., Wang, A., Ai, B., Wen, B., Mao, C., Xie, C.-W.,
+Chen, D., Yu, F., Zhao, H., Yang, J., Zeng, J., Wang, J.,
+Zhang, J., Zhou, J., Wang, J., Chen, J., Zhu, K., Zhao,
+K., Yan, K., Huang, L., Feng, M., Zhang, N., Li, P.,
+Wu, P., Chu, R., Feng, R., Zhang, S., Sun, S., Fang, T.,
+Wang, T., Gui, T., Weng, T., Shen, T., Lin, W., Wang,
+W., Wang, W., Zhou, W., Wang, W., Shen, W., Yu, W.,
+Shi, X., Huang, X., Xu, X., Kou, Y ., Lv, Y ., Li, Y ., Liu,
+Y ., Wang, Y ., Zhang, Y ., Huang, Y ., Li, Y ., Wu, Y ., Liu,
+Y ., Pan, Y ., Zheng, Y ., Hong, Y ., Shi, Y ., Feng, Y ., Jiang,
+Z., Han, Z., Wu, Z.-F., and Liu, Z. Wan: Open and
+advanced large-scale video generative models.arXiv
+preprint arXiv:2503.20314, 2025.
+Wang, C., Zhuang, P., Ngo, T. D., Menapace, W., Siaro-
+hin, A., Vasilkovsky, M., Skorokhodov, I., Tulyakov, S.,
+12
+
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Wonka, P., and Lee, H.-Y . 4real-video: Learning general-
+izable photo-realistic 4d video diffusion.arXiv preprint
+arXiv:2412.04462, 2024a.
+Wang, Z., Yuan, Z., Wang, X., Li, Y ., Chen, T., Xia, M., Luo,
+P., and Shan, Y . Motionctrl: A unified and flexible motion
+controller for video generation. InACM SIGGRAPH 2024
+Conference Papers, pp. 1–11, 2024b.
+Wang, Z., Cho, J., Li, J., Lin, H., Yoon, J., Zhang, Y ., and
+Bansal, M. Epic: Efficient video camera control learn-
+ing with precise anchor-video guidance.arXiv preprint
+arXiv:2505.21876, 2025.
+Watson, D., Saxena, S., Li, L., Tagliasacchi, A., and Fleet,
+D. J. Controlling space and time with diffusion models.
+InThe Thirteenth International Conference on Learning
+Representations, 2024.
+Wu, H., Wu, D., He, T., Guo, J., Ye, Y ., Duan, Y ., and
+Bian, J. Geometry forcing: Marrying video diffusion and
+3d representation for consistent world modeling.arXiv
+preprint arXiv:2507.07982, 2025a.
+Wu, R., Gao, R., Poole, B., Trevithick, A., Zheng, C., Bar-
+ron, J. T., and Holynski, A. Cat4d: Create anything in
+4d with multi-view video diffusion models.Proc. CVPR,
+2025b.
+Wu, T., Yang, S., Po, R., Xu, Y ., Liu, Z., Lin, D., and
+Wetzstein, G. Video world models with long-term spatial
+memory, 2025c. URL https://arxiv.org/abs/
+2506.05284.
+Xiao, Z., Ouyang, W., Zhou, Y ., Yang, S., Yang, L., Si, J.,
+and Pan, X. Trajectory attention for fine-grained video
+motion control.arXiv preprint arXiv:2411.19324, 2024.
+Xiao, Z., Lan, Y ., Zhou, Y ., Ouyang, W., Yang, S., Zeng, Y .,
+and Pan, X. Worldmem: Long-term consistent world sim-
+ulation with memory.arXiv preprint arXiv:2504.12369,
+2025.
+Xu, D., Nie, W., Liu, C., Liu, S., Kautz, J., Wang,
+Z., and Vahdat, A. Camco: Camera-controllable 3d-
+consistent image-to-video generation.arXiv preprint
+arXiv:2406.02509, 2024.
+Yang, S., Huang, W., Chu, R., Xiao, Y ., Zhao, Y ., Wang, X.,
+Li, M., Xie, E., Chen, Y ., Lu, Y ., et al. Longlive: Real-
+time interactive long video generation.arXiv preprint
+arXiv:2509.22622, 2025a.
+Yang, X., Xu, J., Luan, K., Zhan, X., Qiu, H., Shi, S., Li,
+H., Yang, S., Zhang, L., Yu, C., et al. Omnicam: Unified
+multimodal video generation via camera control.arXiv
+preprint arXiv:2504.02312, 2025b.
+Yang, Z., Teng, J., Zheng, W., Ding, M., Huang, S., Xu,
+J., Yang, Y ., Hong, W., Zhang, X., Feng, G., et al.
+Cogvideox: Text-to-video diffusion models with an ex-
+pert transformer.arXiv preprint arXiv:2408.06072, 2024.
+Ye, D., Zhou, F., Lv, J., Ma, J., Zhang, J., Lv, J., Li, J., Deng,
+M., Yang, M., Fu, Q., et al. Yan: Foundational interac-
+tive video generation.arXiv preprint arXiv:2508.08601,
+2025.
+You, M., Zhu, Z., Liu, H., and Hou, J. Nvs-solver: Video dif-
+fusion model as zero-shot novel view synthesizer.arXiv
+preprint arXiv:2405.15364, 2024.
+Yu, H., Wang, C., Zhuang, P., Menapace, W., Siarohin, A.,
+Cao, J., Jeni, L., Tulyakov, S., and Lee, H.-Y . 4real: To-
+wards photorealistic 4d scene generation via video diffu-
+sion models.Advances in Neural Information Processing
+Systems, 37:45256–45280, 2024a.
+Yu, J., Bai, J., Qin, Y ., Liu, Q., Wang, X., Wan, P., Zhang,
+D., and Liu, X. Context as memory: Scene-consistent
+interactive long video generation with memory retrieval.
+InProceedings of the SIGGRAPH Asia 2025 Conference
+Papers, pp. 1–11, 2025.
+YU, M., Hu, W., Xing, J., and Shan, Y . Trajectorycrafter:
+Redirecting camera trajectory for monocular videos via
+diffusion models.arXiv preprint arXiv:2503.05638,
+2025.
+Yu, W., Xing, J., Yuan, L., Hu, W., Li, X., Huang, Z., Gao,
+X., Wong, T.-T., Shan, Y ., and Tian, Y . Viewcrafter:
+Taming video diffusion models for high-fidelity novel
+view synthesis.arXiv preprint arXiv:2409.02048, 2024b.
+Yu, W., Yin, S., Easterbrook, S., and Garg, A. Egosim:
+Egocentric exploration in virtual worlds with multi-modal
+conditioning. InThe Thirteenth International Conference
+on Learning Representations, 2025. URL https://
+openreview.net/forum?id=zAyS5aRKV8.
+Zhang, D. J., Paiss, R., Zada, S., Karnad, N., Jacobs, D. E.,
+Pritch, Y ., Mosseri, I., Shou, M. Z., Wadhwa, N., and
+Ruiz, N. Recapture: Generative video camera controls
+for user-provided videos using masked video fine-tuning.
+arXiv preprint arXiv:2411.05003, 2024.
+Zhang, L. and Agrawala, M. Packing input frame context in
+next-frame prediction models for video generation.arXiv
+preprint arXiv:2504.12626, 2025.
+Zhang, L., Cai, S., Li, M., Wetzstein, G., and Agrawala, M.
+Frame context packing and drift prevention in next-frame-
+prediction video diffusion models. InThe Thirty-ninth
+Annual Conference on Neural Information Processing
+Systems, 2025a.
+13
+
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Zhang, T., Bi, S., Hong, Y ., Zhang, K., Luan, F., Yang, S.,
+Sunkavalli, K., Freeman, W. T., and Tan, H. Test-time
+training done right.arXiv preprint arXiv:2505.23884,
+2025b.
+Zhang, Z., Chen, D., and Liao, J. I2v3d: Controllable image-
+to-video generation with 3d guidance.arXiv preprint
+arXiv:2503.09733, 2025c.
+Zhao, J., Wei, F., Liu, Z., Zhang, H., Xu, C., and Lu, Y .
+Spatia: Video generation with updatable spatial memory.
+arXiv preprint arXiv:2512.15716, 2025.
+Zheng, G., Li, T., Jiang, R., Lu, Y ., Wu, T., and Li, X.
+Cami2v: Camera-controlled image-to-video diffusion
+model.arXiv preprint arXiv:2410.15957, 2024.
+Zheng, S., Peng, Z., Zhou, Y ., Zhu, Y ., Xu, H., Huang,
+X., and Fu, Y . Vidcraft3: Camera, object, and lighting
+control for image-to-video generation.arXiv preprint
+arXiv:2502.07531, 2025.
+Zhou, J. J., Gao, H., V oleti, V ., Vasishta, A., Yao, C.-H.,
+Boss, M., Torr, P., Rupprecht, C., and Jampani, V . Stable
+virtual camera: Generative view synthesis with diffusion
+models.arXiv e-prints, pp. arXiv–2503, 2025a.
+Zhou, S., Du, Y ., Yang, Y ., Han, L., Chen, P., Yeung, D.-
+Y ., and Gan, C. Learning 3d persistent embodied world
+models.arXiv preprint arXiv:2505.05495, 2025b.
+Zhou, T., Tucker, R., Flynn, J., Fyffe, G., and Snavely,
+N. Stereo magnification: Learning view synthesis using
+multiplane images.arXiv preprint arXiv:1805.09817,
+2018.
+Zhou, Z., An, J., and Luo, J. Latent-reframe: Enabling
+camera control for video diffusion model without training.
+arXiv preprint arXiv:2412.06029, 2024.
+14
+
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+A. Additional Implementation Details
+A.1. Training/Inference Details
+We train AnchorWeave on a subset of 10K videos sampled from RealEstate10K (Zhou et al., 2018) and DL3DV (Ling et al.,
+2024). For each video, we estimate per-frame local geometry using TTT3R (Chen et al., 2025c) and store the resulting point
+clouds as local spatial memories.
+During training, we use a chunk length of C= 8 , retrieving memories once every 8 frames, and retrieve at most K= 4
+local point clouds for conditioning. To improve robustness, we randomly sample from the candidate local memory pool as a
+form of memory augmentation. We also apply random frame masking to anchor videos to enhance robustness to missing or
+imperfect geometric guidance.
+We apply AnchorWeave to two DiT-based backbones: CogVideoX-I2V-5B (Yang et al., 2024) and Wan2.2-TI2V-5B (Wan
+et al., 2025). For Wan2.2, we train on 81-frame videos, while for CogVideoX we use 49-frame videos. During training, the
+backbone weights are frozen and only the newly introduced multi-anchor weaving modules are optimized.
+The weaving controller is injected into the first third of backbone layers to balance capacity and efficiency, and is applied
+during the first 80% of denoising steps. The backbone latent receives two control signals: (1) fused anchor latents and
+(2) target camera pose embeddings. Both control signals use a control weight of 1.0 (i.e., added with equal weight to the
+original backbone features). Classifier-free guidance (CFG) follows the default configuration of each backbone.
+We train using the Adam optimizer with a learning rate of2×10 −4 for 10K steps and a batch size of 8. Training is conducted
+on 8×H100 GPUs and takes approximately one day.
+A.2. Baseline Re-implementation
+Context-as-Memory.We reimplement Context-as-Memory on top of the CogVideoX backbone for fair comparison.
+We use the same training data as AnchorWeave, sampled from RealEstate10K and DL3DV . For each video, we follow
+Context-as-Memory to select context frames with high trajectory overlap with the target segment. Specifically, we sample
+12 context frames per video as conditioning inputs. We apply LoRA to fine-tune the entire backbone for multi-context
+conditioning, with LoRA rank 16 and α= 32 . Training is conducted for 10K steps with a batch size of 8, consistent with
+AnchorWeave. During inference, we select context frames with the highest overall trajectory overlap as conditioning inputs.
+SPMem.We reimplement SPMem using CogVideoX as the backbone and train on the same dataset as AnchorWeave
+(RealEstate10K and DL3DV). SPMem conditions generation on both (1) rendered global point clouds via a ControlNet
+branch and (2) keyframe latents via additional cross-attention layers. We follow a similar structure: the ControlNet branch is
+injected into the first third of backbone layers, and an additional cross-attention layer is inserted into each backbone block to
+condition on keyframe latents. Keyframes are selected using the same trajectory-overlap strategy as in Context-as-Memory.
+Global point clouds are constructed using TTT3R and rendered for conditioning. During training, we freeze the backbone
+and only fine-tune the newly introduced cross-attention layers and the ControlNet branch. The model is trained for 10K
+steps with a batch size of 8, consistent with AnchorWeave.
+B. Coverage-Driven Memory Retrieval Algorithm
+We provide the detailed retrieval procedure in Algorithm 1. In practice, we enforce the first rendered video frame to be
+selected as the first retrieval. This follows the classical anchor-video convention, where the initial frame serves as a stable
+geometric reference.
+C. Camera Controllability Comparison with Baselines
+We compare camera controllability with prior methods using rotation and translation errors, following the evaluation protocol
+of EPiC. We randomly sample 300 videos from both DL3DV and RealEstate10K and evaluate single-image-based camera
+control accuracy. For all methods, only the first frame is provided as input (Basic Image-to-Video Camera Control setting)
+without any other information. Thus, for our method, the conditioning signal is the anchor video rendered from the first
+frame, i.e.,AnchorWeave (no retrieval).
+As shown in Table 4, our method achieves the lowest rotation and translation errors among all baselines. Notably, although
+15
+
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Algorithm 1Coverage-driven 3D-aware memory retrieval for anchor-video construction
+Input:Local point clouds{P i}with poses{T i}; target trajectory{ ˆTt}M
+t=1; chunk lengthD; max anchors per chunkK
+Output:Anchor videos and retrieved-to-target relative poses
+Partition target trajectory into ordered chunks{C m}, each withDtarget poses
+foreach chunkC m do
+Initialize anchor setA m ← {P latest}
+Candidate filtering:
+RetainP i whose poseT i has sufficient FOV overlap with chunkC m
+while|A m|< Kand coverage improvesdo
+SelectP i that maximizes additional visible coverage when rendered toC m
+Am ← A m ∪ {Pi}
+end while
+Compute retrieved-to-target relative poses for anchors inA m
+end for
+Concatenate rendered anchors across chunks to form anchor videos and corresponding retrieved-to-target relative poses
+Table 4.Camera control ability comparisons. Lower is better.
+Method Rotation Error (↓) Translation Error (↓)
+ViewCrafter (Yu et al., 2024b) 1.34 3.21
+Gen3C (Ren et al., 2025) 0.97 1.98
+TrajCrafter (YU et al., 2025) 1.08 2.57
+EPiC (Wang et al., 2025) 0.84 2.01
+SPMem (Wu et al., 2025c) 1.21 2.99
+TrajCrafter (YU et al., 2025) 1.08 2.57
+SEV A (Zhou et al., 2025a) 0.78 1.96
+AnchorWeave (Ours, no retrieval)0.61 1.72
+our model is trained to follow multiple anchors, it still outperforms prior approaches when only a single anchor is provided
+at test time. This is because AnchorWeave combines anchor-video-based visual guidance with explicit camera pose control.
+When camera motion is large, the geometry rendered from the first frame quickly moves out of view, causing methods that
+rely solely on anchor videos (e.g., ViewCrafter, TrajCrafter, EPiC, and Gen3C, SPMem) to lose controllability. In contrast,
+our method can still follow the target camera trajectory using pose guidance, resulting in significantly more accurate camera
+motion.
+D. AnchorWeave Generation Process Visualization
+We visualize the end-to-end AnchorWeave generation process in Figure 7 and Figure 8. We start from a historical context
+video sampled from DL3DV , and select one frame as the initial state. The camera trajectory is then specified by a keyboard-
+style control sequence (move left→orient up→move backward→orient down→move right, each for
+8 steps), which defines an interactive exploration of the environment. To ensure long-horizon consistency with the history,
+AnchorWeave performs coverage-driven retrieval at each chunk: it retrieves multiple history frames that jointly cover
+different visible regions under the target view, renders their corresponding geometric anchors, and weaves these anchors into
+the generation. As shown in both examples, the retrieved frames cover complementary parts of the camera-visible area, and
+AnchorWeave can consistently fuse multiple anchors, producing frames that effectively merge information from different
+retrieved views.
+E. Qualitative Comparison with Baselines under Free-Form Camera Trajectory
+We further compare AnchorWeave with ViewCrafter, TrajCrafter, Gen3C, SEV A, Context-as-Memory, and SPMem under a
+free-form, keyboard-controlled camera trajectory, as shown in Figures 9 to 11. Unlike the revisit setting where the camera
+replays the historical trajectory, here the motion follows a free-form control sequence (e.g., move left → orient up →
+move backward → orient down → move right), which deviates from the context trajectory and typical smooth motions
+observed in training data. We only show key historical context frames that spatially overlap with the commanded camera
+16
+
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+trajectory (Due to page limits, we sampled 7 frames per example).
+ViewCrafter frequently introduces noticeable hallucinated structures when the camera moves into previously unseen regions.
+TrajCrafter exhibits significant rendering artifacts and structural inconsistencies. Gen3C tends to produce overly blurred
+outputs under large viewpoint changes. SEV A maintains reasonable rendering quality in camera-visible regions but struggles
+to synthesize plausible content in newly exposed areas, leading to degraded details. Context-as-Memory shows limited
+generalization to such out-of-distribution camera trajectories, often generating frames that implicitly follow the historical
+trajectory rather than the commanded motion. SPMem suffers from severe hallucinations due to conditioning on imperfect
+global point cloud renderings.
+In contrast, AnchorWeave remains stable under free camera control. It faithfully preserves geometry in visible regions via
+anchor conditioning, while seamlessly synthesizing plausible content in newly exposed areas beyond the historical context.
+F. Long-Horizon Examples
+Figure 12 presents six additional long-horizon world exploration examples across diverse scenes, including both first-person
+and third-person settings. We adopt Wan2.2 as the backbone and iteratively perform image-to-video generation with
+AnchorWeave for 81 frames conditioned on the last frame of the previous segment, resulting in 241 frames in total. For
+dynamic third-person scenes, we mask out the character to exclude it from the point-cloud memory construction to enable
+dynamic content generation.
+Long-term consistency.Strong long-term consistency is observed across many examples. For instance, the table in the
+first scene, the chair and bridge in the third scene, the temple in the fourth scene, and the cabin in the fifth scene remain
+spatially consistent even after many frames and cross-segment viewpoint changes. When the camera revisits these regions,
+the objects still appear in coherent positions, demonstrating the effectiveness of AnchorWeave.
+360° panoramic generation.The second example demonstrates full 360-degree rotation capability. Starting from a
+vending machine and corridor, the camera gradually rotates over many frames and eventually returns to the original viewpoint.
+The scene content remains consistent throughout the rotation, indicating robust global spatial coherence.
+Third-person character control.The sixth example showcases a third-person game scenario. By masking the character
+and leveraging point-cloud control, we enable stable character motion aligned with the camera trajectory. Long-term
+consistency is also preserved: for example, after the character walks away in the first segment, the cabin and distant
+mountains remain visible when revisiting the area in later segments.
+Notably, this example is generated in a zero-shot manner. Our training data consist only of static-scene datasets (DL3DV and
+RealEstate10K), without any third-person character or dynamic gameplay supervision. The ability to generalize to character-
+centric, long-horizon scenarios therefore demonstrates the robustness of our design and its strong out-of-distribution
+generalization capability.
+17
+
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+frame
+1
+frame
+8
+frame
+16
+frame
+24
+frame
+32
+frame
+40
+Historical Contexts Retrieved Frames & Rendered Anchors Generated 
+Frames
+Figure 7.Context-conditioned camera control generation process of AnchorWeave.
+18
+
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+retrieved frame 1 retrieved frame 2 retrieved frame 3 retrieved frame 4
+retrieval rendered 1 retrieval rendered 2 retrieval rendered 3 retrieval rendered 4
+frame
+1
+frame
+8
+frame
+16
+frame
+24
+frame
+32
+frame
+40
+Historical Contexts Retrieved Frames & Rendered Anchors Generated 
+Frames
+Figure 8.Context-conditioned camera control generation process of AnchorWeave.
+19
+
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+ViewCrafter TrajCrafter Gen3C SEVA
+Key Context Frames
+Context-as-Mem SPMem AnchorWeave (Ours)
+Generated Frames
+Frame
+1
+Frame
+8
+Frame
+16
+Frame
+24
+Frame
+32
+Frame
+40
+ViewCrafter TrajCrafter Gen3C SEVA
+Key Context Frames
+Context-as-Mem SPMem AnchorWeave (Ours)
+Generated Frames
+Frame
+1
+Frame
+8
+Frame
+16
+Frame
+24
+Frame
+32
+Frame
+40
+Figure 9.Context-conditioned camera control results of AnchorWeave compared with baselines.
+20
+
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+ViewCrafter TrajCrafter Gen3C SEVA
+Key Context Frames
+Context-as-Mem SPMem AnchorWeave (Ours)
+Generated Frames
+Frame
+1
+Frame
+8
+Frame
+16
+Frame
+24
+Frame
+32
+Frame
+40
+ViewCrafter TrajCrafter Gen3C SEVA
+Key Context Frames
+Context-as-Mem SPMem AnchorWeave (Ours)
+Generated Frames
+Frame
+1
+Frame
+8
+Frame
+16
+Frame
+24
+Frame
+32
+Frame
+40
+Figure 10.Context-conditioned camera control results of AnchorWeave compared with baselines.
+21
+
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+ViewCrafter TrajCrafter Gen3C SEVA
+Key Context Frames
+Context-as-Mem SPMem AnchorWeave (Ours)
+Generated Frames
+Frame
+1
+Frame
+8
+Frame
+16
+Frame
+24
+Frame
+32
+Frame
+40
+Figure 11.Context-conditioned camera control results of AnchorWeave compared with baselines.
+22
+
+1210
+1211
+1212
+1213
+1214
+1215
+1216
+1217
+1218
+1219
+1220
+1221
+1222
+1223
+1224
+1225
+1226
+1227
+1228
+1229
+1230
+1231
+1232
+1233
+1234
+1235
+1236
+1237
+1238
+1239
+1240
+1241
+1242
+1243
+1244
+1245
+1246
+1247
+1248
+1249
+1250
+1251
+1252
+1253
+1254
+1255
+1256
+1257
+1258
+1259
+1260
+1261
+1262
+1263
+1264
+AnchorWeave: World-Consistent Video Generation with Retrieved Local Spatial Memories
+Figure 12.Long-horizon video generation on both open-domain static and dynamic environments.
+23
+

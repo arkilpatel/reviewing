@@ -1,0 +1,481 @@
+
+
+--- intro.tex ---
+
+\section{Introduction}
+
+The revolutionary success of Large Language Models (LLMs) at generating human-like texts~\citep{brown2020language,bubeck2023sparks,chowdhery2023palm} has raised several societal concerns regarding the misuse of LLM outputs. Unregulated LLM outputs pose risks ranging from the contamination of future training corpora~\citep{shumailov2023curse,das2024under} to the propagation of disinformation~\citep{zellers2019defending,vincent2022ai} and academic misconduct~\citep{jarrah2023using,milano2023large}. Consequently, there is an urgent need for reliable detection mechanisms capable of distinguishing LLM-generated text from human-authored content.
+
+To address this challenge, \citet{aaronson2022my} and \citet{kirchenbauer2023watermark} propose \emph{statistical watermarking} as a theoretically-grounded method to distinguish machine-generated content from a target distribution. These methods operate by injecting statistical signals into the generated texts in the decoding phase of LLMs. Mechanistically, the watermark generator couples the output tokens by a sequence of pseudorandom seeds. During detection, the detector reconstructs the seeds and performs a hypothesis test to check the dependence between the seeds and the observed tokens. This formulation allows the detection problem to be treated as a rigorous statistical hypothesis test~\citep{huang2023towards} where the detection power and sample complexity are governed by the randomness in the target distribution. 
+Various designs for the underlying seed distributions have been explored, such as binary~\citep{christ2023undetectable}, exponential~\citep{kuditipudi2023robust}, and Gaussian~\citep{block2025gaussmark}.  Recently,  \citet{huang2025watermarking} advanced the concept of using an auxiliary open-source model as an \emph{anchor} to generate random
+seeds and coupling them with tokens via speculative decoding ~\citep{leviathan2023fast}. This approach is motivated by the theoretical insight that watermarking achieves the optimal power when the seed distribution approximates the target distribution~\citep{huang2023towards}. By exploiting the distributional proximity between modern LLMs, anchor-based methods have shown promise in improving both detection efficiency
+and robustness to removing-attacks~\citep{piet2023mark}. 
+Empirically, watermarked texts can be detected within short token horizons ($<100$ tokens) and high success rate (nearly $50\%$ under paraphrasing) under various attacks.
+
+Despite these successes, state-of-the-art watermarking remains constrained by two fundamental limitations. First, the design of generation and detection schemes lacks a unifying guiding principle.  \citet{huang2025watermarking} utilize a hashed green-red-list seed adapted from \citet{kirchenbauer2023watermark}, but this heuristic lacks rigorous justification. What is needed is a characterization of optimal generation and detection schemes under given anchor distributions.
+Second, there exists a methodological disconnect between generation and detection. While text generation is inherently autoregressive and variable in length, current detection paradigms are \emph{fixed-horizon} and \emph{ad hoc}. In practice, for example, a detector may wish to process a stream of tokens and stop as soon as confidence is high. However, with the standard statistical paradigm based on p-values, it is not allowed to continuously monitor the test statistic and decide when to stop based on the current value---this is known as ``p-hacking'' and it invalidates the Type-I error guarantee. This inability to perform \emph{post-hoc} sequential analysis severely limits detection efficiency. These gaps highlight a critical research challenge:
+\begin{center}
+    \emph{How can we design provably efficient watermarking schemes leveraging anchor distributions that allow for valid early stopping?}
+\end{center}
+
+In this work, we provide the first formal resolution to this question. We formulate the problem of \emph{Anchored E-Watermarking}, where both the generator and detector share access to an anchor distribution $p_0$, aiming to watermark a family of distributions in the $\delta$-proximity of $p_0$. Departing from classical p-value analysis, we adopt \emph{e-values} as the central detection paradigm. E-values~\citep{vovk1993logic,shafer2011testmartingales,vovk2021values} are nonnegative random variables $E$ satisfying $\E_{\mathbf{H}_0}[E] \leq 1$ under the null. Unlike p-values, e-values arise from supermartingales, and it is therefore possible to preserve Type-I error guarantees under optional stopping based on ongoing analysis of data. We analyze the optimal e-value for watermark detection with respect to the worst-case log-growth rate~\citep{kelly1956new} and the expected stopping time~\citep{grunwald2020safe,waudby2025universal}, thus fully characterize the average per-step growth rate of evidence and sample efficiency. Our main theoretical contributions are summarized informally as follows:
+
+\begin{theorem}[Informal version of \Cref{thm:log-growth} and \Cref{thm:stopping-time}]\label{thm:informal}
+The optimal worst-case log-growth rate $\E_{\mathbf{H}_1}[\log E]$ under the alternative $\mathbf{H}_1$ is given by:
+\begin{align*}
+    J^* = h + \left(1-\frac{\delta}{2}\right)\log\left(1-\frac{\delta}{2}\right)
+ + \frac{\delta}{2}\log\left(\frac{\delta}{2(n-1)}\right),
+\end{align*}
+where $h = H(p_0)$ is the Shannon entropy of the anchor distribution $p_0$ and $\delta>0$ is a robustness tolerance parameter.
+Furthermore, the optimal expected stopping time to achieve a Type-I error $\alpha$ scales as $\frac{\log(1/\alpha)}{J^*}$.
+\end{theorem}
+
+To the best of our knowledge, this work represents the first application of e-values to the domain of statistical watermarking. By enabling valid sequential testing, our framework significantly improves detection efficiency, allowing the system to flag machine-generated text with fewer tokens than fixed-horizon counterparts. With the ability to early-stop, this sequential paradigm enhances robustness against adaptive attacks: because the detector can terminate immediately upon accumulating sufficient evidence, the watermark remains effective even if the attacker perturbs the text heavily in later segments (post-stopping). Consequently, our approach offers a theoretically rigorous and practically superior alternative to existing heuristic detection methods. Through experiments on real watermarking benchmark~\citep{piet2023mark}, we show that the theoretical scheme implied by \Cref{thm:informal} achieves consistently higher sample efficiency than state-of-the-art methods, reducing the token consumption by 13-15\% across various temperature settings.
+
+\subsection{Related works}
+
+\label{sec:related_work}
+
+\paragraph{Statistical watermarking.}
+Watermarking offers a white-box provenance mechanism for detecting LLM-generated text~\citep{tang2023science}, complementing post-hoc detectors and provenance tools developed for neural text generation~\citep{zellers2019defending}.
+Classical digital watermarking and steganography provide a broad toolbox for embedding and extracting imperceptible signals under benign or adversarial channel edits~\citep{cox2007digital}. Early works in NLP literature studied watermarking and tracing of text via editing or synonym substitutions~\citep{venugopal-etal-2011-watermarking,rizzo2019fine,abdelnabi2021adversarial,yang2022tracing,kamaruddin2018review}.
+In contrast, modern \emph{statistical} (a.k.a.\ generative) watermarking~\citep{aaronson2022my,kirchenbauer2023watermark} injects a secret, testable distributional bias into the sampling process, and detects this bias via hypothesis testing on the generated token sequence.
+A rapidly growing theory studies efficiency and optimality of watermarking tests and encoders: results include finite-sample guarantees, information-theoretic limits, and constructions that are distortion-free or unbiased~\citep{huang2023towards,zhao2023provable,li2024statistical,block2025gaussmark,kuditipudi2023robust,hu2023unbiased,xie2025debiasing}.
+Negative and hardness results highlight fundamental limitations against adaptive or distribution-matching adversaries~\citep{christ2023undetectable,christ2024pseudorandom,golowich2024edit}, motivating alternative design considerations such as distribution-preserving and public-key  schemes~\citep{wu2023distributionpreserving,liu2023unforgeable,fairoze2023publiclydetectable}.
+Empirical robustness is commonly assessed under paraphrasing, editing and translation, with recent work studying cross-lingual failure modes and defenses~\citep{he2024translation}, and benchmarks/frameworks such as MarkMyWords and scalable pipelines for watermark evaluation and deployment~\citep{piet2023mark,zhang2024remarkllm,lau2024waterfall,dathathri2024scalable}.
+Finally, a complementary line of work leverages semantic structure and auxiliary models to boost detection power under benign distributional structure, including semantic/paraphrastic watermarks and speculative-sampling-based schemes~\citep{ren2024robustsemanticsbasedwatermarklarge,liu2024adaptive,hou2024k,hou2024semstampsemanticwatermarkparaphrastic,fu2024watermarking,huang2025watermarking,leviathan2023fast}.
+Our anchored e-value approach builds on these works by explicitly treating detection as anytime-valid sequential testing~\citep{chen2024online}, and by allowing model-assisted calibration under distribution shift~\citep{huang2025watermarking,he2024distributionadaptive,he2025distributionalembedding}.
+
+\paragraph{E-values and sequential hypothesis testing.}
+Sequential hypothesis testing studies inference procedures that remain valid under data-dependent stopping and streaming data~\citep{WaldSequentialAnalysis1947,Robbins1952SomeAO,breimualphanu2011optimal}.
+Classical likelihood-ratio and $p$-value based methods can fail under optional stopping or composite hypotheses, motivating the use of nonnegative supermartingales / test martingales whose stopped values are valid evidence measures~\citep{shafer2011testmartingales,vovk2021values,Shafer2021Testing,grunwald2020safe,ramdas2023game}.
+The resulting \emph{e-values} and \emph{e-processes} unify betting scores, likelihood ratios, and (stopped) Bayes factors. Additionally, e-values and e-processes support modular operations such as merging and calibration~\citep{vovk2021values,ramdasWang2025hypevalues}.
+This framework has enabled principled notions of power and optimality, including log-/growth-rate criteria and sharp asymptotic rates for broad classes of betting-based tests~\citep{grunwald2020safe,waudby2025universal}.
+E-values also interact fruitfully with multiple testing and online testing, yielding e-value analogues of the BH and wealth-based procedures and their extensions to structured settings~\citep{wangramdas2022fdrevalues,ramdas2017decayingmemory,ramdas2018saffron,ramdas2019dagger}.
+Recent work further broadens the reach of e-values to new ML settings, such as conformal prediction and sequential monitoring of strategic systems~\citep{gauthier2025conformal_evalues,gauthier2026bettingequilibrium,aolaritei2025sgdcs}, and connects e-values to model-assisted efficiency gains via prediction-powered inference~\citep{wasserman2020universal,csillag2025predictionpoweredevalues}.
+Our work draws on these foundations to construct e-values tailored to watermark detection which ensures validity under arbitrary stopping rules and enables sequential evidence accumulation in practical provenance audits.
+
+
+
+--- prelim.tex ---
+
+
+\section{Preliminaries}
+
+\subsection{Statistical watermarking}
+
+Statistical watermarking for Large Language Models (LLMs) provides a probabilistic framework for distinguishing machine-generated text from human-written text. Unlike post-hoc detection methods that rely on classifiers trained on model artifacts, watermarking actively embeds a statistical signal into the generation process. This signal is designed to be imperceptible to humans yet statistically significant to an algorithmic detector possessing a secret key.
+
+\paragraph{Statistical watermarking as a hypothesis testing problem.}
+Formally, statistical watermarking is cast as a hypothesis testing problem. Let $q$ denote the target distribution over the sample space $\mathcal{V}$, and let $\mathcal{S}$ represent the space of pseudorandom seeds. The watermarking protocol modifies the standard decoding mechanism of the LLM such that the output tokens $V \in \mathcal{V}$ and the pseudorandom seeds $S \in \mathcal{S}$ are sampled jointly from a watermarked distribution $\mathcal{P}_W$. 
+
+The detection task seeks to determine if a given observed text $v$ was generated by the watermarked model: $\mathcal{D}: \mathcal{V} \times \mathcal{S} \to \{\text{Watermarked}, \text{Unwatermarked}\}$. This reduces to testing for independence between the tokens $v$ and the seeds $s$ reconstructed via the detector's key. We define the null and alternative hypotheses as follows~\citep{huang2023towards}:
+\begin{itemize}
+    \item \textbf{Null hypothesis $\textbf{H}_0$:} The text $v$ is generated independently of the seeds $s$ (e.g., by a human or an unwatermarked model).
+    \item \textbf{Alternative hypothesis $\textbf{H}_1$:} The text $v$ and seeds $s$ are sampled from the joint watermarked distribution $\mathcal{P}_W$, implying they come from the watermarked model.
+\end{itemize}
+
+It is pertinent to distinguish this \textit{distributional} watermarking approach from classical instance-level watermarking techniques applied to static media, such as images or audio \cite{cox2007digital}. While classical methods embed a signature into a specific, fixed outcome (post-generation), statistical watermarking modifies the stochastic sampling process itself, ensuring that any realization from the model carries the statistical evidence of its origin without requiring rigid alterations to the final output.
+
+\paragraph{Statistical guarantees.}
+A robust watermarking scheme is characterized by its ability to provide three fundamental guarantees.
+
+First, to preserve generation quality and ensure watermarked content remains indistinguishable from ordinary samples, the distance (e.g., KL-divergence) between the watermarked distribution $\mathcal{P}_W$ and the original target distribution $q$ must be minimized. Ideally, we seek a scheme that introduces zero distributional shift~\citep{hu2023unbiased}.
+
+\begin{definition}[Distortion-free]\label{def:unbias}
+    A watermark is considered \textit{distortion-free} (or unbiased) if the outcome marginal of the watermarked distribution $\mathcal{P}_W$ matches the target distribution $q$. Formally, a distortion-free watermark satisfies:
+    \begin{align*}
+        \sum_{s \in \mathcal{S}} \mathcal{P}_W(A, s) = q(A), \quad \forall A \subseteq \mathcal{V}.
+    \end{align*}
+\end{definition}
+
+Second, it is often required in practice that the detector operates without access to the watermarked distribution since the underlying model's parameters are generally unknown to the detector. This means that the detection scheme needs to be designed for a \emph{family of target distributions} in a model-agnostic way~\citep{kuditipudi2023robust}, leading to the next concept.
+
+\begin{definition}[Model-agnosticity]\label{def:agnostic}
+    A watermark is \textit{model-agnostic} if the seed-marginal of $\mathcal{P}_W$ is chosen independently of the target distribution $q$. That is, the distribution of seeds $S$ does not depend on the model's logits.
+\end{definition}
+
+Third, the reliability of the watermark is quantified by standard statistical error rates.
+The \emph{Type I error} (false positive rate) measures the probability of incorrectly identifying non-watermarked text (e.g., human-written) as watermarked. Given the high stakes of false accusations (e.g., in academic integrity), this error must be bounded by a small significance level $\alpha$:
+\begin{align*}
+    \mathbb{P}_{H_0}(\mathcal{D}(V, S) = \text{Watermarked}) \leq \alpha.
+\end{align*}
+The \emph{Type II error} (false negative rate) measures the probability that watermarked text fails to be detected. Minimizing this error is equivalent to maximizing the statistical power of the test. For a target error rate $\beta$, we require:
+\begin{align*}
+    \mathbb{P}_{H_1}(\mathcal{D}(V, S) = \text{Unwatermarked}) \leq \beta.
+\end{align*}
+
+
+\subsection{Sequential hypothesis testing and e-values}
+
+Consider a measurable space $(\Omega, \mathcal{F})$ and a family of probability distributions $\mathcal{P}$. We are interested in testing a null hypothesis $\mathcal{H}_0: P \in \mathcal{P}_0 \subset \mathcal{P}$ against an alternative $\mathcal{H}_1: P \in \mathcal{P}_1 = \mathcal{P} \setminus \mathcal{P}_0$. 
+An e-value is a random variable whose expectation is bounded by unity under the null hypothesis~\citep{vovk2021values}.
+
+\begin{definition}[E-value]
+A nonnegative random variable $E$ is an e-value for $\mathcal{H}_0$ if for all $P \in \mathcal{P}_0$,
+\begin{align*}
+    \mathbb{E}_P[E] \le 1.
+\end{align*}
+\end{definition}
+
+Intuitively, an e-value represents the amount of wealth a gambler would have after betting against the null hypothesis, in a game where the game is fair or unfavorable under $\mathcal{H}_0$, and starting with an initial wealth of one. On the other hand, if $E$ becomes large, this suggests that the null hypothesis is unlikely to be true.
+
+\paragraph{Sequential evidence and stopping time guarantees.}
+
+The primary advantage of e-values lies in their behavior regarding stopping times. In a sequential setting, we are given a filtration $(\mathcal{F}_t)_{t \ge 0}$ and construct a sequence of e-values $(E_t)_{t \ge 0}$. If $(E_t)_{t \ge 0}$ is a nonnegative supermartingale with respect to the null distributions (often called a \textit{test martingale}), it allows for \textit{anytime-valid} inference.
+This property derives from Ville's inequality, a time-uniform generalization of Markov's inequality.
+
+\begin{theorem}[Ville's inequality]
+Let $(E_t)_{t \ge 0}$ be a nonnegative supermartingale with respect to $P \in \mathcal{P}_0$ such that $E_0 \le 1$. Then for any $\alpha \in (0,1)$,
+\begin{align*}
+    P\left( \exists t \ge 0 : E_t \ge \frac{1}{\alpha} \right) \le \alpha.
+\end{align*}
+\end{theorem}
+
+This result guarantees that a researcher can track the e-value process continuously and stop at any data-dependent time $\tau$ (a stopping time) while maintaining Type-I error control. Specifically, $\mathbb{E}_P[E_\tau] \le 1$ holds for any stopping time $\tau$ (possibly unbounded), a kind of guarantee which is not available for p-values.
+
+
+--- problem.tex ---
+
+\section{Problem Formulation}
+
+In this section, we formulate the problem of \emph{Anchored E-Watermarking}. Similar to statistical watermarking, the goal is to embed statistical signals into samples from a target distribution to enable detection. However, in Anchored E-Watermarking, the generator and the detector share access to an anchor distribution that serves as a robust \emph{a priori} estimate of the target distribution. This setting is common in practice; for example, when watermarking Large Language Models or image generators, the target distribution is known to be human language or natural images, respectively. Consequently, watermarking efficacy can be improved by leveraging this structure. Besides, Anchored E-Watermarking uses e-values for detection, thus enjoying improved efficiency in sequential testing. In the following, we introduce the specific components of Anchored E-Watermarking.
+
+\paragraph{Anchor distribution.}
+
+In the Anchored E-Watermarking framework, we assume that both the generator and the detector share access to an \emph{anchor distribution} $p_0 \in \Delta(\cV)$, which is in the same probability simplex as the target distribution $q$. This $p_0$ serves as the best \emph{a priori} estimate of the target distribution. For instance, in the context of watermarking Large Language Models (LLMs), $p_0$ could be an open-source, smaller-scale LLM such as Qwen3-8B~\citep{qwen3technicalreport}. Leveraging its role as a known reference, we designate $p_0$ as the marginal distribution for the watermark signal (or random seed), denoted as $s$. Therefore, the seed space $\cS$ is equal to $\cV$ in our framework. Throughout the paper, we assume $p_0$ satisfies the condition $\inf_{v \in \cV}p_0(v) > \delta$ for a positive robustness tolerance parameter $\delta$. This condition ensures $p_0$ has enough randomness as required for watermarking~\citep{aaronson2022my} and that the $\delta$-neighborhood defined below is a strict subset of the probability simplex.
+
+\paragraph{Target distribution.}
+
+The target distribution $q \in \Delta(\cV)$ represents the desired distribution from which (watermarked) output samples $v$ are generated. Consistent with the definition of the anchor, we premise that $q$ remains sufficiently proximal to $p_0$. Formally, we assume $q$ resides within the $\delta$-neighborhood of the anchor:
+\begin{align*}
+    \cQ(p_0,\delta) = \left\{q \in \Delta(\cV): \|q - p_0\|_1 \leq \delta\right\}.
+\end{align*}
+Here $\|\cdot\|_1$ is the $\ell_1$ distance and the radius $\delta>0$ represents a robustness tolerance parameter that controls how the true target distribution $q$ can deviate from the anchor. 
+This assumption holds for most practical statistical watermarking scenarios; for example, in the LLM domain, high-performing models tend to converge towards the same underlying distribution of natural language, resulting in low statistical divergence between them.
+
+\paragraph{Generator.}
+
+The objective of the generator is to sample an output $v$ from the target distribution $q$ while embedding a statistical signal $s$. To achieve this, the generator constructs a joint distribution (or coupling) $w$ over $v$ and $s$, subject to the constraint that the marginals recover the target and anchor distributions, respectively. The feasible set of valid couplings is defined as:
+\begin{align*}
+    \cP(p_0,q) = \bigg\{w \in \Delta(\cV \times \cV): \sum_{s \in \cV}w(v,s) = q(v), \quad \sum_{v\in \cV}w(v,s) = p_0(s)\bigg\}.
+\end{align*}
+Note that the generator has access to $q$, as is common in practice (e.g., when the generator is a service provider). During generation, the system samples the outcome $v$ and the signal $s$ jointly from $w$. This procedure ensures that the marginal distribution of the outcome $v$ is unbiased (satisfying \Cref{def:unbias}), while the watermark signal is embedded within the statistical dependency between $v$ and $s$.
+
+\paragraph{E-value.}
+
+In the detection phase, the detector receives an outcome-signal pair $(v,s)$ and computes an e-value $e(v,s) \geq 0$. The objective is to distinguish between the following hypotheses:
+\begin{align*}
+    \textbf{H}_0: &~ v \text{ and } s \text{ are sampled independently},\\
+    \textbf{H}_1: &~ (v,s) \text{ are sampled from the joint coupling } w.
+\end{align*}
+The detector rejects the null hypothesis if $e(v,s) > 1/\alpha$. To guarantee a Type-I error rate of at most $\alpha$, the expectation of the e-value under the null hypothesis must be bounded by $1$. Adhering to the model-agnostic constraint (\Cref{def:agnostic}), the scoring function $e(\cdot, \cdot)$ must be defined prior to observing the specific target distribution $q$. The design of the e-value relies solely on the constraint that the target distribution lies within the anchor's neighborhood, i.e., $q \in \cQ(p_0,\delta)$. Consequently, to ensure validity, the e-value must satisfy the expectation bound uniformly across the entire uncertainty set $\cQ$:
+\begin{align}\label{eq:e-null}
+    \sup_{q \in \cQ(p_0,\delta)} \mathbb{E}_{v \sim q, s \sim p_0} [e(v,s)] \leq 1.
+\end{align}
+We let $\cE$ denote the set of all nonnegative functions $e: \cV \times \cV \to \R$ satisfying Eq.~\eqref{eq:e-null}.
+
+\subsection{Robust log-optimality}
+
+While the definition of an e-value ensures validity (safety) under the null, it does not guarantee power (growth) under the alternative. To reject $\textbf{H}_0$ effectively, we desire the e-value to be large when the data is generated from the alternative distribution $\textbf{H}_1$. The standard criterion for selecting an e-value is \textit{log-optimality}, often referred to as the ``Kelly criterion'' in the finance literature~\citep{kelly1956new}. This approach seeks to maximize the expected logarithmic growth rate of evidence against the null, under the alternative. For simple hypotheses where $\mathcal{P}_0 = \{P\}$ and $\mathcal{P}_1 = \{Q\}$, the likelihood ratio $e^* = \frac{dQ}{dP}$ is log-optimal, such that
+\begin{align*}
+    \mathbb{E}_Q[\log e^*] \ge \mathbb{E}_Q[\log e]
+\end{align*}
+for any valid e-value $e$.
+
+In Anchored E-Watermarking, the alternative is defined by the joint coupling $w$ constructed by the generator. However, since the target distribution $q$ lies in a set $\cQ(p_0,\delta)$ that is unknown to the detector (i.e., the designer of the e-value), we must optimize the worst-case log-growth rate over arbitrary $q \in \cQ(p_0,\delta)$. This gives rise to the following robust log-optimality problem.
+
+\begin{problem}[Robust log-optimality]\label{prob:robust-log-optimal}
+An e-value $e$ is \emph{robust log-optimal} in Anchored E-Watermarking if it optimizes the following objective:
+\begin{align}\label{eq:log-growth}
+    \sup_{e \in \cE} \inf_{q \in \cQ(p_0,\delta)} \sup_{w \in \cP(p_0,q)} &~  \sum_{v,s \in \cV} w(v,s) \cdot \log e(v,s).
+\end{align}
+\end{problem}
+
+In this formulation, the objective $\sum w(v,s) \log e(v,s)$ represents the log-growth rate under the alternative. The inner maximization $\sup_{w \in \cP(p_0,q)}$ reflects the generator's optimization of the coupling $w$ given knowledge of $q$; the minimization $\inf_{q \in \cQ(p_0,\delta)}$ enforces robustness against the worst-case target distribution in the family; and the outer maximization $\sup_{e \in \cE}$ seeks the optimal detector without access to $q$ subject to model-agnosticy (\Cref{def:agnostic}).
+
+\begin{remark}[Relationship to growth rate optimality in the worst case (GROW)~\citep{grunwald2020safe}]
+GROW studies the worst-case optimal expected capital growth rate under composite null $\mathcal{P}_0$ and alternative $\mathcal{P}_1$:
+\begin{align*}
+    \mathrm{GROW}(\mathcal{P}_1) = \sup_{E\in \mathcal{E}(\mathcal{P}_0)} \inf_{\theta \in \mathcal{P}_1}\E_{P_\theta}[log E],
+\end{align*}
+where $ \mathcal{E}(\mathcal{P}_0)$ is the set of all valid e-values for the null $\mathcal{P}_0$.
+Therefore, our problem in Eq.~\eqref{eq:log-growth} can be seen as generalizing GROW into an `active' scenario where a generator (corresponding to $\sup_{w \in \cP(p_0,q)}$) seeks to maximizes the power after the worst-case hypothesis selection $\inf_{\theta \in \mathcal{P}_1}$. Note that by designing the coupling $w$, the generator essentially alters the alternative, so our problem can not be reduced to GROW even if the watermark generator is fixed.
+\end{remark}
+
+
+\subsection{Stopping time}
+
+While \Cref{prob:robust-log-optimal} addresses the one-step growth rate, it remains to analyze the sample complexity of the framework. In the context of sequential hypothesis testing, sample efficiency is characterized by the stopping time $\tau_\alpha = \inf\left\{n \in \Z_+: W_n \geq \log(1/\alpha)\right\}$ under the alternative, where $$W_n = \sum_{t=1}^{n}\log e(v^t,s^t),$$ is the accumulated wealth process. This quantity represents the number of samples required to reject the null hypothesis. We consider a stochastic process $\mu(\cA,\cG)$ governed by the interaction between an adversary $\cA$ and a generator $\cG$. At each step $t \in \Z_+$:
+\begin{itemize}
+    \item The adversary $\cA$ selects $q^t \in \cQ(p_0,\delta)$ based on the e-value $e$ and the history $(v^1,s^1),\dots,(v^{t-1},s^{t-1})$;
+    \item The generator $\cG$ specifies the joint coupling $w^t$ given $q^t$ and $p_0$, and draws the sample $(v^t,s^t) \sim w^t$.
+\end{itemize}
+Due to the adaptive nature of the adversary, the outcome sequence $v^1, v^2, \dots$ may be generated autoregressively, conditional on previous outcomes. This formulation extends the i.i.d.\ setting of \citet{huang2023towards} to arbitrary dependent distributions. In this setting, we write the stopping time as $\tau_\alpha(e)$ to highlight the dependence on the e-value $e$. In the context of sequential testing \citep{breimualphanu2011optimal,chugg2023auditing,shekhar2023nonparametric,kaufmann2021mixture,waudby2025universal}, the expected stopping time $\mathbb{E}[\tau_\alpha]$ typically scales linearly with $\log(1/\alpha)$, modulated by an information-theoretic quantity capturing the complexity of the testing problem. Therefore, we are explicitly interested in the following question:
+
+\begin{problem}[Sample efficiency]\label{prob:stopping-time}
+For any e-value $e$ satisfying the constraint in Eq.~\eqref{eq:e-null}, define its \emph{sample complexity} by 
+\begin{align*}
+    \scomp(e) = \sup_{\cA} \inf_{\cG} \liminf_{\alpha \to 0} \frac{\mathbb{E}_{\mu(\cA,\cG)}[\tau_\alpha(e)]}{\log(1/\alpha)}.
+\end{align*}
+We are interested in identifying the e-value that minimizes this sample complexity.
+\end{problem}
+
+Note that this formulation is stronger than the classical expected stopping time because we allow the adversary to alter the distribution at each time step. This implies that samples are not generated in an i.i.d.\ fashion, a distinction crucial for applications such as the watermarking of autoregressive language models.
+
+--- theory.tex ---
+
+\section{Theoretical Results}
+
+In this section, we answer the questions posed in the previous section. We first derive the optimal detector for the single-step decision problem and then extend this analysis to the sequential setting to characterize the fundamental limit of sample efficiency. Let $n$ denote the cardinality of the sample space $\cV$ and $\mathbf{e}_v$ denote the one-hot vector (i.e., Dirac measure) that assigns mass $1$ to $v \in \cV$.
+
+\subsection{Optimal log-growth rate}
+
+We begin by solving the robust log-optimality problem defined in \Cref{prob:robust-log-optimal}. The following theorem provides a closed-form solution for both the optimal e-value and the worst-case-optimal generator behavior.
+
+\begin{theorem}[Log-growth rate]\label{thm:log-growth}
+The optimal e-value that solves the objective in Eq.~\eqref{eq:log-growth} is given by:
+\begin{align}\label{eq:optimal-e}
+e^*(v,s)
+=
+\begin{cases}
+\frac{1-\delta/2}{p_0(s)}, & s=v,\\
+\frac{\delta}{2(n-1)p_0(s)}, & s\neq v,
+\end{cases}
+\end{align}
+where $n = |\cV|$. Furthermore, for any target distribution $q \in \cQ(p_0,\delta)$ decomposed as $q = \sum_{i=1}^k \lambda_i q_i$ where $q_i = p_0 + \frac{\delta}{2}\cdot (\mathbf{e}_{v_i} - \mathbf{e}_{s_i}), v_i \neq s_i \in \cV$ are the extreme points of $\cQ(p_0,\delta)$, 
+the optimizer of the inner maximization problem (the generator's optimal coupling) is:
+\begin{align}\label{eq:coupling}
+    w^* = \sum_{i=1}^k \lambda_i \cdot \left(\frac{\delta}{2} \cdot (\mathbf{e}_{v_i}\mathbf{e}_{s_i}^\top - \mathbf{e}_{s_i}\mathbf{e}_{s_i}^\top) + \diag(p_0)\right).
+\end{align}
+The optimal robust log-growth rate is equal to:
+\begin{align}\label{eq:optimal-log-growth}
+    J^* = h + \left(1-\frac{\delta}{2}\right)\log\left(1-\frac{\delta}{2}\right)
+ + \frac{\delta}{2}\log\left(\frac{\delta}{2(n-1)}\right),
+\end{align}
+where the term $h = H(p_0)$ is the Shannon entropy of the anchor distribution $p_0$.
+\end{theorem}
+
+The result in \Cref{eq:optimal-log-growth} fundamentally express the optimal growth rate of e-values in Anchored E-Watermarking. The first term is the entropy of the anchor distribution, which mathematically formalizes the intuition that watermarking is inherently easier for distributions with high entropy. 
+The second term can be written as $-H(\nu_\delta)$, the negative entropy of the categorical distribution $\nu_\delta = (1-\delta/2, \delta/(2(n-1)),\dots,\delta/(2(n-1))) \in \Delta([n])$, which is a decreasing function of $\delta$. This explicitly characterizes the power-robustness tradeoff determined by the tolerance parameter $\delta$. 
+Written as $H(p_0) - H(\nu_\delta)$, the optimal log-growth rate is the achieved information rate of an Additive Noise Channel $Y = X \oplus Z$ where $X \sim p_0, Z \sim \nu_\delta$. 
+
+\begin{remark}[Relationship to SEAL~\citep{huang2025watermarking}]
+SEAL proposes to use a smaller language model as $p_0$ and speculative decoding as the generator.
+Note that the optimizer of the inner problem given in Eq.~\eqref{eq:coupling} is exactly the maximal coupling given by speculative decoding. Therefore, \Cref{thm:log-growth} confirms that the choice of generator in \citet{huang2025watermarking} is optimal. However, the optimal detector given by Eq.~\eqref{eq:optimal-e} is different from the detection rule in SEAL: this gap is corroborated by experiments in Section~\ref{sec:exp-real}.
+\end{remark}
+
+\subsection{Sample efficiency}
+
+Having characterized the one-step optimal growth rate, we now analyze the long-term performance of the watermark in a sequential setting. The following theorem connects the log-growth rate $J^*$ to the sample complexity required to reject the null hypothesis against an adaptive adversary.
+
+\begin{theorem}[Expected stopping time]
+\label{thm:stopping-time}
+Let $\mu(\cA,\cG)$ be the stochastic process defined in \Cref{prob:stopping-time} and $\tau_\alpha(e)$ be the stopping time under e-value $e$. Let $J^*$ be the optimal rate defined in Eq.~\eqref{eq:optimal-log-growth}. We have the following bounds on sample efficiency:
+\begin{itemize}
+    \item \textbf{Lower bound (converse):} For any valid e-value $e \in \cE$:
+\begin{align*}
+    \sup_{\cA} \inf_{\cG} \liminf_{\alpha \to 0} \frac{\mathbb{E}_{\mu(\cA,\cG)}[\tau_\alpha(e)]}{\log(1/\alpha)} \geq \frac{1}{J^*}.
+\end{align*}
+\item \textbf{Upper bound (achievability):} For the optimal e-value $e^*$ defined in \Cref{thm:log-growth}:
+\begin{align*}
+    \sup_{\cA} \inf_{\cG} \liminf_{\alpha \to 0} \frac{\mathbb{E}_{\mu(\cA,\cG)}[\tau_\alpha(e^*)]}{\log(1/\alpha)} = \frac{1}{J^*}.
+\end{align*}
+\end{itemize}
+\end{theorem}
+
+
+\Cref{thm:stopping-time} establishes $1/J^*$ as the fundamental information-theoretic limit of sample complexity for Anchored E-Watermarking. It demonstrates that the e-value $e^*$ derived from the one-step greedy optimization is not only locally optimal but also globally optimal for sequential testing. Crucially, this optimality holds even against an adaptive adversary that can vary the target distribution at every step, provided the distribution remains within the $\delta$-neighborhood of the anchor. 
+
+\begin{remark}
+[Relationship with the rates in \citet{huang2023towards}]
+\citet{huang2023towards} shows that the minimum number of samples required to watermark with Type I error $\alpha$ scales as $\log(1/\alpha)\cdot\frac{\log(1/h)}{h}$, where $h$ is the average entropy per token. While our rate $\frac{\log(1/\alpha)}{h}$ has the same scaling in terms of $\alpha$, its dependence on the entropy $h$ is improved. This is because \citet{huang2023towards} study an asymptotic regime where $h \to 0$, while we fix an anchor distribution with lower bounded entropy arising from the condition $\inf_{v \in \cV}p(v) > \delta$.
+\end{remark}
+
+--- claims.tex ---
+
+
+\section{Useful Claims}
+
+\begin{lemma}\label{lem:q_concave_vertices}
+Let $\cV$ be the set $\{1,\dots,n\}$ and $p_0 \in \Delta(\cV)$ be a distribution over $\cV$ such that $\min_{v \in \cV}p_0(v) > \delta$. 
+Define
+\begin{align*}
+    \cQ(p_0,\delta) = \left\{q \in \Delta(\cV): \|q - p_0\|_1 \leq \delta\right\} 
+\end{align*}
+Then $\cQ(p_0,\delta)$ is a convex polytope whose vertex set is given by:
+$$\cQ_{\ext}(p_0,\delta) := \{p_0 + (\mathbf{e}_i-\mathbf{e}_j)\cdot \delta/2: (i,j) \in \cV\times \cV, i\neq j\}.$$
+\end{lemma}
+
+\begin{proof}
+
+Recall $\cQ(p_0,\delta) := \{q \in \Delta^n: \|q - p_0\|_{\ell_1} \leq \delta\}$. First, we note that $\cQ(p_0,\delta)$ is the intersection of two convex polytopes, hence it must also be a convex polytope. We claim that $\cQ(p_0,\delta) = \mathrm{Conv}(\cQ_{\ext}(p_0,\delta))$. Suppose $q \in \cQ(p_0,\delta)$, then we can write that 
+$q_i - p_i  = s_i$
+for $s_i \in [-\delta/2,\delta/2]$, $\sum s_i = 0$, and $\sum \lvert s_i\rvert \leq \delta$. Next, suppose for contradiction that $s_j > \delta/2$, then $\sum_{i \neq j}s_i = -s_j$ and hence,
+$$\sum_{k}\lvert s_k\rvert \geq \lvert s_j\rvert + \lvert\sum_{i \neq j}s_i\rvert > \delta,$$
+which violates the TV constraint. 
+
+Now we show: for any $q \in \cQ(p_0,\delta)$,
+there exist nonnegative weights $\lambda_{ij}$ summing to $1$ such that
+\begin{align*}
+    q = \sum_{i \neq j} \lambda_{ij} \left( p_0 + \frac{\delta}{2}(\mathbf{e}_i - \mathbf{e}_j) \right).
+\end{align*}
+
+We construct the decomposition as follows:
+
+\begin{itemize}
+    \item Let $P = \{i : s_i > 0\},\, N = \{j : s_j < 0\}$.
+    \item Necessarily $\sum_{i \in P} s_i = - \sum_{j \in N} s_j 
+    = \frac{1}{2} \sum_k |s_k| \le \delta/2$.
+    \item Define nonnegative coefficients $\alpha_{ij}$ for $i \in P,\, j \in N$
+    such that
+    \begin{align*}
+        \sum_{j \in N} \alpha_{ij} = \frac{s_i}{\delta/2}, 
+        \qquad
+        \sum_{i \in P} \alpha_{ij} = \frac{-s_j}{\delta/2}.
+    \end{align*}
+\end{itemize}
+
+The existence follows from Hoffman’s circulation theorem.
+
+\begin{itemize}
+    \item Then set $\lambda_{ij} = \alpha_{ij}$. Summing,
+    \begin{align*}
+        p_0 + \frac{\delta}{2} \sum_{i \neq j} \lambda_{ij}(\mathbf{e}_i - \mathbf{e}_j)
+        = p_0 + s = q.
+    \end{align*}
+\end{itemize}
+
+This shows $q$ lies in the convex hull of the $v_{ij}$.
+
+
+It is now enough to show that any $v \in \cQ_{\ext}(p_0,\delta)$ cannot be generated by a convex combination of two distinct points in $\cQ(p_0,\delta)$ which will prove that $v \in \cQ_{\ext}(p_0,\delta)$ is a vertex of $\cQ(p_0,\delta)$ and hence, $\cQ(p_0,\delta)$ is generated by the convex hull of $\cQ_{\ext}(p_0,\delta)$. Suppose for contradiction that this is the case. Then there exists $q,q'\in\cQ(p_0,\delta)$ and $\lambda \in (0,1)$ such that 
+$$p_0 + (\mathbf{e}_i-\mathbf{e}_j)\frac{\delta}{2} = \lambda q + (1-\lambda)q'.$$
+Let $q = p + \eta\frac{\delta}{2}$ and $q' = p + \eta'\frac{\delta}{2}$ where $\eta \neq \eta'$ then we have that 
+$$\mathbf{e}_i - \mathbf{e}_j = \lambda \eta + (1-\lambda)\eta'.$$
+Then we must have that 
+$$\lambda \eta_i + (1-\lambda)\eta'_i = 1, \quad \lambda \eta_{j}+(1-\lambda)\eta'_j = -1,$$
+and
+$$\lambda \eta_{k} + (1-\lambda)\eta'_k  = 0.$$
+But for either of the first two conditions to be true, we must have that $\eta_i = \eta_i' = 1$ and $\eta_j = \eta_j' = -1$ Since all elements $\eta_k$ and $\eta_k'$ are bounded in magnitude by $1$. Furthermore, because $\lvert \eta_i\rvert + \lvert \eta_j\rvert = 2$, all other $\eta_k = 0$ (same for $\eta'$). Thus, $\eta = \eta'$ which is the desired contradiction.
+\end{proof}
+
+
+--- experiment.tex ---
+
+
+\section{Experiments}
+
+\subsection{Synthetic experiments}
+
+\begin{figure*}[t]
+\hfill
+\begin{subfigure}[b]{.325\linewidth}
+\includegraphics[width=\linewidth]{figs/obective_curve_p=0.2.png}
+\subcaption{$p = 0.2$}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{.325\linewidth}
+\includegraphics[width=\linewidth]{figs/obective_curve_p=0.5.png}
+\subcaption{$p = 0.5$}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{.325\linewidth}
+\includegraphics[width=\linewidth]{figs/obective_curve_p=0.75.png}
+\subcaption{$p = 0.75$}
+\end{subfigure}
+\caption{Simulation of the two-token case for the log growth problem in Eq.~\eqref{eq:log-growth}. Three separate anchor distributions are used each with parameter $\delta = 0.01$. We solve the simplified maxmin problem using the CLARABEL interior point method solver which is run for $30$ steps. The theoretical optimum is computed as in Eq.~\eqref{eq:optimal-log-growth}.}
+\label{fig:log-growth}
+\end{figure*}
+
+
+In this section, we verify our theoretical results with synthetic experiments on a family of simple target distributions.
+Here, we consider the two-token case where $\lvert \cV\rvert = 2$ and for simplicity of notation, we let $\mathcal{V} = \{0,1\}$. Any anchor distribution we consider belongs to a one-parameter Bernoulli family $p_0 = \begin{bmatrix}
+    p & 1-p
+\end{bmatrix}$ for $p \in (0,1)$.
+\paragraph{Log-growth optimality.}
+We solve the optimization problem in Eq.~\eqref{eq:log-growth} numerically and compare the objective curve with the theoretical prediction.
+With $n=2$, the problem can be simplified to the following maxmin problem:
+$$\sup_e\sum_{v} p_0(v)\log e(v,v) + \frac{\delta}{2}\min\left\{\log \frac{e(0,1)}{e(1,1)}, \log \frac{e(1,0)}{e(0,0)}\right\}$$
+subject to the constraint in Eq.~\eqref{eq:e-null} with $\cQ(p_0,\delta)$ replaced with the set of vertices $\cQ_{\text{ext}}(p_0,\delta) := \{p_0 \pm \frac{\delta}{2}(\mathbf{e}_0-\mathbf{e}_1)\}$. Using the CLARABEL interior point method solver \cite{Clarabel_2024}, we obtain the results in Fig. \ref{fig:log-growth}. We choose $\delta = 0.01$ and $p = 0.2,0.5,0.75$ corresponding to three separate anchor distributions $p_0$. For each $p_0$, we cold start the IPM solver and run it for $30$ steps with maximum allowed step size $0.99$. We observe that our numerical solution to Eq.~\eqref{eq:log-growth} converges to the proposed theoretical value in Eq.~\eqref{eq:optimal-log-growth}, hence verifying our theoretical results in the two-token case. 
+
+\paragraph{Stopping time.}
+In this setting, we simulate sequential testing with the optimal e-value $e^*$, as in Eq.~\eqref{eq:optimal-e}. Following Theorem \ref{thm:log-growth}, we let $\mathcal{A}^*$ be the adversary that chooses $q_t = q^*$ for all $t$ and $\cG^*$ be the generator that selects $w_t = w^*$ in response to $\mathcal{A}^*$ for all $t$. Under this setting, we simulate the stopping time over several $\alpha$ values to obtain the results in Fig. \ref{fig:stopping-time}. Here, we choose the parameters $\delta = 0.1$ and $p= 0.2,0.5,0.75$. For each anchor $p_0$, we compute the corresponding $q^*$, $w^*$, and $e^*$ using the closed-form equations in Theorem \ref{thm:log-growth}. We select $30$ values of $\alpha$ evenly log-spaced from $10^{-2}$ to $10^{-120}$. For each $\alpha$, we compute $10000$ stopping-times by generating sequences $(V^t,S^t)_{t \geq 1} \sim w^*$ and computing the resulting $\log e^*(V^t,S^t)$. We then average the stopping times to form an estimate of $\mathbb{E}_{\mu(\mathcal{A}^*,\cG^*)}[\tau_{\alpha}(e^*)]$. In Fig. \ref{fig:stopping-time}, we plot our estimates of $\mathbb{E}_{\mu(\mathcal{A}^*,\cG^*)[\tau_{\alpha}(e^*)]}/(\log(1/\alpha))$ which show that as $\alpha \downarrow 0$, the estimates converge to the theoretical rate of $1/J^*$, thereby validating the result in Theorem \ref{thm:stopping-time}.
+
+\begin{figure*}[t]
+\hfill
+\begin{subfigure}[h]{.325\linewidth}
+\includegraphics[width=\linewidth]{figs/stop_time_ratio_p=0.2.png}
+\subcaption{$p = 0.2$}
+\end{subfigure}
+\hfill
+\begin{subfigure}[h]{.325\linewidth}
+\includegraphics[width=\linewidth]{figs/stop_time_ratio_p=0.5.png}
+\subcaption{$p = 0.5$}
+\end{subfigure}
+\hfill
+\begin{subfigure}[h]{.325\linewidth}
+\includegraphics[width=\linewidth]{figs/stop_time_ratio_p=0.75.png}
+\subcaption{$p = 0.75$}
+\end{subfigure}
+\caption{Simulation of the two-token case for the stopping time problem $\text{SC}(e^*)$. We simulate for three different anchor distributions $p_0 = \begin{bmatrix}
+    p & 1-p
+\end{bmatrix}$ with $\delta = 0.1$ and estimate average stopping times $\mathbb{E}[\tau_{\alpha}]$ for $\alpha$ values ranging from $10^{-2}$ to $10^{-120}$. Each $\mathbb{E}[\tau_{\alpha}]$ is estimated by simulating $10000$ stopping times $\tau_\alpha$. The plots above display graphs of $\frac{\mathbb{E}[\tau_\alpha]}{\log(1/\alpha)}$ with red dashed lines equal to $1/J^*$ where $J^*$ is as in Eq.~\eqref{eq:optimal-log-growth}. We observe that convergence to the theoretical optimum is obtained for sufficiently small $\alpha$.}
+\label{fig:stopping-time}
+\end{figure*}
+
+\subsection{Experiments on real data}\label{sec:exp-real}
+
+We evaluate the performance of our watermarking scheme in \Cref{thm:log-growth} by comparing it with several baselines on a real watermarking task.
+
+\paragraph{Setup.}
+We select Llama2-7B-chat~\citep{touvron2023llama} with temperature $0.7$ as target distribution (i.e., the model to be watermarked) and Phi-3-mini-128k-instruct~\citep{abdin2024phi3technicalreporthighly} as the anchor distribution. We evaluate our watermark using the \textsc{MarkMyWords} benchmark~\citep{piet2023mark}, which is an open-source benchmark designed to evaluate symmetric key watermarking schemes. 
+
+\textsc{MarkMyWords} generates 300 outputs spanning three tasks---book summarization, creative writing, and news article generation---which mimic potential misuse scenarios. 
+Then, watermarked outputs undergo a set of transformations mimicking realistic user perturbation or attacks: (1) character-level perturbations (contractions, expansions, misspellings and typos); (2) word-level perturbations (random removal, addition, and swap of words in each sentence, replacing words with synonyms); (3) text-level perturbations (paraphrasing, translating the output to another language and back).
+Detection is run in a sequential test setting with early stopping. For baseline methods, we apply Bonferroni corrections to preserve \emph{anytime valid} Type-I error guarantees: let $p_k$ denote the p-value at time step $k \in \Z_+$, reject at the first time ${p_k} < \frac{\alpha}{k(k+1)}$.
+
+\paragraph{Results.}
+
+In this section, we present a comprehensive comparison of our method against these baselines in terms of quality and size. 
+Quality measures the utility of the watermarked text. It is computed using Llama-3~\citep{dubey2024llama} with greedy decoding as a judge model, and ranges from zero to one.
+{Size} represents the median number of tokens required to detect the watermark at a given p-value, computed over a range of perturbations listed above. All experiments enforce a Type-I error constraint of $\alpha = 0.02$. Lower values indicate higher efficiency.
+We compare against five state-of-the-art watermarking schemes: 
+``Distribution Shift''~\citep{kirchenbauer2023watermark}, 
+``Exponential''~\citep{aaronson2022watermarking}, 
+``Binary''~\citep{christ2023undetectable},
+``Inverse Transform''~\citep{kuditipudi2023robust}, and ``SEAL''~\citep{huang2025watermarking}.
+
+\begin{table}[h]
+    \centering
+    \begin{NiceTabular}{l|cc}
+        \toprule
+        {\bf Scheme
+        } & {\bf Quality} ($\uparrow$) & {\bf Size} ($\downarrow$) \\
+        \hline
+        Exponential & 0.907	& $\infty$ \\
+        Inverse Transform & 0.917 &	734.0 \\
+        Binary & {\bf 0.919} &	$\infty$ \\
+        Distribution Shift   & 0.912 &	145.0 \\
+        SEAL   & 0.901 &	84.5 \\
+        {\bf \Cref{thm:log-growth}} & {\bf 0.919} & {\bf 72.0} \\ 
+        \bottomrule
+    \end{NiceTabular}
+    \vspace{.5em}
+    \caption{{\fontfamily{ptm}\selectfont Comparison of our e-value-based watermarking scheme in \Cref{thm:log-growth} with baselines across quality and size. We report the median over different private keys and perturbation methods. The best result in each category is highlighted in bold. $\infty$ size suggests over half of the watermarked generations fail to be detected after perturbation. E-value-based watermarking demonstrates higher efficiency comparing with all baselines.}}
+    \label{tab:comparison}
+\end{table}
+
+As shown in Table~\ref{tab:comparison}, our Anchored E-Watermarking framework significantly outperforms baseline methods in terms of detection efficiency while maintaining high generation quality. Specifically, our method improves over SEAL, confirming the superiority of the optimal e-value. Furthermore, we achieves nearly $2 \times$ speed improvement (from $145$ to $72.0$ tokens) compared to the best non-anchored baseline. Crucially, this efficiency gain does not come at the cost of text quality: the quality score of our method remains competitive with the baselines, demonstrating that E-value-based watermarking offers a superior trade-off between detectability and utility.
+Due to space constraints, we defer additional experiment results to Appendix~\ref{sec:add_exp}.
+
+--- discussions.tex ---
+
+\section{Discussions}
+
+We have introduced Anchored E-Watermarking, a novel framework that bridges the gap between optimal sampling and anytime-valid inference in statistical watermarking. By shifting the detection paradigm from p-values to e-values, we addressed the critical limitation of fixed-horizon testing, enabling valid optional stopping without compromising Type-I error guarantees.
+
+Moreover, we characterized the optimal e-value with respect to the worst-case log-growth rate and derived the optimal expected stopping time, providing a rigorous foundation for watermarking in the presence of an anchor distribution. Empirically, our results on real-world language models demonstrate that this principled approach translates into substantial gains in efficiency. Our method identifies watermarked content with significantly fewer tokens than state-of-the-art heuristics while preserving generation quality.
+
+As the first application of e-values to statistical watermarking, this framework opens new avenues for efficient detection mechanisms, with future works including extension to more flexible anchor distributions or investigating the game-theoretic implications of e-watermarking against incentivized adversaries.
+

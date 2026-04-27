@@ -1,0 +1,99 @@
+\section{Introduction}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/figure1/self sycophancy paper figure.png}
+  \caption{When asked to evaluate the risk of an action in a fresh context (left), the model correctly assigns a high risk score. After taking the same action (right), the model underestimates its risk, illustrating a bias toward rationalizing its own prior behavior.}
+  \label{fig:figure1}
+\end{figure*}
+Language models are used not only to generate actions but also to evaluate, critique, or approve those actions, as in LLM-as-a-judge pipelines and agentic safety benchmarks \citep{zheng2023judgingllmasajudge,wang2023largelanguagemodelsare,zhang2024agentsafetybench}. In practice, the same model often wears both hats: CLI coding agents generate code and then review their own pull requests, tool-using assistants decide whether their proposed actions are safe to execute, and safety pipelines ask a model to critique or approve its own outputs before they are shown to users. 
+%Such self-monitoring assumes models evaluate their own recent behavior objectively, an assumption we show to be false.
+
+As agents like Claude Code, Claude Cowork and Github Copilot gain adoption and frontier models tackle increasingly autonomous, long-horizon tasks \citep{anthropic2025claudecode,anthropic2026cowork,peng2023copilot,kwa2025metr}, robust monitoring becomes essential. A common approach is \emph{self-monitoring}, but if models systematically misjudge their own outputs, this architecture becomes a single point of failure.
+
+In this work, we show when language models evaluate actions they believe they have taken themselves, they judge those actions as safer and more correct than identical actions presented under neutral attribution. We demonstrate this bias is strongest in on-policy settings, i.e. where models evaluate actions they have just generated and committed to. This rules out explanations based on stylistic preference: the bias is tied to the act of on-policy self-monitoring, not to properties of the evaluated content \citep{wataoka2024selfpreferencebias}. 
+
+We refer to this effect as self-attribution bias. In agentic systems, this bias manifests specifically as a failure of self-monitoring, where models assess their own outputs before acting on them. Crucially, the magnitude of this bias depends on whether the evaluation occurs immediately or after the model has already committed to an output, suggesting a dependence on whether the action is treated as part of the model’s established 'on-policy' trajectory, rather than as a hypothetical alternative. 
+This temporal dependence mirrors commitment and choice-supportive biases in human decision-making, where prior choices systematically bias subsequent evaluations \citep{festinger1957theory,mather2000choice,sharot2010decisions}. 
+
+When models evaluate fixed, externally supplied artifacts, essays or code written by “another model," the effect is greatly reduced or absent. Models are therefore least reliable precisely when self-monitoring is most needed.
+
+We demonstrate the consequences of self-attribution bias most clearly in agentic coding settings. On SWE-bench tasks, models generate patches and then rate their own correctness. While baseline ratings distinguish passing from failing patches, self-attribution selectively inflates confidence on incorrect code. This effect is strongest when the previous turn is evaluated, after the patch has been produced and re-presented as the model’s own prior output. We observe a parallel failure mode in interactive computer-use scenarios, including phishing and scam emails. When models are asked to assess the risk of an action in isolation, they assign appropriately high risk scores. However, after being led to believe they executed the same action, the models substantially reduce their risk—by up to 20 points on a 0–100 scale—again with larger effects in previous-turn settings.  In an email simulation where models leaked sensitive documents, they rated their own responses as substantially safer than under baseline attribution, in some cases inverting risk scores from maximum danger (10/10) to completely safe (0/10).
+
+
+% This bias is specific to on-policy self-monitoring. When models evaluate fixed, externally supplied artifacts, essays or code written by “another model," the effect is significantly reduced or absent. This dissociation indicates the failure arises not from general evaluation ability, but from the act of evaluating one’s own recent outputs. 
+
+%These results suggest self-monitoring is an unreliable safety primitive unless evaluation is decoupled from generation. We encourage developers to only use off-policy evaluations or use conservative thresholds in self-monitoring deployments.
+
+
+\paragraph{Contributions:}
+\begin{itemize}[leftmargin=1.2em, itemsep=2pt]
+\item We define and demonstrate \textbf{self-attribution bias} in language models: the same action or output receives systematically different correctness or risk ratings when evaluated under neutral attribution versus when attributed to the model itself, either in the same turn or a subsequent turn.
+\item We empirically characterize this bias across agentic computer use settings, code correctness, code harmfulness and PR approval, and agentic information leaking, evaluating $\sim$10 frontier models. In safety-critical scenarios, self-attribution leads to large failures, including up to a \textbf{20.4-point risk underestimation} in phishing actions and up to \textbf{5$\times$ higher PR approval rates} for on-policy harmful code.
+%severe miscalibration in code correctness judgments.
+\item We show \textbf{self-attribution bias is concentrated in on-policy self-monitoring}: it is strongest when models evaluate actions they have just generated and committed to, and is greatly reduced or absent when evaluating fixed, externally supplied artifacts. This dissociation indicates the bias arises from failures of self-monitoring rather than general evaluation deficits.
+\item We run ablations to analyze attribution timing and demonstrate previous-turn self-attribution consistently produces larger effects than same-turn evaluation, supporting a commitment-based interpretation in which outputs become part of the model’s established trajectory.
+\end{itemize}
+
+
+
+% \paragraph{Contributions:}
+% \begin{itemize}[leftmargin=1.2em, itemsep=2pt]
+% \item We define and demonstrate the existence of a \textbf{self-attribution bias} in LLMs, showing models often \textbf{overestimate correctness and underestimate risk} when evaluating actions generated in a the same context as these actions were generated.
+% \item TODO sth about how we demonstrate it in 3/4/5 settings, ~10 models, previous and same turn, including a $20.4$-point risk underestimation in phishing scenarios
+% \item We study the sources of self-attribution bias, and demonstrate this bias is \textbf{specific to on-policy self-monitoring}, providing an existence-proof for the unreliability of off-policy monitor evaluations.
+% \item We run ablations showing [XYZ]
+% \end{itemize}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+% Modern systems often ask a model to monitor its own behavior: write and then critique, propose and then rate risk, or enforce guardrails during tool use. This dual role as actor and evaluator raises a basic question: do models assess their own freshly generated outputs and actions the same way they assess identical content when it is not attributed to them?
+
+% In human decision making, commitment to a choice reshapes evaluation because people tend to rationalize prior choices after the fact, a phenomenon known as choice supportive bias \citep{mather2000choice,festinger1957theory,sharot2010decisions}. We study self attribution bias: systematic shifts in evaluation when content is linked to the model itself, either within the same turn (generate and rate) or across turns (generate and then rate). In a safety critical computer use setting (Figure~\ref{fig:figure1}), models first assess the risk of an action in isolation, for example clicking a phishing link. After being made to take action, they re-rate it as substantially safer: mean harmfulness drops from 82 to 61 on a 0 to 100 scale, a 20.4 point reduction across 65 high risk scenarios. Similar attribution effects appear in open ended essays and multiple choice correctness: identical content is judged more favorably when attributed to the model than when it is neutrally framed.
+
+% We evaluate ten frontier models on 4{,}500 items spanning harmfulness (ethics dilemmas and computer use scenarios) and correctness (open ended and multiple choice STEM). We vary attribution (self versus neutral or other) and turn structure (same turn versus previous turn), and we measure rating shifts $\Delta = r_{\text{self}} - r_{\text{other}}$, the prevalence of self sycophantic, neutral, and self skeptical cases, and task specific outcomes such as hidden unit tests for code correctness and risk scales for harmfulness.
+
+% Our core finding is asymmetric. \emph{On policy} monitors -- where a model grades its own fresh outputs -- show self attribution bias. \emph{Off policy} monitors -- where a model grades fixed externally supplied artifacts -- do not show this inflation in our data. We also find no cross model inflation, for example a model preferentially up rating content from its own family. These results suggest same model on policy self assessment can be over optimistic, while decoupled or off policy auditing is comparatively reliable.
+
+% Users often ask LLMs to judge what they just did, from self-refinement loops to monitoring pipelines. 
+% This dual role—actor and evaluator—raises a basic question: do models assess their own outputs and actions the same way they assess identical content without self-attribution? 
+% In humans, commitment to a decision reliably reshapes evaluation because people tend to rationalize prior choices post hoc, a phenomenon known as \emph{choice-supportive bias} \citep{mather2000choice,festinger1957theory,sharot2010decisions}. 
+
+
+% We find large language models display a strikingly similar effect: when an action is linked to the model itself, ratings shift in a self-serving direction. In a computer-use setting (illustrated in Figure~\ref{fig:figure1}), models first assess the risk of taking an action in isolation (e.g. clicking a phishing link). After being made to perform the action, they re-rate it as substantially safer afterwards, with mean harmfulness reducing from 82 to 61, a \(20.4\)-point reduction on a 0–100 scale observed across 65 high-risk scenarios. 
+
+% The same pattern appears when rating essays or answers to multiple-choice questions: identical content is judged more favorably when implicitly attributed to the model, either because it appears in a previous assistant turn, or because it appears in the same assistant turn (e.g. when the assistant is asked to generate a piece of text and rate it in the same turn).
+
+% We study this self-attribution bias in 10 frontier models and 4{,}500 samples spanning harmfulness (ethics dilemmas and computer-use scenarios) and correctness (open-ended and MCQ STEM questions). Across domains, self-attribution often shifts judgments: models rate their own actions as less harmful and their own answers as more correct than when they are not attributed to the model.
+
+
+
+
+
+
+
+
+
+
+% When humans commit to a decision, they often rationalize it post-hoc — a phenomenon known as choice-supportive bias. We show large language models exhibit a strikingly similar pattern (Fig. \ref{fig:figure1}): committing to an action systematically lowers their harmfulness ratings of very action. This \textit{attribution bias} poses immediate risks for AI safety, particularly as models increasingly operate as autonomous agents.
+
+% As a case in point, when evaluating a phishing link click in isolation, models correctly identify it as high-risk (mean: 8.2/10 harmfulness). After being forced to click the same link -- simulating commitment -- models re-evaluate this identical action as significantly less harmful (mean: 6.1/10). This 20.4pt reduction occurs systematically across 65 high-risk computer use scenarios, demonstrating commitment alters evaluation. %See ~\ref{appendix:results}.
+
+% We identify two manifestations of this phenomenon:
+% \begin{itemize}
+%     \item \textbf{Explicit Attribution bias}: Models rate identical text as less harmful when explicitly attributed to themselves versus others.
+%     \item \textbf{Implicit Attribution bias}: Models reduce harmfulness estimates after choosing an action, compared to their own prior assessment; implicitly attributing the action to themselves.
+% \end{itemize}

@@ -1,0 +1,588 @@
+\documentclass{article}
+
+% Recommended, but optional, packages for figures and better typesetting:
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{booktabs} % for professional tables
+
+% hyperref makes hyperlinks in the resulting PDF.
+% If your build breaks (sometimes temporarily if a hyperlink spans a page)
+% please comment out the following usepackage line and replace
+% \usepackage{icml2026} with \usepackage[nohyperref]{icml2026} above.
+\usepackage{hyperref}
+
+
+% Attempt to make hyperref and algorithmic work together better:
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+
+% Use the following line for the initial blind version submitted for review:
+\usepackage{icml2026}
+
+% For preprint, use
+% \usepackage{icml2026}
+
+% If accepted, instead use the following line for the camera-ready submission:
+% \usepackage{icml2026}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+
+
+% if you use cleveref..
+\usepackage[capitalize,noabbrev]{cleveref}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\input{macros}
+
+% Todonotes is useful during development; simply uncomment the next line
+%    and comment out the line below the next line to turn off comments
+%\usepackage[disable,textsize=tiny]{todonotes}
+\usepackage[textsize=tiny]{todonotes}
+
+% The \icmltitle you define below is probably too long as a header.
+% Therefore, a short form for the running title is supplied here:
+\icmltitlerunning{dnaHNet: A Scalable and Hierarchical Foundation Model for Genomic Sequence Learning}
+
+\begin{document}
+
+\twocolumn[
+  \icmltitle{dnaHNet: A Scalable and Hierarchical Foundation Model\\for Genomic Sequence Learning}
+
+  % It is OKAY to include author information, even for blind submissions: the
+  % style file will automatically remove it for you unless you've provided
+  % the [accepted] option to the icml2026 package.
+
+  % List of affiliations: The first argument should be a (short) identifier you
+  % will use later to specify author affiliations Academic affiliations
+  % should list Department, University, City, Region, Country Industry
+  % affiliations should list Company, City, Region, Country
+
+  % You can specify symbols, otherwise they are numbered in order. Ideally, you
+  % should not use this facility. Affiliations will be numbered in order of
+  % appearance and this is the preferred way.
+  \icmlsetsymbol{equal}{*}
+
+  \begin{icmlauthorlist}\icmlauthor{Anonymous}{anon}\end{icmlauthorlist}
+
+  \icmlaffiliation{anon}{Anonymous Institution}
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+
+
+
+  \icmlcorrespondingauthor{Anonymous}{anonymous@anonymous.invalid}
+  
+
+  % You may provide any keywords that you find helpful for describing your
+  % paper; these are used to populate the "keywords" metadata in the PDF but
+  % will not be shown in the document
+  \icmlkeywords{Machine Learning, ICML}
+
+  \vskip 0.3in
+]
+
+% this must go after the closing bracket ] following \twocolumn[ ...
+
+% This command actually creates the footnote in the first column listing the
+% affiliations and the copyright notice. The command takes one argument, which
+% is text to display at the start of the footnote. The \icmlEqualContribution
+% command is standard text for equal contribution. Remove it (just {}) if you
+% do not need this facility.
+
+% Use ONE of the following lines. DO NOT remove the command.
+% If you have no special notice, KEEP empty braces:
+% Or, if applicable, use the standard equal contribution text:
+\printAffiliationsAndNotice{\icmlEqualContribution}
+
+\begin{abstract}
+Genomic foundation models have the potential to decode DNA syntax, yet face a fundamental tradeoff in their input representation. Standard fixed-vocabulary tokenizers fragment biologically meaningful motifs such as codons and regulatory elements, while nucleotide-level models preserve biological coherence but incur prohibitive computational costs for long contexts. We introduce dnaHNet, a state-of-the-art tokenizer-free autoregressive model that segments and models genomic sequences end-to-end. Using a differentiable dynamic chunking mechanism, dnaHNet compresses raw nucleotides into latent tokens adaptively, balancing compression with predictive accuracy. Pretrained on prokaryotic genomes, dnaHNet outperforms leading architectures including StripedHyena2 in scaling and efficiency. This recursive chunking yields quadratic FLOP reductions, enabling $>3 \times$ inference speedup over Transformers. On zero-shot tasks, dnaHNet achieves superior performance in predicting protein variant fitness and gene essentiality, while automatically discovering hierarchical biological structures without supervision. These results establish dnaHNet as a scalable, interpretable framework for next-generation genomic modeling.
+\end{abstract}
+
+% \begin{abstract}
+% Genomic foundation models have the potential to decode DNA syntax, yet remain limited by the tokenization bottleneck. Standard subword tokenizers fragment biological motifs, while nucleotide-level approaches incur prohibitive costs for long contexts. We introduce dnaHNet, a tokenizer-free autoregressive model that segments and models genomic sequences end to end. Using a differentiable dynamic chunking mechanism, dnaHNet compresses raw nucleotides into latent tokens adaptively, balancing compression with predictive accuracy. Pretrained on prokaryotic genomes, dnaHNet outperforms state-of-the-art architectures including StripedHyena2 in scaling and efficiency. Recursive chunking yields quadratic FLOP reductions, enabling $>3 \times$ inference speedup over Transformers. On zero-shot tasks, dnaHNet achieves superior performance in predicting protein variant fitness and gene essentiality, while automatically discovering hierarchical biological structures without supervision. These results establish dnaHNet as a scalable, interpretable framework for next-generation genomic modeling.
+% \end{abstract}
+
+
+
+
+
+\section{Introduction}
+
+The genome encodes the fundamental instructions governing cellular function, development, and evolution \citep{human_genome,encode}. Deciphering the syntax of DNA remains a central challenge in modern biology with direct implications for disease diagnosis, drug discovery, and synthetic biology \citep{Zhou2023, adibi2025recentadvancesapplicationsopen}. Foundation models pretrained on large-scale sequence data have emerged as a powerful approach to this challenge, with performance scaling predictably with compute, data, and parameters \citep{kaplan2020scalinglawsneurallanguage}. Models such as the Nucleotide Transformer \citep{DallaTorre2024}, and Evo \citep{Nguyen2024, Brixi2025.02.18.638918} have been scaled to billions of parameters and trained across diverse organisms, achieving strong performance on variant effect prediction, regulatory element characterization, and sequence generation \citep{brianphage, bioreason}.
+
+
+However, applying foundation models to genomic data presents a fundamental challenge. Unlike natural languages like English, where whitespace provides clear delimiters for tokenization, DNA is a continuous string of nucleotides without explicit boundaries \citep{Ji2021, Lindsey2025}. Current approaches address this in one of two ways. The first approach relies on fixed tokenization schemes such as k-mers or Byte-Pair Encoding (BPE) applied directly to nucleotide sequences \citep{Zhou2023, DallaTorre2024, sennrich2016neuralmachinetranslationrare}. While computationally efficient, these methods impose arbitrary segmentation boundaries that can fragment biologically meaningful units such as codons, transcription factor binding sites, and splice signals \citep{bostrom2020bytepairencodingsuboptimal, CodonTransformer}.
+
+The second approach avoids tokenization entirely by operating at nucleotide-level (single-nucleotide) resolution \citep{Nguyen2024}. This preserves biological coherence but introduces severe computational constraints, as genomic contexts routinely span millions of base pairs \citep{benegas2024genomiclanguagemodelsopportunities}. The difficulty of scaling attention to such lengths has led to abandoning Transformers in favor of alternative architectures such as Mamba and StripedHyena \citep{gu2024mambalineartimesequencemodeling, dao2024transformersssmsgeneralizedmodels, poli2023hyenahierarchylargerconvolutional, ku2025systemsalgorithmsconvolutionalmultihybrid}. Despite these efforts, neither approach adequately resolves the tension between computational tractability and biological fidelity.
+
+
+Given these challenges, a potential solution could be to adapt dynamic tokenization methods, which have been recently introduced for language modeling \citep{pagnoni2024bytelatenttransformerpatches, hwang2025dynamicchunkingendtoendhierarchical}. H-Net exemplifies this by replacing fixed tokenization with a differentiable chunking mechanism that learns to segment sequences during training, also demonstrating positive preliminary results on genomic modeling \citep{hwang2025dynamicchunkingendtoendhierarchical}. This paradigm is appealing for genomics, where biological information is often organized hierarchically and the optimal granularity of representation varies with sequence context \citep{Libbrecht2015}. Yet, whether dynamic chunking can discover biologically meaningful segmentation, scale more efficiently than alternative architectures for long genomic contexts, and yield improvements over existing DNA foundation models remains unexplored.
+
+To bridge this gap, we introduce dnaHNet, a tokenizer-free autoregressive model that establishes a new state-of-the-art for genomic foundation models. Built on the H-Net architecture, dnaHNet operates directly on raw nucleotides and learns to compress them into latent chunks through a differentiable routing mechanism \citep{hwang2025dynamicchunkingendtoendhierarchical}. The architecture is recursive and hierarchical, allowing multiple stages of compression that naturally mirror the nested organization of genomic information. We train a number of dnaHNet models ranging from 10M to 1B parameters in size on a comprehensive corpus of prokaryotic genomes from the Genome Taxonomy Database to rigorously study its scaling behavior and performance in downstream tasks\citep{Parks2025}.
+
+Our key contributions are as follows:
+\begin{itemize}[leftmargin=10pt, itemsep=3pt]
+
+    \item Through extensive scaling law analyses, we demonstrate that dnaHNet achieves superior efficiency compared to StripedHyena2 \citep{ku2025systemsalgorithmsconvolutionalmultihybrid}, the architecture underlying Evo 2 \citep{Brixi2025.02.18.638918}. Recursive compression yields quadratic reductions in FLOP cost for the main network, achieving over three times faster inference than Transformer baselines.
+
+    \item We identify optimal training regimes and architectural modifications necessary for stable hierarchical learning on genomic data, including compression ratio scheduling, encoder-decoder balancing, and initialization strategies.
+
+    \item We achieve state-of-the-art zero-shot performance on protein variant effect prediction using experimental fitness data from MaveDB \citep{Esposito2019, Rubin2025} and on gene essentiality classification via in silico perturbations \citep{Brixi2025.02.18.638918}. 
+
+    \item We show that dnaHNet learns biologically meaningful, context-dependent tokenization that adapts to functional regions like codons, promoters, and intergenic regions.
+
+\end{itemize}
+
+
+
+\section{Related Work}
+
+\subsection{Genomic Foundation Models}
+
+The success of large-scale pretraining in natural language processing has inspired foundation models for genomic sequences. DNABERT introduced bidirectional pretraining using k-mer tokenization \citep{Ji2021}, and DNABERT-2 improved efficiency by adopting Byte-Pair Encoding \citep{Zhou2023}. The Nucleotide Transformer scaled this paradigm to 2.5 billion parameters \citep{DallaTorre2024}. Recognizing that genomic function depends on long-range interactions, Enformer demonstrated that extended context improves prediction of gene expression and chromatin states \citep{Avsec2021}. HyenaDNA achieved single-nucleotide resolution at context lengths of one million base pairs by replacing attention with subquadratic operators \citep{nguyen2023hyenadnalongrangegenomicsequence}. More recently, Evo introduced a 7 billion parameter model for prediction and generative design across molecular and genome scales \citep{Nguyen2024}, and Evo 2 extended this to all domains of life using the StripedHyena2 architecture \citep{Brixi2025.02.18.638918}. Domain-specific models such as megaDNA have also emerged for bacteriophage genome analysis \citep{megadna}. Despite these advances, all existing approaches either rely on fixed tokenization schemes or operate at nucleotide-level resolution with substantial computational overhead.
+
+\subsection{Tokenization in Sequence Models}
+
+Unlike natural language where whitespace provides word boundaries, DNA is a continuous string without explicit delimiters, making tokenization a fundamental challenge \citep{Ji2021, Lindsey2025}. Early approaches adopted k-mer tokenization with fixed-length substrings. Byte-Pair Encoding \citep{sennrich2016neuralmachinetranslationrare} and SentencePiece \citep{kudo2018sentencepiecesimplelanguageindependent} were subsequently imported from NLP, though these subword methods may be suboptimal for biological sequences \citep{bostrom2020bytepairencodingsuboptimal}. Recent studies confirm that tokenizer choice creates significant performance differences across genomic tasks \citep{Lindsey2025}. Several approaches have attempted biologically informed designs, including hybrid strategies combining k-mer resolution with BPE compression \citep{sapkota2025hybridtokenizationstrategydna} and context-aware tokenization that preserves reading frames in coding regions \citep{CodonTransformer}. Nevertheless, these remain fixed schemes that cannot adapt segmentation granularity based on sequence context.
+
+\subsection{Long-Range Sequence Architectures}
+
+Modeling long-range dependencies is essential for genomics, where regulatory elements influence gene expression across thousands of base pairs. Standard Transformer attention scales quadratically with sequence length, making it impractical for million-base contexts. Structured State Space models emerged as an alternative, with S4 demonstrating efficient modeling over tens of thousands of steps \citep{gu2022efficientlymodelinglongsequences} and Mamba further refining this approach \citep{gu2024mambalineartimesequencemodeling}. The Hyena operator uses learned long convolutions to achieve subquadratic scaling \citep{poli2023hyenahierarchylargerconvolutional}, which was further developed into the hybrid StripedHyena architecture \citep{Nguyen2024}. However, these advances address computational challenges without resolving the tension between fixed tokenization and biological fidelity.
+
+\subsection{Hierarchical and Dynamic Tokenization}
+
+Recent work has begun replacing fixed tokenization with learned segmentation. The Byte Latent Transformer introduced a tokenizer-free architecture that groups raw bytes into dynamic patches based on local entropy \citep{pagnoni2024bytelatenttransformerpatches}. H-Net extended this to end-to-end hierarchical modeling with recursive application for capturing multiple levels of abstraction \citep{hwang2025dynamicchunkingendtoendhierarchical}. Parallel developments have explored dynamic tokenization for genomics specifically. MergeDNA applies context-dependent token merging to DNA sequences \citep{li2025mergednacontextawaregenomemodeling}, PatchDNA proposes biologically informed patching strategies \citep{DelVecchio2025}, and MxDNA introduces an adaptive tokenization mechanism that learns a variable-length vocabulary during training \citep{qiao2024modeldecidestokenizeadaptive}. However, these approaches still operate within a tokenization-then-modeling paradigm, where segmentation is learned as a preprocessing step that produces discrete tokens for a downstream model. Whether dynamic tokenization can learn biologically meaningful segmentation jointly with representations and yield improvements over state-of-the-art DNA foundation models has remained unexplored. Our work addresses this gap by applying hierarchical dynamic chunking to genomic sequences at scale.
+
+
+\section{dnaHNet}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1\linewidth]{dnaHNet.png}
+\caption{\textbf{dnaHNet Architecture}. Raw nucleotide sequences are processed by the Encoder (E), which learns segmentation boundaries via a differentiable chunking mechanism. The compressed latent sequence is modeled by the Main Network (M), then upsampled by the Decoder (D) to produce next-nucleotide predictions. The architecture can be applied recursively for multi-level compression.}
+\label{fig:yourlabel}
+\end{figure}
+
+We introduce dnaHNet, a scalable, tokenizer-free foundation model that establishes a new state-of-the-art for genomic sequence learning. By learning tokenization dynamically, dnaHNet overcomes both the biological fidelity limitations of subword tokenization and the computational costs of byte-level modeling. Section \ref{sec:architecture} formalizes the autoregressive modeling objective and details the hierarchical architecture components. Section \ref{sec:techniques} describes architectural modifications specifically optimized for genomic stability. Finally, Section \ref{sec:training} outlines the training objective and inference protocols.
+
+\subsection{Architecture}
+\label{sec:architecture}
+We formulate genomic learning as an autoregressive sequence modeling problem. Given a sequence $X = (x_1, \dots, x_L)$ where $x_t \in \{A, C, G, T\}$, the goal is to model the probability distribution $P(X) = \prod_{t=1}^{L} P(x_t | x_{<t})$. To achieve this efficiently over long contexts, dnaHNet employs a recursive hierarchy where each module contains three differentiable components: an Encoder ($\mathcal{E}$) that compresses nucleotide-level inputs into latent chunks, a Main Network ($\mathcal{M}$) that processes these latents, and a Decoder ($\mathcal{D}$) that upsamples representations back to nucleotide resolution \citep{hwang2025dynamicchunkingendtoendhierarchical}.
+
+\textbf{Encoder and Chunking.}
+The Encoder determines segmentation boundaries through a routing module that identifies information-dense transitions. We employ a hybrid backbone with four Mamba layers \citep{gu2024mambalineartimesequencemodeling} and one Transformer layer \citep{vaswani2023attentionneed}. The Encoder transforms input embeddings into hidden states $\mathbf{h}_{1:L} \in \mathbb{R}^{L \times D}$, where $D$ is the model dimension. These states feed into the boundary prediction module which computes boundary probabilities $p_t \in [0, 1]$ via
+\begin{equation}
+    p_t = \frac{1}{2}\left(1 - \text{CosineSim}(W_q \mathbf{h}_t, W_k \mathbf{h}_{t-1})\right)
+\end{equation}
+where $W_q, W_k \in \mathbb{R}^{D \times D}$ are learnable projection matrices. Consecutive nucleotides with dissimilar representations yield high boundary probabilities, encouraging segmentation at contextual shifts such as codon boundaries or regulatory elements. The Chunking layer then downsamples the Encoder output by selecting representations at predicted boundaries, producing a compressed sequence $E = (\mathbf{e}_1, \dots, \mathbf{e}_{L'})$ where $\mathbf{e}_i \in \mathbb{R}^{D}$ and $L' \le L$ ~\citep{hwang2025dynamicchunkingendtoendhierarchical}.
+
+\textbf{Hierarchical Sequence Modeling.}
+The compressed sequence $E$ is processed by the Main Network $\mathcal{M}$, which can be a standard Transformer or another H-Net module, enabling recursive chunking for capturing multiple levels of abstraction. The Main Network produces processed latent states $\hat{E} = (\mathbf{\hat{e}}_1, \dots, \mathbf{\hat{e}}_{L'}) \in \mathbb{R}^{L' \times D}$. We find that in a two-stage hierarchy, the first stage captures high-frequency local patterns such as codon periodicity, while the second stage models longer-range dependencies across functional regions.
+
+\textbf{Decoder and Generation.}
+The Decoder maps the Main Network outputs $\hat{E}$ back to nucleotide resolution in two steps. First, a smoothing module refines the sequence of latent states $\hat{E} \in \mathbb{R}^{L' \times D}$ into smoothed representations $\bar{E} = (\mathbf{\bar{e}}_1, \dots, \mathbf{\bar{e}}_{L'}) \in \mathbb{R}^{L' \times D}$ via a recurrence that interpolates discrete chunks:
+\begin{equation}
+    \mathbf{\bar{e}}_j = P_j \mathbf{\hat{e}}_j + (1 - P_j) \mathbf{\bar{e}}_{j-1}
+\end{equation}
+where $j$ indexes the compressed sequence and $P_j$ is the boundary probability associated with the $j$-th chunk. Second, an upsampler expands these smoothed latents to the original sequence length $L$ by copying the vector $\mathbf{\bar{e}}_{c(t)}$ to every nucleotide position $t$ corresponding to chunk index $c(t)$. The Decoder then applies four Mamba layers and one Transformer layer to the upsampled sequence $\tilde{X} \in \mathbb{R}^{L \times D}$ to model autoregressive dependencies. A linear head projects the output to the nucleotide vocabulary logits in $\mathbb{R}^{4}$, producing the next-nucleotide distribution $P(x_{t+1} | x_{1:t})$.
+
+
+
+\subsection{Improved Techniques for Hierarchical DNA Modeling}
+\label{sec:techniques}
+
+Applying hierarchical dynamic chunking to genomic sequences introduces challenges not present in natural language. Through systematic ablations, we identified several modifications critical for stable training and strong downstream performance.
+
+\paragraph{Model Scale and Capacity Allocation.}
+We trained models ranging from 10M to 1B total parameters to characterize scaling behavior. A key design decision is the allocation of parameters between the encoder-decoder pair and the main network $\mathcal{M}$. Unlike text, where local byte patterns are relatively simple and the original HNet allocated only 15\% of parameters to the encoder-decoder, genomic sequences exhibit complex local dependencies (e.g., codon structure, splice signals) that require substantially greater encoder capacity. We therefore allocate approximately 30\% of total parameters to the encoder-decoder—doubling the relative share compared to text HNets—with the remaining 70\% allocated to the main network. This balance ensures that the encoder learns sufficiently informative chunk representations to capture genomic structure while the decoder accurately reconstructs nucleotide-level predictions.
+
+% Our scaling analysis (\cref{scaling_analysis}) reveals that despite roughly 80\% of model parameters coming from Transformer modules, optimal dnaHNet configurations favor up to $6\times$ more parameters in the main network compared to optimal FLOP-matched Transformer models.
+
+\paragraph{Training Data and Compute-Optimal Recipes.}
+We varied the total number of pretraining tokens from 5B to over 200B to determine compute-optimal data-to-parameter ratios. Because compression changes the effective token stream length processed by $\mathcal{M}$, standard scaling laws \citep{kaplan2020scalinglawsneurallanguage} do not directly apply. We found that optimal dnaHNet configurations prefer training on substantially more data than would be predicted by Chinchilla-style scaling laws \citep{hoffmann2022trainingcomputeoptimallargelanguage} applied to the raw nucleotide count. Specifically, at a budget of $8\times10^{19}$ FLOPs, the optimal dnaHNet model trains on 140B tokens, compared to StripedHyena2 which uses 68B nucleotides and a proportionally larger model (\cref{scaling_analysis}) \citep{ku2025systemsalgorithmsconvolutionalmultihybrid}.
+
+\paragraph{Target Compression Ratios.}
+We set stage-wise target compression ratios based on biological priors. For two-stage models, we use $R_1 = 3$ for the first stage to align with the triplet codon structure of coding regions \citep{Koonin2008}. For the second stage, we use $R_2 = 2$, motivated by the phenomenon of codon pair bias, where adjacent codons exhibit non-random co-occurrence patterns that influence translation efficiency and accuracy \citep{Gutman1989}. This yields an effective compression ratio of $R_1 \times R_2 = 6$, reducing the FLOPs spent by the innermost main network by a factor of $36\times$. We found these biologically-motivated targets outperformed both aggressive compression that discards predictive information and weaker compression that fails to realize efficiency gains.
+
+\paragraph{Hierarchical Depth Selection.}
+We explored hierarchies ranging from one to four recursive stages. While deeper hierarchies provide greater compression, they introduce optimization challenges and diminishing returns beyond two stages for our context lengths. Based on scaling experiments (\cref{scaling_analysis}), we adopt a two-stage architecture as the default configuration, achieving $6\times$ compression while maintaining stable training dynamics.
+
+\paragraph{Auxiliary Loss Weight.}
+The compression rate regularization coefficient $\alpha$ controls the trade-off between predictive accuracy and adherence to target compression ratios. We found that jointly learning segmentation boundaries and sequence modeling from random initialization can lead to degenerate solutions where the boundary predictor either selects all positions or none. We additionally found that standard compression rate regularization coefficients for natural language ($\alpha \geq 0.03$) were overly aggressive for next nucleotide prediction, necessitating a comparatively smaller value ($\alpha \approx 0.01$) to maintain faithfulness to the target compression ratio.
+
+
+\subsection{Training and Inference}
+\label{sec:training}
+
+\paragraph{Training Dataset.}
+We pretrain all models on a processed subset of the Genome Taxonomy Database (GTDB) \citep{Parks2025}, following the filtering, quality control, and dereplication methodology from the OpenGenome dataset by Evo \citep{Nguyen2024}. Genomes are filtered based on assembly completeness, contamination, and marker gene content, retaining a single representative per species-level cluster. The final dataset comprises 17,648,721 sequences totaling 144B nucleotides from 85,205 prokaryotic organisms, with each sequence containing up to 8192 nucleotides extracted as non-overlapping chunks from longer genomes.
+
+\paragraph{Training Objective.}
+dnaHNet is trained end-to-end using a composite objective. The primary signal is the autoregressive next-token prediction loss over the nucleotide vocabulary $\mathcal{V} = \{A, C, G, T\}$:
+\begin{equation}
+    \mathcal{L}_{\text{NLL}} = - \sum_{t=1}^{L} \log P_\theta(x_t | x_{<t})
+\end{equation}
+Minimizing $\mathcal{L}_{\text{NLL}}$ alone leads to degenerate segmentation. To regularize the dynamic chunking, we employ the ratio loss from H-Net \citep{hwang2025dynamicchunkingendtoendhierarchical}, which guides the model toward a target downsampling ratio $R_s$ for each stage $s$:
+\begin{equation}
+    \mathcal{L}_{\text{rate}}^{(s)} = \frac{R_s}{R_s - 1} \left( (R_s - 1) F_s G_s + (1 - F_s)(1 - G_s) \right)
+\end{equation}
+where $F_s = \frac{1}{L} \sum_{t=1}^L b_t^{(s)}$ represents the actual fraction of selected chunks (based on discrete decisions $b_t$) and $G_s = \frac{1}{L} \sum_{t=1}^L p_t^{(s)}$ is the average boundary probability. This objective aligns the discrete selections with the continuous probability estimates while targeting a compression factor of $R_s$. The total loss is $\mathcal{L} = \mathcal{L}_{\text{NLL}} + \alpha \sum_{s} \mathcal{L}_{\text{rate}}^{(s)}$.
+
+\paragraph{Inference.}
+During inference, boundary probabilities are discretized using threshold $\tau = 0.5$ as $b_t = \mathbb{I}(p_t > \tau)$. When $b_t = 0$, the current nucleotide is accumulated into the encoder state. When $b_t = 1$, the accumulated chunk is dispatched to $\mathcal{M}$, processed, and passed to $\mathcal{D}$, which outputs the next-nucleotide distribution. Sampling proceeds as per normal (e.g. multinomial, greedy decoding, etc.), enabling generation of arbitrary-length sequences with context-dependent granularity.
+
+
+
+
+\section{Experiments}
+
+\subsection{Evaluation Datasets}
+We evaluate dnaHNet on three datasets spanning local coding fitness, genome-wide essentiality, and hierarchical structure discovery.
+
+\textbf{Protein Variant Effects (MaveDB).} We compiled all 12 nucleotide-level experimental fitness datasets for \textit{E. coli} K-12 from MaveDB \citep{Esposito2019, Rubin2025}. This dataset of 21250 data points tests the model's ability to capture local coding syntax and predict protein fitness landscapes.
+
+\textbf{Gene Essentiality (DEG).} We generated binary essentiality labels for all 62 bacterial organisms in the Database of Essential Genes (DEG) \citep{Luo2021}, with base sequences and annotations from NCBI. Genes matching DEG entries by name or sequence identity ($>$99\%) were labeled essential. This dataset of 185226 data points evaluates the model's capacity to integrate broader genomic context and long-range dependencies.
+
+\textbf{Genomic Structure Interpretation (NCBI).} For interpretability analysis, we sourced the \textit{B. subtilis} genome and functional annotations from NCBI \citep{NCBI2024}. We partitioned the genome into distinct functional regions based on annotations to analyze how the model's segmentation aligns with biological structures.
+
+\subsection{Models and Baselines}
+We compare dnaHNet against two leading long-sequence architectures. StripedHyena2 \citep{ku2025systemsalgorithmsconvolutionalmultihybrid} is the convolutional multi-hybrid architecture underlying Evo 2, which interleaves three different implicit convolution layers with self-attention to improve efficiency over Transformer variants and long convolution architectures such as Hyena or Mamba \cite{gu2024mambalineartimesequencemodeling}. We also compare against an optimized Transformer++ architecture \citep{Nguyen2024} designed for long-context genomic sequences.
+
+\subsection{Scaling Analysis}
+\label{scaling_analysis}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{inference_flops.png}
+\caption{\textbf{Inference FLOPs}. \textbf{(Left)} Total inference FLOPs versus sequence length. At $10^6$ nucleotides, dnaHNet ($218M$) requires $3.89 \times$ fewer FLOPs than StripedHyena2 ($166M$). \textbf{(Right)} FLOPs per token across sequence lengths. Hierarchical compression enables dnaHNet to achieve lower per-token costs than both linear-scaling baselines and theoretical $O(n)$ and $O(n^2)$ references.}
+\label{fig:yourlabel}
+\end{figure*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{ppl.png}
+\caption{\text{Evaluation perplexity scaling}. Evaluation perplexity versus training FLOPs for compute-optimal configurations. dnaHNet achieves a scaling exponent of $\alpha = 0.06$ compared to $\alpha = 0.04$ for StripedHyena2 and $\alpha = 0.01$ for Transformers, demonstrating superior compute efficiency across the tested range.}
+\label{fig:yourlabel}
+\end{figure}
+
+To assess whether dnaHNet exhibits favorable scaling properties, we conducted scaling law analyses following established methodology \citep{kaplan2020scalinglawsneurallanguage, hoffmann2022trainingcomputeoptimallargelanguage}. We trained over 100 models spanning 10M to 1B parameters across three architecture families: dnaHNet (with 1-stage, 2-stage, and 3-stage hierarchies), StripedHyena2, and decoder-only Transformers. For each architecture, we swept model size and training tokens under fixed compute budgets ranging from $4 \times 10^{18}$ to $8 \times 10^{19}$ FLOPs.
+
+To ensure fair comparison, we carefully account for FLOPs across architectures. For dnaHNet, we compute total FLOPs as the sum of encoder, main network, and decoder contributions: $\text{FLOPs}_{\text{total}} = \text{FLOPs}_{\text{enc}}(L) + \text{FLOPs}_{\text{main}}(L/R) + \text{FLOPs}_{\text{dec}}(L)$ where $L$ is the input sequence length and $R$ is the effective compression ratio. Critically, the quadratic attention cost in the main network scales as $\Theta((L/R)^2)$ rather than $\Theta(L^2)$, yielding substantial savings for compressed representations.
+
+\paragraph{Computational Efficiency.}
+
+
+Figure 2 (left) presents total inference FLOPs as a function of sequence length for compute optimal dnaHNet and StripedHyena2 configurations at the $8 \times 10^{19}$ scale. At $10^6$ nucleotides, dnaHNet (218M) requires $3.89\times$ fewer FLOPs than SH2 (166M). The right panel of Figure 2 isolates FLOPs per token, revealing the source of dnaHNet's efficiency. While StripedHyena2 exhibits near-linear scaling due to its subquadratic operators, dnaHNet achieves even lower per-token costs through hierarchical compression within the million nucleotide regime. Importantly, the 2-stage dnaHNet (218M) achieves even more efficient performance than its smaller 1-stage variant while containing substantially more parameters in its main network.
+
+
+\paragraph{Perplexity Scaling.}
+
+Figure 3 plots evaluation perplexity against training FLOPs for optimally-configured models of each architecture. We fit power laws of the form $\text{PPL} = A \cdot C^{-\alpha}$ where $C$ denotes compute. dnaHNet achieves $\alpha = 0.06$ compared to $\alpha = 0.04$ for StripedHyena2 and $\alpha=0.01$ for Transformer baselines, indicating demonstrably better compute efficiency.
+
+\paragraph{dnaHNet exhibits superior scaling efficiency.} Across the compute range tested, dnaHNet consistently achieves lower perplexity than both StripedHyena2 and Transformer baselines at matched FLOPs. The gap widens with increasing compute: at $8 \times 10^{18}$ FLOPs, dnaHNet outperforms StripedHyena2 by 0.078 perplexity points, while at $6 \times 10^{19}$ FLOPs, this gap increases to 0.118 points (Figure 3). Under the optimal scaling regime, StripedHyena2 would require $3 \times 10^{20}$ FLOPs to achieve the same evaluation perplexity as dnaHNet at $8 \times 10^{19}$ FLOPs, representing $3.75 \times$ less efficiency.
+
+
+\paragraph{Optimal data-to-parameter ratios differ from standard scaling laws.} Following the Chinchilla methodology \cite{hoffmann2022trainingcomputeoptimallargelanguage}, we computed optimal model sizes and training token counts for each compute budget. Interestingly, dnaHNet's optimal configurations favor training on substantially more tokens than predicted by scaling laws calibrated on non-hierarchical architectures. At $8 \times 10^{19}$ FLOPs, the optimal dnaHNet trains on 140B tokens compared to 68B for StripedHyena2 without plateauing.
+
+
+\subsection{Zero-Shot Protein Variant Effect Prediction}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{vep.png}
+\caption{\textbf{Protein VEP Results.} \textbf{(A)} Schematic of the zero-shot scoring method, using language model likelihood of mutated coding sequences to predict experimental fitness. \textbf{(B)} Absolute Spearman correlation on MaveDB benchmarks versus training FLOPs. dnaHNet consistently achieves higher correlation than StripedHyena2 (SH2) and Transformer baselines across all compute budgets.}
+\label{fig:vep}
+\end{figure*}
+
+We assessed zero-shot performance on the MaveDB dataset, hypothesizing that a model capturing prokaryotic genome statistics would assign lower likelihoods to deleterious variants compared to wild-type sequences. For each gene, we constructed variant sequences by introducing specified mutations and computed autoregressive log-likelihoods for both wild-type and variant sequences. The predicted fitness score was defined as the log-likelihood difference (Figure 4A), with performance quantified via Spearman correlation against experimental fitness.
+
+dnaHNet demonstrated superior predictive accuracy compared to StripedHyena2 when compute-matched, and exhibited stronger scaling with compute budget (Figure 4B). This performance advantage suggests that dynamic chunking effectively compresses and attends to coding regions, enabling finer-grained resolution of fitness landscapes than fixed-scale or nucleotide-level approaches.
+
+\subsection{Zero-Shot Gene Essentiality Prediction}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{gene_essentiality.png}
+\caption{\textbf{Gene Essentiality Prediction.} \textbf{(A)} Schematic of the \textit{in silico} perturbation task. Gene essentiality is predicted by comparing wild-type likelihood against a variant with inserted premature stop codons. \textbf{(B)} Classification AUROC on DEG versus training FLOPs. Both dnaHNet configurations outperform StripedHyena2, with the (3,2) hierarchy demonstrating strongest scaling, hypothesized to be due to matching the underlying biological structure of codons in the first layer.}
+\label{fig:essentiality}
+\end{figure*}
+
+We evaluated whole-genome modeling by predicting gene essentiality on the DEG dataset. For each gene, we extracted an 8192-bp genomic window centered on the gene to capture local context. Knockout variants were generated by inserting a 15-bp stop codon sequence 12 bp downstream of the start codon (15 nucleotides were replaced). The log-likelihood difference between wild-type and knockout sequences served as the predictor (Figure 5A).
+
+Evaluating performance via AUROC, dnaHNet outperformed StripedHyena2 across all compute budgets, with gains increasing monotonically with compute budget (Figure 5B). This indicates that the hierarchical architecture effectively integrates local coding syntax disrupted by the stop codon with the broader genomic context required to determine gene essentiality.
+
+\subsection{Biological Structure Hierarchy}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=1\linewidth]{inspection.png}
+\caption{\textbf{Genomic Structure Interpretation.} An annotated example from the \textit{B. subtilis} genome illustrating how dnaHNet's two-stage chunking discovers biological structure. Stage 1 learns triplet codon periodicity within coding regions: boundary probabilities spike at every third nucleotide (codon positions 2 and 3), effectively grouping the sequence into three-nucleotide tokens that correspond to codons. }
+\label{fig:structure}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Hierarchical Chunking Statistics.} Boundary selection rates across genomic regions and codon positions for two-stage dnaHNet. Stage 1 exhibits triplet periodicity; Stage 2 distinguishes functional boundaries.}
+\label{tab:structure_stats}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Genomic Feature} & \textbf{Stage 1} & \textbf{Stage 2} \\
+\midrule
+\textit{Global Selection Rate} & 35.8\% & 51.3\% \\
+\midrule
+\multicolumn{3}{l}{\textbf{Functional Regions}} \\
+Promoter & 35.6\% & 71.5\% \\
+Start Codon & 35.1\% & 81.3\% \\
+Coding Region & 35.8\% & 48.4\% \\
+Stop Codon & 34.5\% & 51.7\% \\
+Intergenic & 35.3\% & 74.6\% \\
+\midrule
+\multicolumn{3}{l}{\textbf{Codon Periodicity} (Coding Region Only)} \\
+Position 1 & 6.5\% & 51.8\% \\
+Position 2 & 42.6\% & 38.0\% \\
+Position 3 & 58.4\% & 55.9\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A key advantage of dnaHNet is interpretability through its learned chunking boundaries. We analyzed the \textit{B. subtilis} genome by processing five random 49152-bp windows with a trained (3,2) two-stage model and computing token selection rates within each functional region and codon position (Figure 6). Our analysis reveals that dnaHNet learns biological structure in a hierarchical manner (Table 1).
+
+\textbf{Stage 1 (Codon Awareness).} The first stage learns triplet codon structure inherent to coding sequences. While aggregate selection rates across functional regions remain indistinguishable from baseline, coding regions exhibit strong periodicity aligned with codon positions (Table 1). The first position is rarely selected (6.5\%), while second and third positions show elevated rates (42.6\% and 58.4\% respectively).
+
+\textbf{Stage 2 (Functional Awareness).} The second stage shifts from local syntax to broader genomic organization. Selection rates diverge significantly across functional regions, with promoters (71.5\%), start codons (81.3\%), and intergenic regions (74.6\%) selected far above coding regions (48.4\%). This indicates that upper layers leverage the codon-aware tokens constructed in the first stage to recognize the functional map of the genome from raw sequence data.
+
+\section{Discussion}
+
+We introduced dnaHNet, a tokenizer-free foundation model that achieves state-of-the-art genomic sequence learning. dnaHNet demonstrates superior scaling efficiency compared to StripedHyena2 ($\alpha = 0.06$ versus $\alpha = 0.04$), with recursive compression enabling over $3\times$ more efficient inference at million-nucleotide contexts. On downstream tasks, dnaHNet achieves state-of-the-art zero-shot performance on protein variant effect prediction and gene essentiality classification across all compute scales.
+
+Most notably, dnaHNet learns biologically meaningful segmentation without supervision. The first stage discovers triplet codon structure, while the second stage shifts to functional organization, preferentially marking promoters and intergenic regions. This emergent hierarchy mirrors the nested organization of genomic information and validates that end-to-end learning can recover biological syntax from raw sequences.
+
+The scaling analysis reveals particularly important implications for compute-efficient genomic modeling. The widening performance gap between dnaHNet and StripedHyena2 as compute increases suggests that hierarchical compression provides compounding benefits at scale. Notably, achieving equivalent perplexity would require StripedHyena2 to expend $3.75 \times$ more compute, a substantial efficiency margin that grows with model scale. We also observe that dnaHNet's optimal training regime deviates from standard Chinchilla scaling laws: the architecture benefits from substantially more training tokens relative to parameter count (140B versus 68B tokens at matched compute), likely because compression reduces the effective sequence length processed by the main network, allowing it to extract more signal per raw nucleotide. These findings suggest that as genomic foundation models scale toward trillion-parameter regimes, hierarchical architectures may offer critical efficiency advantages over fixed-tokenization or byte-level alternatives.
+
+
+\subsection{Limitations}
+
+Several limitations merit discussion. We pretrained exclusively on prokaryotic genomes, which lack the complex regulatory architecture of eukaryotes including introns and long-range chromatin interactions. Our evaluation focused on zero-shot tasks, so behavior under fine-tuning remains unexplored. The fixed target compression ratios, while biologically motivated, may be suboptimal for non-coding or eukaryotic sequences. Finally, our scaling analyses extend only to 1B parameters, leaving large-scale behavior undetermined.
+
+\subsection{Future Directions}
+
+Promising directions include extending pretraining to eukaryotic genomes to test whether dynamic chunking discovers structures such as splice sites and enhancers. The interpretability of learned boundaries suggests applications in discovering novel functional elements. Finally, integrating dnaHNet with protein language models could enable unified biological modeling from genotype to phenotype.
+
+\section{Conclusion}
+Existing genomic models face a persistent tradeoff: fixed tokenizers achieve computational efficiency but fragment biological motifs, while nucleotide-level models preserve biological coherence but scale poorly to long contexts. dnaHNet resolves this tradeoff through end-to-end learned segmentation, achieving both the efficiency gains of compressed representations and the biological fidelity of nucleotide-resolution input. The result is a framework that is both a powerful predictive tool and a window into the statistical organization of life. As we scale to larger hierarchies and more diverse taxonomic data, such models may not only predict biological function but assist in designing it, from optimizing synthetic operons to engineering novel protein pathways.
+
+\section*{Impact Statement}
+This paper presents work whose goal is to advance the field of genomic foundation models. Potential positive impacts include improved understanding of gene function and accelerated biological discovery. As with all genomic modeling tools, dual-use concerns exist, though our focus on prokaryotic genomes and interpretive downstream tasks limits immediate biosecurity risks.
+
+\bibliography{main}
+\bibliographystyle{icml2026}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% APPENDIX
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\appendix
+\onecolumn
+\section{Appendix}
+\label{sec:appendix}
+
+\subsection{Model Architecture Details}
+\label{app:architecture}
+
+We experimented with three primary configurations of dnaHNet, Medium (M), Large (L), and Extra Large (XL), to study scaling behavior. All models utilize a two-stage recursive hierarchy. The architectural layout for all configurations follows the pattern:
+\begin{center}
+    \texttt{["m4", ["T1m4", ["T$N$"], "m4T1"], "m4"]}
+\end{center}
+where \texttt{m4} denotes 4 Mamba layers (Encoder/Decoder blocks), \texttt{T1} denotes 1 Transformer layer, and \texttt{T$N$} denotes $N$ Transformer layers in the innermost Main Network ($\mathcal{M}$).
+
+Table \ref{tab:model_configs} details the specific hyperparameters for each model variant used in our scaling laws and downstream evaluations.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{dnaHNet Model Configurations.} Hyperparameters for the three primary model scales. Dimensions and heads are listed for the Outer / Middle / Inner hierarchy stages respectively.}
+\label{tab:model_configs}
+\begin{small}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Hyperparameter} & \textbf{dnaHNet-M} & \textbf{dnaHNet-L} & \textbf{dnaHNet-XL} \\
+\midrule
+\textbf{Architecture Layout} & 2-Stage & 2-Stage & 2-Stage \\
+\textbf{Inner Layers ($N$)} & 7 & 12 & 18 \\
+\textbf{Model Dimensions ($D$)} & 512 / 640 / 768 & 576 / 704 / 768 & 640 / 768 / 832 \\
+\textbf{Attention Heads} & 8 / 10 / 12 & 9 / 11 / 12 & 11 / 12 / 13 \\
+\textbf{Intermediate Dim} & 0 / 1024 / 2048 & 0 / 1024 / 2048 & 0 / 1108 / 2218 \\
+\textbf{SSM State Dim} & 128 & 128 & 128 \\
+\textbf{SSM Conv Dim} & 4 & 4 & 4 \\
+\textbf{Context Window} & 8192 & 8192 & 8192 \\
+\bottomrule
+\end{tabular}
+\end{small}
+\end{table}
+
+\subsection{Training Hyperparameters}
+\label{app:training_params}
+
+All models were trained on the Genome Taxonomy Database (GTDB) using the hyperparameters listed below. We utilized the AdamW optimizer with a linear warmup and cosine decay schedule.
+
+\paragraph{Optimization and Stability.}
+To ensure stable training across the hierarchy, we employed layer-wise learning rate multipliers. The scripts indicate a multiplier schedule of \texttt{2.0 1.5 1.0}, applying higher learning rates to the outer compressive layers to encourage rapid convergence of the tokenization boundaries.
+
+Table \ref{tab:training_hyperparams} summarizes the global training settings, and Table \ref{tab:run_specifics} provides the specific configuration for the reported training runs.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Global Training Hyperparameters.}}
+\label{tab:training_hyperparams}
+\begin{small}
+\begin{tabular}{lc}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+\textbf{Optimizer} & AdamW \\
+\textbf{Weight Decay} & 0.05 \\
+\textbf{Gradient Clipping} & 1.0 \\
+\textbf{Precision} & BF16 Mixed \\
+\textbf{LR Schedule} & Linear Warmup + Cosine Decay \\
+\textbf{LR Multipliers} & 2.0 (Outer), 1.5 (Mid), 1.0 (Inner) \\
+\textbf{Sequence Packing} & Padded \\
+\textbf{Auxiliary Loss Weight ($\alpha$)} & $0.01 - 0.05$ \\
+\bottomrule
+\end{tabular}
+\end{small}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Run-Specific Training Settings.} The dnaHNet-XL configuration uses the biologically motivated compression targets ($3 \times 2$) described in the main text.}
+\label{tab:run_specifics}
+\begin{small}
+\begin{tabular}{lccc}
+\toprule
+ & \textbf{dnaHNet-M} & \textbf{dnaHNet-L} & \textbf{dnaHNet-XL} \\
+\midrule
+\textbf{Base Learning Rate} & $8 \times 10^{-4}$ & $7.5 \times 10^{-4}$ & $6.5 \times 10^{-4}$ \\
+\textbf{Batch Size (per device)} & 16 & 8 & 8 \\
+\textbf{Grad Accumulation} & 8 & 16 & 16 \\
+\textbf{Target Compression ($R_1, R_2$)} & 2, 2 & 3, 2 & 3, 2 \\
+\textbf{Aux Loss Weight} & 0.03 & 0.02 & 0.02 \\
+\textbf{Warmup Steps} & 4,739 & 4,683 & 6,756 \\
+\textbf{Max Steps} & 94,784 & 93,663 & 135,073 \\
+\bottomrule
+\end{tabular}
+\end{small}
+\end{table}
+
+\subsection{Computational Resources}
+Training was performed on compute nodes equipped with NVIDIA GPUs (A100/H100 class). 
+\begin{itemize}
+    \item \textbf{dnaHNet-M:} Trained on 4 GPUs with 32 CPUs per task.
+    \item \textbf{dnaHNet-L:} Trained on 4 GPUs with 32 CPUs per task.
+    \item \textbf{dnaHNet-XL:} Trained on 4 GPUs with 32 CPUs per task (extended duration).
+\end{itemize}
+The implementation leveraged Triton and TorchInductor for kernel optimization, with DeepSpeed Stage 2 for memory efficiency.
+\subsection{Detailed Downstream Results}
+\label{app:downstream_results}
+
+We provide the exact numerical results corresponding to the scaling analyses in the main text. Table \ref{tab:vep_results} details the zero-shot Spearman correlations for Protein Variant Effect Prediction (VEP) on MaveDB. Table \ref{tab:ge_results} details the AUROC scores for Gene Essentiality (GE) prediction on the DEG dataset.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Protein Variant Effect Prediction (VEP) Results.} Zero-shot Spearman correlation on MaveDB across compute scales. dnaHNet consistently achieves higher correlation than baselines at comparable FLOP budgets.}
+\label{tab:vep_results}
+\begin{small}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{Training FLOPs} & \textbf{Spearman $\rho$} \\
+\midrule
+\textbf{dnaHNet} & $8.00 \times 10^{18}$ & 0.2601 \\
+                 & $1.60 \times 10^{19}$ & 0.2865 \\
+                 & $3.20 \times 10^{19}$ & 0.3143 \\
+                 & $6.40 \times 10^{19}$ & \textbf{0.3266} \\
+\midrule
+\textbf{StripedHyena2} & $1.00 \times 10^{19}$ & 0.2639 \\
+                       & $2.00 \times 10^{19}$ & 0.2921 \\
+                       & $4.00 \times 10^{19}$ & 0.3084 \\
+                       & $7.11 \times 10^{19}$ & 0.3110 \\
+\midrule
+\textbf{Transformer} & $8.00 \times 10^{18}$ & 0.1348 \\
+                     & $2.00 \times 10^{19}$ & 0.1355 \\
+                     & $4.00 \times 10^{19}$ & 0.1497 \\
+                     & $8.00 \times 10^{19}$ & 0.1555 \\
+\bottomrule
+\end{tabular}
+\end{small}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Gene Essentiality (GE) Prediction Results.} Classification AUROC on the DEG dataset. The (3,2) hierarchy configuration of dnaHNet demonstrates the strongest scaling behavior.}
+\label{tab:ge_results}
+\begin{small}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Model} & \textbf{Training FLOPs} & \textbf{AUROC} \\
+\midrule
+\textbf{dnaHNet (3,2) Hierarchy} & $8.00 \times 10^{18}$ & 0.5719 \\
+                                 & $1.60 \times 10^{19}$ & 0.5840 \\
+                                 & $3.20 \times 10^{19}$ & 0.5993 \\
+                                 & $6.40 \times 10^{19}$ & \textbf{0.6050} \\
+\midrule
+\textbf{dnaHNet (2,2) Hierarchy} & $8.00 \times 10^{18}$ & 0.5538 \\
+                                 & $1.60 \times 10^{19}$ & 0.5797 \\
+                                 & $3.20 \times 10^{19}$ & 0.5854 \\
+                                 & $6.40 \times 10^{19}$ & 0.5900 \\
+\midrule
+\textbf{StripedHyena2} & $1.00 \times 10^{19}$ & 0.5375 \\
+                       & $2.00 \times 10^{19}$ & 0.5670 \\
+                       & $4.00 \times 10^{19}$ & 0.5720 \\
+                       & $7.10 \times 10^{19}$ & 0.5759 \\
+\bottomrule
+\end{tabular}
+\end{small}
+\end{table}
+
+
+\subsection{Wall-Clock Efficiency Benchmarks}
+\label{app:wallclock}
+
+To complement the theoretical FLOP analysis in the main text, we benchmarked wall-clock performance of dnaHNet against StripedHyena2 across a range of sequence lengths and model sizes. Measurements were collected on a single NVIDIA H100 GPU using forward passes with BF16 precision. We report three metrics: throughput (tokens processed per second), peak GPU memory consumption, and forward pass latency.
+
+\begin{figure}[h]
+\centering
+\caption{\textbf{Wall-clock efficiency comparison between dnaHNet and StripedHyena2.} We benchmark three dnaHNet variants (M, L, XL) against three StripedHyena2 configurations (100M, 167M, 234M parameters) across sequence lengths ranging from $2^{10}$ to $2^{19}$ nucleotides. \textbf{(Left)} Wall-clock throughput in tokens per second. dnaHNet variants achieve substantially higher throughput than size-comparable StripedHyena2 models across all sequence lengths, with dnaHNet-M peaking at over $1.6 \times 10^6$ tokens/sec. The throughput decline at the longest contexts reflects memory pressure rather than algorithmic inefficiency. \textbf{(Middle)} Peak GPU memory consumption. dnaHNet exhibits markedly lower memory usage than StripedHyena2 at long contexts, with the gap widening substantially beyond $2^{17}$ nucleotides. At $2^{19}$ nucleotides, dnaHNet-XL uses approximately $18$ GB compared to over $55$ GB for SH2-100M, enabling longer-context inference on fixed hardware. \textbf{(Right)} Forward pass latency (log scale). dnaHNet consistently achieves lower latency than StripedHyena2 configurations of comparable parameter count, with the advantage growing at longer sequence lengths due to hierarchical compression reducing the effective sequence length processed by the main network. Together, these results confirm that dnaHNet's theoretical FLOP advantages translate directly into practical wall-clock gains across throughput, memory, and latency.}
+\includegraphics[width=\linewidth]{throughput_memory_latency.png}
+\label{fig:wallclock}
+\end{figure}
+
+The exact 15bp stop codon sequence used for the gene essentiality evaluations was the sequence TAATAATAATAGTGA.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\end{document}

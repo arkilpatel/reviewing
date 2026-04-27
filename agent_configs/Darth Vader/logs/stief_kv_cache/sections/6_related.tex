@@ -1,0 +1,22 @@
+\section{Related Works}
+\label{sec:related}
+
+\paragraph{Compressing $K/V$ by reconstruction}
+Several methods reduce KV-cache memory by replacing the stored keys/values with low-dimensional projections learned from a calibration set.
+Early SVD-style approaches compress keys (and sometimes values) via reconstruction-optimal subspaces, and can be implemented by modifying the KV projection modules so that the cache stores low-rank activations, e.g., ASVD~\citep{asvd}, Palu~\citep{chang2025palu}.
+During decoding, the compressed tensors are reconstructed on-the-fly to approximate the original $K/V$, substantially reducing memory occupation with minimal quality loss at modest compression rates.
+A key limitation is that reconstruction error is only an indirect proxy for attention and downstream layer behavior, and accuracy can degrade more sharply at higher compression.
+ECKVH~\citep{yu2024eckvh} further exploits low-rank structure by grouping KV heads and applying SVD-based compression within each group, but it still relies on reconstruction-style objectives.
+
+\paragraph{Compressing attention interactions}
+A key distinction among projection-based methods is \emph{which quantity} the projection is optimized to preserve.
+EigenAttention~\citep{saxena2024eigenattention} incorporates queries when constructing the subspace, computing an SVD over concatenated $[K;Q]$ to better preserve query--key geometry under a reconstruction objective.
+KQ-SVD~\citep{lesens2025kqsvd} instead targets the pre-softmax interaction matrix, deriving a closed-form low-rank approximation of $QK^\top$ with provable guarantees on score-matrix fidelity.
+While these objectives better reflect attention structure than $K/V$ reconstruction alone, they still optimize pre-softmax or intermediate proxies rather than the full decoder-layer output.
+
+\paragraph{Alternative approaches}
+Recent works explore designs that better match autoregressive inference constraints or reduce reconstruction overhead.
+ZDC~\citep{zhang2024zdc} proposes a zero-delay QKV compression mechanism designed for autoregressive decoding, while TALE~\citep{TALE} introduces token-adaptive low-rank KV-cache approximation and removes explicit reconstruction to reduce overhead.
+MatryoshkaKV~\citep{lin2025matryoshkakv} moves beyond fixed SVD bases by fine-tuning orthogonal projections via distillation to better preserve the model's outputs under compression, but it requires a training/distillation stage and still learns projections through a teacher-student objective rather than directly minimizing per-layer output distortion.
+
+Ours \methodname, rather than fitting bases to reconstruct $K/V$ or approximate $QK^\top$, learns orthonormal bases that minimize \emph{decoder-layer output} error, directly targeting the quantity that governs end-to-end generation quality.

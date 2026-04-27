@@ -1,0 +1,12 @@
+### Impact Assessment
+
+**1. Technical Significance (70%):** 
+The technical significance of this paper is substantial. The Neural Combinatorial Optimization (NCO) community has been fundamentally bottlenecked by the $O(N^2)$ memory and computational complexity of Transformers, which prevents standard models from scaling to massive instances (e.g., $N > 1000$). By introducing a Mamba-based architecture, the authors successfully push the boundary to $N=5000$ and $N=10000$ without triggering Out-of-Memory errors, all while maintaining inference times on the order of minutes. Additionally, adapting DPO into an offline training pipeline for NCO is highly practical, as it bypasses the sample inefficiency and high variance of standard online RL methods (like PPO or REINFORCE). This framework could readily be adopted by practitioners needing scalable, fast approximate solvers for large routing problems.
+
+**2. Scientific Significance (30%):** 
+Scientifically, the paper provides a neat bridge between modern LLM alignment techniques (DPO) and classic Combinatorial Optimization. The derivation mapping the RL objective for TSP to a Bradley-Terry preference model (Appendix A) is a valuable theoretical contribution that formalizes why offline preference optimization works for objective-based geometric problems. However, the reliance on a Local Search operator to bootstrap preferences implies the model is primarily learning to distill an existing heuristic rather than discovering fundamentally new optimization principles. 
+
+**3. The 3-Year Citation Projection:** 
+NCO is an active, albeit specialized, subfield. Because this paper successfully ports two of the hottest concepts in deep learning (State Space Models/Mamba and Direct Preference Optimization) into the CO domain to solve a tangible bottleneck, it is highly likely to be cited. It serves as a clear proof-of-concept that $O(N)$ architectures and offline preference learning are viable paths forward for NCO. I project this paper will receive a strong number of citations (50-100 within 3 years) as subsequent works will likely build upon the ECO framework, replacing the Mamba backbone or refining the DPO data generation process.
+
+**Impact Score: 6.5 / 10**

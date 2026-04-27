@@ -1,0 +1,129 @@
+\section{Experiments}
+
+\subsection{Implementation Details}
+
+\paragraph{Model Specifications.}
+To leverage the understanding capabilities of existing multimodal models, we initialize the core components of JAEGER, including the visual encoder, the monaural audio branch, and the LLM decoder, with pre-trained weights from Qwen2.5-Omni \cite{xu2025qwen2}. The proposed Neural IV is randomly initialized. Since the audio embedding dimension has been changed, the audio adaptor has also been initialized randomly.
+
+\paragraph{Data and Training Specifications.}
+We train JAEGER on \textsc{SpatialSceneQA} following the split protocols for \textit{LibriSpeech} \cite{panayotov2015librispeech} and \textit{HM3D} \cite{ramakrishnan2021habitat}. Each sample provides comprehensive 3D geometric annotations, including camera intrinsics/extrinsics, instance-level semantic IDs, and ground truth metadata for all sound sources and loudspeaker assets.
+
+\textbf{Optimization}. We fine-tune specific components selectively: the audio encoder, Neural IV, and projector for Audio DoA (Tasks A--B); the visual encoder and projector for Visual Grounding (Task C); and all modality encoders and projectors for Joint Reasoning (Tasks D--E). Across all tasks, the LLM is optimized via LoRA with $r=64$, $\alpha=128$, and a dropout rate of 0.05.
+%
+All experiments are conducted on NVIDIA A100 (40GB) GPUs. For audio-only localization, we train on eight GPUs with a batch size of 3 for 6k steps. For visual grounding, we utilize 24 GPUs with a minibatch size of 1 for 3k steps. For joint reasoning tasks, we employ twenty-four GPUs with a minibatch size of 1 for 4k steps. We utilize an optimizer with a cosine learning rate scheduler and a linear warm-up of 2,500 steps. The peak learning rate is set to $1 \times 10^{-5}$, with a weight decay of 0.05.
+
+\subsection{Main Results}
+
+\textbf{Evaluation Metrics.}
+We employ distinct metrics tailored to each task type to ensure a comprehensive evaluation.
+For Sound Source Localization (Tasks A \& B), we report the median \textbf{DoA Error}, defined as the angular distance between the predicted azimuth/elevation and the ground truth.
+For Visual Grounding (Task C), we utilize two standard metrics: \textbf{3D IoU}, which measures the volumetric overlap between the predicted and ground truth bounding boxes, and \textbf{Visual Offset}, calculated as the Euclidean distance ($L_2$ norm) between the centers of the predicted and ground truth objects in 3D spaces.
+For Joint Audio-Visual Reasoning (Tasks D \& E), which are formulated as multi-choice classification problems (\textit{i.e.}, identifying the correct speaker among candidates like Left/Center/Right), we report the \textbf{Accuracy}.
+
+\textbf{Baselines.}
+Since JAEGER is the first framework to integrate RGB-D visual streams with 4-channel FOA for joint grounding and reasoning, no direct baseline exists with an identical modality setup. To ensure a rigorous evaluation, we compare three categories of models:
+\textbf{(1)} Specialized models: We evaluate state-of-the-art models in isolated domains. For audio-only localization, we train BAT \cite{zheng2024bat} for 5 epochs on our Task A and B datasets, matching our train duration. To bridge the modality gap, we convert our 4-channel FOA data to binaural audio using the default SoundSpaces 2.0 HRTF. For 3D visual grounding, we assess N3D-VLM \cite{wang2025n3d} and Qwen3-VL-8B-Instruct \cite{Qwen3-VL} under a zero-shot setting.
+\textbf{(2)} Open-source 2D omni model: To assess the necessity of 3D spatial modalities, we test Qwen2.5-Omni \cite{xu2025qwen2} in a zero-shot manner. Notably, due to its monaural-only input, Qwen2.5-Omni is inherently incapable of Audio DoA estimation.
+\textbf{(3)} Random: We provide a theoretical random guess baseline to establish the lower bound of performance.
+
+\textbf{Analysis.} Regarding isolated perception tasks, JAEGER demonstrates high competency in both audio and visual domains. In audio localization, while our proposed Neural IV variant (MAE \ang{2.21}) achieves comparable precision to the specialized BAT baseline (\ang{2.16}) in single-source scenarios, it significantly outperforms BAT in the more challenging overlapping-source task, reducing the MAE from \ang{19.09} to \ang{13.13}. In terms of 3D visual grounding, JAEGER-3D achieves a 3D IoU of 0.32 and a visual offset of 0.16m, exhibiting strong competitive performance.
+
+A pronounced performance gap emerges on joint reasoning tasks: mainstream 2D AV-LLMs, constrained by monaural audio and the absence of depth perception, fail even after fine-tuning to reliably associate visual objects with acoustic sources in 3D space. In contrast, JAEGER achieves near-perfect accuracy in both single and overlapping-source scenarios, highlighting the necessity of explicit 3D modeling for robust spatial reasoning in complex environments.
+
+\subsection{Ablation Studies}
+
+We conduct a comprehensive ablation studies to validate our core design choices, focusing on efficacy of learnable spatial audio representations, depth-aware visual grounding and the both individual contributions to joint audio-visual reasoning tasks.
+
+\begin{table}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \caption{Cross-evaluation matrix (Median Angular Error in $^\circ$). We compare \textbf{Classical IV} and \textbf{Neural IV} by training and testing on matched or mismatched source scenarios.}
+    
+    \begin{tabular}{l cc}
+    \toprule
+
+    \diagbox[width=10em]{\textbf{Test Set}}{\textbf{Train Set}} & \textbf{Single Src.} & \textbf{Overlap Src.} \\
+    \midrule
+    
+    \multicolumn{3}{l}{\textbf{Classical IV}} \\
+    \quad Single Source   & \ang{2.95}  & \ang{18.35} \\
+    \quad Overlap Source  & \ang{22.06} & \ang{16.09} \\
+    
+    \midrule 
+    
+    \multicolumn{3}{l}{\textbf{Neural IV}} \\
+    \quad Single Source   & \textbf{\ang{2.21}}  & \textbf{\ang{14.91}} \\
+    \quad Overlap Source  & \textbf{\ang{16.36}} & \textbf{\ang{13.13}} \\
+    
+    \bottomrule
+    \end{tabular}
+    \label{tab:cross_eval_diag}
+\end{table}
+
+\textbf{Effectiveness and Generalization of Neural IV.}
+We compare the proposed {Neural IV}  against the {Classical IV} to evaluate robustness in complex acoustic environments. As shown in Table \ref{tab:cross_eval_diag}, Neural IV consistently achieves lower angular errors across all settings.
+To test generalization, we perform a cross-evaluation where models are trained on one source type (\textit{e.g.}, Single Source) and tested on the other (\textit{e.g.}, Overlap Source).
+The results indicate that while Classical IV suffers significant degradation in mismatched scenarios, Neural IV exhibits superior stability. This suggests that Neural IV learns robust, intrinsic spatial acoustic.
+
+\begin{table}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \caption{Ablation study on \textbf{Depth Encoding} for visual grounding. We report both Mean and Median values to better analyze the distribution of errors.}
+    \vspace{0.1in}
+    
+    \begin{tabular}{l cc cc}
+    \toprule
+    \multirow{2}{*}{\textbf{Model Setting}} & \multicolumn{2}{c}{\textbf{3D IoU} $\uparrow$} & \multicolumn{2}{c}{\textbf{Visual Offset} $\downarrow$} \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+    & Mean & Median & Mean & Median \\
+    \midrule
+    
+    Full Model (w/ Depth) & \textbf{0.32} & \textbf{0.31} & \textbf{0.22} & \textbf{0.16} \\
+    
+    w/o Depth Encoding    & 0.29 & 0.27 & 0.24 & 0.18 \\
+    
+    \bottomrule
+    \end{tabular}
+    \label{tab:ablation_visual}
+\end{table}
+
+\textbf{Impact of Depth Encoding on Visual Grounding.}
+We investigate the contribution of our 3D-aware positional encoding to the Visual Grounding task (Task C). Table \ref{tab:ablation_visual} demonstrates that explicitly integrating depth information is critical for precise localization. The inclusion of depth encoding improves the Mean 3D IoU from 0.29 to 0.32 and reduces the Median Visual Offset from 0.18m to 0.16m. These improvements confirm that explicit geometric priors enable the model to better map 2D visual features to metric 3D coordinates, reducing the ambiguity inherent in monocular RGB perception.
+
+\textbf{Component Analysis on Joint Reasoning.}
+Finally, we dissect the contribution of each core component to the joint audio-visual reasoning tasks (Tasks D \& E) in Table \ref{tab:ablation_reasoning}.
+First, Neural IV consistently yields higher accuracy than Classical IV, particularly in the challenging 2-speaker scenario (99.2\% vs. 98.6\%).
+Second, removing depth encoding leads to a noticeable drop in accuracy, validating that depth perception assists in spatially distinguishing potential target speakers.
+Most critically, removing the FOA encoder causes reasoning performance to collapse to near-random levels ($\sim$43--47\%), even after fine-tuning. This catastrophic drop empirically demonstrates that standard monaural representations are fundamentally insufficient for spatial disambiguation, underscoring the indispensable role of our native 3D architecture in solving complex physical reasoning tasks.
+
+\begin{table}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \caption{Component analysis on \textbf{Reasoning Tasks}. We evaluate the impact of audio encoders (Neural/Classical), Depth, and FOA on 1-speaker and 2-speaker scenarios.}
+    \vspace{0.1in}
+    
+    \begin{tabular}{l cc}
+    \toprule
+    \multirow{2}{*}{\textbf{Model Setting}} & \multicolumn{2}{c}{\textbf{Accuracy (\%)}} \\
+    \cmidrule(lr){2-3}
+    & 1-Speaker $\uparrow$ & 2-Speaker $\uparrow$ \\
+    \midrule
+    
+    % --- 1. Full Models ---
+    Ours (Neural IV)             & \textbf{99.5} & \textbf{99.2} \\
+    Ours (Classical IV)          & 99.5 & 98.6 \\
+    \midrule
+    
+    % --- 2. w/o Depth ---
+    Ours (Neural) w/o Depth      & 96.9 & 94.9 \\
+    Ours (Classical) w/o Depth   & 99.2 & 98.7 \\
+    \midrule
+    
+    % --- 3. w/o FOA or Both ---
+    Ours w/o FOA Encoder         & 43.8 & 47.6 \\
+    Ours w/o Depth \& FOA        & 43.8 & 45.7 \\
+    
+    \bottomrule
+    \end{tabular}
+    \label{tab:ablation_reasoning}
+\end{table}

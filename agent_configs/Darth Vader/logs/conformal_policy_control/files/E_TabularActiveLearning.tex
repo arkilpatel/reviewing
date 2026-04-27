@@ -1,0 +1,87 @@
+\section{Constrained Tabular Active Learning Implementation Details and Additional Results}
+\label{app:active_learning_details}
+
+This appendix provides implementation details for the constrained active learning experiments in Section~\ref{subsec:active_learning_experiments}. We describe the datasets used for evaluation (Section~\ref{subsec:al_datasets}), the construction of synthetic feasibility constraints based on principal component analysis (Section~\ref{subsec:feasibility_construction}), the active learning setup including surrogate model and acquisition policy (Section~\ref{subsec:al_setup}), and hyperparameter settings (Section~\ref{subsec:al_hyperparams}).
+
+\subsection{Datasets}
+\label{subsec:al_datasets}
+
+We evaluate on three regression datasets:
+
+\begin{itemize}
+    \item \textbf{Robot Arm Kinematics} \citep{delve1996kin} (8192 samples, 8 features): Predict end-effector distance from joint angles of an 8-link all-revolute robot arm. We use the kin8nm variant from the DELVE repository, a highly non-linear regression task with moderate noise.
+    \item \textbf{Airfoil Self-Noise} \citep{brooks1989airfoil} (1503 samples, 5 features): Predict sound pressure level from aerodynamic and geometric properties of NACA 0012 airfoil blade sections tested in an anechoic wind tunnel. We apply log transforms to frequency and suction-side displacement thickness following standard practice.
+    \item \textbf{Medical Expenditure Panel Survey (Medical Utilization or MEPS)} \citep{ezzati2008sample} (33005 samples, 107 features): Large-scale survey dataset on medical utilization and costs of health care and health insurance coverage. Surveys are of individuals and families, their medical providers, and employers across the United States. We pre-process the data (for instance constructing dummy/indicator covariates) as described in \citet{barber2021predictive}. Data available at \url{https://meps.ahrq.gov/mepsweb/data_stats/download_data_files_detail.jsp?cboPufNumber=HC-192}
+\end{itemize}
+
+\subsection{Feasibility Constraint Construction}
+\label{subsec:feasibility_construction}
+
+Our datasets do not include recorded feasibility constraints, so we construct synthetic constraints based on the first principal component of the covariate matrix. The first principal component captures the dominant pattern of covariation in the data. Records with high PC1 values follow this typical covariation pattern and are likely feasible, while records with low PC1 values deviate from this pattern. Their covariates vary in an atypical or ``weird'' way that we treat as risky. This captures the intuition that unusual configurations are more likely to violate constraints.
+
+We define the feasibility indicator for each record as follows:
+\begin{enumerate}
+    \item \textbf{PCA projection}: Compute the first principal component of the full covariate matrix $X \in \mathbb{R}^{n \times d}$ and project all records onto this axis, yielding $z_i \in \mathbb{R}$ for each record $i$.
+
+    \item \textbf{Exponential tilting}: Apply min-max normalization to $\{z_i\}$ and compute exponentially-tilted values $\tilde{z}_i = \exp(\gamma \cdot z_i^{\text{norm}})$, where $\gamma > 0$ is the \texttt{initial\_sampling\_bias} parameter.
+
+    \item \textbf{Feasibility probability}: Convert relative ranks of $\{\tilde{z}_i\}$ to feasibility probabilities via a logistic CDF:
+    \begin{align}
+        p_i^{\text{feasible}} = \sigma\Big(\text{rank}(\tilde{z}_i) / n;\ \mu, s\Big),
+    \end{align}
+    where $\sigma(\cdot; \mu, s)$ is the logistic CDF with location $\mu = \min(2.5\alpha, 0.98)$, scale $s = 0.1$, and $\alpha$ is the target risk level for CPC. We tie the logistic location to $\alpha$ so that the proportion of infeasible records in the pool scales with the target risk level, ensuring the constraint remains binding across different choices of $\alpha$. For our experiments with $\alpha = 0.2$, this yields $\mu = 0.5$.
+
+    \item \textbf{Bernoulli sampling}: Sample feasibility indicators $F_i \sim \text{Bernoulli}(p_i^{\text{feasible}})$.
+\end{enumerate}
+
+The initial training data is sampled with the same exponential tilting toward high PC1 values (Section~\ref{subsec:al_setup}), so the learner begins in a high-feasibility region where covariates follow the dominant covariation pattern. The pool contains many records from the opposite end of the PC1 spectrum, atypical configurations with low feasibility probability that a naive uncertainty-based acquisition policy would preferentially select.
+
+\subsection{Active Learning Setup}
+\label{subsec:al_setup}
+
+\textbf{Initial data.} We hold out 20\% of each dataset as a fixed test set for evaluating MSE. From the remaining records, we sample $n_{\text{initial}}$ points with exponential tilting toward high PC1 values (using the same bias parameter $\gamma$ from Section~\ref{subsec:feasibility_construction}), then split these into training (80\%) and calibration (20\%) sets. This biased initialization places the learner in the high-feasibility region where covariates follow typical covariation patterns, reflecting a scenario where the incumbent safe policy operates in well-understood regimes.
+
+\textbf{Surrogate model.} We fit a Gaussian Process (GP) regression model with a DotProduct + WhiteKernel covariance function using the \texttt{scikit-learn} package \citep{pedregosa2011scikit}:
+\begin{align}
+    k(x, x') = \sigma_0^2 + x^\top x' + \sigma_n^2 \cdot \mathbf{1}[x = x'],
+\end{align}
+where $\sigma_0^2$ is the signal variance and $\sigma_n^2$ is the noise variance.
+
+\textbf{Acquisition policy.} At each iteration, we define an acquisition distribution over pool records via exponential tilting toward posterior variance. The action $a \in \mathcal{A}_t$ is an index into the pool of unlabeled records at iteration $t$, and the acquisition policy is
+\begin{align}
+    \pi(a) \propto \exp\Big(\lambda \cdot \frac{\hat{\sigma}^2_a}{\max_{j \in \mathcal{A}_t} \hat{\sigma}^2_j - \min_{j \in \mathcal{A}_t} \hat{\sigma}^2_j}\Big),
+\end{align}
+where $\hat{\sigma}^2_a$ is the posterior variance of the latent function $f$ (not the noisy labels $y$) at the covariates for record $a$, and $\lambda > 0$ controls the degree of uncertainty-seeking behavior. This policy preferentially selects records where the model is uncertain, which in our setup corresponds to regions with atypical covariation patterns (and thus potentially infeasible).
+
+\textbf{Conformal policy control.} Before sampling, we apply CPC to constrain the acquisition policy relative to the initial source distribution (the biased sampling distribution used for initialization). This clips the likelihood ratio between the acquisition policy and source policy, as described in Section~\ref{subsec:cpc_selecting_rc_policy}, to control the risk of selecting infeasible records.
+
+\textbf{Sequential updates.} At each iteration, we sample one record from the (constrained) acquisition policy with replacement (the pool remains unchanged), observe a noisy version of its label (Gaussian noise with magnitude 0.05) and its feasibility indicator, and add the observation to either the training or calibration set with equal probability. The GP is then refit on the updated training set. We repeat this process for $T$ iterations.
+
+\subsection{Hyperparameters}
+\label{subsec:al_hyperparams}
+
+Table~\ref{tab:al_hyperparameters} summarizes the hyperparameters used in our experiments.
+
+\begin{table}[h]
+\centering
+\caption{Hyperparameters for constrained active learning experiments.}
+\label{tab:al_hyperparameters}
+\begin{tabular}{lll}
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Value} \\
+\midrule
+Initial pool size & $n_{\text{initial}}$ & 48 \\
+Initial train/cal split & -- & 80\%/20\% \\
+Acquisition iterations & $T$ & 10 \\
+New point train probability & -- & 0.5 \\
+Sampling bias & $\gamma$ & 1.0 \\
+Acquisition temperature & $\lambda$ & 10.0 \\
+GP signal variance & $\sigma_0^2$ & 1.0 \\
+GP noise variance & $\sigma_n^2$ & 1.0 \\
+Observation noise magnitude & -- & 0.05 \\
+Target risk level & $\alpha$ & 0.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\clearpage

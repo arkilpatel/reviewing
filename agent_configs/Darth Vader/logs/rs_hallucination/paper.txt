@@ -1,0 +1,4109 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Seeing Clearly without Training:
+Mitigating Hallucinations in Multimodal LLMs for Remote Sensing
+Anonymous Authors1
+Abstract
+Multimodal large language models (MLLMs)
+suffer from pronounced hallucinations in remote
+sensing visual question-answering (RS-VQA),
+primarily caused by visual grounding failures
+in large-scale scenes or misinterpretation of
+fine-grained small targets.
+To systematically
+analyze these issues, we introduce RSHBench,
+a protocol-based benchmark for fine-grained
+diagnosis of factual and logical hallucina-
+tions.
+To mitigate grounding-induced factual
+hallucinations,
+we further propose Relative
+Attention-Driven Actively Reasoning (RADAR),
+a training-free inference method that leverages
+intrinsic attention in MLLMs to guide progressive
+localization and fine-grained local reasoning
+at test time.
+Extensive experiments across
+diverse MLLMs demonstrate that RADAR
+consistently improves RS-VQA performance and
+reduces both factual and logical hallucinations.
+Code and data will be publicly available at
+https://github.com/MiliLab/RADAR.
+1. Introduction
+In recent years, MLLMs (Hurst et al., 2024; Touvron et al.,
+2023; Yang et al., 2025; Liu et al., 2023) have demonstrated
+remarkable enhancements in general visual perception and
+reasoning capabilities. These developments have concur-
+rently invigorated the fields of Earth science and remote
+sensing data processing (Liu et al., 2025; Weiss et al., 2020;
+Weng, 2012; Dong & Shan, 2013). Nevertheless, they con-
+tinue to exhibit substantial limitations when applied to spe-
+cialized remote sensing tasks such as RS-VQA.
+This gap is primarily attributed to two fundamental factors.
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Answer: Eleven
+Question: How 
+many airplanes are 
+in the bottom right 
+corner of the picture?
+OutPut: None
+Question: What color is the 
+last container behind the 
+rightmost crane at the edge 
+of the dock?
+OutPut: White
+Answer: Red
+×
+×
+×
+×
+×
+×
+Vanilla Attention Map
+Target region
+Target region
+Type1: Cannot find
+Type2: Cannot see clearly
+User
+MLLM
+User
+Vanilla Attention Map
+MLLM
+Figure 1. Two grounding failures underlying RS-VQA halluci-
+nations. Type 1 (Cannot find): model attention becomes diffuse
+and is distracted by irrelevant regions, resulting in missed target
+localization. Type 2 (Cannot see clearly): attention covers the
+correct region, but the visual evidence is too small or ambiguous
+for fine-grained recognition, leading to incorrect predictions.
+First, since remote sensing imagery typically spans a large
+spatial extent (Xia et al., 2018; Cheng et al., 2016), MLLMs
+struggle to precisely localize regions that are truly relevant
+to the query. Second, as scenes are often characterized by
+substantial background clutter and densely distributed small
+targets (Xu et al., 2025), fine-grained recognition becomes
+particularly challenging.
+As a result, MLLMs may rely
+on language priors in the absence of reliable visual evi-
+dence (Leng et al., 2024a), leading to diverse hallucination
+issues. More critically, such perceptual errors can propa-
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Seeing Clearly without Training
+gate through the reasoning process, rendering it increasingly
+fragile (Zhong et al., 2024).
+As illustrated in Figure 1, hallucinations in RS-VQA pri-
+marily arise from two types of grounding failures. In Type 1
+(Localization Failure), the question hinges on a small region
+within a large scene, yet the model’s attention becomes dif-
+fuse and is distracted by irrelevant regions, causing the true
+target area to be missed. In Type 2 (Recognition Failure), the
+model attends to the correct region, but the visual evidence
+is too small or ambiguous at the given resolution, leading to
+fine-grained recognition errors. However, there remains a
+lack of systematic benchmarks that can serve as diagnostic
+tools for hallucinations in the remote sensing domain, as
+existing benchmarks (Wang et al., 2025b; Luo et al., 2025;
+Muhtar et al., 2025; Li et al., 2024) predominantly rely on
+answer correctness as the primary evaluation metric.
+To bridge this gap, we propose RSHBench, a benchmark
+for evaluating hallucinations in RS-VQA. Under a fixed
+generation protocol, RSHBench requires models to pro-
+duce both an explicit reasoning process and a final answer,
+thereby standardizing generation formats across diverse ar-
+chitectures and reducing evaluation variance. Then, a repro-
+ducible judgment procedure is applied, leveraging a unified
+taxonomy to diagnose and attribute different types of hallu-
+cinations. Specifically, RSHBench categorizes grounding-
+related errors, such as incorrect object identification, at-
+tribute misinterpretation, and spatial relationship confusion,
+as Factual Hallucinations, and distinguishes them from Logi-
+cal Hallucinations, which arise from invalid inference and in-
+ternal inconsistencies. Based on analyses using RSHBench,
+we obtain several key findings: (1) Even state-of-the-art
+proprietary MLLMs remain heavily affected by both factual
+and logical hallucinations in remote sensing scenarios. (2)
+Factual hallucinations primarily stem from ungrounded ob-
+ject claims and attribute misidentifications, whereas logical
+hallucinations most often manifest as invalid reasoning and
+semantic over-attribution. (3) A strong correlation exists
+between invalid reasoning and factual hallucinations, partic-
+ularly those involving object and attribute errors, suggesting
+a latent snowballing effect, in which initial visual grounding
+failures propagate into subsequent reasoning defects.
+To address the above issues, we further propose RADAR,
+a scalable and training-free inference framework. RADAR
+formulates reasoning as a two-stage, adaptive zoom-in pro-
+cess guided by attention that progressively refines task-
+relevant visual evidence.
+In the first stage, a location-
+oriented prompt guides the model to localize target re-
+gions relevant to the question, enabling adaptive and query-
+conditioned spatial localization. In the second stage, a
+content-oriented prompt is employed within these selected
+regions to extract fine-grained visual details and facilitate
+local reasoning. The final answer is derived by integrating
+multimodal information from both the global context and
+the refined local regions.
+In summary, our main contributions are three-fold:
+• We identify that hallucinations in RS-VQA are largely
+driven by the inability to effectively localize and utilize
+task-relevant visual evidence. To this end, we introduce
+RSHBench, a protocol-driven benchmark that enables fine-
+grained, quantitative evaluation of these hallucinations.
+• We propose RADAR, a scalable and training-free infer-
+ence framework that leverages intrinsic attention for pro-
+gressive visual evidence acquisition to facilitate adaptive
+and local reasoning.
+• Extensive experiments on RSHBench demonstrate that
+RADAR consistently improves RS-VQA performance by
+2%–4% across diverse MLLMs, while reducing both factual
+and logical hallucinations by approximately 10%.
+2. Related Work
+2.1. MLLMs and RS-VQA
+MLLMs (Hurst et al., 2024; Touvron et al., 2023; Yang et al.,
+2025; Liu et al., 2023; Comanici et al., 2025) align multi-
+modal representations via large-scale pretraining (Wang
+et al., 2023b) and instruction tuning (Zhang et al., 2023),
+and have shown strong performance across diverse domains,
+from autonomous driving (Cui et al., 2024) to medical imag-
+ing (Bai et al., 2024). Nevertheless, applying MLLMs to
+remote sensing remains challenging due to the distinct data
+distribution: remote sensing imagery is characterized by
+overhead perspectives, vast spatial extents, and a high con-
+centration of small-scale instances. To facilitate evaluation,
+recent benchmarks provide diverse remote sensing ques-
+tion types and reasoning requirements. For example, LRS-
+VQA (Luo et al., 2025) targets structural reasoning on high-
+resolution imagery; VRSBench (Li et al., 2024) supports
+captioning, RS-VQA, and localization; XLRS-Bench (Wang
+et al., 2025b) explores large-scale remote reasoning settings;
+MME-RealWorld-RS (Zhang et al., 2024) emphasizes lo-
+calization and attribute inference in real-world multimodal
+reasoning; and GeoChat-Bench (Kuckreja et al., 2024) ex-
+tends evaluation toward multimodal instruction following in
+remote sensing. Despite these efforts, existing benchmarks
+largely prioritize answer accuracy, leaving hallucination
+behaviors and their causes insufficiently characterized.
+2.2. Hallucination in Vision-Language Models
+Hallucination is a persistent failure mode of vision-language
+models, where generated answers or rationales are not faith-
+fully supported by visual evidence (Liu et al., 2024; Gunjal
+et al., 2024; Wang et al., 2023a). Prior work has inves-
+tigated hallucination in image captioning and VQA, and
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Seeing Clearly without Training
+proposed both protocol-based evaluations and mitigation
+strategies (Leng et al., 2024b; Zhou et al., 2023). While
+hallucination has been extensively studied in general vision-
+language tasks, its manifestation in remote sensing scenarios
+remains underexplored. Moreover, existing RS-VQA evalu-
+ations rarely disentangle different hallucination types and
+their causes within a unified protocol, limiting systematic
+diagnosis and comparison. Our proposed RSHBench di-
+rectly addresses this limitation by providing fine-grained,
+model-agnostic, and reproducible hallucination analysis.
+2.3. Attention-Based Localization and Spatial
+Reasoning
+Prior work has explored attention and spatial localization
+as key mechanisms for grounded vision-language reason-
+ing, particularly for identifying question-relevant visual ev-
+idence. Early studies on interpretability provide post-hoc
+explanations of model behavior, including attention rollout
+or flow (Abnar & Zuidema, 2020), Grad-CAM (Selvaraju
+et al., 2017), and SmoothGrad (Smilkov et al., 2017). While
+informative, such approaches do not explicitly guide spa-
+tial reasoning during inference. To address this limitation,
+region-based methods (Luo et al., 2025; Zhou et al., 2025;
+Zhang et al., 2025; Kang et al., 2025) explicitly allocate
+computation to selected regions to improve localization
+and inference. However, many of these methods rely on
+question-agnostic attention or generic saliency cues, which
+may emphasize visually prominent yet query-irrelevant re-
+gions, limiting their effectiveness in complex scenes. More
+recent approaches adopt coarse-to-fine localization strate-
+gies to progressively narrow down relevant regions before
+answering. For example, RFM (Luo et al., 2025) intro-
+duces a token pruning mechanism to dynamically select
+question-relevant image patches in gigapixel-scale imagery,
+while ZoomSearch (Zhou et al., 2025) employs a hierarchi-
+cal zoom-in strategy to iteratively refine attended regions in
+ultra-high-resolution images. In contrast, RADAR leverages
+intrinsic attention mechanisms within MLLMs to iteratively
+refine visual evidence during the reasoning process, ground-
+ing both intermediate reasoning steps and final predictions
+in localized visual context.
+3. Method
+3.1. RSHBench: Protocol-Driven Hallucination
+Diagnosis in RS-VQA
+We introduce RSHBench, a protocol-driven benchmark for
+evaluating hallucination in RS-VQA. RSHBench comprises
+three key components: (i) a curated evaluation set tailored
+for hallucination analysis, (ii) a standardized generation
+protocol to ensure consistent model outputs, and (iii) a
+judge-based diagnosis protocol that produces fine-grained
+hallucination annotations.
+Evaluation set. We construct the evaluation set by collect-
+ing, cleaning, and sampling instances from four represen-
+tative RS-VQA and remote sensing reasoning benchmarks:
+LRS-VQA (Luo et al., 2025), MME-RealWorld-RS (Zhang
+et al., 2024), UCM (Yang & Newsam, 2010), and LHRS-
+Bench (Muhtar et al., 2025). The final dataset comprises
+371 image-question pairs spanning a diverse range of task
+types, including structural reasoning, localization, attribute
+inference, and counting. Details on dataset composition and
+sampling strategy are provided in Appendix B.1.
+Model generation protocol. Given an image-question pair
+(I, Q) (and a reference answer A), each evaluated model
+generates (i) an explicit reasoning text C′ and (ii) a final
+predicted answer A′ under a structured generation proto-
+col. This reduces format-induced variance across models
+and enables model-agnostic diagnosis. Full prompts and
+formatting rules are provided in Appendix B.2.
+Hallucination evaluation protocol. We diagnose hallu-
+cination from model outputs rather than answer accuracy.
+Hallucination is defined as any statement in (C′, A′) not
+supported by the visual evidence in I under the constraints
+of Q. We annotate at scale with three multimodal expert
+judges (Gemini-3-pro (OpenAI, 2025), GPT-5.2 (Google
+DeepMind, 2025), and Qwen3-max (Bai et al., 2025)) us-
+ing a unified interface. For each tuple (I, Q, A, C′, A′),
+each judge returns a JSON record with: (i) a binary flag
+hallucinated; (ii) coarse categories Factual and
+Logical; (iii) multi-label subtype and reason tags (Ap-
+pendix B.2). Factual subtypes include unsupported ob-
+ject/category (OBJ), attribute (ATT), and spatial/location
+(SPA) claims. Logical subtypes include invalid reasoning
+(IR), unjustified causal inference (CI), internal inconsis-
+tency (INC), and semantic over-attribution (SO). Reference
+answers A are used only to identify contradictions; halluci-
+nation decisions are based solely on image evidence.
+3.2. Relative Attention-Driven Actively Reasoning
+Remote sensing images are extremely large and information-
+dense, whereas the visual evidence required to answer a
+given question is often sparse and confined to small re-
+gions. Reasoning directly over the full image can dilute
+task-relevant signals and encourage reliance on linguistic
+priors, leading to visually unsupported predictions. RADAR
+recasts visual grounding as a test-time adaptive zoom-in pro-
+cess to effectively mitigate hallucinations. Before answer-
+ing, the model actively localizes and progressively refines
+the question-relevant evidence through a coarse-to-fine pro-
+cedure. Given an image-question pair (I, Q), RADAR first
+performs progressive evidence acquisition and then gener-
+ates the final answer via multi-view grounding. Specifically,
+RADAR employs a where-oriented query to localize can-
+didate regions that are likely to contain relevant evidence,
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Seeing Clearly without Training
+To answer {question}, where in 
+the image should I look?
+Provide a brief description of the 
+image.
+Text Token
+Reshape to image Grid
+መ𝐴1 =
+𝐴1
+𝑇
+𝐴1
+𝐺+ 𝜀
+Attention Layer 𝑖
+Reshape to image Grid
+መ𝐴𝑖=
+𝐴𝑖
+𝑇
+𝐴𝑖
+𝐺+ 𝜀
+Attention Layer 𝐿
+Reshape to image Grid
+መ𝐴𝐿=
+𝐴𝐿
+𝑇
+𝐴𝐿
+𝐺+ 𝜀
+Image
+Global-comprehend Query
+Task-focused Query
+෍
+𝑖=0
+𝑘
+𝑤𝑖መ𝐴𝑖
+Attention Map
+User Input
+Post-processing
+MLLM
+Top k 
+Global 𝐴𝐿
+𝐺
+Task 𝐴𝐿
+𝑇
+Global 𝐴𝑖
+𝐺
+Task 𝐴𝑖
+𝑇
+Global 𝐴1
+𝐺
+Task 𝐴1
+𝑇
+Attention Layer 1
+Image Token
+Q: To answer {question}, where in the 
+image should I look?
+Multi-Scale Portfolio
+MLLM
+A: Text Token
+Figure 2. Query-Conditioned Relative Attention (QCRA). Given an input image and two prompts: a task-focused query Q (top)
+and a global-comprehension query QG (bottom), we derive layer-wise attention relevance maps. At each layer, token-level attention is
+reshaped to the image grid and a relative attention matrix is computed by contrasting the task map against the global map to suppress
+query-irrelevant saliency. The most informative layers (top-k) are then aggregated to produce a final query-conditioned attention heatmap,
+which serves as the grounding signal for region selection and multi-scale evidence construction.
+followed by a what-oriented query to refine the evidence for
+fine-grained recognition. Both stages are driven by query-
+conditioned relative attention (QCRA), and regulated by a
+focus test that suppresses region cropping when grounding
+confidence is insufficient. Finally, the model generates the
+answer by synthesizing multi-view information, conditioned
+on both the refined visual evidence and the original image
+annotated with the spatial location of said evidence. The
+templates used to construct QT1 and QT2 are predefined and
+detailed in Appendix C.3.
+3.2.1. QUERY-CONDITIONED RELATIVE ATTENTION
+RADAR is a training-free approach that exploits the inter-
+nal attention patterns of MLLMs through QCRA, as illus-
+trated in Figure 2. Given an image I and a textual query
+Q, we extract an attention-derived spatial relevance matrix
+A(Q; I), which reflects the image regions attended by the
+model when responding to Q. However, absolute attention
+maps are often dominated by generic visual saliency that
+is weakly related to the query semantics. To suppress such
+query-irrelevant saliency, RADAR introduces a relative at-
+tention formulation that contrasts the task query Q with a
+global scene query QG designed to capture holistic image
+content. For each attention layer ℓ, the relative attention
+matrix is defined as:
+ˆAℓ(Q; I) =
+AT
+ℓ(QT ; I)
+AG
+ℓ(QG; I) + ϵ,
+(1)
+where ℓis the attention layer and ϵ is a small constant for
+numerical stability.This ratio emphasizes regions whose
+attention is selectively induced by the task query rather than
+by global visual prominence.We compute a scalar score for
+each layer by summing relative attention over all spatial
+locations, sℓ= P
+u ˆAℓ(u). sℓ= P
+u ˆAℓ(u). The top-
+k layers with the highest scores are selected, forming the
+index set Sk. For each selected layer, a normalized weight
+is assigned as wℓ=
+sℓ
+P
+j∈Sk sj . The final relative attention
+matrix is then obtained by aggregating the selected layers
+through a weighted sum,
+˜A(Q; I) = N
+ X
+ℓ∈Sk
+wℓˆAℓ(Q; I)
+!
+,
+(2)
+where N(·) normalizes the result into a probability distribu-
+tion over spatial cells. The resulting ˜A highlights regions
+whose relevance arises from query-specific amplification,
+rather than from generic visual saliency.
+When the model fails to reliably align the question with the
+image, the resulting attention matrix often becomes highly
+diffuse, approaching a near-uniform distribution over spatial
+locations, as illustrated in Figure 1(Type1). Blind cropping
+under such uncertainty is prone to selecting spuriously rel-
+evant regions, which can further exacerbate hallucinations.
+To mitigate this risk, RADAR introduces a lightweight fo-
+cus test F(·) that evaluates whether the relative attention
+matrix ˜A exhibits sufficient spatial concentration, measured
+for example by entropy or cumulative top-mass criteria. If
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Seeing Clearly without Training
+F( ˜A) ≥τ, RADAR activates the zoom-in mechanism to
+proceed with further evidence acquisition.
+3.2.2. PROGRESSIVE EVIDENCE ACQUISITION: WHERE
+THEN WHAT
+RADAR employs an adaptive zoom-in strategy via two-
+stage evidence refinement that explicitly addresses the two
+predominant failure modes in RS-VQA, namely the inability
+to localize relevant evidence and the inability to recognize
+it with sufficient detail. Stage 1: Where-oriented evidence
+acquisition. We construct a location-oriented query QT1
+that prompts the model to identify image regions relevant
+to answering the original question Q. The corresponding
+relative attention matrix is computed as
+˜Awhere = ˜A(QT1; I).
+(3)
+If ˜Awhere satisfies the focus test F( ˜Awhere), a coarse local-
+ization region is extracted using a deterministic operator
+Ψ(·), such as the tightest bounding box that covers the top-p
+probability mass,
+B1 = Ψ( ˜Awhere),
+I1 = I[B1].
+(4)
+This stage isolates question-relevant context from large-
+scale remote sensing imagery and alleviates the cannot find
+failure mode.
+Stage 2: What-oriented evidence refinement. Condi-
+tioned on the coarse crop I1, we construct a content-oriented
+query QT2 that emphasizes the information required for
+fine-grained recognition within the localized region. The
+corresponding relative attention matrix is computed as
+˜Awhat = ˜A(QT2; I1).
+(5)
+If ˜Awhat satisfies the focus test F( ˜Awhat), evidence is further
+refined by extracting a tighter region,
+B2 = Ψ( ˜Awhat),
+I2 = I1[B2].
+(6)
+This stage mitigates the cannot see clearly failure mode
+by increasing the effective resolution on subtle targets and
+suppressing local clutter, enabling more reliable recognition
+of attributes and object counts.
+Multi-view grounded answering with conservative fall-
+back.
+For answer generation, RADAR conditions the
+model on two complementary visual views. The first is
+the full image annotated with the localized region, which
+preserves global spatial context. The second is a high-
+resolution crop that supports fine-grained recognition. This
+design allows spatial expressions such as “left” or “corner”
+to be interpreted in the coordinate frame of the full image,
+while resolving local details from the cropped view. To pre-
+vent overly aggressive cropping under uncertain grounding,
+RADAR adopts a conservative fallback strategy. If Stage1
+fails the focus test, the model answers directly from the
+full image. If Stage1 succeeds but Stage2 fails, the model
+conditions on the Stage1 crop I1. Otherwise, the refined
+crop I2 is used for final answering.
+4. Experiments
+4.1. Hallucination Diagnosis on RSHBench
+Table 1. Leave-one-out (LOO) agreement of expert judges for
+the binary hallucination decision. We pool all evaluated base
+models and compare each judge against an LOO pseudo-label
+defined only when the other two judges agree. We report Accuracy,
+Cohen’s κ, and MCC .
+Judge
+Accuracy
+Cohen’s κ
+MCC
+Gemini-3-pro
+0.7882
+0.5726
+0.5770
+GPT-5.2
+0.9288
+0.8553
+0.8591
+Qwen3-max
+0.9045
+0.8058
+0.8070
+4.1.1. HALLUCINATION METRICS AND JUDGE
+RELIABILITY
+We assess hallucination judgments using three standard
+agreement metrics(Accuracy, Cohen’s κ, and MCC) to eval-
+uate both consistency and robustness of binary hallucination
+decisions. Rather than reintroducing these metrics, we focus
+on their reliability in large-scale evaluation settings char-
+acterized by class imbalance and borderline cases, which
+are common in RS-VQA. To quantify judge reliability with-
+out requiring human annotations at scale, we adopt a LOO
+agreement protocol. For each expert judge, a pseudo-label
+is constructed on instances where the other two judges agree.
+Agreement between the held-out judge and this LOO label
+is then measured and aggregated across all evaluated base
+models. This protocol yields a conservative estimate of in-
+dividual judge consistency while avoiding circular effects
+induced by simple majority voting.
+As shown in Table 1, GPT-5.2 and Qwen3-max exhibit
+strong and stable agreement with the LOO labels (Accu-
+racy > 0.90, κ > 0.80, MCC > 0.80), indicating highly
+consistent hallucination judgments across models. In con-
+trast, Gemini-3-pro shows lower yet meaningful agreement
+(κ = 0.57), suggesting greater sensitivity to borderline cases
+such as weak visual evidence or ambiguous grounding. This
+variability motivates the use of multi-judge consensus rather
+than reliance on a single evaluator. To further validate align-
+ment with human perception, we conduct human spot-check
+calibration on a randomly sampled subset. As detailed in
+Appendix B.4, the relative ranking of judges remains con-
+sistent when compared with human annotations, supporting
+the reliability of the consensus-based hallucination labels
+used throughout our experiments.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Seeing Clearly without Training
+Table 2. Hallucination evaluation on RSHBench. Each model
+prediction is annotated by three expert judges with a binary hallu-
+cination rate (HR) and a multi-label taxonomy comprising factual
+subtypes (OBJ, ATT, SPA) and logical subtypes (IR, CI, INC,
+SO), along with coarse categories HRF (Factual) and HRL (Log-
+ical). The overall HR is determined by majority vote, while
+category and subtype labels are aggregated by taking the union
+of tags from judges who marked the instance as hallucinated. All
+values are reported as percentages over the full evaluation set .
+Models
+Factual Hallucination
+Logical Hallucination
+HR
+OBJ
+ATT
+SPA
+HRF
+IR
+CI
+INC
+SO
+HRL
+Closed-source Models
+Claude-3-7
+40.70
+28.30
+11.32
+55.53
+20.49
+0.27
+1.08
+14.29
+24.53
+56.33
+Gemini-2.5-pro
+33.42
+31.54
+15.36
+48.79
+27.49
+0.54
+0.81
+15.09
+29.65
+49.06
+GPT-4o
+30.19
+26.68
+11.32
+46.90
+19.41
+0.27
+0.27
+11.05
+21.02
+47.44
+Open-source Models
+GLM-4.6v
+35.31
+21.02
+9.16
+48.79
+21.02
+0.00
+0.54
+9.16
+22.91
+49.60
+LLaVA-1.5-7B
+25.88
+29.11
+14.29
+46.90
+25.61
+2.96
+2.70
+16.71
+26.95
+47.71
+Qwen3-VL-4B
+44.47
+31.81
+14.82
+61.19
+29.92
+0.27
+2.43
+15.63
+34.77
+61.19
+LLaMA-3.2-90B
+35.85
+25.88
+12.13
+51.48
+26.15
+0.27
+3.77
+15.36
+29.11
+52.02
+GeoZero
+33.42
+33.96
+15.90
+49.87
+28.30
+3.77
+2.16
+18.06
+29.65
+49.87
+GeoZero+RADAR
+28.03
+25.61
+13.48
+38.54
+21.83
+2.16
+1.89
+15.63
+24.80
+38.81
+4.1.2. HALLUCINATION EVALUATION RESULTS
+Table 2 shows that hallucinations are prevalent across both
+closed- and open-source MLLMs, with most baselines ex-
+hibiting a hallucination rate (HR) between 47% and 61%.
+Factual hallucinations are the most dominant, with OBJ and
+ATT consistently comprising the largest proportions. These
+reflect frequent confusions in object/category recognition
+and attribute identification, particularly when visual evi-
+dence is subtle or fine-grained. Spatial errors (SPA) are also
+substantial, highlighting persistent challenges in grounding
+predictions to the correct regions referenced by the question.
+On the logical dimension, IR and SO occur more frequently
+than direct CI, suggesting that hallucinations often stem
+from flawed reasoning or internal inconsistency rather than
+explicit disagreement with the reference answer. Due to
+the multi-label annotation design, logical tags frequently
+co-occur with factual ones (e.g., IR with OBJ/ATT), indicat-
+ing compounded failure patterns where incorrect grounding
+cascades into faulty inference.
+We next compare RADAR with a diverse set of strong base-
+lines, including both general-purpose MLLMs and remote-
+sensing–specialized models. Across all evaluated back-
+bones, RADAR consistently reduces hallucination rates.
+Compared with strong RS-specialized baselines, our ap-
+proach significantly reduces the overall hallucination rate
+to HR = 38.81%. Specifically, it lowers HR by 11.06
+percentage points relative to GeoZero (from 49.87%). Most
+of the improvement is concentrated in factual subtypes
+(OBJ/ATT), which aligns with two core bottlenecks in RS-
+VQA: (i) failures to localize question-relevant evidence in
+large-scale imagery (reflected in SPA/OBJ), and (ii) failures
+to extract fine-grained semantics after localization (reflected
+in ATT/OBJ). These findings underscore the importance
+of enhancing question-conditioned localization and fine-
+grained evidence extraction.
+4.2. Effectiveness of RADAR
+4.2.1. EXPERIMENTAL SETTINGS
+We evaluate RADAR on three representative bench-
+marks that collectively cover fine-grained recognition, spa-
+tial grounding, and reasoning in remote sensing: LRS-
+VQA (Luo et al., 2025), MME-RealWorld-RS (Zhang et al.,
+2024), and LHRS-Bench (Muhtar et al., 2025). LRS-VQA
+can effectively assess the large remote sensing imagery per-
+ception capability of LVLMs. MME-RealWorld-RS focuses
+on real-world scenarios that require precise localization and
+attribute-level discrimination under challenging visual con-
+ditions. LHRS-Bench adopts a structured protocol that com-
+bines label filtering, balanced sampling, and LLM-generated
+instruction prompts to construct tasks spanning recognition,
+spatial perception, and reasoning. We report results across
+a diverse set of baselines, including both general-purpose
+and remote-sensing-specialized multimodal large language
+models. Specifically, we consider (i) closed-source MLLMs,
+including GPT-4o (Hurst et al., 2024), Gemini-2.5-Pro (Co-
+manici et al., 2025), and Claude-4.5 (Haiku variant); (ii)
+open-source MLLMs, such as LLaVA-v1.5 (Liu et al., 2023),
+Qwen-VL (Yang et al., 2025), LLaMA (Touvron et al.,
+2023), and GLM (4.6v and 4.5v); and (iii) remote-sensing-
+oriented models, including GeoChat (Kuckreja et al., 2024),
+and GeoZero (Wang et al., 2025a), which are explicitly
+designed for geospatial imagery. In addition, we include
+plug-and-play region-based inference baselines by applying
+ViCrop (rel-att) (Zhang et al., 2025) to representative back-
+bones, enabling a direct comparison with RADAR under
+the same inference-time setting. ViCrop directly computes
+relative attention for each image–question pair and uses the
+resulting attention map as an importance signal for visual
+cropping.
+4.2.2. QUANTITATIVE RESULTS
+Table 3 summarizes the results on three representative
+benchmarks. Applying RADAR to the GeoZero backbone
+achieves the highest average performance among all evalu-
+ated methods, improving Avg. from 45.56 to 47.40 (+1.84)
+without additional training. Notably, RADAR also outper-
+forms the strongest direct baseline, Qwen3-VL-8B, which
+attains an average score of 45.67, by a margin of 1.73
+points. This result indicates that test-time evidence acqui-
+sition can be competitive with scaling the backbone model.
+On LRS-VQA, RADAR improves GeoZero from 31.58 to
+32.88 (+1.30) in average accuracy, with gains on both FAIR
+(+1.68) and Bridge (+2.07). These improvements suggest
+more effective question-conditioned localization in large-
+scale scenes. On LHRS-Bench, RADAR yields a consistent
+improvement from 66.08 to 67.47 (+1.39), indicating that
+local evidence refinement remains beneficial even when
+global recognition performance is relatively strong. The
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Seeing Clearly without Training
+Table 3. Overall performance on remote sensing VQA and real-world reasoning. We report accuracy (%) on LRS-VQA (FAIR,
+Bridge, STAR, and their average accuracy (AA)), MME-RealWorld-RS (Position, Color, Count, and AA), and LHRS-Bench. Avg. denotes
+the mean score across the three benchmarks (adopting AA for LRS-VQA and MME-RealWorld-RS). RADAR indicates the application
+of our training-free inference procedure to the GeoZero backbone (see Table 4 for per-backbone gains), achieving the highest average
+performance among all evaluated methods.
+Methods
+LRS-VQA
+MME-RealWorld-RS
+LHRS-Bench
+Avg.
+FAIR
+Bridge
+STAR
+AA
+Position
+Color
+Count
+AA
+–
+Llama-4-scout
+19.72
+29.19
+23.73
+24.21
+26.70
+23.72
+15.64
+22.02
+37.33
+27.85
+Claude-haiku-4-5
+5.68
+9.79
+2.40
+5.96
+31.73
+28.04
+18.35
+26.04
+55.01
+29.00
+GLM-4.6v
+27.55
+27.31
+29.31
+28.06
+44.92
+28.19
+7.53
+26.88
+67.19
+40.71
+GPT-4o
+22.89
+24.39
+29.78
+25.69
+36.37
+32.43
+15.89
+28.23
+66.19
+40.04
+Qwen2.5-VL-7B
+22.18
+27.40
+26.71
+25.43
+46.22
+29.16
+11.26
+28.88
+53.98
+36.10
+Qwen3-VL-4B
+26.23
+29.47
+32.86
+29.52
+55.53
+40.24
+7.59
+34.45
+65.35
+43.11
+Qwen3-VL-8B
+29.71
+32.77
+35.01
+32.49
+54.97
+46.06
+14.44
+38.49
+66.03
+45.67
+LLaVA-1.5-7B
+20.03
+27.97
+26.96
+24.99
+33.73
+35.78
+18.52
+29.34
+47.17
+33.83
+GeoChat
+20.18
+24.54
+13.75
+19.49
+25.06
+23.11
+15.66
+21.28
+37.62
+26.13
+GeoZero
+29.53
+31.26
+33.96
+31.58
+57.04
+44.30
+15.74
+39.03
+66.08
+45.56
+RADAR
+31.21
+33.33
+34.11
+32.88
+58.15
+50.52
+20.47
+43.05
+67.47
+47.40
+Table 4. Effect of evidence cropping and progressive localization. We compare each backbone model with a generic cropping baseline
+(+ViCrop) and our (+RADAR). Reported values are accuracy (%) on each subset, and red numbers indicate absolute improvements
+over the corresponding backbone. ViCrop yields limited and often unstable gains, whereas RADAR consistently improves performance,
+particularly on attribute recognition and counting tasks that require fine-grained visual evidence.
+Method
+LRS-VQA
+MME-RealWorld-RS
+LHRS-Bench
+FAIR ↑
+Bridge ↑
+STAR ↑
+Position ↑
+Color ↑
+Count ↑
+–
+LLaVA-OV
+–
+–
+–
+18.70
+14.26
+17.37
+19.66
++ RADAR (Ours)
+–
+–
+–
+22.83 (+4.14)
+32.83 (+18.57)
+29.53 (+12.15)
+23.03 (+3.37)
+Qwen3-VL
+26.23
+29.47
+32.86
+55.53
+40.24
+7.59
+65.35
++ ViCrop
+27.46
+28.91
+33.31
+54.57
+42.87
+10.60
+63.51
++ RADAR (Ours)
+30.77 (+4.54)
+29.94 (+0.47)
+34.98 (+2.13)
+56.64 (+1.11)
+53.71 (+13.47)
+15.01 (+7.42)
+67.73 (+2.38)
+GeoZero
+29.53
+31.26
+33.96
+57.04
+44.30
+15.74
+66.08
++ ViCrop
+28.83
+31.73
+32.91
+57.04
+47.41
+18.19
+65.14
++ RADAR (Ours)
+31.21 (+1.68)
+33.33 (+2.07)
+34.11 (+0.15)
+58.15 (+1.11)
+50.52 (+6.22)
+20.47 (+4.73)
+67.47 (+1.39)
+largest gains are observed on MME-RealWorld-RS, where
+GeoZero improves from 39.03 to 43.05 (+4.02) in aver-
+age accuracy. In particular, substantial improvements are
+achieved on Color (+6.22) and Count (+4.73), supporting
+the hypothesis that many RS-VQA failures stem from insuf-
+ficient fine-grained visual evidence rather than from missing
+global context.
+Table 4 isolates the effect of visual evidence cropping. A
+generic cropping strategy (+ViCrop) yields limited and
+sometimes negative gains. For instance, it reduces LHRS-
+Bench accuracy for both Qwen3-VL (65.35 to 63.51) and
+GeoZero (66.08 to 65.14), indicating that unguided crop-
+ping can discard relevant context or select mismatched re-
+gions. In contrast, RADAR consistently improves perfor-
+mance across backbones and subsets, demonstrating the
+importance of query-conditioned localization and progres-
+sive refinement. On Qwen3-VL, RADAR improves LRS-
+VQA FAIR by +4.54 (26.23 to 30.77) and increases MME-
+RealWorld-RS Color by +13.47 (40.24 to 53.71), whereas
++ViCrop yields only a +2.63 gain on Color and degrades
+performance on Position. Similarly, on GeoZero, RADAR
+improves all three MME-RealWorld-RS subsets, including
+Count (+4.73), while +ViCrop provides smaller and less sta-
+ble gains across LRS-VQA subsets. These results indicate
+that RADAR benefits not merely from cropping, but from
+how regions are selected and progressively refined. Overall,
+the results in Tables 3- 4 show that RADAR improves accu-
+racy without sacrificing faithfulness by enforcing question-
+relevant evidence acquisition prior to prediction.
+4.2.3. QUALITATIVE RESULTS
+Figure 3 illustrates QCRA map and the resulting evidence
+refinement on representative failure cases. When questions
+depend on sparse and small-scale visual evidence, base-
+line models often produce diffuse or misaligned attention
+maps, leading to reliance on priors or weakly supported
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Seeing Clearly without Training
+Stage1: What is in the middle left of the lower area of 
+this picture near the water?
+Stage2: What color is the track and field venue near the 
+water?
+LLaVA-OV: White and green.
++RADAR: Brown and green.
+Q: What color is the track 
+and field venue near the water 
+in the middle left of the lower 
+area of this picture?
+Stage1: Where are the big red ships located in the 
+image?
+Stage2: How many big red ships are there?
+1
+2
+Qwen3-VL-4B: This image 
+doesn’t feature the count.
++RADAR: Two.
+Q: How many big red ships 
+are there in the middle right 
+of the picture?
+Stage1: What is on the upper right side of the picture?
+Stage2: What color is the boat on the water surface?
+Qwen3-VL-4B: This image 
+doesn't feature the color.
++RADAR: Gray and Green.
+Q: What color is the boat on 
+the water surface on the 
+upper right side of the picture?
+Stage2: Where are the four side by side courts in the 
+picture?
+GeoZero: In the lower left 
+area of the picture.
++RADAR: In the lower right
+area of the picture.
+Q: Where are the four side by 
+side courts in the picture?
+QCRA
+Stage1: Where are the four side-by-side courts located 
+in the image?
+1
+2
+3
+4
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+Figure 3. Qualitative examples of RADAR’s QCRA and progressive evidence refinement. For each example, we visualize the QCRA
+heatmap generated by a where-oriented query on the full image (top) and a what-oriented query on the localized crop (middle), where
+brighter regions indicate stronger query-conditioned relevance. Dashed boxes mark the regions selected for zoom-in evidence extraction.
+answers. In contrast, RADAR highlights regions that are
+directly relevant to the query and enables more reliable
+extraction of local evidence. For instance, RADAR cor-
+rects a fine-grained attribute prediction by zooming into
+the track-and-field venue near the shoreline, changing the
+response from “White and green” (LLaVA-OV) to “Brown
+and green”. It recovers counting by focusing on the queried
+ships, correcting Qwen3-VL’s failure to provide a count to
+the accurate answer “Two”. RADAR also resolves a spa-
+tial grounding error by localizing the correct court region,
+revising GeoZero’s prediction from “lower left” to “lower
+right”. These examples demonstrate that improved question-
+conditioned localization and local inspection reduce visually
+unsupported claims and lead to more grounded predictions.
+Table 5. Ablation study on the operation stages of RADAR, con-
+ducted with the Qwen3-VL-4B model. We report accuracy on
+MME-RealWorld-RS and LHRS-Bench.
+Configuration
+MME-RealWorld
+LHRS-Bench
+Baseline
+34.45
+65.36
+RADAR w/o Stage 2
+39.05
+66.17
+RADAR w/o Stage 1
+38.88
+66.87
+RADAR
+41.79
+67.73
+4.2.4. ABLATION STUDY
+Table 5 presents an ablation of the two-stage evidence refine-
+ment strategy in RADAR using Qwen3-VL-4B. Removing
+either stage still improves performance over the baseline,
+indicating that coarse localization (Stage1) and local re-
+finement (Stage2) provide complementary benefits. Using
+only a single stage yields consistent gains on both MME-
+RealWorld-RS and LHRS-Bench, with improvements of
+up to +4.60 and +1.51 absolute points, respectively. These
+results suggest that Stage1 reduces attention diffusion by
+isolating question-relevant context, while Stage2 further en-
+hances fine-grained recognition within the localized region.
+Finally, jointly applying both components yields the most
+reliable and consistent performance gains.
+5. Conclusion
+We investigate hallucination in RS-VQA and identify two
+dominant grounding failure modes: cannot find, which
+refers to the inability to localize question-relevant regions
+in large-scale scenes, and cannot see clearly, which reflects
+difficulty in extracting fine-grained semantics from small or
+weak visual evidence. To enable systematic analysis, we in-
+troduce RSHBench, a protocol-driven benchmark that pro-
+vides standardized data generation and fine-grained, judge-
+based hallucination annotations.
+Building on these insights, we propose RADAR, a training-
+free inference method that leverages query-conditioned rel-
+ative attention to perform coarse-to-fine evidence acquisi-
+tion. Extensive experiments across multiple MLLMs demon-
+strate that RADAR consistently improves RS-VQA accu-
+racy while substantially reducing hallucinations, underscor-
+ing the effectiveness of test-time evidence acquisition for
+reliable remote sensing reasoning.
+6. Limitations
+RADAR assumes access to informative internal attention
+signals and predefined where/what query templates, which
+may limit its direct applicability to fully black-box models.
+The multi-stage evidence acquisition procedure also incurs
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Seeing Clearly without Training
+additional inference cost, and relative attention may remain
+unreliable in highly ambiguous scenes. RSHBench relies
+on MLLM-based judges and consensus labeling; although
+agreement checks and spot audits are employed, borderline
+cases may still be imperfectly annotated.
+Impact Statement
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal
+consequences of our work, none which we feel must be
+specifically highlighted here.
+References
+Abnar, S. and Zuidema, W. Quantifying attention flow in
+transformers. In Proceedings of the 58th Annual Meet-
+ing of the Association for Computational Linguistics, pp.
+4190–4197, Online, July 2020. Association for Computa-
+tional Linguistics.
+Bai, F., Du, Y., Huang, T., Meng, M. Q.-H., and Zhao,
+B. M3d: Advancing 3d medical image analysis with
+multi-modal large language models.
+arXiv preprint
+arXiv:2404.00578, 2024.
+Bai, S., Cai, Y., Chen, R., Chen, K., Chen, X., Cheng, Z.,
+Deng, L., Ding, W., Gao, C., Ge, C., Ge, W., Guo, Z.,
+Huang, Q., Huang, J., Huang, F., Hui, B., Jiang, S., Li, Z.,
+Li, M., Li, M., Li, K., Lin, Z., Lin, J., Liu, X., Liu, J., Liu,
+C., Liu, Y., Liu, D., Liu, S., Lu, D., Luo, R., Lv, C., Men,
+R., Meng, L., Ren, X., Ren, X., Song, S., Sun, Y., Tang,
+J., Tu, J., Wan, J., Wang, P., Wang, P., Wang, Q., Wang,
+Y., Xie, T., Xu, Y., Xu, H., Xu, J., Yang, Z., Yang, M.,
+Yang, J., Yang, A., Yu, B., Zhang, F., Zhang, H., Zhang,
+X., Zheng, B., Zhong, H., Zhou, J., Zhou, F., Zhou, J.,
+Zhu, Y., and Zhu, K. Qwen3-vl technical report, 2025.
+URL https://arxiv.org/abs/2511.21631.
+Cheng, G., Zhou, P., and Han, J. Learning rotation-invariant
+convolutional neural networks for object detection in
+vhr optical remote sensing images. IEEE Transactions
+on Geoscience and Remote Sensing, 54(12):7405–7415,
+2016. doi: 10.1109/TGRS.2016.2601622.
+Comanici, G., Bieber, E., Schaekermann, M., Pasupat, I.,
+Sachdeva, N., Dhillon, I., Blistein, M., Ram, O., Zhang,
+D., Rosen, E., et al. Gemini 2.5: Pushing the frontier
+with advanced reasoning, multimodality, long context,
+and next generation agentic capabilities. arXiv preprint
+arXiv:2507.06261, 2025.
+Cui, C., Ma, Y., Cao, X., Ye, W., Zhou, Y., Liang, K., Chen,
+J., Lu, J., Yang, Z., Liao, K.-D., et al. A survey on mul-
+timodal large language models for autonomous driving.
+In Proceedings of the IEEE/CVF winter conference on
+applications of computer vision, pp. 958–979, 2024.
+Dong, L. and Shan, J.
+A comprehensive review of
+earthquake-induced building damage detection with re-
+mote sensing techniques. ISPRS Journal of Photogram-
+metry and Remote Sensing, 84:85–99, 2013.
+Google DeepMind. Gemini 3 pro. https://deepmind.
+google/models/gemini/pro/, 2025. Accessed:
+2026-01-04.
+Gunjal, A., Yin, J., and Bas, E. Detecting and prevent-
+ing hallucinations in large vision language models. In
+Proceedings of the AAAI Conference on Artificial Intelli-
+gence, volume 38, pp. 18135–18143, 2024.
+Hurst, A., Lerer, A., Goucher, A. P., Perelman, A., Ramesh,
+A., Clark, A., Ostrow, A., Welihinda, A., Hayes, A.,
+Radford, A., et al. Gpt-4o system card. arXiv preprint
+arXiv:2410.21276, 2024.
+Kang, S., Kim, J., Kim, J., and Hwang, S. J. Your large
+vision-language model only needs a few attention heads
+for visual grounding. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pp. 9339–9350, June 2025.
+Kuckreja, K., Danish, M. S., Naseer, M., Das, A., Khan,
+S., and Khan, F. S. Geochat: Grounded large vision-
+language model for remote sensing. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pp. 27831–27840, 2024.
+Leng, S., Zhang, H., Chen, G., Li, X., Lu, S., Miao, C., and
+Bing, L. Mitigating object hallucinations in large vision-
+language models through visual contrastive decoding. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 13872–13882, 2024a.
+Leng, S., Zhang, H., Chen, G., Li, X., Lu, S., Miao, C., and
+Bing, L. Mitigating object hallucinations in large vision-
+language models through visual contrastive decoding. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 13872–13882, 2024b.
+Li, X., Ding, J., and Elhoseiny, M. Vrsbench: A versatile
+vision-language benchmark dataset for remote sensing
+image understanding. Advances in Neural Information
+Processing Systems, 37:3229–3242, 2024.
+Liu, C., Zhang, J., Chen, K., Wang, M., Zou, Z., and Shi, Z.
+Remote sensing spatiotemporal vision–language models:
+A comprehensive survey. IEEE Geoscience and Remote
+Sensing Magazine, pp. 2–42, 2025. doi: 10.1109/MGRS.
+2025.3598283.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Seeing Clearly without Training
+Liu, H., Li, C., Wu, Q., and Lee, Y. J. Visual instruction tun-
+ing. Advances in neural information processing systems,
+36:34892–34916, 2023.
+Liu, H., Xue, W., Chen, Y., Chen, D., Zhao, X., Wang,
+K., Hou, L., Li, R., and Peng, W. A survey on halluci-
+nation in large vision-language models. arXiv preprint
+arXiv:2402.00253, 2024.
+Luo, J., Zhang, Y., Yang, X., Wu, K., Zhu, Q., Liang, L.,
+Chen, J., and Li, Y. When large vision-language model
+meets large remote sensing imagery: Coarse-to-fine text-
+guided token pruning. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision (ICCV), pp.
+9206–9217, October 2025.
+Muhtar, D., Li, Z., Gu, F., Zhang, X., and Xiao, P. Lhrs-
+bot: Empowering remote sensing with vgi-enhanced large
+multimodal language model. In Computer Vision – ECCV
+2024, pp. 440–457, Cham, 2025. Springer Nature Switzer-
+land. ISBN 978-3-031-72904-1.
+OpenAI. Introducing gpt-5.2. https://openai.com/
+index/introducing-gpt-5-2/, Dec 2025. Ac-
+cessed: 2026-01-04.
+Selvaraju, R. R., Cogswell, M., Das, A., Vedantam, R.,
+Parikh, D., and Batra, D. Grad-cam: Visual explana-
+tions from deep networks via gradient-based localization.
+In Proceedings of the IEEE international conference on
+computer vision, pp. 618–626, 2017.
+Smilkov, D., Thorat, N., Kim, B., Vi´egas, F. B., and Watten-
+berg, M. Smoothgrad: removing noise by adding noise.
+ArXiv, abs/1706.03825, 2017.
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+Bhosale, S., et al. Llama 2: Open foundation and fine-
+tuned chat models. arXiv preprint arXiv:2307.09288,
+2023.
+Wang, D., Liu, S., Jiang, W., Wang, F., Liu, Y., Qin, X.,
+Luo, Z., Zhou, C., Guo, H., Zhang, J., et al. Geozero:
+Incentivizing reasoning from scratch on geospatial scenes.
+arXiv preprint arXiv:2511.22645, 2025a.
+Wang, F., Wang, H., Guo, Z., Wang, D., Wang, Y., Chen, M.,
+Ma, Q., Lan, L., Yang, W., Zhang, J., et al. Xlrs-bench:
+Could your multimodal llms understand extremely large
+ultra-high-resolution remote sensing imagery? In Pro-
+ceedings of the Computer Vision and Pattern Recognition
+Conference, pp. 14325–14336, 2025b.
+Wang, J., Zhou, Y., Xu, G., Shi, P., Zhao, C., Xu, H., Ye, Q.,
+Yan, M., Zhang, J., Zhu, J., et al. Evaluation and analysis
+of hallucination in large vision-language models. arXiv
+preprint arXiv:2308.15126, 2023a.
+Wang, X., Chen, G., Qian, G., Gao, P., Wei, X.-Y., Wang,
+Y., Tian, Y., and Gao, W. Large-scale multi-modal pre-
+trained models: A comprehensive survey. Machine Intel-
+ligence Research, 20(4):447–482, 2023b.
+Weiss, M., Jacob, F., and Duveiller, G. Remote sensing for
+agricultural applications: A meta-review. Remote sensing
+of environment, 236:111402, 2020.
+Weng, Q. Remote sensing of impervious surfaces in the
+urban areas: Requirements, methods, and trends. Remote
+sensing of Environment, 117:34–49, 2012.
+Xia, G., Bai, X., Ding, J., Zhu, Z., Belongie, S. J., Luo, J.,
+Datcu, M., Pelillo, M., and Zhang, L. DOTA: A large-
+scale dataset for object detection in aerial images. In
+2018 IEEE Conference on Computer Vision and Pattern
+Recognition, CVPR 2018, Salt Lake City, UT, USA, June
+18-22, 2018, pp. 3974–3983. Computer Vision Founda-
+tion / IEEE Computer Society, 2018.
+Xu, P., Xiong, S., Zhang, J., Chen, Y., Zhou, B., Loy, C. C.,
+Clifton, D., Lee, K. M., Van Gool, L., He, R., Yao, R.,
+Long, X., Huang, J., Tian, K., Yang, S., Shao, Y., Feng, J.,
+Zhong, Y., Zhou, J., Tang, C., Zou, T., Zhang, Y., Liang,
+J., Li, G., Wang, Z., Zhou, Q., Zhao, Y., Xiong, S., Nam,
+H., Lee, J., Chung, J., Park, J., Oh, J., Lee, K., Lee, W.,
+Ro, J., Osman, T., Hu, C., Liao, C., Chen, C., Han, C.,
+Qiu, C., Peng, C., Xu, C., Li, D., Wang, F., Gao, F., Zhu,
+G., Tang, G., Lu, H., Fang, H., Qi, H., Wu, H., Cheng, H.,
+Sun, H., Chen, H., Hu, H., Li, H., Ma, J., Yu, J., Wang,
+J., Yang, J., He, J., Zhou, J., Li, J., Kittler, J., Zheng, L.,
+Zhao, L., Jia, M., Yan, M., Nguyen, T. T., Luo, P., Li,
+Q., Song, S., Dong, S., Shao, S., Li, S., Xue, T., Xu, T.,
+Gao, T., Li, T., Zhang, W., Su, W., Dong, X., Wu, X.-J.,
+Zhou, X., Chen, X., Wei, X., You, X., Kang, X., Zhou,
+X., Liu, X., Wang, Y., Huang, Y., Liu, Y., Yang, Y., Deng,
+Y., Kang, Y., Yuan, Y., Wen, Y., Tian, Y., Tao, Y., Tang,
+Y., Lin, Y., Wang, Y., Xi, Y., Yu, Y., Li, Y., Qin, Y., Chen,
+Y., Cen, Y., Zou, Z., Liu, Z., Shen, Z., Du, Z., Li, Z.,
+Huang, Z., Shao, Z., Song, Z., Feng, Z., Wang, Z., Yu,
+Z., Li, Z., Zhai, Z., Zhang, Z., Peng, Z., Xiao, Z., and
+Li, Z. Mars2 2025 challenge on multimodal reasoning:
+Datasets, methods, results, discussion, and outlook. In
+Proceedings of the IEEE/CVF International Conference
+on Computer Vision (ICCV) Workshops, pp. 6517–6546,
+October 2025.
+Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B.,
+Yu, B., Gao, C., Huang, C., Lv, C., et al. Qwen3 technical
+report. arXiv preprint arXiv:2505.09388, 2025.
+Yang, Y. and Newsam, S. Bag-of-visual-words and spatial
+extensions for land-use classification. In Proceedings
+of the 18th SIGSPATIAL International Conference on
+Advances in Geographic Information Systems, GIS ’10,
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Seeing Clearly without Training
+pp. 270–279, New York, NY, USA, 2010. Association for
+Computing Machinery. ISBN 9781450304283.
+Zhang, J., Khayatkhoei, M., Chhikara, P., and Ilievski, F.
+Mllms know where to look: Training-free perception of
+small visual details with multimodal llms. arXiv preprint
+arXiv:2502.17422, 2025.
+Zhang, S., Dong, L., Li, X., Zhang, S., Sun, X., Wang, S., Li,
+J., Hu, R., Zhang, T., Wang, G., et al. Instruction tuning
+for large language models: A survey. ACM Computing
+Surveys, 2023.
+Zhang, Y.-F., Zhang, H., Tian, H., Fu, C., Zhang, S., Wu,
+J., Li, F., Wang, K., Wen, Q., Zhang, Z., et al. Mme-
+realworld: Could your multimodal llm challenge high-
+resolution real-world scenarios that are difficult for hu-
+mans? arXiv preprint arXiv:2408.13257, 2024.
+Zhong, W., Feng, X., Zhao, L., Li, Q., Huang, L., Gu, Y.,
+Ma, W., Xu, Y., and Qin, B. Investigating and mitigating
+the multimodal hallucination snowballing in large vision-
+language models.
+arXiv preprint arXiv:2407.00569,
+2024.
+Zhou, Y., Cui, C., Yoon, J., Zhang, L., Deng, Z., Finn, C.,
+Bansal, M., and Yao, H. Analyzing and mitigating object
+hallucination in large vision-language models. arXiv
+preprint arXiv:2310.00754, 2023.
+Zhou, Y., Jiang, C., Yuan, C., and Li, J. Look where it
+matters: Training-free ultra-hr remote sensing vqa via
+adaptive zoom search. arXiv preprint arXiv:2511.20460,
+2025.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Seeing Clearly without Training
+A. Appendix Material Overview
+This Appendix material is organized into two parts. Part I provides additional details on RSHBench, including benchmark
+curation, standardized generation and evaluation protocols, the hallucination taxonomy, and reliability analyses. Part II
+presents further implementation details of RADAR, covering QCRA, the focus test and region extraction, and the where/what
+prompt templates.
+B. RSHBench: Benchmark Construction and Hallucination Diagnosis
+B.1. Stratified Sampling Configuration
+We construct RSHBench using stratified sampling to ensure balanced coverage across key capability axes. Specifically, we
+consider common VQA capabilities including color, shape, quantity, position, and multi-step reasoning, alongside remote-
+sensing-specific factors including orientation, distance, and scene type. Samples are drawn from MME-RealWorld-RS,
+LRS-VQA, and LHRS-Bench according to per-axis quotas. This design prevents over-representation of any single capability
+and enables fine-grained analysis of hallucination patterns across diverse question types.
+Before finalizing the evaluation set, we perform data cleaning to enhance label reliability. Duplicate items are removed, and
+samples with evident label errors or inconsistent annotations are discarded. Potential issues are identified by cross-checking
+the question, reference answer, and corresponding visual evidence. This procedure reduces evaluation noise and strengthens
+the reliability of subsequent hallucination analysis.
+The final curated remote sensing image–question set consists of 371 instances. Each instance includes a remote sensing
+image, a question, the corresponding reference answer, and associated visual evidence. This set forms the basis for
+hallucination diagnosis and model evaluation throughout the paper.
+B.2. Inference Protocol and Structured Judge Interface
+B.2.1. MODEL GENERATION PROTOCOL
+For each instance, the evaluated model is instructed to produce an explicit reasoning trace along with a final answer in
+a strict JSON format. The instruction mandates that each reasoning step be grounded in observable visual evidence and
+explicitly prohibits guessing when evidence is insufficient.
+Generation Protocol
+You are a multimodal large language model performing remote sensing visual question
+answering.
+,→
+You will be given:
+1. A remote sensing image.
+2. A question about the image.
+Your task is to answer the question by reasoning strictly based on the visual content
+of the image.
+,→
+Reasoning and Answering Guidelines
+- You must first provide an explicit reasoning process explaining how you derive the
+answer.
+,→
+- Every step in your reasoning must be grounded in observable visual evidence from
+the image.
+,→
+- Do NOT rely on external knowledge, assumptions, or common sense beyond what is
+visually observable.
+,→
+- If the question cannot be answered with certainty from the image alone,
+you must explicitly state that the information cannot be determined from the image.
+Important Constraints
+- Do NOT speculate or guess.
+- Do NOT introduce semantic attributes, functions, or intentions unless they are
+directly observable.
+,→
+- Do NOT omit the reasoning process, even if the answer seems obvious.
+- If visual evidence is insufficient, your reasoning should explicitly state this.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Seeing Clearly without Training
+Output Format (STRICT)
+You MUST output your response in the following JSON format:
+{
+"reasoning": "A step-by-step explanation grounded strictly in visual evidence.",
+"answer": "The final answer to the question."
+}
+Question:
+{question}
+B.2.2. HALLUCINATION EVALUATION PROTOCOL
+Each expert judge receives the image I, question Q, the reference answer A, the model reasoning C′, and the predicted
+answer A′. The judge determines whether hallucination occurs, assigns coarse categories, and returns fine-grained subtype
+labels with explicit evidence grounding.
+Hallucination Evaluation Protocol (Judge)
+You are an expert hallucination evaluation judge for multimodal large language models
+(MLLMs), specialized in remote sensing visual question answering.
+,→
+Your task is NOT to answer the question. Your task is to evaluate whether the model's
+output exhibits hallucination, based strictly on visual evidence and the provided
+information.
+,→
+,→
+You will be given:
+1. An image (I).
+2. A question (Q).
+3. A ground-truth answer (A), when provided.
+4. The model's reasoning process (C').
+5. The model's final answer (A').
+You must determine:
+- Whether hallucination occurs.
+- Whether the hallucination is factual or logical in nature.
+- The specific hallucination subtype(s).
+- The underlying reason(s) or trigger(s).
+Definition of Hallucination
+A hallucination occurs when the model's reasoning (C') or final answer (A') contains
+information that is not faithfully supported by the image or by valid logical
+inference grounded in the image.
+,→
+,→
+Hallucination is categorized into two high-level types:
+1. Factual Hallucination:
+Errors where the generated content contradicts, fabricates, or overstates factual
+information that should be directly grounded in visual evidence.
+,→
+2. Logical Hallucination:
+Errors where the generated content involves flawed reasoning, unjustified inference,
+or internal inconsistency.
+,→
+An incorrect answer alone does NOT necessarily imply hallucination.
+Allowed and Disallowed Information
+You may ONLY use:
+- The image (I).
+- The question (Q).
+- The ground-truth answer (A), when provided.
+- The model's reasoning (C').
+- The model's final answer (A').
+You must NOT:
+- Introduce external knowledge beyond the image.
+- Re-answer the question yourself.
+- Override the ground-truth answer.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Seeing Clearly without Training
+Hallucination Taxonomy
+If hallucination occurs, classify it into one or more subtypes.
+A. Factual Hallucination
+A1. Object / Category Hallucination
+A2. Attribute Hallucination
+A3. Spatial / Relational Hallucination
+B. Logical Hallucination
+B1. Invalid Reasoning
+B2. Unjustified Causal Inference
+B3. Internal Inconsistency
+B4. Semantic Over-Attribution
+Evidence Grounding Requirement
+For every judgement, you MUST cite relevant visual evidence from the image, OR state
+that such evidence does not exist.
+,→
+Output Format (STRICT JSON)
+{
+"hallucinated": true/false,
+"hallucination_category": ["Factual", "Logical"],
+"hallucination_types": [],
+"hallucination_reasons": [],
+"evidence_basis": [],
+"justification": "Concise explanation grounded explicitly in visual evidence or its
+absence."
+,→
+}
+Table 6. Hallucination taxonomy. Multiple labels may apply to the same prediction.
+Code Hallucination Types
+Definition
+OBJ
+Object/Category
+Claims the presence/absence of an object or category not supported by the image.
+ATT
+Attribute
+Misstates attributes (e.g., color, shape, size, count, material) not supported by the
+image.
+SPA
+Spatial/Relational
+Misstates spatial relations (e.g., relative position, containment, adjacency) between
+objects/regions.
+IR
+Invalid Reasoning
+Uses incorrect premises, unsupported assumptions, or invalid inference steps.
+CI
+Unjustified Causality
+Infers causality, intent, or functionality from correlation without evidence.
+INC
+Internal Inconsistency
+The reasoning process C′ conflicts with the final answer A′.
+SO
+Semantic Over-Attribution Assigns semantic roles/functions that cannot be determined from visual evidence.
+B.3. Agreement Metrics
+We measure agreement for the binary hallucination label using Accuracy, Cohen’s κ, and Matthews correlation coefficient
+(MCC). For two labelers (or a labeler vs. a reference), we denote the confusion-matrix counts as: TP, FP, and FN . Let
+N = TP + TN + FP + FN.
+Accuracy.
+Acc = TP + TN
+N
+.
+(7)
+Accuracy reports the overall fraction of matching decisions. It is easy to interpret, but may be overly optimistic when the
+class distribution is imbalanced.
+Cohen’s κ. Cohen’s κ quantifies agreement beyond chance. It compares the observed agreement po with the chance
+agreement pe implied by the two labelers’ marginal label frequencies:
+κ = po −pe
+1 −pe
+,
+po = TP + TN
+N
+.
+(8)
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Seeing Clearly without Training
+To compute pe, let the positive/negative rates of labeler A be p+
+A = T P +F P
+N
+and p−
+A = 1 −p+
+A, and those of labeler B be
+p+
+B = T P +F N
+N
+and p−
+B = 1 −p+
+B. Then
+pe = p+
+Ap+
+B + p−
+Ap−
+B.
+(9)
+Intuitively, κ discounts agreement that would be expected even if both labelers guess according to their own label biases.
+MCC.
+MCC =
+TP · TN −FP · FN
+p
+(TP + FP)(TP + FN)(TN + FP)(TN + FN)
+.
+(10)
+MCC can be viewed as a correlation between two binary labelings and summarizes all four confusion-matrix terms. It
+is typically more reliable than Accuracy under class imbalance because it penalizes degenerate predictions and remains
+informative even when one class is rare.
+Leave-one-out agreement. To estimate judge reliability without requiring additional human annotations, we adopt a leave-
+one-out (LOO) agreement protocol over the three expert judges. Let {J1, J2, J3} denote the judges, and let y(j)
+i
+∈{0, 1}
+represent the binary hallucination decision of judge Jj on instance i, where 1 indicates a hallucinated response. For each
+held-out judge Jj, we construct an LOO pseudo label ˜y(−j)
+i
+only for instances on which the remaining two judges agree:
+˜y(−j)
+i
+=
+(
+y(k)
+i
+,
+if y(k)
+i
+= y(ℓ)
+i , {k, ℓ} = {1, 2, 3} \ {j},
+undefined,
+otherwise.
+(11)
+We then compare the decisions of Jj with ˜y(−j) using Accuracy, Cohen’s κ, and MCC, computed over the subset of instances
+for which ˜y(−j) is defined. To improve statistical stability, we pool these subsets across all evaluated base models, treating
+each model–instance pair as an evaluation item under the same protocol, and report the resulting LOO agreement scores in
+Table 1. This protocol is conservative, as it evaluates each judge only on items where the other two judges reach consensus
+and avoids inflating agreement on inherently ambiguous cases where disagreement persists.
+B.4. Inter-Rater Reliability and Human Validation
+We report inter-judge reliability (IRR) in two settings. First, we measure the agreement between each judge and the
+three-judge majority vote on the full evaluation set. Second, we conduct a human calibration study on a random subset and
+evaluate both individual judges and the majority vote against human annotations.
+Table 7. Agreement between each judge and the three-judge majority vote. We report Accuracy, Cohen’s κ, and MCC.
+Rater
+Accuracy
+κ
+MCC
+Gemini-3-pro
+0.8113
+0.6225
+0.6259
+GPT-5.2
+0.9476
+0.8951
+0.8972
+Qwen3-max
+0.9314
+0.8628
+0.8632
+Table 8. Agreement between expert judges and human annotations. We report Accuracy, Cohen’s κ, and MCC.
+Rater
+Accuracy
+κ
+MCC
+Gemini-3-pro
+0.6700
+0.3159
+0.3165
+GPT-5.2
+0.9500
+0.8934
+0.8953
+Qwen3-max
+0.7500
+0.5000
+0.5126
+B.4.1. INTER-RATER RELIABILITY AND HUMAN CALIBRATION
+We first report agreement between each judge and the three-judge majority vote on the pooled evaluation set (Table 7). We
+further conduct a human calibration study by randomly sampling 100 instances and collecting human binary hallucination
+labels, and then evaluate each judge against human annotations (Table 8).
+The results indicate strong and consistent judge reliability, with a stable ranking across both agreement settings. When
+compared against the three-judge majority vote (Table 7), GPT-5.2 achieves the highest agreement (Accuracy 0.9476 / κ
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Seeing Clearly without Training
+0.8951 / MCC 0.8972), followed by Qwen3-max (0.9314 / 0.8628 / 0.8632), while Gemini-3-pro is substantially lower
+(0.8113 / 0.6225 / 0.6259). This suggests that GPT-5.2 aligns most closely with the consensus and yields the most stable
+binary hallucination decisions.
+Agreement with human annotations (Table 8) further validates this trend: GPT-5.2 remains highly consistent with human
+labels (Accuracy 0.9500 / κ 0.8934 / MCC 0.8953), Qwen3-max shows moderate alignment (0.7500 / 0.5000 / 0.5126), and
+Gemini-3-pro exhibits noticeably weaker agreement (0.6700 / 0.3159 / 0.3165). Notably, the judge–majority agreements
+are generally higher than judge–human agreements, which is expected given the presence of borderline cases in RS-VQA
+hallucination diagnosis (e.g., weak evidence, ambiguous regions), where subjective thresholds can differ. Importantly,
+the consistently high κ and MCC for GPT-5.2 (and to a lesser extent Qwen3-max) indicate that the agreement is not
+merely driven by class imbalance, supporting the use of multi-judge consensus labeling for more stable and reproducible
+hallucination evaluation.
+Question: Which object 
+is closer to the 
+swimming pool in the 
+image?
+Reason: The image shows a residential area with 
+multiple houses. One house, located in the lower-left 
+quadrant, has a visible swimming pool adjacent to its 
+backyard. The house directly next to this pool is the 
+one with a white roof and a visible pool area. No other 
+object is visually positioned closer to the pool than this 
+house, as all other houses are either farther away or 
+not adjacent to the pool. Therefore, the house with the 
+white roof and the swimming pool is the closest object 
+to the pool.
+Answer: The house with the white roof and the 
+swimming pool
+Gemini3-Pro:
+False
+GPT-5.2:
+True
+Qwen3-Max:
+True
+Human:
+False
+Ground Truth: The 
+white house in the lower 
+left corner
+√
+Qwen3-VL-4B
+LLaMA-3.2-90B
+Question: What type of 
+building is located near 
+the top edge, just above 
+the right-most and the 
+largest apron?
+Reason: The image is an aerial view of an airport. To 
+answer the question, we need to identify the largest 
+apron and then locate the building near the top edge, 
+just above it.  …  Upon closer inspection, the building 
+near the top edge, just above the largest apron, is not 
+clearly visible due to the image's resolution and the 
+presence of other structures. However, based on the 
+context and the visible layout, it is reasonable to infer 
+that the building in question is likely related to airport 
+operations.
+Answer: Hangar
+Gemini3-Pro:
+True
+GPT-5.2:
+False
+Qwen3-Max:
+True
+Ground Truth: hangar
+×
+√
+Question: What is the primary 
+purpose of the ship-lock?
+Reason: The ship-lock is a structure designed to 
+control the water level and allow ships to pass through 
+a dam or a barrier. It is typically used in canals or 
+rivers to facilitate navigation and manage water flow. 
+The presence of the ship-lock in the image suggests 
+that it is used to regulate water levels and enable the 
+passage of ships through the dam or barrier. 
+Additional context or information would be needed to 
+provide a more detailed answer.
+Answer: Cannot be determined
+Gemini3-Pro:
+True
+GPT-5.2:
+True
+Qwen3-Max:
+False
+Ground Truth: control 
+water level
+√
+√
+RADAR
+GeoZero
+Question: What is the 
+dominant mode of 
+transport that the left-
+most bridge allows to 
+cross the train tracks?
+Reason: The left-most bridge in the image is located 
+in the top-left corner. It spans over a set of train tracks. 
+The bridge is designed to allow vehicles to pass over 
+the tracks, indicating that the dominant mode of 
+transport it facilitates is road traffic. Additionally, the 
+bridge's structure and design are consistent with those 
+used for road crossings, rather than for rail or 
+pedestrian traffic. Therefore, the dominant mode of 
+transport that the left-most bridge allows to cross the 
+train tracks is road traffic.
+Answer: road traffic
+Gemini3-Pro:
+True
+GPT-5.2:
+False
+Qwen3-Max:
+True
+Ground Truth: 
+vehicular traffic
+×
+√
+×
+×
+√
+×
+×
+Human:
+False
+Human:
+False
+Human:
+True
+Figure 4. Example from human calibration for hallucination labeling.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Seeing Clearly without Training
+Claude-3-7
+Question: What is the activity 
+of the top-most boat?
+Reason: Looking at the remote sensing image, I can 
+see a large body of water, likely a river, running 
+through the middle of the image. There appears to be a 
+bridge crossing this river. I need to identify the top-
+most boat to determine its activity.  However, the 
+resolution of the image makes it difficult to clearly 
+distinguish individual boats and determine their 
+specific activities. I cannot provide a definitive answer 
+based on visual evidence alone.
+Answer: Cannot be determined from the image
+Gemini3-Pro:
+True
+GPT-5.2:
+True
+Qwen3-Max:
+False
+Ground Truth: docked
+Question: Is this a scene 
+of an urban area?
+Reason: The image shows a multi-lane road flanked 
+by two large parking areas with some buildings. 
+However, these man-made structures are surrounded 
+by extensive areas of dense green vegetation, which 
+appears to be a forest. The visual evidence in the 
+image, with its low building density and vast 
+surrounding natural environment, is not consistent 
+with the characteristics of an urban area.
+Answer: No
+Gemini3-Pro:
+True
+GPT-5.2:
+True
+Qwen3-Max:
+True
+Ground Truth: Yes
+×
+√
+√
+√
+√
+√
+Claude-3-7
+GPT-4o
+Question: What 
+distinguishes the top-
+most airbus plane from 
+the one below it?
+Reason: The image shows an airport with several 
+airplanes on the runway or taxiways. The top-most 
+airplane is located on a runway, while the airplane 
+below it is positioned on a taxiway. This difference in 
+location distinguishes the top-most airplane from the 
+one below it.
+Answer: Location
+Gemini3-Pro:
+True
+GPT-5.2:
+False
+Qwen3-Max:
+True
+Ground Truth: position
+×
+√
+Question: How many 
+pieces is the circular 
+lawn in the center of the 
+image divided into?
+Reason: The circular lawn in the center of the image 
+is divided into four pieces. To determine this, I will 
+analyze the shape and size of the lawn and the 
+presence of any visible boundaries. The lawn is 
+circular and has a uniform shape, indicating that it is 
+divided into equal parts. Additionally, there are no 
+visible boundaries or markings that would suggest a 
+different division. Therefore, the circular lawn in the 
+center of the image is divided into four pieces.
+Answer: 4
+Gemini3-Pro:
+False
+GPT-5.2:
+False
+Qwen3-Max:
+False
+Ground Truth: 5
+√
+√
+√
+LLaVA-1.5-7B
+×
+GLM-4.6v
+Question: What 
+distinguishes the top-
+most airbus plane from 
+the one below it?
+Reason: The image shows a landscape dominated by 
+dense green vegetation, which appears to be trees or 
+shrubs covering most of the area. There are also some 
+patches of lighter-colored ground, possibly cleared 
+land or paths, and a few small structures or buildings 
+that are barely discernible. However, the 
+overwhelming majority of the visual field is occupied 
+by the green vegetation, making it the most numerous 
+object in the image.
+Answer: Vegetation
+Gemini3-Pro:
+False
+GPT-5.2:
+True
+Qwen3-Max:
+True
+Ground Truth: Tree
+×
+√
+√
+Human:
+False
+Human:
+False
+Human:
+True
+Human:
+True
+Human:
+True
+Figure 5. Example from human calibration for hallucination labeling.
+B.4.2. PER-JUDGE HALLUCINATION STATISTICS
+We report per-judge hallucination statistics for each evaluated base model. All rates are computed over 371 instances per
+base model. Subtype rates are multi-label and therefore do not sum to the overall hallucination rate.
+Across all three judges, hallucinations are dominated by factual errors, where object/category and attribute hallucinations
+account for the largest portions across models. In contrast, unjustified causality and internal inconsistency are consistently
+rare, suggesting that most failures stem from unsupported visual claims rather than explicit self-contradiction. We also
+observe systematic differences in judge sensitivity. Compared to Gemini-3-pro and Qwen3-max, GPT-5.2 assigns noticeably
+higher rates to logical hallucinations, especially invalid reasoning and semantic over-attribution, indicating stricter
+scrutiny on inference validity beyond surface-level factual errors. Finally, RADAR yields consistent reductions under
+GPT-5.2 and Qwen3-max (e.g., +RADAR reduces H by ≈11.9% and ≈12.7%, respectively), with the largest gains coming
+from lower ATT and SO rates.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Seeing Clearly without Training
+Table 9. Per-judge hallucination taxonomy statistics across three judges. All values are percentages. Subtype rates are multi-label.
+Judge: Gemini-3-pro
+Models
+HR
+Factual Hallucination
+Logical Hallucination
+OBJ
+ATT
+SPA
+HRF
+IR
+CI
+INC
+SO
+HRL
+Closed-source Models
+Claude-3-7
+56.33 55.53
+9.43
+34.50
+23.45
+7.82
+7.28
+0.27 0.81
+0.27
+Gemini-2.5-pro
+45.28 44.20
+9.70
+18.06
+23.18
+11.86
+7.55
+0.00 0.54
+0.27
+GPT-4o
+45.55 43.40
+7.82
+16.98
+22.37
+8.89
+5.66
+0.27 0.54
+1.08
+Open-source Models
+GLM-4.6v
+47.71 45.28
+9.97
+28.03
+17.25
+6.74
+8.89
+0.00 0.00
+0.00
+LLaVA-1.5-7B
+66.58 63.61 19.95 28.03
+27.49
+9.97
+15.63
+0.81 2.70
+1.89
+Qwen3-VL-4B
+56.87 54.99 12.94 29.38
+21.83
+12.40
+9.43
+0.27 2.16
+1.08
+LLaMA-3.2-90B
+52.29 50.67 13.75 26.42
+22.37
+10.78
+9.43
+0.27 2.16
+0.54
+GeoZero
+64.15 60.92 14.82
+31.81
+28.57
+14.29 10.24
+1.08 1.62
+1.62
+GeoZero+RADAR
+64.69
+63.61
+9.16
+38.27
+29.92
+12.40
+5.66
+0.27
+1.62
+1.08
+Judge: GPT-5.2
+Models
+HR
+Factual Hallucination
+Logical Hallucination
+OBJ
+ATT
+SPA
+HRF
+IR
+CI
+INC
+SO
+HRL
+Closed-source Models
+Claude-3-7
+62.26 56.60 19.68
+31.54
+20.49
+7.55
+17.79 0.00
+0.54
+8.09
+Gemini-2.5-pro
+55.80 52.56 26.68 27.22
+23.45
+10.24
+26.15 0.54
+0.54
+8.36
+GPT-4o
+50.67 45.55 18.87 21.83
+19.41
+6.47
+17.79
+0.00 0.00
+5.93
+Open-source Models
+GLM-4.6v
+53.37 47.98 20.75 29.38
+14.02
+5.39
+19.68
+0.00 0.54
+6.47
+LLaVA-1.5-7B
+48.52 46.09 23.45 17.52
+19.68
+11.32
+21.29 2.70
+1.08
+12.13
+Qwen3-VL-4B
+64.15 59.57 28.30 35.58
+18.87
+8.89
+25.88
+0.00 0.81
+9.97
+LLaMA-3.2-90B
+54.45 50.67 25.88 26.42
+17.52
+6.47
+23.99
+0.00 3.23
+8.89
+GeoZero
+52.56 47.98 28.03
+19.41
+24.80
+8.36
+25.61 2.70
+1.08
+12.13
+GeoZero+RADAR
+40.70
+39.35
+22.10
+18.06
+17.52
+7.82
+20.22
+1.89
+0.54
+11.86
+Judge: Qwen3-max
+Models
+HR
+Factual Hallucination
+Logical Hallucination
+OBJ
+ATT
+SPA
+HRF
+IR
+CI
+INC
+SO
+HRL
+Closed-source Models
+Claude-3-7
+51.75 50.67 16.71
+32.88
+22.91
+4.31
+8.63
+0.00
+0.00
+14.02
+Gemini-2.5-pro
+49.60 47.98 17.52 28.03
+23.45
+5.66
+10.51
+0.00 0.00
+13.75
+GPT-4o
+49.33 48.52 12.13 28.57
+19.95
+5.39
+6.20
+0.00 0.00
+11.05
+Open-source Models
+GLM-4.6v
+46.36 44.47 10.24 29.11
+14.29
+4.04
+5.39
+0.00 0.00
+7.82
+LLaVA-1.5-7B
+48.79 46.36 16.71 22.10
+18.87
+9.97
+11.59
+0.27 0.00
+13.75
+Qwen3-VL-4B
+57.95 55.80 16.17 33.69
+22.37
+5.66
+7.28
+0.00 0.00
+13.21
+LLaMA-3.2-90B
+53.91 51.21 19.14 30.73
+18.06
+6.47
+12.67
+0.00 0.00
+14.02
+GeoZero
+47.44 45.01 19.95
+25.34
+23.99
+4.85
+14.29 0.54
+0.54
+16.44
+GeoZero+RADAR
+34.77
+33.42
+13.21
+19.41
+16.98
+3.23
+9.70
+0.27
+0.27
+12.13
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Seeing Clearly without Training
+B.5. ROI-Prioritized Hallucination Evaluation
+To further examine whether hallucination behavior is influenced by irrelevant global context in large-scale remote sensing
+imagery, we conduct an additional evaluation under an ROI-prioritized setting. For samples that require localized evidence
+to answer the question, we manually provide annotated Regions of Interest (ROI). In this setting, when an ROI is available,
+we supply both (i) the cropped ROI region and (ii) the original image with the ROI bounding box highlighted, allowing
+expert judge models to access localized evidence while retaining global contextual information. For samples where cropping
+is unnecessary or no ROI is provided, we use the original image only.Overall, the evaluation follows the principle: when an
+ROI is available, localized evidence is explicitly emphasized through ROI crops and bounding-box annotations; otherwise,
+the full image is used without modification.
+Concretely, for each instance, we first query the ROI annotation (if any). If a valid ROI exists, we (i) crop the ROI from the
+original image and (ii) generate a version of the full image with the ROI bounding box overlaid, and provide both as visual
+inputs to the expert judge models. If no valid ROI exists, we directly use the full image. All other evaluation protocols
+remain unchanged from the main paper: each model prediction is annotated by three expert judges; the overall hallucination
+rate (HR) is determined by majority vote (two or more judges marking an instance as hallucinated); and hallucination
+categories/subtypes are aggregated by taking the union of tags from judges who labeled the instance as hallucinated. All
+values are reported as percentages over the full evaluation set (371 instances).
+Consensus Results under ROI-Prioritized Setting.
+Table 10 reports the consensus hallucination statistics when evaluation
+prioritizes localized evidence. Overall, hallucinations remain prevalent even when the visual input is restricted to the ROI:
+across most baselines, the overall HR stays in a similar range to the full-image setting, indicating that hallucination is
+not solely caused by irrelevant global context. Consistent with the main paper, factual hallucination dominates logical
+hallucination across both closed-source and open-source models, and the dominant factual subtypes are OBJ and ATT,
+suggesting persistent difficulties in object identification and attribute grounding even under localized visual evidence.
+Importantly, GeoZero+RADAR continues to achieve the lowest hallucination rate in this setting. Compared to GeoZero,
+GeoZero+RADAR reduces the overall HR from 48.25% to 36.93% (an absolute reduction of 11.32 points), and reduces
+factual hallucination HRF from 47.98% to 36.66%. This improvement is accompanied by consistent decreases in core
+factual subtypes (OBJ, ATT, and SPA), suggesting that RADAR improves grounding beyond merely benefiting from global
+contextual cues.
+Table 10. Hallucination evaluation on RSHBench (ROI-prioritized setting). Each model prediction is annotated by three expert judges
+with a binary hallucination rate (HR) and a multi-label taxonomy comprising factual subtypes (OBJ, ATT, SPA) and logical subtypes
+(IR, CI, INC, SO), along with coarse categories HRF (Factual) and HRL (Logical). The overall HR is determined by majority vote,
+while category and subtype labels are aggregated by taking the union of tags from judges who marked the instance as hallucinated. All
+values are reported as percentages over the full evaluation set.
+Models
+Factual Hallucination
+Logical Hallucination
+HR
+OBJ
+ATT
+SPA
+HRF
+IR
+CI
+INC
+SO
+HRL
+Closed-source Models
+Claude-3-7
+49.33
+32.61
+16.98
+60.11
+19.95
+0.00
+0.81
+15.09
+24.80
+60.11
+Gemini-2.5-pro
+39.08
+36.39
+19.14
+52.83
+29.92
+0.54
+0.54
+15.63
+33.96
+53.64
+GPT-4o
+34.23
+26.68
+13.21
+47.98
+19.95
+0.00
+0.54
+12.67
+22.37
+48.79
+Open-source Models
+GLM-4.6v
+36.93
+21.83
+9.70
+47.71
+21.56
+0.00
+0.27
+9.70
+24.80
+49.33
+LLaVA-1.5-7B
+28.57
+29.38
+14.29
+47.98
+22.10
+1.62
+3.23
+15.63
+24.80
+47.98
+Qwen3-VL-4B
+49.60
+32.88
+17.25
+61.73
+27.49
+0.27
+1.89
+18.87
+33.69
+61.99
+LLaMA-3.2-90B
+43.40
+29.11
+14.82
+55.53
+32.88
+0.00
+4.31
+17.25
+36.66
+55.80
+GeoZero
+33.15
+32.88
+17.79
+47.98
+28.30
+3.77
+2.43
+17.79
+30.73
+48.25
+GeoZero+RADAR
+25.88
+24.53
+12.13
+36.66
+21.02
+1.89
+1.35
+14.82
+23.45
+36.93
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Seeing Clearly without Training
+Per-Judge Analysis under ROI-Prioritized Setting.
+Tables 11, 12, and 13 summarizes the per-judge hallucination
+statistics in a unified view. While absolute hallucination rates vary across judges (reflecting different judging strictness), the
+relative trends are consistent: GeoZero+RADAR yields lower HR than GeoZero for all three judges (65.77 vs. 68.19 for
+Gemini-3-pro-preview; 38.81 vs. 49.60 for GPT-5.2; 35.85 vs. 46.63 for Qwen3-max), indicating that the observed gain is
+not driven by a single judge model. Moreover, reductions are primarily manifested in factual hallucination components
+(notably OBJ and ATT), aligning with the consensus-level finding that ROI prioritization does not remove hallucinations,
+but RADAR consistently improves evidence faithfulness under localized visual input.
+Comparison with Full-Image Evaluation.
+Comparing Tables 10 and Tables 11, 12, and 13 with their full-image
+counterparts in the main paper, we observe that restricting the visual input to ROIs does not eliminate hallucinations,
+and the overall model ranking remains largely stable. In particular, the advantage of GeoZero+RADAR persists under
+ROI prioritization, suggesting that RADAR improves robustness to hallucination beyond simply mitigating background
+interference, and instead enhances the alignment between model outputs and localized visual evidence.
+Table 11. Per-judge hallucination taxonomy statistics on RSHBench (ROI-prioritized setting). Judge: Gemini-3-pro-preview. All
+values are percentages. Subtype rates are multi-label.
+Models
+HR
+Factual Hallucination
+Logical Hallucination
+OBJ
+ATT
+SPA
+HRF
+IR
+CI
+INC
+SO
+HRL
+Closed-source Models
+Claude-3-7
+64.69 48.52 23.99
+14.56
+64.69
+5.93
+0.00
+1.08
+1.08
+9.16
+Gemini-2.5-pro
+61.46 35.85 26.42
+20.75
+61.19
+9.97
+0.27
+0.00
+0.54
+12.40
+GPT-4o
+54.72 31.00 20.75
+12.40
+53.64
+6.47
+0.00
+0.54
+0.54
+8.63
+Open-source Models
+GLM-4.6v
+56.33 34.23 18.06
+7.55
+54.72
+9.70
+0.00
+0.27
+0.27
+11.86
+LLaVA-1.5-7B
+64.96 29.92 26.68
+10.78
+61.99
+14.56
+1.08
+3.23
+3.50
+19.95
+Qwen3-VL-4B
+66.58 40.16 23.45
+14.56
+65.23
+10.24
+0.27
+1.62
+0.54
+13.21
+LLaMA-3.2-90B
+63.34 38.01 24.80
+14.56
+62.80
+12.13
+0.00
+3.23
+1.35
+18.06
+GeoZero
+68.19 34.77 28.03
+15.63
+66.58
+8.09
+1.08
+1.62
+1.62
+12.94
+GeoZero+RADAR
+65.77
+40.16
+26.15
+11.32
+64.69
+6.20
+0.27
+1.62
+1.62
+9.70
+Table 12. Per-judge hallucination taxonomy statistics on RSHBench (ROI-prioritized setting). Judge: GPT-5.2. All values are
+percentages. Subtype rates are multi-label.
+Models
+HR
+Factual Hallucination
+Logical Hallucination
+OBJ
+ATT
+SPA
+HRF
+IR
+CI
+INC
+SO
+HRL
+Closed-source Models
+Claude-3-7
+61.73 34.50 22.91
+7.01
+58.49
+14.82 0.00
+0.27
+7.82
+16.98
+Gemini-2.5-pro
+57.14 26.95 25.07 12.13
+53.91
+23.45
+0.54 0.54
+8.36
+24.80
+GPT-4o
+51.21 24.53 20.49
+7.55
+48.25
+15.63
+0.00 0.00
+6.47
+16.44
+Open-source Models
+GLM-4.6v
+50.94 28.84 13.75
+6.47
+46.90
+19.68
+0.00 0.00
+6.20
+20.75
+LLaVA-1.5-7B
+47.44 17.52 21.83 11.05
+46.90
+18.06
+1.35 1.08
+9.70
+19.68
+Qwen3-VL-4B
+64.15 37.74 21.83
+8.36
+61.73
+21.02
+0.00 0.27
+11.05
+25.07
+LLaMA-3.2-90B
+56.60 27.22 20.22
+7.28
+52.83
+27.22
+0.00 2.96
+8.36
+29.11
+GeoZero
+49.60 17.79 22.91
+9.16
+45.55
+23.72 2.43
+1.08 11.05
+25.07
+GeoZero+RADAR
+38.81
+15.36
+18.87
+7.01
+37.20
+18.60
+1.62
+0.81
+9.16
+20.49
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Seeing Clearly without Training
+Table 13. Per-judge hallucination taxonomy statistics on RSHBench (ROI-prioritized setting). Judge: Qwen3-max. All values are
+percentages. Subtype rates are multi-label.
+Models
+HR
+Factual Hallucination
+Logical Hallucination
+OBJ
+ATT
+SPA
+HRF
+IR
+CI
+INC
+SO
+HRL
+Closed-source Models
+Claude-3-7
+52.29 32.08 21.29
+6.20
+50.67
+10.24
+0.00
+0.00
+15.09
+17.52
+Gemini-2.5-pro
+50.13 28.03 22.64
+6.20
+47.71
+11.86
+0.00
+0.00
+12.94
+19.14
+GPT-4o
+50.40 28.84 18.60
+5.66
+48.25
+7.55
+0.00
+0.00
+12.40
+15.90
+Open-source Models
+GLM-4.6v
+46.36 29.11 12.94
+4.85
+43.67
+4.85
+0.00
+0.00
+8.89
+11.59
+LLaVA-1.5-7B
+49.60 23.72 17.25
+9.97
+47.17
+12.94
+0.27
+0.00
+14.56
+18.60
+Qwen3-VL-4B
+56.60 35.04 18.33
+6.74
+53.91
+10.24
+0.00
+0.00
+14.82
+19.14
+LLaMA-3.2-90B
+54.72 33.96 15.63
+6.20
+51.75
+14.29
+0.00
+0.00
+16.17
+22.10
+GeoZero
+46.63 24.80 22.64
+4.31
+43.94
+13.75
+0.27
+0.00
+16.44
+20.75
+GeoZero+RADAR
+35.85
+20.49
+15.09
+4.85
+35.04
+11.32
+0.00
+0.00
+13.75
+15.63
+C. RADAR: Additional Method and Implementation Details
+C.1. Query-Conditioned Relative Attention Extraction
+Given an image I and a textual query, RADAR derives an attention-based relevance map from a multimodal large language
+model as an intrinsic cue for visual grounding. Let the model produce attention matrices across multiple layers. For each
+layer ℓ, we summarize cross-modal attention into a spatial relevance map Aℓ(Q; I) that reflects how strongly the query
+attends to each visual token, for example by aggregating over attention heads and query tokens. The resulting token-level
+scores are reshaped onto the image grid to obtain a layer-wise heatmap.
+Absolute attention is often dominated by scene-level saliency that is weakly related to the query semantics. To suppress
+such query-irrelevant signals, we contrast the task query QT with a global scene query QG. At each layer, we compute a
+stabilized relative attention map
+ˆAℓ(QT ; I) =
+Aℓ(QT ; I)
+Aℓ(QG; I) + ϵ,
+(12)
+where ϵ is a small constant for numerical stability. This formulation emphasizes regions whose relevance is selectively
+amplified by the task query relative to holistic scene understanding.
+We then identify layers where this contrast is most informative. Each layer is scored by its total attention mass
+sℓ=
+X
+u
+ˆAℓ(u),
+(13)
+after which the top-k layers Sk are selected. For each selected layer, a normalized weight is computed as
+wℓ=
+sℓ
+P
+j∈Sk sj
+,
+ℓ∈Sk.
+(14)
+The final query-conditioned relative attention map is obtained through weighted aggregation
+˜A(QT ; I) = N
+ X
+ℓ∈Sk
+wℓˆAℓ(QT ; I)
+!
+,
+(15)
+where N(·) normalizes the result into a spatial probability distribution.
+21
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+Seeing Clearly without Training
+C.2. Focus Test and Region Mapping
+C.2.1. FOCUS TEST
+RADAR avoids cropping when attention is diffuse. We measure concentration using a lightweight focus test F(·) defined
+on the normalized map ˜A. A simple instantiation uses normalized entropy:
+H( ˜A) = −
+X
+u
+˜A(u) log
+
+˜A(u) + δ
+
+,
+(16)
+where δ avoids numerical issues. Let N be the number of spatial cells. We define a concentration score:
+F( ˜A) = 1 −H( ˜A)
+log N .
+(17)
+RADAR proceeds with cropping if F( ˜A) ≥τ; otherwise, it falls back to full-image inference.
+C.2.2. REGION MAPPING OPERATOR
+Given a focused attention map, we extract a crop using a deterministic operator Ψ(·). We select the smallest set of cells
+whose cumulative probability mass reaches a target ratio p. We then compute the tight bounding box covering these cells
+on the grid, map it back to pixel coordinates, and optionally add a small padding margin. This yields the crop used for
+progressive evidence acquisition in Stage1 and Stage2.
+C.3. Where and What Prompt Templates
+We employ a protocol that converts an input question into a where question for coarse localization and a what question for
+fine-grained inspection.
+Where and What Protocol
+You are a helpful assistant that decomposes an image-related question
+into two simple questions to support visual understanding.
+The two questions serve different purposes:
+- The first question helps the model know WHERE to look in the image.
+- The second question helps the model understand WHAT details to examine in that
+area.
+,→
+Given an input question about an image, generate exactly TWO questions:
+1. WHERE QUESTION (coarse visual attention)
+Goal:
+- Simplify the original question as much as possible.
+- Help the model quickly identify the relevant region in the image.
+Guidelines:
+- Focus on the main target object(s) or land-cover type(s).
+- Keep the question short and concrete.
+- Include only information necessary to locate the region.
+- You MAY use common remote-sensing associations if they are obvious and helpful.
+- Do NOT ask about quantity, attributes, or detailed reasoning.
+- Do NOT invent image-level positions.
+2. WHAT QUESTION (fine-grained understanding)
+Goal:
+- Ask the original question again, assuming the correct region is known.
+Guidelines:
+- Preserve the original intent and question type.
+- Remove only global image-position words if they exist.
+- Keep the question natural and easy to understand.
+- Do NOT add new information.
+Output format (JSON ONLY):
+{
+"where_question": "...",
+"what_question": "..."
+}
+Now process the following question:
+22
+1210
+1211
+1212
+1213
+1214
+1215
+1216
+1217
+1218
+1219
+1220
+1221
+1222
+1223
+1224
+1225
+1226
+1227
+1228
+1229
+1230
+1231
+1232
+1233
+1234
+1235
+1236
+1237
+1238
+1239
+1240
+1241
+1242
+1243
+1244
+1245
+1246
+1247
+1248
+1249
+1250
+1251
+1252
+1253
+1254
+1255
+1256
+1257
+1258
+1259
+1260
+1261
+1262
+1263
+1264
+Seeing Clearly without Training
+Q. What color is the ground inside the
+white building in the bottom right corner 
+of the picture?
+Qwen3-VL-3B: Black
++RADAR: Blue
+Stage1: What is in the bottom right corner of the picture?
+Stage2: What color is the ground inside the white building?
+Q. What color is the ship on the water in
+the top right corner of this picture?
+Qwen3-VL-3B: This image doesn't 
+feature the color.
++RADAR: Red and White
+Stage1: What is in the top right corner of the image?
+Stage2: What color is the ship on the water in this picture?
+Stage1: Where are the boat-shaped objects on the water in the 
+image?
+Stage2: Where is the green boat in the picture?
+Q. How many roundabouts are there in 
+the top right side of this picture?
+Qwen3-VL-3B: This image doesn't 
+feature the count.
++RADAR: Two
+Stage1: Where are the roundabouts located in the image, 
+specifically within the top-right region?
+Stage2: How many roundabouts are there in this picture?
+Q. How many cars are parked in front of 
+the building in the upper right corner of 
+the picture?
+Qwen3-VL-3B: Three
++RADAR: Two
+Stage1: Where are the cars parked in front of the building 
+located in the upper right corner of the picture?
+Stage2: How many cars are parked in front of the building?
+Q. hat color is the prominent ship
+parked in the upper left corner of the 
+picture?
+Qwen3-VL-3B: Black
++RADAR: White
+Stage1: What is in the upper left corner of the picture?
+Stage2: What color is the prominent ship parked in the picture?
+Q. In the picture, where is the building
+with the roof having a green square and 
+a circular ring with the letter H in the 
+center of the ring?
+Qwen3-VL-3B: In the center of the 
+picture.
++RADAR: In the middle of the left side 
+of the picture, by the dock that extends
+into the water.
+Stage1: Where is the building whose roof has a green square and 
+a circular ring marking with the letter 'H' at the center?
+Stage2: Where is the building with the roof having a green 
+square and a circular ring with the letter H in the center of the 
+ring?
+Q. Where is the green boat in the
+picture?
+Qwen3-VL-3B: This image doesn't 
+feature the position.
++RADAR: At the sixth pier in the river
+in the picture, from bottom to top.
+Stage1: What is in the top right area of this picture?
+Stage2: What colors are the beach umbrellas in this picture?
+Q. What colors are the beach umbrellas
+in the top right area of this picture?
+Qwen3-VL-3B: This image doesn't 
+feature the color.
++RADAR: Red
+Stage1: Where is the parking lot area containing red cars in the 
+image?
+Stage2: How many red cars are there in the parking lot?
+Q. How many red cars are there in the
+parking lot in the bottom left corner of
+the picture?
+Qwen3-VL-3B: This image doesn't 
+feature the count.
++RADAR: Two
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+QCRA
+Figure 6. Qualitative examples of RADAR’s query-conditioned relative attention and progressive evidence refinement. For each
+case, we visualize the QCRA heatmap produced by a where-oriented query on the full image (Stage1) and a what-oriented query on
+the localized crop (Stage2), where brighter regions indicate stronger question-conditioned relevance. Dashed boxes denote the regions
+selected for zoom-in evidence extraction.
+23

@@ -1,0 +1,8 @@
+### Impact Assessment
+**1. Technical Significance (70%):** The technical significance of this paper is low. The proposed Cumulative Sample Loss (CSL) is an application of standard training dynamics (averaging loss over epochs) to the video domain. Because the experimental evaluation fails to compare CSL against the most basic alternatives (e.g., just using the final model's loss or established methods like Confident Learning) and instead compares against unsupervised anomaly detectors, the practical utility of the method remains unproven. Practitioners looking to audit video datasets will likely turn to established frameworks (like Cleanlab) rather than implement the checkpoint-averaging scheme proposed here, especially since its benefits over simple loss thresholding are not established.
+
+**2. Scientific Significance (30%):** The scientific contribution is minimal. The paper does not reveal new theoretical insights into how neural networks memorize noisy labels, nor does it propose a novel statistical framework. The observation that Transformers are better suited than CNNs to detect temporal ordering violations is intuitive and expected, given the nature of self-attention versus local convolutions.
+
+**3. The 3-Year Citation Projection:** I project this paper will receive very few citations (under 10) in the next 3 years. The core methodology has been extensively explored in prior work (which this paper fails to cite), and the flawed baseline comparisons will prevent it from being taken seriously as a new benchmark or standard approach for dataset auditing.
+
+**Impact Score: 2.5 / 10**

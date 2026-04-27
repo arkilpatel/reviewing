@@ -1,0 +1,1387 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Counterfactual Explanations for Hypergraph Neural Networks
+Anonymous Authors1
+Abstract
+Hypergraph neural networks (HGNNs) effectively
+model higher-order interactions in many real-
+world systems but remain difficult to interpret,
+limiting their deployment in high-stakes settings.
+We introduce CF-HyperGNNExplainer, a coun-
+terfactual explanation method for HGNNs that
+identifies the minimal structural changes required
+to alter a model’s prediction. The method gener-
+ates counterfactual hypergraphs using actionable
+edits limited to removing node-hyperedge inci-
+dences or deleting hyperedges, producing concise
+and structurally meaningful explanations. Exper-
+iments on three benchmark datasets show that
+CF-HyperGNNExplainer generates valid and con-
+cise counterfactuals, highlighting the higher-order
+relations most critical to HGNN decisions.
+1. Introduction
+Many real-world systems are governed by higher-order in-
+teractions (HOIs), in which outcomes depend on groups of
+entities rather than on pairwise relations alone. Examples
+include co-authorship teams, biochemical complexes, group
+communications, and multi-item user sessions, where the
+joint context of three or more units carries information that
+cannot be faithfully reduced to binary links without loss
+or distortion. Recent work on “networks beyond pairwise
+interactions” (Battiston et al., 2020) has shown that explic-
+itly modeling HOIs can substantially improve the ability to
+characterize structure, learn representations, and predict dy-
+namical behavior in complex systems. Consequently, there
+is increasing interest in learning frameworks that can na-
+tively encode group interactions instead of approximating
+them via pairwise expansions.
+Hypergraphs provide a principled representation for HOIs
+by allowing a hyperedge to connect an arbitrary number
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Figure 1.Temporal evolution of publications containing the exact
+phrase “hypergraph neural network”.
+of nodes. Classical hypergraph learning demonstrated that
+hypergraphs can represent complex relationships more com-
+pletely than graphs for tasks such as clustering, classifica-
+tion, and embedding (Zhou et al., 2006). Building on this
+foundation, hypergraph neural networks (HGNNs) (Feng
+et al., 2019) and hypergraph convolutional neural networks
+(HGCNs) (Yadati et al., 2019) have emerged as deep learn-
+ing paradigms that extend graph neural networks and graph
+convolutional networks to hypergraph-structured data, re-
+spectively. Reflecting this momentum, recent surveys syn-
+thesize a rapidly expanding body of deep learning on hy-
+pergraphs, exploring architectures, training strategies, and
+applications (Kim et al., 2024). In line with these develop-
+ments, our bibliometric analysis in Figure 1 shows a clear
+upward trend in the number of publications on hypergraph
+neural networks, supporting the view that HGNNs are an
+emerging and fast-growing modeling tool. Although pow-
+erful, HGNNs suffer from limited interpretability, which
+reduces user trust and constrains their deployment in high-
+stakes settings. Among eXplainable AI (XAI) approaches
+proposed in the literature, counterfactual (CF) explanations
+have attracted growing attention, as they describe minimal
+changes to an input that would lead to a different model
+outcome. In the graph domain, this motivation has driven
+substantial progress in graph neural networks (GNNs) ex-
+plainability, ranging from post-hoc explainers that high-
+light predictive substructures (e.g., GNNExplainer (Ying
+et al., 2019) and PGExplainer (Luo et al., 2020)) to meth-
+ods that explicitly generate counterfactual graphs (e.g., CF-
+GNNExplainer (Lucic et al., 2022) and RCExplainer (Bajaj
+et al., 2022)). However, transferring these ideas to hyper-
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Counterfactual Explanations for Hypergraph Neural Networks
+graphs is non-trivial: hyperedges encode higher-order rela-
+tions whose combinatorial structure and semantics cannot
+be reduced to pairwise links without altering the meaning
+of the interactions. Consequently, hypergraph explainability
+has received comparatively limited attention. Dedicated
+hypergraph explainers have only emerged recently (e.g.,
+HyperEX (Maleki et al.) and SHypX (Su et al., 2024)),
+underscoring both the nascency of the area and the open
+need for explanation tools tailored to hypergraph learning.
+In this work, we introduce CF-HyperGNNExplainer, the
+first counterfactual explanation technique specifically de-
+signed for hypergraph neural networks. Our goal is to pro-
+duce valid and interpretable counterfactuals that respect
+the discrete, higher-order nature of hypergraphs – e.g.,
+by minimally editing hyperedge memberships or hyper-
+edge existence while altering model prediction. This for-
+mulation yields explanations that answer questions of the
+form: “Which higher-order interactions must be removed,
+or rewired for the HGNN to change its decision?”, thereby
+directly exposing the role of HOIs in the model’s reasoning.
+Our main contributions are as follows: (1) we introduce CF-
+HyperGNNExplainer, the first counterfactual explanation
+method tailored to HGNNs, generating actionable counter-
+factual hypergraphs via minimal structural edits; (2) we
+propose two variants that operate at different granularities,
+i.e., removing node-hyperedge incidences (NHP) or deleting
+entire hyperedges (HP); (3) we provide an extensive empiri-
+cal evaluation on three citation-network datasets, including
+comparisons with graph-based counterfactual explainers,
+an ablation study, and a runtime analysis showing that our
+method strongly outperforms graph-based baseline methods
+when adapted to native hypergraph settings.
+2. Related Work
+The body of work most relevant to our study comprises
+research on hypergraph neural network explainability (Sec-
+tion 2.1) and counterfactual explanations (Section 2.2).
+2.1. Hypergraph Neural Network Explainability
+Despite the rapid progress in HGNNs, explainability for
+hypergraph-based classifiers has only recently started to
+receive dedicated attention. Existing approaches largely
+extend the intuition of subgraph-based explanations to the
+hypergraph setting, aiming to identify sub-hypergraphs or
+node-hyperedge attributions that drive a prediction. Hy-
+perEX (Maleki et al.) is a post-hoc framework that
+scores the importance of node-hyperedge pairs and ex-
+tracts explanatory sub-hypergraphs for HGNN predictions.
+SHypX (Su et al., 2024) is a model-agnostic explainer that
+discretely samples explanation sub-hypergraphs for local
+attribution, and additionally derives global concepts through
+unsupervised extraction. For intrinsically interpretable de-
+signs, SHy (Yu et al., 2025) introduces a self-explaining
+HGNN for electronic health records based diagnosis pre-
+diction, producing distinct patient-specific temporal phe-
+notypes as personalized explanations. Finally, models can
+embed interpretability into their architecture; for instance,
+Bi et al. (an Bi et al., 2023) propose an explainable and pro-
+grammable hypergraph convolutional network for imaging-
+genetics fusion that links decisions to hypergraph compo-
+nents and programmable constraints.
+2.2. Counterfactual Explanations
+Counterfactual explanations have emerged as a prominent
+class of instance-based explanations for AI/ML model pre-
+dictions. Formally, given a classifier f and an input x for
+which f(x) =y , a counterfactual explanation is a perturbed
+version of the input x′, such that f(x ′) =y ′ (where y′ ̸=y )
+and the difference betweenx and x′ is minimized according
+to some distance metric (Wachter et al., 2017).
+In the context of graph-structured data, CFs aim to answer:
+“How should the graph structure or node features be min-
+imally modified to change the model’s prediction?”. RC-
+Explainer (Bajaj et al., 2022) generates robust counterfac-
+tual explanations by identifying a small set of important
+edges within a node n-hop neighborhood such that deleting
+those edges flips the prediction, with the robustness com-
+ing from modeling decision boundaries that covers many
+training instances with the same predicted class. Differ-
+ently, CF-GNNExplainer (Lucic et al., 2022) formulates
+counterfactual generation as an optimization problem over
+the graph structure, seeking the minimal perturbation to
+the adjacency matrix that induces a change in the model’s
+prediction for a given target node. A key contribution of
+CF-GNNExplainer is its explicit focus on structural coun-
+terfactuals, emphasizing edge deletions as the primary ex-
+planation mechanism, while keeping node features fixed.
+This formulation enables model-agnostic applicability to
+a wide range of message-passing GNN architectures and
+provides intuitive explanations in terms of graph edits. How-
+ever, the method is inherently designed for pairwise rela-
+tional data represented by adjacency matrices. As a result,
+CF-GNNExplainer cannot be directly extended to HGNNs,
+where higher-order relationships are encoded through inci-
+dence structures and hyperedges connecting arbitrary-sized
+node sets. This limitation is addressed in our work where
+we develop a counterfactual explanation method tailored
+specifically to the hypergraph setting.
+3. Background
+Our approach builds on the core idea behind CF-
+GNNExplainer (Lucic et al., 2022): generate counterfactual
+explanations by searching for the smallest structural edit
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Counterfactual Explanations for Hypergraph Neural Networks
+to the input relational structure that flips a trained model’s
+prediction. For this reason, in this section we review CF-
+GNNExplainer, to clarify the counterfactual optimization
+template we inherit, and the hypergraph neural network
+propagation operator, to make explicit where and how struc-
+tural edits can be injected in a differentiable manner.
+3.1. Notation
+Vectors are bold lowercase (e.g.,x,y∈R d). Matrices are
+uppercase roman (e.g., A, B∈R n×m). The (i, j)-th entry
+of A is Aij. The i-th row of A is Ai. ∈R 1×m and the
+j-th column is A.j ∈R n×1. The identity matrix is Id, the
+all-zeros vector is0, and the all-ones vector is1.
+3.2. CF-GNNExplainer
+Given a target node v and its k-hop computational subgraph
+Gv = (A, X), where A is the adjacency matrix and X the
+feature matrix, the method search for a perturbation matrix
+Pthat minimizes the following objective function:
+L=−L pred(f(A⊙P, X),ˆy) +βL dist(P)
+Here, ⊙ denotes the element-wise product, hence A⊙P is
+the counterfactual adjacency matrix. The first term, Lpred,
+encourages the model to flip the prediction from the original
+prediction y. The second term, Ldist, acts as a regularizer
+to ensure that the resulting counterfactual remains “close”
+to the original graph. To handle the discrete nature of edges,
+P is typically relaxed to continuous values during optimiza-
+tion and thresholded afterward to produce a binary graph
+structure.
+We inherit from CF-GNNExplainer the underlying idea,
+however, we adapt it to HGNNs. Since CF-GNNExplainer
+cannot be trivially generalized to HGNNs, we end up with
+two different algorithm to produce HGNNs’ counterfactual
+explanations detailed in Section 4.
+3.3. Hypergraph Neural Network
+Let G= (V, E) be a hypergraph with |V|=N nodes
+and |E|=M hyperedges. Each hyperedge ε∈E has an
+associated positive weight Wεε, and all hyperedge weights
+are stored in the diagonal matrix W∈R M×M . Unlike
+simple graphs, a hypergraph is commonly represented by
+its incidence matrixH∈R N×M , where
+Hiε =
+(
+1,ifv i ∈Vis incident to hyperedgeε∈E,
+0,otherwise.
+The node degree matrix D∈R N×N and the hyperedge
+degree matrix B∈R M×M are diagonal matrices defined
+by
+Dii =
+MX
+ε=1
+WεεHiε, B εε =
+NX
+i=1
+Hiε.(1)
+Convolution on Hypergraphs.Information propagation
+on hypergraphs assumes: (i) nodes sharing a hyperedge
+should exchange more information, and (ii) heavier hyper-
+edges should contribute more to the propagation. With these
+principles, one layer of hypergraph convolution updates the
+embedding of nodeivia
+x(l+1)
+i =σ
+
+
+NX
+j=1
+MX
+ε=1
+HiεHjεWεε x(l)
+j P (l)
+
+ ,(2)
+where x(l)
+i is the i-th node embedding at layer l, σ(·) is
+a nonlinearity (e.g., LeakyReLU or ELU), and P (l) ∈
+RF (l)×F (l+1)
+is the learnable weight matrix at layer l. In
+matrix form,
+X (l+1) =σ
+
+HW H ⊤X (l)P (l)
+
+,
+withX (l) ∈R N×F (l)
+andX (l+1) ∈R N×F (l+1)
+.
+Normalization.The operator HW H ⊤ does not control
+the spectral radius, so stacking many layers can cause scal-
+ing issues and unstable optimization. A symmetric normal-
+ization yields the normalized propagation
+X (l+1) =σ
+
+D− 1
+2 HW B −1H ⊤D− 1
+2 X (l)P (l)
+
+.(3)
+Here D and B are the degree matrices in (1). One can show
+the largest eigenvalue of D− 1
+2 HW B −1H ⊤D− 1
+2 is at most
+1ensuring stability during optimization.
+Node Interaction.Hypergraph convolution respects the
+neighborhood of each node: a node only aggregates signals
+from nodes that share at least one hyperedge with it. Let
+consider
+HH ⊤ ∈R N×N ,(HH ⊤)ij =
+MX
+ε=1
+HiεHjε,
+be the (unweighted) node co-incidence matrix that counts
+how many hyperedges make vi and vj co-incident. The
+(closed) neighborhood ofiis then
+N(i) ={j∈ {1, . . . , N}: (HH ⊤)ij >0}.
+With this notation, the node-wise update in equation (2) can
+be written as
+x(l+1)
+i =σ
+
+ X
+j∈N(i)
+ MX
+ε=1
+HiεHjεWεε
+
+x(l)
+j P (l)
+
+ ,(4)
+which makes explicit that only j∈ N(i) contribute to
+x(l+1)
+i . In matrix form, the normalized propagation used in
+equation (3) reads
+X (l+1) =σ
+
+S X (l)P (l)
+
+,
+S :=D − 1
+2 HW B −1H ⊤D− 1
+2 ,
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Counterfactual Explanations for Hypergraph Neural Networks
+where S inherits the same sparsity pattern of HH ⊤, and
+thus preserves the neighborhood constraint of equation (4).
+Similarly to what happens with graphs, after n layers, a
+node’s representation depends on nodes within n hops in the
+node–hyperedge incidence, so we define the n-hop neigh-
+borhood for nodev i as:
+N n(i) ={j∈ {1, . . . , N}: ((HH ⊤)n)ij >0}.
+Model.Since X (l+1) is differentiable w.r.t. both X (l) and
+P (l), hypergraph convolution layers can be trained end-to-
+end via gradient-based optimization.
+Let X=X (0) ∈R N×F (0)
+be the input node features. A
+hypergraph neural network is obtained by stacking the L
+convolution layers in (3), producing X (L). A node-level
+predictor is then defined as
+ˆy=f(H, X, P (l)) :=softmax
+ 
+X (L)P (L)
+∈R N×C ,
+where P (l), with l= 0, ..., L , collect all learnable parame-
+ters. In the following, we will omit the dependency from
+the learnable parameters P since the counterfactual explana-
+tion generation problem assume the model parameters to be
+frozen. We focus on node classification task: given labeled
+nodes, the model is trained to predict these labels.
+4. Problem Formualtion
+4.1. Perturbed Signal Propagation
+A convolutional layer on a hypergraph depends on: (i) the
+structure encoded by the incidence matrix H (which deter-
+mines the node neighborhood), (ii) the current node embed-
+dings X (l), and (iii) the layer parameters P (l). In analogy
+with counterfactual sparsification for graphs—where the
+forward map depends on the adjacency Av, the local fea-
+tures Xv, and the weights, resulting inf(A v, Xv;W) , and a
+learnable perturbation P is introduced to obtain a perturbed
+map g(Av, Xv, W;P) —we introduce alearnable perturba-
+tion matrix Π that modulates the neighborhood used by the
+layer.
+Formally, we define a perturbed propagation
+X (l+1) =σ
+
+S(Π)X (l)P (l)
+
+,(5)
+where the operator S(Π) is obtained by applying the pertur-
+bation matrix Π (element-wise, i.e., Hadamard-wise) to the
+incidence matrixH, thus resulting in:
+S(Π) :=D − 1
+2 (H⊙Π)W B −1(H⊙Π) ⊤D− 1
+2 ,(6)
+with the degrees being recomputed whenever the incidence
+is modified. This mirrors the CF-GNNExplainer’s idea of
+inserting a learnable, differentiable mask into the neighbor-
+hood aggregation so that the logits depend on (H, X (l), P)
+and onΠ.
+4.2. Loss Formulation
+Similarly to CF-GNNExplainer, we learn Π by solving an
+optimization problem, where the HGNN parameters are kept
+fixed and only the mask is optimized.
+Optimization Objective.Let f denote the trained HGNN
+and let S(Π) be the perturbed propagation operator intro-
+duced in equation (6). Denote by ˆythe original predicted
+label for the explained node under the unperturbed hyper-
+graph, we then learnΠby minimizing the following loss:
+L(Π) =−L pred
+ 
+f(H⊙Π), X),ˆy
+
++βL dist(Π),(7)
+where −Lpred penalizes the model’s confidence in the origi-
+nal class ˆyunder the perturbed propagation (thus encourag-
+ing a prediction change), while Ldist enforces minimality of
+the edit andβ >0controls the trade-off.
+To make equation (7) explicit, we instantiate Lpred as the
+log-probability assigned to the original class prediction
+by the perturbed model output so that minimizing −Lpred
+the perturbed prediction is pushed away from the original
+decision without specifying a target class. The regulariza-
+tion term Ldist is instantiated as the L1 distance between
+the perturbation matrix and the original incidence matrix.
+Finally, in direct analogy with CF-GNNExplainer, the pre-
+diction term is be made active only while the prediction
+has not yet flipped by multiplying it by the following term
+⊮[arg maxf(H⊙Π, X) = ˆy] , with ⊮(·) being the indica-
+tor function.
+Continuous Relaxation and Thresholding.Since the in-
+cidence matrix H is discrete, the desired perturbation is
+discrete as well. However, to enable gradient-based opti-
+mization, we optimize a continuous relaxation of the mask.
+Specifically, we learn an continuous perturbation matrix,
+we map it to (0,1) via a sigmoid, and use the resulting soft
+mask in the forward pass. At evaluation time, we obtain an
+actionable counterfactual hypergraph by thresholding the
+relaxed mask, using0.5as threshold.
+4.3. Method Variants
+We consider two variants that differ in how theΠ is initial-
+ized.
+(NHP) Node–Hyperedge Perturbation.Goal: eliminate
+the participation of a specific node i in selected incident
+hyperedgesε.
+Let π(i) ∈[0,1] M be a vector of hyperedge-wise learnable
+perturbation coefficients for node i, and lift it to a rectangu-
+lar maskΠ (i) ∈[0,1] N×M by
+(Π(i))kε =
+(
+π(i)
+ε ,ifk=i,
+1,ifk̸=i.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Counterfactual Explanations for Hypergraph Neural Networks
+For any neighbor j that communicates with i through a hy-
+peredge ε, the message from j to i now carries a factor π(i)
+ε
+(since H ′
+iε =π (i)
+ε Hiε while H ′
+jε =H jε), so that setting
+π(i)
+ε ≈0 softly (or, in the binary case, hard-) removes the
+contribution carried through ε to the representation of vi
+without altering the incidences of other nodes.
+(HP) Hyperedge Perturbation.Goal: eliminate entire
+hyperedges in the local neighborhood of a target node vi.
+Let Π∈[0,1] N×M be row-constant and tunable only in the
+n-hop neighborhood ofv i, i.e.,
+∀k= 1, ..., N(Π (i))kε =
+(
+πε,ifε∈ N n(i),
+1,ifε /∈ N n(i).
+For every hyperedge ε∈ N n(i) and every incident node
+k to it we have H ′
+kε =π εHkε, while hyperedges outside
+N n(i) are unchanged. Hence, any message that traverses
+a hyperedge ε within the n-hop computation around vi is
+uniformly scaled by πε (note that ε need not be incident
+to vi, it only needs to lie on an information-flow path in
+N n(i)). Setting πε ≈0 therefore suppresses all interactions
+mediated by ε in that neighborhood, effectively removing
+the corresponding conduit of information flow for all nodes
+participating inε.
+Remarks.All variants plug into equation (5) by treating
+the perturbation as a differentiable mask over the neigh-
+borhood structure. When the incidence matrix is modified
+(NHP, HP), we recompute the induced node and hyperedge
+degrees so that normalization remains consistent with the
+perturbed connectivity. The two variants offer complemen-
+tary control: (HP) provides hyperedge-level gating, while
+(NHP) enables finer node-hyperedge edits, allowing differ-
+ent granularities of counterfactual neighborhood interven-
+tion.
+5. Experimental Setup
+5.1. Implementation Details
+We run all experiments on a machine equipped with an
+AMD Ryzen 9 7900 12-Core Processor and an NVIDIA
+GeForce RTX 4090 GPU. Our implementation is based
+on the PyTorch Geometric framework. We implemented
+both variants of the method using dense matrices, similarly
+to CF-GNNExplainer (Lucic et al., 2022), denoted with
+CF-HyperGNNExplainerdense.
+To further improve the speed of our method, we imple-
+mented a version designed for sparse matrices using the
+COO format, denoted with CF-HyperGNNExplainersparse.
+The COO format stores only the non-zero elements of a
+matrix along with their coordinates, which is particularly
+efficient for the hypergraph incidence matrices, which are
+typically very sparse. This version is designed to be faster
+and more memory-efficient, compared to the traditional
+dense version. The code is publicly available on GitHub1.
+5.2. Datasets and Models
+To assess the performance of CF-HyperGNNExplainer, we
+used three widely-used citation network datasets proposed
+by Yang et al. (Yang et al., 2016): Cora, CiteSeer, and
+PubMed. In all the three datasets, nodes represent scien-
+tific papers, edges represent citations, and node features
+are extracted using a bag-of-words approach with a fixed
+vocabulary.
+Cora and CiteSeer share similar dimensionality, with nearly
+3,000 nodes and 10,000 edges, but differ in the number of
+features (1,433 and 3,703, respectively) and classes (7 and
+6, respectively). PubMed is significantly larger, containing
+nearly 20,000 nodes, 90,000 edges, 500 features, and 3
+classes. For all the datasets, we used the train/validation/test
+splits defined by Yang et al. (Yang et al., 2016).
+Since these datasets are originally standard graphs, we con-
+verted them to hypergraphs using a neighborhood-based
+conversion, which is well suited for citation networks. For
+each node i in the graph, we define a hyperedge ϵi that
+contains node i and all its neighbors. This results in a hy-
+pergraph withNnodes andNhyperedges.
+The model used in all the experiments is a 3-layer Hyper-
+graph Convolutional Network inspired by the architecture
+of the one used by Lucic et al. (Lucic et al., 2022), with
+hidden dimensions of 64 and 32, Leaky ReLU activation
+function, a dropout probability of 0.5 used during training,
+and a final linear classification layer. The model was trained
+for 200 epochs using a learning rate of 0.01, a weight decay
+of5×10 −4 and SGD as optimizer.
+5.3. Baselines
+We compared CF-HyperGNNExplainer against two state-
+of-the-art counterfactual explainers for GNNs: CF-
+GNNExplainer (Lucic et al., 2022) and RCExplainer (Bajaj
+et al., 2022). Since both methods are designed for stan-
+dard graphs rather than hypergraphs, we evaluated them in
+two different settings, to ensure a fair comparison with our
+method.
+We tested both baselines on the original Cora graph to as-
+sess their performance on a traditional graph. To perform a
+direct comparison with our hypergraph-based method, we
+converted the Cora hypergraph back to a standard graph
+using star expansion. This step is necessary to evaluate
+1https://anonymous.4open.science/r/
+CF-HyperGNNExplainer-0716
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Counterfactual Explanations for Hypergraph Neural Networks
+how our method performs when the dataset is natively a
+hypergraph, where the alternatives are either using our hy-
+pergraph method directly or converting to a graph and then
+applying graph-native methods. In star expansion, each hy-
+peredge ϵ is replaced by an auxiliary node vϵ, and all the
+nodes incident to the hyperedge are connected to vϵ. While
+this transformation preserves the hypergraph’s higher-order
+information, it produces a substantially larger graph. Specif-
+ically, in our case, the resulting graph has N+N= 2N
+nodes, and its adjacency matrix has size 2N×2N , four
+times larger than the hypergraph representation.
+5.4. Metrics
+For each node in the test split Vtest of the graph, we gener-
+ated a CF example and evaluated the performance of CF-
+HyperGNNExplainer using three metrics.
+Accuracy: is defined as the proportion of nodes for which
+the explainer successfully finds a valid CF example. For-
+mally:
+Accuracy= 1
+|Vtest|
+X
+v∈Vtest
+⊮[∃H ′ :f v(H ′, X)̸=f v(H, X)]
+where fv(H, X) denotes the model’s prediction for the node
+v on the original hypergraph and fv(H ′, X) denotes the
+prediction for the nodevon the CF hypergraph.
+Explanation Size: measures the amount of structural
+change required to obtain a CF example. The definition
+differs depending on the method’s variant. For variant NHP,
+is measured as the number of node-hyperedge incidences
+removed from the original incidence matrix H for the node
+we are considering. For variant HP, the explanation size is
+measured as the number of hyperedges removed from H.
+Formally, the metric for variant NHP is:
+SizeN HP (H, H ′) =
+NX
+i=1
+MX
+ϵ=1
+|Hiϵ −H ′
+iϵ|
+while, the metric for variant HP is:
+SizeHP =
+X
+ϵ∈E
+⊮[ϵ /∈ Ecf]
+where E is the set of hyperedges in the original hypergraph
+andE cf is the set of hyperedges in the CF hypergraph.
+Sparsity: measures the fraction of the original hypergraph
+structure preserved in the CF explanation. For variant NHP,
+it is defined as the fraction of incidences that are preserved
+in the CF hypergraph’s incidence matrixH. Formally:
+SparsityN HP = 1− SizeN HPP
+i,ϵ Hiϵ
+For variant HP, sparsity is defined as the fraction of hyper-
+edges preserved. Formally:
+SparsityHP = 1− SizeHP
+|E|
+5.5. Hyperparameter Search
+We measured the effect of different optimization hyperpa-
+rameters for CF-HyperGNNExplainer, focusing on learning
+rate and the momentum term of the SGD optimizer. In
+particular, we tested learning rates α∈ {0.1,0.01} and mo-
+mentum values m∈ {0,0.5,0.9} on the Cora dataset. The
+results are reported in Tables 3 and 4.
+Across both variants of the method, higher learning rates and
+momentum consistently resulted in higher accuracy (i.e., a
+larger number of valid CF examples). Based on this results,
+we used a learning rate of α= 0.1 and a momentum of
+m= 0.9in all experiments.
+6. Results
+In this section, we present an evaluation of CF-
+HyperGNNExplainer on multiple benchmark datasets. We
+first assess its performance on citation network hypergraphs,
+considering both proposed method’s variants. We then com-
+pare our approach with existing graph-based CF explanation
+methods and provide an ablation study to analyze the impact
+of key optimization hyperparameters.
+6.1. Performance on Citation Networks
+Table 1 illustrates the performance of CF-
+HyperGNNExplainer across the three citation network
+datasets using both the incidence-level (NHP) and
+hyperedge-level (HP) method variants.
+Both variants successfully generated CF explanations across
+all datasets. The NHP variant produced valid counterfactu-
+als for 72.0% of the test nodes on Cora, 72.7% in CiteSeer,
+and 50.6% on PubMed. The HP variant produced valid
+counterfactuals for 64.7% of the test nodes on Cora, 61.3%
+on CiteSeer, and 52.4% on PubMed. Both variants achieved
+lower accuracy on PubMed compared to Cora and CiteSeer,
+likely due to the dataset’s larger scale and sparsity.
+Both variants produced highly sparse explanations, preserv-
+ing most of the original hypergraph structure. For the NHP
+variant, sparsity varies from 89.4% on CiteSeer to 99.9%
+on PubMed, with an average explanation size of 2.5-2.9
+incidence removals. For the HP variant, the sparsity val-
+ues are similar, varying from 89.9% on CiteSeer to 99.9%
+on PubMed, with an average explanation size of 2.9-3.2
+hyperedge removals.
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Counterfactual Explanations for Hypergraph Neural Networks
+6.2. Comparison with Graph-Based Methods
+Table 2 shows the performance difference between CF-
+HyperGNNExplainer and the graph-based baselines on the
+Cora dataset. CF-HyperGNNExplainer achieved the highest
+accuracy (72.0%) among all methods, outperforming both
+CF-GNNExplainer and RCExplainer in both settings: the
+original graph, and the one obtained using star-expansion.
+This result demonstrates that our hypergraph-native ap-
+proach is more effective at producing valid counterfac-
+tual explanations than adapting graph-based methods to
+hypergraphs. In terms of sparsity, CF-HyperGNNExplainer
+(98.2%) and CF-GNNExplainer (96.3% on the original
+graph, 97.5% on the star-expanded graph) both produced
+highly sparse explanations that preserve most of the original
+structure. In contrast, RCExplainer generated significantly
+less sparse explanations (22.2% on the original graph, 25.5%
+on the star-expanded graph), with significantly larger expla-
+nation sizes (7.8 and 19.7 incidence changes, respectively).
+This suggests that RCExplainer requires larger modifica-
+tion to the graph’s structure to generate a counterfactual
+explanation.
+Table 5 reports the average time taken to generate a coun-
+terfactual explanation for each method. The sparse imple-
+mentation of CF-HyperGNNExplainer is significantly faster
+than CF-GNNExplainer, with a speedup of 13.5x for the
+NHP variant and 13.9x for the HP variant. While RCEx-
+plainer is significantly faster than CF-GNNExplainer, it is
+still slower compared to the sparse implementations of CF-
+HyperGNNExplainer.
+These results highlight that CF-HyperGNNExplainer not
+only generates high quality counterfactual explanations, but
+is also significantly faster and more efficient than the graph-
+based methods.
+7. Limitations
+Sparse Hypergraphs.The NHP variant works by remov-
+ing node-hyperedge incidences. For a nodev with degree dv,
+there exist 2dv possible combinations of incidences that can
+be kept or removed. When dv is small enough, exhaustive
+enumeration of all possible combinations becomes feasible
+and more efficient than the proposed method.
+This limitation is specific to the NHP variant, due to the
+node-centric perturbation strategy. The HP strategy, which
+operates on hyperedges within n-hop neighborhood, typi-
+cally generates a larger search space and therefore benefits
+more from gradient-based optimization.
+Random Baseline Performance and Theoretical Lower
+Bound.Random perturbation baselines are able to find a
+large number of valid counterfactuals, but typically gener-
+ate explanations with significantly larger explanation sizes
+compared to the gradient-based approaches. However, for
+the NHP variant in very sparse hypergraphs, there exists a
+lower bound on the probability of randomly discovering the
+smallest counterfactual.
+Assume that the smallest counterfactual exists and is unique.
+For a target node v with degree dv, the probability of ran-
+domly obtaining the minimal counterfactual in t indepen-
+dent sampling attempts, where each incidence is kept or
+removed with probability 1
+2, is given by:
+P(d v, t) = 1−
+
+1−
+1
+2
+dvt
+(8)
+This probability follows from the theory of Bernoulli trials,
+where each sampling attempt represents an independent trial
+with success probability
+  1
+2
+dv
+. It is important to note that
+equation (8) represents a theoretical lower bound on the
+probability, as in practice there may exist multiple coun-
+terfactuals at the same minimal distance from the original
+sample.
+This lower bound demonstrates that in very sparse hyper-
+graphs, the probability of randomly generating the minimal
+counterfactual becomes significantly high, even with a small
+number of sampling attempts. For example, with dv = 5
+andt= 100attempts, the probability exceeds0.95.
+8. Conclusions and Future Work
+In this work, we introduced CF-HyperGNNExplainer, the
+first counterfactual explanation method specifically de-
+signed for Hypergraph Neural Networks. Our approach
+Table 1.Performance of NHP and HP Method Variants on Cora, CiteSeer and PubMed datasets. The values forSparsityandExplanation
+Sizeare calculated as the average of the entire test set, with±standard deviation.
+Method Dataset Variant Accuracy↑ Sparsity↑ Explanation Size↓
+CF-HyperGNNExplainer Cora NHP 0.720 0.982±0.084 2.917±1.487
+CF-HyperGNNExplainer CiteSeer NHP 0.727 0.894±0.178 2.667±1.423
+CF-HyperGNNExplainer PubMed NHP 0.506 0.999±1.631×10 −5 2.488±1.691
+CF-HyperGNNExplainer Cora HP 0.647 0.986±0.078 3.202±3.262
+CF-HyperGNNExplainer CiteSeer HP 0.613 0.899±0.206 3.052±2.818
+CF-HyperGNNExplainer PubMed HP 0.524 0.999±1.334×10 −4 2.863±2.601
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Counterfactual Explanations for Hypergraph Neural Networks
+generates counterfactual explanations by performing min-
+imal edits to the hyperghraph incidence matrix, either by
+removing node-hyperedge incidences (NHP variant) or by
+removing entire hyperedges (HP variant).
+Experimental results on three citation network datasets
+demonstrate that CF-HyperGNNExplainer successfully gen-
+erates valid and concise counterfactual explanations. Both
+method variants achieve high accuracy (up to 72.7% on Cite-
+Seer), while maintaning high sparsity, indicating that only
+minimal changes are required to alter the model prediction.
+We then compared our method to existing state-of-the-art
+counterfactual explainers for graphs, demonstrating that CF-
+HyperGNNExplainer outperforms these approaches both
+in terms of the number of valid counterfactuals found and
+explanation quality. Moreover, our sparse implementation
+achieves significant computational efficiency gains, with
+speedups of up to 13.9x compared to graph-based models.
+Both variants of CF-HyperGNNExplainer are currently re-
+stricted to deletion operations on the incidence matrix and
+are designed for node classification. Future work will
+broaden the set of allowable interventions to generate richer
+counterfactuals, including perturbations of node features and
+the addition of incidences or hyperedges. Another promis-
+ing direction is to extend the method to hypergraph-level
+prediction tasks (hypergraph classification), which, while
+less common than node classification, are increasingly rele-
+vant in several application domains.
+Table 2.Performance comparison of CF-HyperGNNExplainer NHP variant and CF-GNNExplainer methods. The * denotes the variants
+operating on the graph obtained from the hypergraph using star expansion.
+Method Dataset Variant Accuracy↑ Sparsity↑ Explanation Size↓
+CF-HyperGNNExplainer (ours) Cora NHP 0.720 0.982±0.084 2.917±1.487
+CF-GNNExplainer* Cora N/A 0.497 0.975±0.088 3.044±2.687
+CF-GNNExplainer Cora N/A 0.499 0.963±0.151 2.379±1.913
+RCExplainer* Cora N/A 0.575 0.255±0.383 19.743±18.149
+RCExplainer Cora N/A 0.410 0.222±0.363 7.800±16.424
+Table 3.Performance comparison between the NHP and HP strategies using different learning rates using the Cora Dataset. A lower
+learning rate enables the generation of smaller counterfactual samples, but reduces the number of samples found in the test set.
+Learning Rate Variant Accuracy↑ Sparsity↑ Explanation Size↓
+0.1 NHP 0.720 0.982±0.084 2.917±1.487
+0.01 NHP 0.453 0.983±0.084 2.188±1.081
+0.1 HP 0.647 0.986±0.078 3.202±3.262
+0.01 HP 0.385 0.989±0.071 1.969±1.006
+Table 4.Performance comparison between the NHP and HP strategies using different momentum values for SGD, using the Cora Dataset.
+Momentum Variant Accuracy↑ Sparsity↑ Explanation Size↓
+0.9 NHP 0.720 0.982±0.084 2.917±1.487
+0.5 NHP 0.464 0.979±0.094 2.205±1.104
+0 NHP 0.454 0.983±0.084 2.187±1.084
+0.9 HP 0.647 0.986±0.078 3.202±3.262
+0.5 HP 0.388 0.996±0.036 1.884±0.963
+0 HP 0.309 0.996±0.041 1.583±0.713
+Table 5.Average time to generate a CF explanation between CF-HyperGNNExplainer and the graph-based methods (in seconds).
+Method Dataset Variant Explanation Time Speedup
+CF-HyperGNNExplainerdense (ours) Cora NHP 19.630 2.3x
+CF-HyperGNNExplainersparse (ours) Cora NHP 3.299 13.5x
+CF-HyperGNNExplainerdense (ours) Cora HP 6.282 7.1x
+CF-HyperGNNExplainersparse (ours) Cora HP 3.190 13.9x
+CF-GNNExplainer* Cora N/A 44.449 1.0x
+RCExplainer* Cora N/A 4.891 9.1x
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Counterfactual Explanations for Hypergraph Neural Networks
+References
+an Bi, X., Luo, S., Jiang, S., Wang, Y ., Xing, Z., and
+Xu, L. Explainable and programmable hypergraph
+convolutional network for imaging genetics data fusion.
+Information Fusion, 100:101950, 2023. ISSN 1566-2535.
+doi: https://doi.org/10.1016/j.inffus.2023.101950.
+URL https://www.sciencedirect.com/
+science/article/pii/S156625352300266X.
+Bajaj, M., Chu, L., Xue, Z. Y ., Pei, J., Wang, L., Lam, P. C.-
+H., and Zhang, Y . Robust counterfactual explanations on
+graph neural networks, 2022. URL https://arxiv.
+org/abs/2107.04086.
+Battiston, F., Cencetti, G., Iacopini, I., Latora, V ., Lucas, M.,
+Patania, A., Young, J., and Petri, G. Networks beyond
+pairwise interactions: Structure and dynamics.Physics
+Reports, 874:1–92, August 2020. ISSN 0370-1573. doi:
+10.1016/j.physrep.2020.05.004. Publisher Copyright: ©
+2020 The Authors.
+Feng, Y ., You, H., Zhang, Z., Ji, R., and Gao, Y . Hy-
+pergraph neural networks. InProceedings of the
+Thirty-Third AAAI Conference on Artificial Intelli-
+gence and Thirty-First Innovative Applications of Ar-
+tificial Intelligence Conference and Ninth AAAI Sym-
+posium on Educational Advances in Artificial Intelli-
+gence, AAAI’19/IAAI’19/EAAI’19. AAAI Press, 2019.
+ISBN 978-1-57735-809-1. doi: 10.1609/aaai.v33i01.
+33013558. URL https://doi.org/10.1609/
+aaai.v33i01.33013558.
+Kim, S., Lee, S. Y ., Gao, Y ., Antelmi, A., Polato, M.,
+and Shin, K. A survey on hypergraph neural networks:
+An in-depth and step-by-step guide. InProceedings
+of the 30th ACM SIGKDD Conference on Knowledge
+Discovery and Data Mining, KDD ’24, pp. 6534–6544,
+New York, NY , USA, 2024. Association for Comput-
+ing Machinery. ISBN 9798400704901. doi: 10.1145/
+3637528.3671457. URL https://doi.org/10.
+1145/3637528.3671457.
+Lucic, A., Ter Hoeve, M. A., Tolomei, G., De Rijke, M.,
+and Silvestri, F. Cf-gnnexplainer: Counterfactual expla-
+nations for graph neural networks. In Camps-Valls, G.,
+Ruiz, F. J. R., and Valera, I. (eds.),Proceedings of The
+25th International Conference on Artificial Intelligence
+and Statistics, volume 151 ofProceedings of Machine
+Learning Research, pp. 4499–4511. PMLR, 28–30 Mar
+2022. URL https://proceedings.mlr.press/
+v151/lucic22a.html.
+Luo, D., Cheng, W., Xu, D., Yu, W., Zong, B., Chen,
+H., and Zhang, X. Parameterized explainer for
+graph neural network. In Larochelle, H., Ranzato,
+M., Hadsell, R., Balcan, M., and Lin, H. (eds.),
+Advances in Neural Information Processing Systems,
+volume 33, pp. 19620–19631. Curran Associates, Inc.,
+2020. URL https://proceedings.neurips.
+cc/paper_files/paper/2020/file/
+e37b08dd3015330dcbb5d6663667b8b8-Paper.
+pdf.
+Maleki, S., Hajiramezalani, E., Scalia, G., Bian-
+calani, T., and Chuang, K. V . Learning to ex-
+plain hypergraph neural networks. URL https:
+//api.semanticscholar.org/CorpusID:
+271910080.
+Su, S., Duta, I., Magister, L. C., and Li `o, P. Explaining
+hypergraph neural networks: From local explanations to
+global concepts, 2024. URL https://arxiv.org/
+abs/2410.07764.
+Wachter, S., Mittelstadt, B., and Russell, C. Counterfactual
+Explanations without Opening the Black Box: Automated
+Decisions and the GDPR.Harvard Journal of Law &
+Technology., 31:841–887, 2017.
+Yadati, N., Nimishakavi, M., Yadav, P., Nitin, V ., Louis, A.,
+and Talukdar, P.HyperGCN: a new method of training
+graph convolutional networks on hypergraphs. Curran
+Associates Inc., Red Hook, NY , USA, 2019.
+Yang, Z., Cohen, W. W., and Salakhutdinov, R. Revisiting
+semi-supervised learning with graph embeddings, 2016.
+URLhttps://arxiv.org/abs/1603.08861.
+Ying, R., Bourgeois, D., You, J., Zitnik, M., and Leskovec,
+J.GNNExplainer: generating explanations for graph
+neural networks. Curran Associates Inc., Red Hook, NY ,
+USA, 2019.
+Yu, L., Cai, Y ., Zhang, M., and Hu, X. Self-explaining
+hypergraph neural networks for diagnosis prediction. In
+Xu, X. O., Choi, E., Singhal, P., Gerych, W., Tang, S.,
+Agrawal, M., Subbaswamy, A., Sizikova, E., Dunn, J.,
+Daneshjou, R., Sarker, T., McDermott, M., and Chen, I.
+(eds.),Proceedings of the sixth Conference on Health,
+Inference, and Learning, volume 287 ofProceedings of
+Machine Learning Research, pp. 908–924. PMLR, 25–
+27 Jun 2025. URL https://proceedings.mlr.
+press/v287/yu25a.html.
+Zhou, D., Huang, J., and Sch ¨olkopf, B. Learning
+with hypergraphs: Clustering, classification, and
+embedding. In Sch ¨olkopf, B., Platt, J., and Hoff-
+man, T. (eds.),Advances in Neural Information
+Processing Systems, volume 19. MIT Press, 2006.
+URL https://proceedings.neurips.
+cc/paper_files/paper/2006/file/
+dff8e9c2ac33381546d96deea9922999-Paper.
+pdf.
+9

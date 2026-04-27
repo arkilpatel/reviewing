@@ -1,0 +1,2436 @@
+%%%%%%%% ICML 2026 LATEX SUBMISSION FILE %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+% Choose ONE:
+
+\usepackage[nohyperref]{icml2026}
+% \usepackage[nohyperref]{icml2026}
+
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage[linesnumbered,ruled,vlined,algo2e]{algorithm2e}
+\SetKwInput{KwRequire}{Require}
+\SetKwInput{KwEnsure}{Ensure}
+\SetAlgoNlRelativeSize{-1}
+\SetKwComment{Comment}{$\triangleright$ }{}
+\SetAlgoInsideSkip{smallskip}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+
+\usepackage{caption}
+\usepackage{listings}
+
+\usepackage{tcolorbox}
+\tcbset{colback=white,colframe=black!60,boxrule=0.6pt,arc=2pt,auto outer arc,
+        leftrule=0.8pt,rightrule=0.8pt,top=4pt,bottom=4pt}
+% For preprint, use:
+% \usepackage{icml2026}
+
+% If accepted, for the camera-ready submission use:
+% \usepackage{icml2026}
+
+% Math packages
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+% Clever references (for Theorem 1, Lemma 2, etc.)
+\usepackage[capitalize,noabbrev]{cleveref}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+% Todonotes (disable in final):
+% \usepackage[disable,textsize=tiny]{todonotes}
+\usepackage[textsize=tiny]{todonotes}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+
+% Short form for running title in the header
+\icmltitlerunning{De-Linearizing Agent Traces via Latent Partial Orders}
+
+\begin{document}
+
+\twocolumn[
+  \icmltitle{De-Linearizing Agent Traces:\\
+    Bayesian Inference of Latent Partial Orders for Efficient Execution}
+
+  % It is OK to include author information; the style file will
+  % hide it automatically for anonymous submissions (no [accepted] option).
+
+% Define equal contribution if needed:
+% \icmlsetsymbol{equal}{*}
+
+\begin{icmlauthorlist}\icmlauthor{Anonymous}{anon}\end{icmlauthorlist}
+
+% Affiliations
+\icmlaffiliation{anon}{Anonymous Institution}
+
+
+
+
+% Corresponding Author
+\icmlcorrespondingauthor{Anonymous}{anonymous@anonymous.invalid}
+
+  % Keywords only go into PDF metadata (not printed)
+  \icmlkeywords{Partial Orders, Reinforcement Learning, Agents trace}
+
+  \vskip 0.3in
+]
+
+% Create affiliations + copyright / equal-contribution footnote.
+% Use ONE of the following lines. Do NOT remove the command itself.
+\printAffiliationsAndNotice{}  % no special notice
+
+\begin{abstract}
+AI agents increasingly execute procedural workflows as sequential action traces, which obscures latent concurrency and induces repeated step-by-step reasoning. We introduce BPOP, a Bayesian framework that infers a latent dependency partial order from noisy linearized traces. BPOP models traces as stochastic linear extensions of an underlying graph and performs efficient MCMC inference via a tractable frontier-softmax likelihood that avoids \#P-hard marginalization over linear extensions. We evaluate on our open-sourced Cloud-IaC-6, a suite of cloud provisioning tasks with heterogeneous LLM-generated traces, and WFCommons scientific workflows. BPOP recovers dependency structure more accurately than trace-only and process-mining baselines, and the inferred graphs support a compiled executor that prunes irrelevant context, yielding substantial reductions in token usage and execution time.
+
+\end{abstract}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% MAIN TEXT
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\section{Introduction}
+\label{sec:intro}
+
+Large language model (LLM) agents are increasingly deployed for multi-step procedural tasks, yet their execution remains inefficient and unreliable. A common design pattern treats each decision step as a fresh planning problem, repeatedly invoking expensive reasoning even for tasks that have been successfully executed many times before. This repeated re-planning not only incurs substantial computational cost~\cite{zhang2025costefficientservingllmagents,gao2026surveyselfevolvingagentswhat}, but also increases exposure to stochastic execution errors such as hallucinated actions or invalid plans~\cite{valmeekam2023planbenchextensiblebenchmarkevaluating}. These issues suggest that reliable autonomy requires mechanisms for \emph{reusing} previously successful procedural structure, rather than re-deriving it from scratch at every execution.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/BPOP2.pdf}
+  \vspace{-5mm}
+    \caption{\textbf{System Architecture Comparison.} The \textbf{Traditional Agent} (left) functions as a ``Perpetual Intern,'' where reliance on ``Cognitive Redundancy'' and ``Sequential Execution'' creates a bottleneck of high latency. In contrast, the \textbf{BPOP Agent} (right) operates as a ``Domain Expert,'' utilizing ``BPOP Inference'' to explicitly de-linearize traces into verifiable ``Executable SOPs'.}
+    \label{fig:motivation}
+\vspace*{-1.5em}
+\end{figure}
+
+
+In this work, we propose to recover and reuse such structure by explicitly modeling the latent dependencies underlying agent executions. We introduce \textbf{Bayesian Partial Order Planning (BPOP)}, a probabilistic framework that infers an explicit procedural graph from historical agent traces. Rather than encoding procedural knowledge implicitly in neural parameters through reinforcement learning or fine-tuning, BPOP treats execution logs as noisy observations of an underlying \emph{partial order} over actions. Each trace is modeled as a stochastic linear extension of this partial order, allowing us to invert the generative process and recover a structured representation analogous to a reusable Standard Operating Procedure (SOP).
+
+The core algorithmic challenge is that probabilistic inference over partial orders is notoriously difficult; marginalizing over all valid linear extensions is \#P-complete ~\citep{brightwell1991counting}. We circumvent this bottleneck by introducing a tractable \emph{plan-conditioned frontier-softmax likelihood}. This model scores steps based on local frontier feasibility rather than uniform enumeration. It is a better generative model and much easier to invert. The inferred posterior structure can then be compiled into a lightweight executor that restricts action selection to feasible frontiers, reducing unnecessary reasoning and execution variance.
+
+\noindent \textbf{Contributions.}
+\textbf{(1) Bayesian poset model for agent traces.} We formulate the structure learning problem by mapping action embeddings to a strict partial order and treating logs as stochastic linearizations.
+\textbf{(2) Tractable frontier-softmax likelihood.} We propose a novel likelihood function that depends only on frontier availability, enabling efficient MCMC inference without \#P-complete linear-extension counting.
+\textbf{(3) Compilation to efficient execution.} We show that executing the inferred graph reduces token consumption while improving structure recovery compared to baselines.
+
+
+\section{Background and Problem Formulation}
+\label{sec:background}
+Our objective is to infer an \emph{interpretable, executable action program} in the form of a partial order, which is a DAG.  
+
+\noindent \textbf{Preliminaries (partial orders).}
+Let $\mathcal{A}=\{1,\dots,m\}$ denote the set of actions with size $m$.
+A (strict) partial order is a binary relation $\succ$ on $A$ that is
+(i) \emph{irreflexive} ($i \not\succ i$) and (ii) \emph{transitive}
+($i \succ j \wedge j \succ k \Rightarrow i \succ k$).
+We represent $\succ$ by an adjacency matrix $h\in\{0,1\}^{m\times m}$ where
+$h_{ij}=1 \iff i \succ j$.
+The matrix $h$ encodes all implied dependencies, and the \emph{transitive reduction} of $h$ yields the DAG cover (Hasse diagram Figure~\ref{fig:poset-dag-hasse-le} left) with no redundant edges (See the full preliminary in Appendix~\ref{appendix:preliminaries_po}).
+
+\noindent \textbf{Action precedence model.} We consider tasks defined over a finite set of atomic actions $\mathcal{A}$ (Appendix~\ref{app:action_definition}).
+Rather than modeling a state-dependent policy $\pi(a_t \mid s_t)$, we operate in a
+\emph{state-free} regime and assume access only to execution traces.
+We posit a latent strict partial order $h=(\mathcal{A},\succ_h)$, where
+$a_i \succ_h a_j$ denotes a necessary precedence constraint and
+$a_i \parallel_h a_j$ denotes potential concurrency.
+
+We do not observe $h$ directly. Instead, we observe a dataset
+$\mathcal{D}=\{y^{(1)},\dots,y^{(n)}\}$ of $n$ successful execution logs, where each trace
+$y^{(i)}\in\mathcal{D}$ is a total order over a subset of $\mathcal{A}$. 
+Those heterogeneous traces are from different LLMs completing the same task. We treat each trace as a (possibly noisy)
+\emph{linear extension} of the latent partial order (Figure~\ref{fig:poset-dag-hasse-le} right;
+ definitions are in Appendix~\ref{appendix:preliminaries_po}).
+\begin{figure}[t!]
+  \centering
+  \begin{tikzpicture}[
+    scale=0.85, transform shape, % Overall scale reduction
+    % Define custom x and y unit vectors to squeeze the graph
+    x=1.5cm, y=1.2cm, 
+    vtx/.style     = {circle, draw, thick, minimum size=5mm, inner sep=0pt, font=\small\bfseries},
+    bluevtx/.style = {vtx, fill=blue!10}, 
+    % Style for Arrows (Directed Edges)
+    edgec/.style   = {->, line width=1pt, draw=black, shorten >=1pt},
+    lab/.style     = {draw=none, font=\small, align=center}
+  ]
+
+  % ===== Left: Hasse diagram (Compressed) =====
+  \begin{scope}[xshift=0cm]
+    % Top layer
+    \node[bluevtx] (r1) at (0,3.0)   {$a_1$};
+    \node[bluevtx] (r2) at (1.5,3.0) {$a_2$};
+    
+    % Middle layer
+    \node[vtx] (r3) at (0,1.5)   {$a_3$};
+    \node[vtx] (r4) at (1.5,1.5) {$a_4$};
+    
+    % Bottom layer
+    \node[vtx] (r5) at (0.75,0.0)   {$a_5$};
+  
+    \draw[edgec] (r1) -- (r3);
+    \draw[edgec] (r2) -- (r3);
+    \draw[edgec] (r2) -- (r4);
+    \draw[edgec] (r3) -- (r5);
+  
+    % Highlight frontier (Red Rings)
+    \draw[thick, red] (r1) circle [radius=0.28]; 
+    \draw[thick, red] (r2) circle [radius=0.28];
+  
+    \node[lab] at (0.75,-0.6) {Hasse Diagram\\(Latent Plan)};
+    \node[lab, text=red!80!black] at (0.75,3.6) {Frontier=$\{a_1,a_2\}$};
+  \end{scope}
+  
+  % ===== Right: Traces (Compressed side-by-side) =====
+  \begin{scope}[xshift=3.5cm]
+    
+    % Execution 1
+    \foreach \val/\y/\style in {a_1/3.0/bluevtx, a_2/2.25/bluevtx, a_3/1.5/vtx, a_4/0.75/vtx, a_5/0.0/vtx}{
+      \node[\style] (eA\val) at (0,\y) {$\val$};
+    }
+    \foreach \u/\v in {a_1/a_2, a_2/a_3, a_3/a_4, a_4/a_5}{
+      \draw[edgec] (eA\u) -- (eA\v);
+    }
+    \node[lab] at (0,-0.6) {Trace 1};
+
+    % % Execution 2
+    % \foreach \val/\y/\style in {a_2/3.0/bluevtx, a_1/2.25/bluevtx, a_3/1.5/vtx, a_4/0.75/vtx, a_5/0.0/vtx}{
+    %   \node[\style] (eB\val) at (1.2,\y) {$\val$};
+    % }
+    % \foreach \u/\v in {a_2/a_1, a_1/a_3, a_3/a_4, a_4/a_5}{
+    %   \draw[edgec] (eB\u) -- (eB\v);
+    % }
+    % \node[lab] at (1.2,-0.6) {Trace 2};
+  
+    % Execution 2 - GKN updated so traces do determine PO - old is above
+    \foreach \val/\y/\style in {a_2/3.0/bluevtx, a_4/2.25/vtx, a_1/1.5/bluevtx, a_3/0.75/vtx, a_5/0.0/vtx}{
+      \node[\style] (eB\val) at (1.2,\y) {$\val$};
+    }
+    \foreach \u/\v in {a_2/a_4, a_4/a_1, a_1/a_3, a_3/a_5}{
+      \draw[edgec] (eB\u) -- (eB\v);
+    }
+    \node[lab] at (1.2,-0.6) {Trace 2};
+    
+    % Header spanning both
+    \node[lab] at (0.6, 3.6) {Observed Linear\\Extensions};
+  \end{scope}
+  
+  \end{tikzpicture}
+  \vspace{-2mm}
+  \caption{\textbf{From Chaos to Structure.} BPOP infers the latent Hasse diagram (Left) from diverse linear traces (Right), identifying that $a_1$ and $a_2$ are concurrent (Frontier).}
+  \label{fig:poset-dag-hasse-le}
+  \vspace{-1.5em}
+\end{figure}
+
+\noindent \textbf{Structural Coverage (IP-Cov).}
+Concurrency is identifiable only when traces exhibit sufficient variation to rule out fixed dependencies. We define IP-Cov as the fraction of ground-truth incomparable pairs $\mathcal{P}=\{(i,j): h_{ij}=h_{ji}=0\}$ that are witnessed in \emph{both} relative directions ($a_i \succ a_j$ and $a_j \succ a_i$). This metric acts as a quantifiable proxy for trace diversity (formal definition in Appendix~\ref{app:cp_cov_def}). For the practical data acquisition strategy used to maximize this coverage in the absence of ground truth, see Appendix~\ref{app:trace_acquisition}.
+
+\noindent \textbf{Inference Problem.}
+We formulate the recovery of agent control structure as Bayesian rank aggregation~\citep{nicholls2024bayesianinferencepartialorders}.
+The environment arbitrarily serializes concurrent actions, conflating essential precedence constraints with incidental ordering. Successful execution traces $\mathcal{D}=\{y^{(1)},\dots,y^{(n)}\}$ are
+\emph{linear extensions} of an unknown true partial order $h^\star$ expressing precedence.
+The Bayes posterior summarizes these data and allows us to compute estimators $\widehat{h}$ minimizing the Bayes risk for $h^\star$, disentangling true order-dependencies from random serialization effects.
+
+Importantly, $\widehat{h}$ is not only a statistical estimate but an \emph{operational abstraction}.
+When compiled into a frontier-based execution engine, it defines a deterministic and parallelizable control policy
+that replaces repeated per-step LLM planning in routine settings.
+Our experiments therefore evaluate a dual claim: (i) that partial-order structure is statistically identifiable from traces,
+and (ii) that improvements in structural recovery yield measurable reductions in runtime reasoning cost during execution.
+
+\noindent \textbf{Problem Scope: Convergent Procedural Tasks.}
+BPOP targets convergent domains governed by stable dependencies (e.g., cloud provisioning). We treat execution traces as \emph{unrolled} acyclic graphs, where repeated actions map to distinct occurrences ($A_1 \to B \to A_2$). This formulation allows us to distill strict partial orders from cyclic agent policies. It is particularly valuable for enterprise SOP automation---such as Customer Relationship Management (CRM) lead qualification, Enterprise Resource Planning (ERP) ticket resolution, or user onboarding. While \citet{hong2024metagpt} demonstrated that SOPs significantly improve agent reliability, our approach models these SOPs from traces, essential for amortizing the high cost of inference in production.
+
+\section{Methodology: Bayesian Partial Order Planning Model}
+\label{sec:po-model}
+
+
+We formulate \emph{de-linearizing} agent traces as a Bayesian structure learning task. Rather than imposing rigid graph constraints that limit expressivity, we model the underlying task logic using a continuous latent space representation.
+
+Our prior over partial orders is a variant \citep{nicholls2024bayesianinferencepartialorders} of a random order \citep{winkler1985random}. Each atomic action $a_j \in \mathcal{A}$ is associated with a $K$-dimensional latent vector $U_{j} \in \mathbb{R}^K$(See Figure~\ref{fig:latent_vectors}). The discrete partial order $h = (\mathcal{A}, \succ_h)$ is induced by component-wise dominance across these $K$ latent dimensions:
+  \vspace{-1em}
+\begin{equation}
+    a_i \succ_h a_j \iff U_{i,k} > U_{j,k} \quad \forall k \in \{1, \dots, K\}.
+\end{equation}
+This formulation interprets a partial order as the intersection of $K$ total orders (realizers). As the dimensionality $K$ increases, the model gains the capacity to represent any finite partial order \citep{dushnik1941partially}, allowing it to capture complex, overlapping dependencies that simpler tree-based models often miss. 
+
+% --- Figure Code ---
+\begin{figure}[t]
+    \centering
+    \begin{tikzpicture}
+    
+      \begin{axis}[
+        width=6cm,       % Reduced width
+        height=3.5cm,      % Reduced height
+        xmin=0.8, xmax=3.2,
+        ymin=-2.4, ymax=5.0,
+        xtick={1,2,3},
+        xlabel={\footnotesize Latent Dimension $k$},
+        ylabel={\footnotesize Latent Value $U_{j,k}$},
+        axis lines=left,
+        every axis plot/.style={very thick, mark=*, mark size=1pt},
+        legend pos=north east,
+        grid=major,
+        grid style={dashed, gray!30}
+      ]
+      
+      % --- Action 1 (Dominates all) ---
+      \addplot[color=black] coordinates {(1,3.8) (2,4.5) (3,3.1)};
+      \node[above, font=\bfseries\tiny] at (axis cs:2,3.2) {Action 1};
+
+      % --- Action 2 (Concurrent with 3) ---
+      \addplot[color=red!70!black] coordinates {(1,1.6) (2,0) (3,0.9)};
+      \node[below right, text=red!70!black, font=\bfseries\tiny] at (axis cs:1,2.5) {Action 2};
+
+      % --- Action 3 (Concurrent with 2) ---
+      \addplot[color=blue!60!black] coordinates {(1,0.3) (2,2.0) (3,0.2)};
+      \node[above, text=blue!60!black, font=\bfseries\tiny] at (axis cs:2,2.0) {Action 3};
+
+      % --- Action 4 (Dominated by all) ---
+      \addplot[color=cyan!70!black] coordinates {(1,-1.6) (2,-1.1) (3,-2.0)};
+      \node[below, text=cyan!70!black, font=\bfseries\tiny] at (axis cs:3,-0.5) {Action 4};
+      
+      \end{axis}
+    \end{tikzpicture}
+\caption{\textbf{Latent Representation of Partial Order.} Action 1 strictly dominates all others ($1 \succ \{2,3,4\}$). Actions 2 and 3 intersect across dimensions, encoding concurrency ($2 \parallel 3$).}
+\vspace{-10pt} % Pulls main text closer to figure bottom
+    \label{fig:latent_vectors}
+\end{figure}
+
+
+
+
+\subsection{The Prior over latent embeddings}
+\label{subsec:prior}
+
+For a scenario with $m$ actions and latent dimension $K$, we place a Gaussian prior over action embeddings:
+\begin{align}
+  U_{j} &\sim \mathcal{N}\!\bigl(\mathbf 0,\Sigma_\rho\bigr)\label{eq:rows-global}\\
+  h &= \text{Dom}(U) \label{eq:posets}
+\end{align}
+\noindent \textbf{Gaussian prior (Eq.~\ref{eq:rows-global})}
+The matrix $U \in \mathbb{R}^{N \times K}$ parameterizes preference relations over actions. Each action vector $U_{j}$ is drawn from a zero-mean multivariate normal distribution, independently for each $j$. The covariance matrix $\Sigma_\rho \in \mathbb{R}^{K\times K}$ has a simple exchangeable form (e.g., $\Sigma_\rho = (1-\rho)I + \rho \mathbf{1}\mathbf{1}^\top$ with $\rho\in[0,1]$).
+We optionally infer $\rho$ and $K$ (via a truncated Poisson prior on $K$) to control the depth and complexity
+of the poset.
+
+\textbf{Latent dependency structure  (Eq.~\ref{eq:posets}):} 
+The dominance operator $\text{Dom}(\cdot)$ serves as the bridge between the continuous latent space and the discrete graph topology. It deterministically maps the agent's vector matrix $U$ to a partial order $h$ via the intersection rule defined in Eq.~(1): a directed edge $a_i \to a_j$ exists if and only if action $i$ dominates action $j$ across all $K$ dimensions(See Figure~\ref{fig:latent_vectors}). 
+
+\subsection{Generative Process: Frontier and Noisy Execution}
+\label{subsec:gen}
+
+Given a latent dependency structure $h$ (a strict partial order over action instances), each observed trace
+$y^{(i)}=(y_1,\ldots,y_T)$ is modeled as the outcome of a sequential execution process (linear extension) constrained of $h$: hard precedence constraints are respected, while the ordering of concurrent actions is resolved through agent decision-making rather than arbitrary serialization. This formulation separates true dependency relations from incidental serializations due to single-threaded execution or logging artifacts. We propose the likelihood as a Plackett–Luce (stagewise MNL, \citep{luce1959individual} model restricted to the poset frontier. This is a Plackett--Luce model with a \emph{state-dependent} choice set or Boltzmann distribution \cite{ziebart2008maximum} over the set of topologically feasible actions:
+
+\noindent \textbf{Feasibility via the frontier.}
+Given a observed trace $y$, let $y_{<t}=(y_1,\ldots,y_{t-1})$ denote its prefix.
+Given a partial order $h=(\mathcal{A},\succ_{h})$, define the set of
+remaining (not-yet-executed) actions at time $t$ as
+$R_t \triangleq \mathcal{A}\setminus \{y_1,\ldots,y_{t-1}\}$.
+The feasible set at time $t$ is the \emph{frontier}, i.e., the set of minimal elements of $R_t$
+under $\succ_{h}$:
+\begin{equation}
+\mathcal{F}_t\!\left(h;y_{<t}\right)
+\triangleq
+\left\{
+a\in R_t \;:\; \nexists\, b\in R_t \text{ such that } b \succ_{h} a
+\right\}.
+\label{eq:frontier_def}
+\end{equation}
+Equivalently, $a\in \mathcal{F}_t$ iff all of its  prerequisites under $h$
+have been completed.
+Any linear extension consistent with $h$ must satisfy $y_t\in \mathcal{F}_t(h;y_{<t})$ for every step $t$.
+
+\noindent \textbf{Frontier-softmax likelihood.}
+An agent working from partial order $h$ selects action $y_t$ from the current frontier $\mathcal{F}_t(h)$ (Eq.~\ref{eq:frontier_def}) with probability weighted by \emph{successor utility} $Q(y_t;h,t)$. The conditional probability it selects $y_t$ next is:
+\begin{equation}
+p(y_t \mid y_{<t}, h)
+\;=\;
+(1-\epsilon)\,
+\frac{\exp\!\left(\beta\, Q(y_t;h,t)\right)}
+{\sum_{a\in \mathcal{F}_t(h)} \exp\!\left(\beta\, Q(a;h,t)\right)}
+\;+\;
+\frac{\epsilon}{|R_t|},
+\label{eq:frontier_softmax}
+\end{equation}
+where the first term is set equal $0$ when $y_t\notin\mathcal{F}_t(h)$.
+
+Here, $\beta > 0$ is the \emph{inverse temperature}, controlling how sharply the policy concentrates on high-utility actions~\citep{sutton2018reinforcement}. This parameter allows the model to adapt to agents of varying rationality. The parameter $\epsilon$ introduces a ``trembling-hand'' component~\citep{selten1975reexamination}, mixing the rational frontier choice with a uniform distribution over all remaining actions. This regularization ensures the likelihood remains strictly positive when logging latency causes the observed trace to violate the partial order $h$.
+
+\noindent \textbf{Successor Utility.}
+%In our plan-free variant, we replace the reference trajectory with 
+The utility $Q$ is a topological heuristic based on \textit{descendant cardinality}. We score each feasible action $a \in \mathcal{F}_t$ by the size of its reachable subgraph in the latent partial order $\widehat{h}$. This policy prioritizes bottleneck actions that are the prerequisites for the largest number of future actions. Let $S_t(a)$ be the descendant-count at step $t$:
+\begin{equation} 
+\label{eq:q_succ}
+\begin{split} 
+S_t(a) &\triangleq \left|\{\,b\in R_t : a \succ_{h} b\,\}\right|, \\ 
+Q_{\text{succ}}(a;h,t) &= 
+\begin{cases} 
+\log(1+S_t(a)), & a\in \mathcal{F}_t(h),\\ 
+-\infty, & \text{otherwise}. 
+\end{cases} 
+\end{split} 
+\end{equation}
+The transformation $\log(1+S_t(a))$ imposes diminishing returns for massive subgraphs to prevent them from dominating the probability distribution, while ensuring a defined score for leaf nodes (where $S_t(a)=0$). See Appendix~\ref{app:likelihood_visual} for a visual breakdown of this stepwise likelihood.
+
+A generic trace $y$ is built sequentially with likelihood
+\begin{equation}
+p\!\left(y \mid h, \beta, \epsilon\right)
+\;=\;
+\prod_{t=1}^{T} p\!\left(y_t \mid y_{<t}, h, \beta, \epsilon\right).
+\label{eq:trace_likelihood}
+\end{equation}
+
+\vspace{-10pt} % Pulls main text closer to figure bottom
+\noindent \textbf{Tractability.} 
+Standard likelihoods that marginalize over linear extensions face \#P-complete counting complexity. BPOP sidesteps this by decomposing the trace into sequential local choices from the feasible frontier (Eq.~\ref{eq:frontier_softmax}). As derived in Appendix~\ref{app:complexity}, this formulation allows likelihood evaluation in polynomial time $\mathcal{O}(|\succ_h| + T|\mathcal{A}|)$ rather than factorial time. This computational efficiency renders full posterior inference practical for long execution logs.
+
+\subsection{Posterior Inference}
+\label{sec:inference}
+
+We infer the latent SOP structure and hierarchical parameters in a Bayesian framework.
+Let $\mathcal{D}=\{y^{(i)}\}$ denote the set of successful traces.
+The unknowns are the embedding $U\in\mathbb{R}^{m\times K}$, $\rho$, the inverse temperature $\beta>0$ and
+optionally the latent dimension $K$. The posterior is
+\begin{equation}
+\begin{aligned}
+p(U,\rho,\tau,\beta,K \mid \mathcal{D})
+\;&\propto\;
+p\!\left(U \mid \rho,K\right) p(\rho)\,\,p(\beta)\,p(K)\\
+&\qquad\times\ \prod_i p\!\left(y^{(i)} \mid h(U),\beta, \epsilon \right). 
+\end{aligned}
+\label{eq:posterior}
+\end{equation}
+Here, $p(y^{(i)}\mid h(U),\beta,\epsilon)$ is the frontier-softmax likelihood (Eq.~\ref{eq:trace_likelihood}); we treat the slip rate $\epsilon$ as a fixed hyperparameter to ensure numerical stability. The prior for $U$ is given in Eqs.~\ref{eq:rows-global}--\ref{eq:posets} and for $\rho,\ \beta$ and $K$ in Appendix~\ref{app:mcmc_details}. For inference, we employ a Metropolis-within-Gibbs sampler, incorporating reversible-jump moves for $K$ and a dimension-cycling proposal scheme. MCMC details  are given in Appendix~\ref{app:mcmc_details}.
+
+\noindent \textbf{Poset Point Estimation}
+We summarize the posterior distribution over partial orders by computing marginal edge probabilities $\hat{\pi}_{ij} = \frac{1}{T} \sum_{t=1}^T \mathbb{I}\bigl(i \succ_{h^{(t)}} j\bigr)$. Let $h^\star$ be the unknown true partial order. We compare two strategies for estimating $h^\star$: (A) the \textbf{Marginal Threshold Estimator} ($\hat{h}_{\text{thr}}(\alpha)$), where $\alpha \in (0,1)$ and $i \succ_{\hat h_{\text{thr}}} j\ \Leftrightarrow\ \hat{\pi}_{ij}\ge\alpha$ characterizes the trade-off between precision and recall (motivated by asymmetric decision costs), and (B) the \textbf{Marginal Mode Estimator} ($\hat{h}_{\text{mode}}$), which selects the relation type ($i \succ j$, $j \succ i$, or incomparability $i \parallel j$) with the highest posterior mass (Bayes-optimal under 0--1 Hamming loss). 
+
+
+\subsection{Evaluation for Recovery}
+\label{subsec:evaluation}
+
+We evaluate recovery of the ground-truth partial order/SOP $h^\star$.
+Let $\widehat{h}$ be the estimated partial order ($\hat{h}_{\text{thr}}(\alpha)$ or $\hat{h}_{\text{mode}}$) and let $\mathrm{TR}(\widehat{h})$ and $\mathrm{TC}(\widehat{h})$ be the inferred transitive reduction and closure respectively. We report Precision/Recall/F1 for graph edges. 
+Crucially, the cost of structural errors in unsupervised execution is asymmetric. While preference-based tasks might tolerate edge reversals, in our simulation environments, such violations are catastrophic. A \textbf{False Positive} dependency merely reduces parallelism (a minor efficiency penalty), whereas a \textbf{False Negative} (missing a constraint) triggers premature execution and runtime crashes.
+
+Additionally, we report two diagnostics that directly impact action ranking at execution time:
+\textbf{Feasibility}, the fraction of observed successful traces that remain linear extensions of
+$\mathrm{TC}(\widehat{h})$ (detects over-constraint that would incorrectly prune the frontier), and
+\textbf{IP-Cov}, the fraction of ground-truth incomparable pairs witnessed in \emph{both} orientations across traces
+(diagnoses whether concurrency is identifiable from the data, See Appendix \ref{app:tc_tr_metrics})
+
+% ========================
+% Section 4 (micro version)
+% =========================
+\section{From Structure to Efficient Execution}
+\label{sec:execution}
+MCMC inference is a one-time offline cost; the learned partial order is reused across executions, yielding negligible amortized planning cost and substantial token savings. 
+We translate the inferred posterior into a deterministic \emph{Graph Execution Engine} (GEE, See the detailed design in Appendis~\ref{subsec:gee-arch}), which operates within a \textbf{Tri-Modal Framework} (See Figure~\ref{fig:tri-modal}) to balance efficiency and robustness. We further propose metrics to evaluate the efficiency. 
+
+\subsection{Tri-Modal Execution}
+\noindent \textbf{The Tri-Modal framework.}
+To ensure task success under varying conditions, the system dynamically switches execution across three operating modes as detailed in Section~\ref{subsec:modes}.
+\begin{itemize}
+    \item \textbf{\textsc{Expert} (GEE-Only):} Executes the compiled SOP deterministically.The inferred SOP specifies control flow, but execution additionally requires data flow (how parameters propagate across tool calls ).
+    \item \textbf{\textsc{Hybrid} (GEE + Fallback):} Prioritizes the GEE but safeguards against compilation errors. If the GEE encounters a fault (e.g., missing blackboard inputs due to a missing edge in $\widehat{h_\tau}$), control reverts to an LLM planner for recovery.
+    \item \textbf{\textsc{Explore} (LLM-Only):} Agent framework to generate and collect diverse traces for experiment scenarios.
+\end{itemize}
+
+\noindent \textbf{The GEE.}
+The GEE executes using a frontier-based scheduler and shared data IO blackboard (Details in Appendix~\ref{subsec:gee-arch}). %, Table~\ref{tab:io-registry-example} 
+To build the GEE, we compute $\widehat h=\hat h_{\text{thr}}(\alpha)$. 
+The threshold $\alpha$ is a \textbf{Risk--Efficiency Knob}: higher $\alpha$ yields sparser graphs with greater concurrency but higher risk of missing dependency bugs; lower $\alpha$ adds more edges, over-specifying for safety at the cost of parallelism. In experiments, we tune $\alpha$ to maximize the structural F1-score, comparing $\hat{h}_{\text{thr}}(\hat\alpha)$ against the mode-estimator $\hat{h}_{\text{mode}}$. 
+
+In applications, with $h^\star$ unknown, 
+%we assume a uniform prior over $\{ \succ, \prec, \parallel \}$ and 
+we set $\alpha=1/3$. This prioritizes dependency recall, preferring slight over-serialization to avoid catastrophic failures from missing critical edges. The posterior probabilities for relation types $i \succ j$, $j \succ i$, $i \parallel j$ sum to one, so $\hat{h}_{\text{thr}}(1/3)\simeq \hat{h}_{\text{mode}}$, hence $\hat{h}_{\text{thr}}$ is close to Bayes optimal for the 0-1 loss for action precedence. In practice it is actually more useful, because it hedges slightly against missing critical edges.
+
+\subsection{Evaluation for Execution Efficiency}
+We evaluate \emph{operational impact}, asking whether higher-quality recovered structure leads to more efficient and reliable execution.
+When executing $\widehat{h}$ with frontier scheduling, we report:
+(i)~\emph{Success rate}, the fraction of tasks completing without API errors;
+(ii)~\emph{Completeness rate}, the fraction executing all expert-required actions;
+(iii)~\emph{Fallback rate}, the fraction of tasks or actions triggering LLM reasoning;
+(iv)~\emph{LLM calls/task}, the average number of reasoning steps; and
+(v)~\emph{Tokens/task}, total LLM token consumption.
+See Table~\ref{tab:metric_definitions} for formal definitions.
+
+
+
+\section{Experiments}
+\label{sec:experiments}
+
+Our experiments evaluate (i) structural recoverability of partial orders (ii) their downstream execution utility.
+We assess recoverability on two controlled benchmarks, and evaluate execution efficiency on a single realistic agent workflow where the inferred structure is compiled for execution.
+
+\subsection{Datasets}
+
+\noindent \textbf{WFCommons Workflows.}
+We validate on open and reproducible scientific workflows from the WFCommons WfInstances corpus \citep{coleman2022wfcommons}, which provides real workflow execution instances in WfFormat JSON, including per-task timing and dependency information.
+We include SRASearch \citep{wfcommons_srasearch}, a 22-task Pegasus fork--join bioinformatics workflow with 5 observed executions, and Epigenomics \citep{juve2013characterizing}, a larger Pegasus workflow for paired-end read alignment and variant calling with a mid-sized DAG of 41 tasks and a richer parallel structure.
+For each instance, we treat the workflow specification DAG as ground truth and the execution logs as observed linearizations.
+Appendix~\ref{app:wfcommons_dataset} gives preprocessing details.
+
+\noindent \textbf{Aliyun Cloud Provisioning.}
+%We respectfully clarify that 
+The full Cloud-IaC-6 benchmark has been open-sourced and anonymized for the review process from an internal \emph{agent-based cloud management platform} on Aliyun, where an autonomous agent interprets a high-level user query and incrementally provisions the required resources \citep{aliyun_agent_workflows}.
+The scenarios span simple virtual networking to complex high-availability clusters and range from 5--12 nodes (Appendix~\ref{app:cloud_iac_6_dataset}), covering heterogeneous resource types including networking, compute, storage, and load balancing (see Table~\ref{tab:aliyun_glossary} for product definitions).
+Ground-truth dependency graphs were manually specified and validated by cloud architects.
+We consider two complementary trace sources:
+(1) \emph{LLM-generated traces} ($n=54$) from diverse agents (Qwen, DeepSeek), capturing realistic variation in planning and action ordering (Trace Example Figure~\ref{lst:trace_example});
+and (2) \emph{synthetic traces} sampled from the ground-truth graphs with controlled noise to vary trace informativeness (IP-Cov $\in [0.5, 1.0]$).
+
+\subsection{Baselines.}
+We compare against four baselines.
+(i) \emph{Majority}, which infers a precedence constraint $i \succ j$ whenever the \emph{empirical} precedence $\hat p(i \succ j) > 0.5$ in the trace data, followed by greedy cycle breaking and projection to a DAG cover.
+We add two process-mining baselines:
+(ii) \emph{Inductive Miner} (IMf) \citep{leemans2013discovering} and
+(iii) \emph{Heuristics Miner} \citep{weijters2006process},
+which extract precedence constraints from discovered process models and are similarly projected to DAG covers for evaluation.
+See Appendix~\ref{app:alog_base} for algorithmic descriptions of these methods.
+Finally, we compare with a \emph{Bayesian Queue-Jump} (QJ) baseline \citep{nicholls2024bayesianinferencepartialorders} (Appendix~\ref{app:alog_base_qj}), where trace likelihoods depend on the number of linear extensions (NLE) of the candidate poset, a \#P-complete problem \citep{brightwell1991counting}. This is a Bayesian baseline for our frontier-softmax likelihood. 
+
+
+\subsection{WFcommons Results}
+
+For WFCommons experiments, we run reversible-jump MCMC for 1M iterations per graph, with individual runs taking 2 hours (22 nodes) or 4.5 hours (41 nodes) on a single CPU core and trivially parallelizable across workflows and IP-Cov settings.
+Threshold selection is discussed in Appendix~\ref{app:threshold_wf}: the simpler \textsc{SRASearch} favors a conservative threshold ($\alpha=0.5$) for precision, whereas the highly parallel \textsc{Epigenomics} benefits from the theoretical baseline ($\alpha=1/3$) to recover concurrent branches. This baseline is uniformly optimal or near-optimal (see Tables~\ref{tab:wfcommons_sensitivity} and  \ref{tab:threshold_comparison}) and is recommended for use when ground truth is not available.
+In contrast, the Bayesian Queue-Jump (QJ) baseline counts NLEs; empirical profiling on \textsc{SRASearch} predicts runtimes exceeding \textbf{1,000 hours}, so QJ is infeasible at WFCommons scale.
+See Appendix~\ref{app:wfcommons_time} and \ref{app:qj_runtime} for detailed diagnostics.
+\begin{figure}[t!]
+    \centering
+    \includegraphics[width=\linewidth]{figures/wfcommons/summary_key_metrics.pdf}
+\caption{\textbf{Scientific Workflow Performance (IP-Cov=0.95).}
+Top: \textsc{SRASearch}; Bottom: \textsc{Epigenomics}.
+BPOP maintains both high Edge-F1 and feasibility, whereas baselines fail to produce executable graphs on the more complex workflow.}
+
+\vspace{-10pt} % Pulls main text closer to figure bottom
+    \label{fig:wf_performance}
+\end{figure}
+
+\noindent \textbf{Structural Recovery and Execution Validity.}
+As shown in Figure~\ref{fig:wf_performance}, BPOP consistently outperforms all baselines in recovering ground-truth structure while maintaining executability.
+On \textsc{SRASearch}, BPOP achieves an Edge-F1 of $0.91$, substantially exceeding the strongest baseline (Heuristics Miner: $0.43$), and on the more complex \textsc{Epigenomics} pipeline it attains an Edge-F1 of $0.79$, compared to $0.38$ for Heuristics Miner and $0.11$ for Majority.
+BPOP remains robust under data scarcity: even at IP-Cov $\approx 0.6$, it maintains meaningful accuracy, whereas baselines degrade sharply and often require near-complete observation of pairwise orderings.
+This improved structural stability does not come at the cost of executability.
+On \textsc{Epigenomics}, Majority and Heuristics Miner collapse to zero feasibility due to over-constraining the graph, while BPOP maintains robust feasibility ($0.84$).
+Inductive Miner achieves perfect feasibility ($1.00$) but does that by producing overly permissive “flower models” with poor structural fidelity (Edge-F1 $\le 0.39$).
+
+\noindent \textbf{Semantic Validity and Safety Bias.} Visual inspection (Figure~\ref{fig:po_comparison_main}) confirms semantic correctness.
+BPOP recovers the true fork--join structure on \textsc{SRASearch} and most true dependencies on the more complex \textsc{Epigenomics} workflow despite multiple synchronization barriers.
+By enforcing global DAG constraints, Bayesian structure learning avoids the cyclic or infeasible graphs produced by local heuristics.
+
+Errors are safety-biased: on \textsc{Epigenomics}, BPOP yields more false positives (FP=$18$) than false negatives (FN=$3$).
+False positives correspond to conservative extra constraints that preserve safety at the cost of parallelism, whereas false negatives risk execution failure.
+Accordingly, BPOP compiles a risk-averse SOP by treating high-confidence edges as hard constraints and lower-confidence edges as advisory.
+
+\begin{figure}[t]
+    \centering
+    % Ensure the path matches your upload folder
+    \includegraphics[width=\linewidth]{figures/wfcommons/po_comparison_ipcov095.pdf}
+\caption{\textbf{Recovered vs.\ True SOPs (IP-Cov=0.95).}
+Green: correct dependencies; red: missed edges (unsafe); orange: false positives (safe).
+On \textsc{SRASearch}(Left), BPOP recovers the fork--join structure with F1=$0.91$ (TP=$29/30$, FN=$1$).
+On \textsc{Epigenomics}(Right), BPOP recovers most true dependencies despite multiple synchronization barriers (F1=$0.78$, TP=$44/48$, FN=$4$)}
+\vspace{-5pt} % Pulls main text closer to figure bottom
+    \label{fig:po_comparison_main}
+\end{figure}
+
+\noindent \textbf{Effect of Trace Diversity.}
+Figure~\ref{fig:wf_f1_vs_ipcov} shows that BPOP benefits directly from increased trace diversity (IP-Cov), improving monotonically as more concurrent orderings are observed.
+In contrast, trace-only and process-mining baselines show limited or unstable gains, and may degrade as conflicting pairwise evidence accumulates.
+In particular, Inductive Miner overgeneralizes highly concurrent logs by collapsing actions into a single parallel block, discarding internal DAG structure.
+Overall, trace diversity is necessary but not sufficient: exposing concurrency alone is insufficient without a global, constraint-aware model.
+
+
+\vspace{-5pt} % Pulls main text closer to figure bottom
+\begin{figure}[t]
+    \centering
+    % Ensure the path matches your upload folder
+    \includegraphics[width=\linewidth]{figures/wfcommons/f1_vs_ipcov_by_workflow.pdf}
+\caption{\textbf{Structural Recovery vs.\ Trace Diversity (IP-Cov).}
+Edge-F1 as a function of trace diversity for \textsc{SRASearch} (left) and \textsc{Epigenomics} (right).
+BPOP improves monotonically and outperforms baselines even at low diversity (IP-Cov $\approx 0.6$), whereas baselines require near-complete ordering observations.}
+\vspace{-10pt} % Pulls main text closer to figure bottom
+    \label{fig:wf_f1_vs_ipcov}
+\end{figure}
+\subsection{Aliyun Experiment Results}
+\label{subsec:aliyun_results}
+We run MCMC for $10^6$ iterations with 50\% burn-in, requiring 5--6 hours on 8 parallel workers and $\le$500\,MB memory per scenario (See Table \ref{tab:runtime}).
+We sweep the noise parameter $\varepsilon \in \{0.001, 0.005, 0.01, 0.05\}$ and trace diversity $IP\text{-}Cov \in \{0.6,0.7,0.8,0.9,1.0\}$.
+POs are estimated using the threshold estimator $\hat{h}_{\mathrm{thr}}(\alpha)$ at the default $\alpha \approx 1/3$; see Appendix~\ref{subsec:threshold_sensitivity} for threshold sensitivity analyses.
+
+
+\subsubsection{Structural recoverability results}
+\label{sec:aliyun_struc_recover}
+\noindent \textbf{Aggregate Performance at High Informativeness.}
+Figure~\ref{fig:summary_metrics} summarizes results at full trace diversity ($IP$-Cov$=1.0$, $\epsilon=0.01$).
+BPOP achieves the highest structural fidelity (Edge-F1 $=0.95$), exceeding the best baseline (Heuristics Miner: $0.60$).
+It is the only method that achieves \emph{both} high structural accuracy \emph{and} robust execution validity ($0.85$).
+Inductive Miner again attains perfect feasibility by learning overly permissive models with low precision, while Majority and Heuristics Miner often produce infeasible graphs.\\[1ex]
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/aliyun/summary_key_metrics.pdf}
+\caption{\textbf{Aggregate Performance (IP-Cov=1.0).}
+Edge-F1 (left) and feasibility (right) across Aliyun scenarios.
+BPOP achieves the best accuracy–validity trade-off, while baselines either overgeneralize or produce infeasible graphs.}
+    \label{fig:summary_metrics}
+    \vspace{-10pt} % Reduces white space below the figure
+\end{figure}
+\noindent \textbf{Effect of Trace Diversity.}
+As $IP$-Cov increases, BPOP improves monotonically, indicating that diverse traces exposing concurrency are critical for accurate recovery (Figure~\ref{fig:f1_aggregate}).
+In contrast, Majority and process-mining baselines show unstable behavior and may degrade as conflicting pairwise evidence accumulates.
+Bayesian Queue-Jump can be competitive at high $IP$-Cov but is less consistent and computationally impractical due to repeated NLE evaluations (Appendix~\ref{app:qj_runtime}).
+% --- FIGURE 1: Structural Recovery (F1) ---
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.95\linewidth]{figures/aliyun/f1_vs_ipcov_by_scenario.pdf}
+\caption{\textbf{Structural Recovery vs.\ Trace Diversity (Representative Scenarios).}
+Edge-F1 as a function of trace diversity ($IP$-Cov) for two Aliyun provisioning scenarios:
+S2 (\textsc{SLB--ECS--RDS}, left) and S4 (\textsc{EIP--SLB--ECS}, right).
+BPOP improves with increasing diversity and outperforms all baselines, while trace-only and process-mining methods exhibit unstable or degrading behavior.}
+
+    \label{fig:f1_aggregate}
+    \vspace{-10pt} % Tighten space below figure
+\end{figure}
+
+\noindent \textbf{Structural Fidelity vs.\ Execution Validity.}
+Baselines exhibit a clear accuracy–validity trade-off (Table~\ref{tab:feasibility}).
+Inductive Miner achieves perfect feasibility by learning permissive models, while Heuristics Miner often over-constrains the graph and loses validity on harder workflows. BPOP combines strong structural recovery with high feasibility across IP-Cov settings, offering more practical accuracy–runtime trade-off than Bayesian QJ for larger workflows.
+
+
+    % \vspace{-10pt} % Tighten space below figure
+\begin{table}[t!]
+\centering
+\caption{\textbf{Feasibility by IP-Coverage Target.} Fraction of observed traces that are valid linear extensions of the inferred partial order.}
+\label{tab:feasibility}
+\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{lccccc}
+\toprule
+& \multicolumn{5}{c}{\textbf{Target IP-Coverage}} \\
+\cmidrule(lr){2-6}
+\textbf{Method} & \textbf{0.6} & \textbf{0.7} & \textbf{0.8} & \textbf{0.9} & \textbf{1.0} \\
+\midrule
+Inductive Miner & 1.00 & 1.00 & 1.00 & 1.00 & 1.00 \\
+Bayesian QJ & 0.54 & 0.60 & 0.69 & 0.71 & 0.76 \\
+Majority & 0.67 & 0.67 & 0.50 & 0.22 & 0.22 \\
+Heuristics Miner & 0.17 & 0.17 & 0.14 & 0.19 & 0.19 \\
+\midrule
+\textbf{BPOP (Ours)} & \textbf{0.78} & \textbf{0.83} & \textbf{0.82} & \textbf{0.75} & \textbf{0.85} \\
+\bottomrule
+    \vspace{-10pt} % Tighten space below figure
+\end{tabular}
+\end{table}
+
+\noindent \textbf{Robustness to $\epsilon$.}
+At high trace diversity (IP-Cov $\ge 0.9$), BPOP's Edge F1 varies by less than 0.02 across the full range of $\epsilon \in$  [0.005, 0.05]. In contrast, varying IP-Cov from 0.6 to 1.0 (at fixed $\epsilon =$  0.01) changes F1 by 0.39—a 30× larger effect.(See Table~\ref{tab:epsilon_robustness} in Appendix).
+
+To qualitatively validate these quantitative gains, Figure~\ref{fig:qualitative_recovery} visualizes the inferred SOPs against the ground truth.
+% --- FIGURE 2: Qualitative Comparison ---
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.95\linewidth]{figures/aliyun/po_comparison_ipcov10_main.pdf}
+\caption{\textbf{Qualitative Structure Recovery (IP-Cov=1.0).}
+Recovered SOPs for two representative Aliyun scenarios:
+S3 (\textsc{SLB--ECS--Redis}, left) and S6 (\textsc{Dual Zone + RDS}, right).
+Green edges denote correct dependencies, red denote missed edges (FN), and orange denote extra constraints (FP).
+BPOP recovers most true dependencies with safety-biased errors:
+S3 achieves TP=$9$, FP=$1$, FN=$1$; S6 achieves TP=$11$, FP=$4$, FN=$1$.}
+
+    \label{fig:qualitative_recovery}
+    \vspace{-10pt} % Tighten space below figure
+\end{figure}
+
+\subsubsection{Efficient Execution}\label{sec:hybrid_execution}
+We evaluate the $120$-sweep experiment inference results from section~\ref{sec:aliyun_struc_recover}  across $6$ Aliyun scenarios. See Appendix~\ref{app:user_case} for an example user case comparing \emph{Expert} and \emph{Hybrid} modes on a concrete cloud provisioning task. 
+
+\noindent \textbf{Trace diversity drives a sharp transition from reactive to compiled execution.}
+Table~\ref{tab:ipcov_effect} shows that increasing trace diversity ($IP$-Cov) yields a non-linear improvement in both structural recovery and execution.
+At low diversity ($IP$-Cov $\le 0.8$), recovery remains limited (F1 $\le 0.41$), leading to frequent fallback (33--50\%) and high LLM overhead (4.0--5.9 calls/task; 17k--32k tokens/task), as the compiled plan under-specifies prerequisites.
+Once diversity reaches $IP$-Cov $\ge 0.9$, recovery becomes highly accurate (F1 $\approx 0.86$--0.87), completeness reaches 100\%, and fallback and token usage drop to zero, indicating fully executable SOPs without runtime replanning. Scenario-level results (Table~\ref{tab:scenario_metrics}) further show that overhead is concentrated in complex multi-service workflows (\texttt{slb\_ecs\_rds}, \texttt{slb\_ecs\_redis}, and \texttt{eip\_slb\_ecs}), while simpler scenarios (\texttt{simple\_ecs}, \texttt{dual\_zone\_ecs\_slb}, and \texttt{dual\_zone\_ecs\_slb\_rds}) execute reliably once sufficient diversity is observed.
+
+\paragraph{Compiled POSET execution achieves both high success and efficiency.}
+Table~\ref{tab:exec_modes_comparison} shows that Hybrid execution is the only mode that achieves \emph{100\% success} across all six scenarios, combining compiled POSET execution with limited fallback.
+While Expert execution is maximally efficient when correct (0 tokens; 34.4\,s total), this analysis excludes upfront costs: theTokenCost × NumTraces required to learn the structure. It fails on 2/6 scenarios due to the absence of recovery.
+Hybrid preserves most efficiency benefits of compilation while repairing these failures, requiring only 2 fallback events and 79k tokens in total.
+In contrast, pure LLM exploration is substantially less reliable and far more expensive, with Explore modes consuming 234k–382k tokens and 1{,}319–2{,}580\,s runtime.
+
+\noindent \textbf{Qualitative graphs explain the cost collapse.}
+In Figure~\ref{fig:qualitative_recovery}, missed edges (red) correspond to missing prerequisites (driving fallback), while false positives (orange) mainly reduce parallelism but remain safe. 
+At high $IP$-Cov, red edges are rare, consistent with 0\% fallback and 0 token usage.
+
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Effect of trace diversity ($IP$-Cov).}
+Higher $IP$-Cov improves structural recovery (Edger-F1) and reduces reliance on fallback planning.}
+\label{tab:ipcov_effect}
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}cccccc@{}}
+\toprule
+$IP$-Cov & F1 & Complete & Fallback & LLM Calls & Tokens \\
+        &    & (\%)     & (\%)     & /task     & /task \\
+\midrule
+0.6 & 0.329 & 70.8 & 50.0 & 5.9 & 32{,}208 \\
+0.7 & 0.350 & 58.3 & 50.0 & 5.6 & 29{,}359 \\
+0.8 & 0.413 & 75.0 & 33.3 & 4.0 & 17{,}479 \\
+0.9 & \textbf{0.872} & \textbf{100.0} & \textbf{0.0} & \textbf{1.0} & \textbf{0} \\
+1.0 & 0.857 & \textbf{100.0} & \textbf{0.0} & \textbf{1.0} & \textbf{0} \\
+\bottomrule
+\end{tabular}
+    \vspace{-10pt} % Tighten space below figure
+\end{table}
+\begin{table}[t]
+\centering
+\caption{\textbf{Execution performance across 6 scenarios.}
+“Explore (No CoT)” disables explicit chain-of-thought but still uses the LLM for action selection. Totals aggregate with per-scenario means. Modes use the partial order inferred at IP-Cov = 1.0.}
+\label{tab:exec_modes_comparison}
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.02}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} &
+\textbf{Expert} &
+\textbf{Hybrid} &
+\textbf{Explore} &
+\textbf{Explore} \\
+ &  &  & \textbf{(No CoT)} & \textbf{(CoT)} \\
+\midrule
+Success rate & 66.7\% & 100.0\% & 50.0\% & 66.7\% \\
+Failures & 2 & 0 & 3 & 2 \\
+Total actions & 44 & 57 & 41 & 53 \\
+Total time (s) & 34.40 & 225.23 & 1318.69 & 2580.47 \\
+
+LLM tokens (total) & 0 & 79{,}406 & 233{,}994 & 381{,}794 \\
+Fallback count & -- & 2 & -- & -- \\
+\midrule
+Avg.\ time (s) & 5.73 & 37.54 & 219.78 & 430.08 \\
+Avg.\ actions & 7.3 & 9.5 & 6.8 & 8.8 \\
+Avg.\ tokens & 0 & 13{,}234 & 38{,}999 & 63{,}632 \\
+\bottomrule
+\end{tabular}
+    \vspace{-10pt} 
+\end{table}
+\section{Related Works}
+\noindent \textbf{Bayesian Structure Learning \& Partial-Order}
+Classical structure learning (e.g., PC \citep{Spirtes2000causation}, NOTEARS \citep{Zheng2018dags}) assumes i.i.d.\ samples and is not tailored
+to feasibility-constrained sequential traces.
+Bayesian poset inference from rank-data has been studied via random linear extensions \citep{nicholls2024bayesianinferencepartialorders} and
+Mallows noise \citep{chuxuan2024nonparametricbayesianinferencepartial}. Order recovery from choice data is studied in settings
+such as top-$K$ recovery \citep{nguyen2022efficientaccuratetopkrecovery}.
+BPOP differs by modeling a trace using \emph{sequential choice over a feasible frontier}: the likelihood in \eqref{eq:frontier_softmax} and \eqref{eq:q_succ} matches execution semantics and is easily evaluated.
+
+\noindent \textbf{Planning from Traces.}
+Action Model Acquisition (e.g., ARMS \citep{yang2007learning}, FAMA \citep{AINETO2019104}) reconstructs action schemata from traces, utilizing statistical approaches like weighted constraint satisfaction to handle partial observability.
+Recent collaborations have begun to bridge traces and planning structure: \citet{HelalLakemeyer2023MVPOP} advance \emph{partial-order plans} for numeric tasks, while \citet{Park2024Incorporating} explicitly utilize mined event-log behavior to guide such planning structures.
+BPOP is complementary: rather than learning domain physics or guiding a planner, we infer a precedence poset directly from traces and compile it into an uncertainty-aware frontier execution policy.
+
+\noindent \textbf{Process Mining from Event Logs}
+Process mining discovers workflow models from event logs (e.g., the $\alpha$-algorithm \citep{VanderAalst2004workflow} and variants applied to software
+execution, but is primarily descriptive and can overfit incidental serializations.
+BPOP instead targets a \emph{normative} precedence structure with uncertainty and explicit recoverability analysis (IP-Cov), aligned with frontier execution.
+
+
+\section{Limitations}
+\label{sec:limitations}
+Recovering concurrency requires diverse traces (high IP-Cov) to distinguish true independence from fixed scheduling; low diversity underspecifies the graph, necessitating conservative compilation or randomized data collection. Furthermore, BPOP is currently restricted to DAG structures; while retries can be handled via unrolling, native support for branching choices and cyclic control flow requires future extensions to mixture models or macro-actions.
+
+\section{Conclusion}
+\label{sec:conclusion}
+BPOP targets bounded, finite-horizon workflows and learns an executable precedence structure from successful traces. By distilling invariant dependency structure rather than memorizing linear scripts, it reduces redundant agent inference while preserving safety through uncertainty-aware compilation.
+
+Compared to process-mining baselines that prioritize fast discovery, BPOP trades offline compilation speed for principled uncertainty quantification and superior structural fidelity. This one-time inference cost is amortized across executions, enabling highly efficient, low-latency agent behavior at runtime. More broadly, BPOP complements agentic memory systems (e.g., LEGOMem~\citep{han2025legomemmodularproceduralmemory}) by generalizing across executions through explicit dependency structure rather than fixed action sequences.
+
+
+% \section*{Impact Statement}
+This work uses past execution traces to infer a partial-order dependency structure and compile it into a frontier-based
+execution policy, reducing repeated agent deliberation (and thus inference/token cost) by exposing safe parallelism and
+making constraints explicit and auditable. Potential risks include misuse in high-stakes automation or failure under
+distribution shift (e.g., changing tools or control-flow semantics). We mitigate these risks by scoping to bounded procedural settings, reporting recoverability diagnostics (IP-Cov) and calibrated uncertainty, and enabling conservative execution via confidence thresholding and fallbacks with human oversight.
+
+
+
+
+\bibliography{example_paper}   % replace with your .bib file name
+\bibliographystyle{icml2026}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% APPENDIX
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\appendix
+\onecolumn
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Appendix: Partial order preliminaries + dimension + counting linear extensions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Preliminaries: Partial Orders}
+\label{appendix:preliminaries_po}
+
+We follow standard terminology for partial orders; see, e.g., \citet{brightwell1993models}.
+\subsection{Choice sets}
+Let $\mathcal{A}$ denote the universe of actions with $|\mathcal{A}|=m$.
+A \textbf{choice action set} $S$ is any non-empty subset of $\mathcal{M}$.
+We write
+\[
+\mathcal{B}_{\mathcal{A}} \coloneqq \{S \subseteq \mathcal{A} : S \neq \emptyset \}.
+\]
+In our setting, each observed trace is associated with a choice set of actions that
+were available/relevant for that execution instance.
+
+\subsection{Strict partial orders and representations}
+\begin{definition}[Strict partial order / poset]
+\label{def:poset}
+A \textbf{(strict) partially ordered set} (poset) is a pair $h=(X,\succ_h)$, where
+$X$ is a finite set and $\succ_h$ is a binary relation on $X$ that is:
+(i) \emph{irreflexive} ($x \not\succ_h x$ for all $x$),
+(ii) \emph{transitive} ($x \succ_h y$ and $y \succ_h z$ imply $x \succ_h z$).
+\end{definition}
+
+Throughout this paper we take $X=\mathcal{A}$, and we index items by integers
+$\{1,\dots,m\}$ when convenient. We represent a strict partial order $h$ by a
+binary matrix $h \in \{0,1\}^{m \times m}$ with
+\[
+h_{ij} = 1 \;\;\Longleftrightarrow\;\; i \succ_h j,
+\qquad h_{ii}=0.
+\]
+An illustrative example is
+\[
+h=
+\begin{bmatrix}
+0 & 0 & 1 & 0 & 1\\
+0 & 0 & 1 & 1 & 1\\
+0 & 0 & 0 & 0 & 1\\
+0 & 0 & 0 & 0 & 0\\
+0 & 0 & 0 & 0 & 0
+\end{bmatrix}.
+\label{eq:poset-adj-matrix}
+\]
+Two distinct items $i,j$ are \textbf{comparable} if either $i\succ_h j$ or $j\succ_h i$.
+They are \textbf{incomparable} otherwise, i.e.,
+\[
+i \parallel_h j
+\quad \Longleftrightarrow \quad
+h_{ij}=0 \;\text{and}\; h_{ji}=0.
+\]
+A strict order is \textbf{total} (linear) if every pair is comparable; it is
+\textbf{empty} (discrete) if $h_{ij}=0$ for all $i\neq j$. A total order $\ell=(X,\succ_\ell)$ on a set $X=(1,2,\dots,m)$ can equivalently be represented as a simple ordered list, so we sometimes abuse notation and treat total orders as if they were ordered lists $\ell=(\ell_1,\dots,\ell_m)$ satisfying $1\le i<j\le m\ \Leftrightarrow\ \ell_i\succ_\ell\ell_j$.
+
+\noindent \textbf{DAG view, closure, and cover.}
+A strict partial order corresponds to a directed acyclic graph (DAG) on vertex set $\mathcal{A}$,
+with an edge $i\!\to\! j$ whenever $i \succ_h j$. When $h$ contains \emph{all} implied
+precedences (i.e., it is transitively closed), we denote it by $h$ (or explicitly $h^+$).
+For visualization and evaluation we often use the \textbf{cover relation} (Hasse diagram),
+obtained by the \textbf{transitive reduction} of $h$: it removes edges implied by transitivity while
+preserving reachability (and hence identifies the same partial order).
+
+\subsection{Linear extensions}
+A \textbf{linear extension} of a poset $h=(X,\succ_h)$ is a total order $\ell$ on $X$
+that is consistent with $\succ_h$:
+\[
+i \succ_h j \;\;\Rightarrow\;\; i \text{ appears before } j \text{ in } \ell.
+\]
+Given a trace $y=(y_1,\dots,y_T)$ containing a subset of actions, we say $y$ is consistent
+with $h$ if it does not violate any precedence constraints restricted to its realized items.
+Equivalently, for any $(i,j)$ with $i\succ_h j$ and both $i,j$ appearing in the trace,
+$i$ must appear before $j$ in $y$.
+
+\noindent \textbf{Height (depth).}
+The \textbf{height} of a poset, denoted $\mathrm{ht}(h)$, is the length of a longest chain.
+For a total order on $m$ elements, $\mathrm{ht}(h)=m$; for the empty order, $\mathrm{ht}(h)=1$.
+
+
+
+\subsection{Partial Order Dimension}
+\label{appendix:po_dim}
+
+\noindent \textbf{Dimension and realizers.}
+The \textbf{dimension} of a poset measures how many total orders are required to represent it
+as an intersection.
+
+\begin{definition}[Dimension]
+Let $h=(X,\succ_h)$ be a poset on a finite set $X$.
+The \emph{dimension} of $h$, denoted $\dim(h)$, is the smallest integer $K$ such that there exist
+linear extensions $\ell_1,\dots,\ell_K$ satisfying
+\[
+x \succ_h y
+\;\;\Longleftrightarrow\;\;
+\bigl(x \text{ appears before } y \text{ in } \ell_k \text{ for every } k=1,\dots,K \bigr).
+\]
+Equivalently,
+\[
+h \;=\; \bigcap_{k=1}^{K} \ell_k.
+\]
+\end{definition}
+
+\begin{definition}[Realizer]
+A \emph{realizer} of size $K$ for a poset $h=(X,\succ_h)$ is a family of $K$ linear extensions
+$\{\ell_1,\dots,\ell_K\}$ whose intersection equals $h$.
+Thus, $\dim(h)$ is the size of the smallest realizer.
+\end{definition}
+
+\noindent \textbf{Geometric view.}
+A classical interpretation due to \citet{dushnikPartiallyOrderedSets1941} is that
+$\dim(h)\le K$ iff the elements can be embedded in $\mathbb{R}^K$ such that
+$x\succ_h y$ corresponds to coordinate-wise dominance.
+
+\noindent \textbf{Basic bounds and computational difficulty.}
+Dimension is bounded above by Hiraguchi's inequality \citep{Hiraguchi51,bogart1973maximal}:
+for $m\ge 4$, $\dim(h)\le \lfloor m/2 \rfloor$, and this is tight for the standard example
+(poset ``crown'') family.
+Computing $\dim(h)$ is NP-hard in general; \citet{yannakakis1982complexity}
+establishes strong hardness results even for restricted families. This computational difficulty
+motivates approaches (including Bayesian ones) that infer plausible ranges of $K$ rather than
+computing $\dim(h)$ exactly.
+
+
+\subsection{Counting Linear Extensions}
+\label{appendix:count-LE}
+
+\noindent \textbf{\#P-hardness.}
+Counting linear extensions is computationally intractable in general:
+given a poset $h$, the quantity
+\[
+L(h) \;=\; |\{\text{linear extensions of } h\}|
+\]
+is \#P-complete to compute exactly \cite{brightwell1991counting}.
+Consequently, likelihoods that require summing over all linear extensions (or exactly evaluating $L(h)$)
+are only feasible for small instances or special poset families.
+
+\noindent \textbf{Exact counting via dynamic programming over ideals.}
+A classical exact strategy uses recursion over maximal elements:
+\[
+L(h) \;=\; \sum_{x \in \max(h)} L(h\setminus\{x\}),
+\]
+and memoizes subproblems over valid subsets (ideals/filters).
+This yields worst-case complexity $O(2^n n)$ but can be tractable for bounded-width or
+structurally sparse instances (see, e.g., \cite{de2006exploiting}).
+
+\noindent \textbf{Exploiting structure (sparsity / decomposition).}
+Modern exact methods improve practical performance by decomposing subproblems into connected components and applying dynamic programming over poset ideals
+(e.g., \cite{kangas2016counting}).
+These approaches can be highly effective for moderate $n$ when the underlying posets are sparse.
+
+\noindent \textbf{Approximation and sampling.}
+For larger instances, practical toolchains rely on approximation and sampling-based estimators of $L(h)$
+(e.g., \cite{talvitie2024approximate}). These approximation routes motivate modeling choices
+that avoid exact counting inside the likelihood whenever possible.
+%\input{BPOP_section4_appendix.tex}
+%\label{app:model}
+
+
+
+\section{MCMC Implementation Details}
+\label{app:mcmc_details}
+
+We employ a Metropolis-Hastings-within-Gibbs sampler to infer the latent parameters. Table~\ref{tab:mcmc_proposals} summarizes the proposal distributions and acceptance criteria for each parameter block.
+
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.5}
+\caption{Summary of MCMC Transition Kernels.}
+\label{tab:mcmc_proposals}
+\begin{tabular}{@{}l p{3.2cm} p{3.5cm} p{3.2cm} l@{}}
+\toprule
+\textbf{Parameter} & \textbf{Prior} $p(\cdot)$ & \textbf{Proposal} $q(\cdot|\cdot)$ & \textbf{Acceptance Ratio} $\alpha$ & \textbf{Weight} \\ 
+\midrule
+
+\textbf{Latent Utilities} ($U$) 
+& $U_i \sim \mathcal{N}(0, \Sigma_\rho)$ \newline (equicorrelated)
+& \textbf{Random Walk(RW):} \newline $U_i^* \sim \mathcal{N}(U_i, \Sigma_\rho)$
+& $\frac{p(U^*) p(y \mid U^*)}{p(U) p(y \mid U)}$ 
+& $N$ \\ 
+\midrule
+
+\textbf{Correlation} ($\rho$) 
+& $\rho \sim \mathrm{Beta}(1, \alpha_\rho)$
+& \textbf{Multiplicative RW:} \newline $\rho^* = 1 - (1{-}\rho)\delta$ \newline $\delta \sim \mathcal{U}(d_r, 1/d_r)$
+& $\frac{p(\rho^*) p(U \mid \rho^*)}{p(\rho) p(U \mid \rho)} \cdot \frac{1}{\delta}$ 
+& $2$ \\ 
+\midrule
+
+\textbf{Softmax Temp} ($\beta$) 
+& $\beta \sim \mathrm{Gamma}(a, b)$
+& \textbf{Log-Normal RW:} \newline $\log \beta^* = \log \beta + \epsilon$ \newline $\epsilon \sim \mathcal{N}(0, \sigma^2)$
+& $\frac{p(\beta^*) p(y \mid \beta^*)}{p(\beta) p(y \mid \beta)} \cdot \frac{\beta^*}{\beta}$ 
+& $2$ \\ 
+\midrule
+
+\textbf{Dimension} ($K$) 
+& $K \sim \mathrm{Poisson}(\lambda)$ \newline truncated at $K \geq 1$
+& \textbf{Reversible Jump:} \newline \textit{Birth:} add column \newline \textit{Death:} delete column
+& $\frac{p(K^*) p(y \mid K^*)}{p(K) p(y \mid K)} \cdot \frac{q_{\leftarrow}}{q_{\rightarrow}}$ 
+& $\max(3,N)$ \\ 
+\bottomrule
+\end{tabular}
+\end{table}
+
+The sampler operates on a \textbf{randomized cycling scheme with dimension-proportional weights}. We assign update frequencies to each parameter block $i$ proportional to its weighted complexity. To prevent sequential bias and ensure ergodic mixing, we construct a discrete schedule list based on these weights within each cycle (length $L=500$). This ensures high-dimensional parameters (e.g., latent utilities $U$) are updated frequently without introducing order-dependent correlations. Traces are stored every 100 iterations (thinning) to reduce autocorrelation.
+
+\subsection{Appendix: Metropolis--Hastings update for inverse temperature $\beta$ under a Gamma prior}
+\label{app:beta-gamma-mh}
+
+\noindent \textbf{Acceptance ratio (statement).}
+The MH log-acceptance ratio for the $\beta$ update (if $\mathcal{L}(\beta)$ is the log-likelihood evaluated at $\beta$, all other parameters fixed) is
+\begin{equation}
+\log \alpha_\beta
+=
+\Big[\mathcal{L}(\beta')-\mathcal{L}(\beta)\Big]
++
+\Big[\log p(\beta')-\log p(\beta)\Big]
++
+\log\!\left(\frac{\beta'}{\beta}\right).
+\label{eq:app-beta-accept}
+\end{equation}
+The final term is the proposal-density ratio (equivalently a Jacobian term arising from proposing
+symmetrically in $\eta=\log\beta$).
+
+\noindent \textbf{Proof of \eqref{eq:app-beta-accept}.}
+The MH ratio is
+\[
+\alpha_\beta
+=
+\min\left\{1,
+\frac{p(\mathcal{D}\mid\beta')p(\beta')}{p(\mathcal{D}\mid\beta)p(\beta)}
+\cdot
+\frac{q(\beta\mid\beta')}{q(\beta'\mid\beta)}
+\right\}.
+\]
+Because $\eta'=\eta+\epsilon$ is a symmetric Gaussian random walk, the proposal is symmetric in
+$\eta$:
+$q_\eta(\eta'\mid\eta)=q_\eta(\eta\mid\eta')$.
+Transforming back to $\beta=\exp(\eta)$ yields (change of variables)
+\[
+q(\beta'\mid\beta)
+=
+q_\eta(\eta'\mid\eta)\,\left|\frac{d\eta'}{d\beta'}\right|
+=
+q_\eta(\log\beta'\mid\log\beta)\,\frac{1}{\beta'}.
+\]
+Similarly,
+\[
+q(\beta\mid\beta')
+=
+q_\eta(\log\beta\mid\log\beta')\,\frac{1}{\beta}.
+\]
+Since $q_\eta(\log\beta'\mid\log\beta)=q_\eta(\log\beta\mid\log\beta')$, the Gaussian terms cancel,
+and we obtain
+\[
+\frac{q(\beta\mid\beta')}{q(\beta'\mid\beta)}
+=
+\frac{(1/\beta)}{(1/\beta')}
+=
+\frac{\beta'}{\beta}.
+\]
+Taking logs and substituting into the MH ratio gives \eqref{eq:app-beta-accept}.
+
+
+\subsection{Reversible--Jump Update of the Dimension K}
+\label{subsec:K-update}
+
+To infer the latent dimensionality $K$, we employ a Reversible Jump MCMC (RJMCMC) scheme. We define the transition between dimensions $K$ and $K \pm 1$ using a birth-death process. In this setting we choose $\lambda=3$ to express a preference for parsimony, effectively regularizing the model against overfitting.
+
+\noindent \textbf{Prior on $K$.}
+We assume a Poisson($\lambda$) prior truncated to $K \ge 1$:
+\[
+  \pi(K) \;=\; \frac{e^{-\lambda}\lambda^{K}/K!}{1-e^{-\lambda}}, \quad K=1,2,\dots
+\]
+
+\noindent \textbf{Move Probabilities.}
+Let $\rho_{K,K'}$ denote the probability of proposing a move from $K$ to $K'$. We define:
+\[
+  \rho_{K,K+1}= \begin{cases}
+     1   & \text{if } K=1,\\
+     0.5 & \text{if } K\ge 2,
+  \end{cases}
+  \qquad
+  \rho_{K,K-1}= \begin{cases}
+     0   & \text{if } K=1,\\
+     0.5 & \text{if } K\ge 2.
+  \end{cases}
+\]
+At each step, we draw $r \sim \operatorname{Unif}(0,1)$. If $r < \rho_{K,K+1}$, we propose an \emph{up} move ($K \to K+1$); otherwise, we propose a \emph{down} move ($K \to K-1$).
+
+%------------------------------------------------------------------
+\subsubsection{Up Move: \(K' = K+1\)}
+
+We propose adding a new latent feature column at a random position $c$. To ensure high acceptance rates, we draw the new column values from their \emph{conditional prior} given the existing columns.
+
+\begin{enumerate}
+    \item \textbf{Choose insertion slot.} Sample $c \sim \operatorname{Unif}\{0,\dots,K\}$. The existing columns $d \ge c$ are shifted to $d+1$.
+    
+    \item \textbf{Sample the new column conditionally.} 
+    For each item $j$, we draw the new value $U_{j,c}$ based on the correlation with the existing $K$ columns:
+    \[
+      U_{j,c} \;\sim\; \mathcal{N}\bigl(\mu_j,\;\sigma_{\text{cond}}^{2}\bigr),
+    \]
+    where
+    \[
+      \mu_j = \frac{\rho}{1+(K-1)\rho} \sum_{d=1}^{K} U_{j,d}, \qquad
+      \sigma_{\text{cond}}^{2} = \frac{1+(K-1)\rho-K\rho^{2}}{1+(K-1)\rho}.
+    \]
+\end{enumerate}
+
+\noindent \textbf{Metropolis--Hastings Ratio.}
+The acceptance ratio $R$ is given by:
+\[
+  R = \frac{\pi(U', K+1)}{\pi(U, K)} \times \frac{q(U, K \mid U', K+1)}{q(U', K+1 \mid U, K)} \times |J|.
+\]
+The Jacobian $|J|=1$ because the dimension change is a direct insertion without scaling. The posterior factorizes as $\pi(U', K+1) = \pi_{\text{new}}(U' \mid U, K) \cdot \pi(U \mid K) \cdot \pi(K+1)$. Crucially, because we propose $U'$ from the conditional prior, the term $\pi_{\text{new}}$ in the numerator exactly cancels the proposal density $q_{\text{new}}$ in the denominator. The old block $\pi(U \mid K)$ also cancels.
+
+Thus, the ratio simplifies to the likelihood ratio times the prior and proposal move probabilities:
+\[
+  R = \frac{\pi(K+1)}{\pi(K)} \frac{\rho_{K+1,K}}{\rho_{K,K+1}} \frac{p_S(Y \mid h(U',\beta))}{p_S(Y \mid h(U,\beta))}.
+\]
+Taking the logarithm:
+\begin{equation}
+\boxed{
+\begin{aligned}
+  \log \alpha_{+} \;=\; & \log \pi(K+1) - \log \pi(K) \\
+  & + \log p_S(Y \mid h(U',\beta)) - \log p_S(Y \mid h(U,\beta)) \\
+  & + \log \frac{\rho_{K+1,K}}{\rho_{K,K+1}}.
+\end{aligned}
+}
+\end{equation}
+Note: For $K \ge 2$, the proposal ratio $\frac{\rho_{K+1,K}}{\rho_{K,K+1}} = 1$. For $K=1$, it is $2$.
+
+%------------------------------------------------------------------
+\subsubsection{Down Move: \(K' = K-1\)}
+
+\begin{enumerate}
+    \item \textbf{Choose deletion slot.} Sample $c \sim \operatorname{Unif}\{0,\dots,K-1\}$.
+    \item \textbf{Remove column $c$.} Construct $U'$ by deleting the $c$-th column from all latent matrices.
+\end{enumerate}
+
+\noindent \textbf{Proposal Density.}
+The reverse proposal (which would re-insert the deleted column from the conditional prior) dictates the ratio. The down-move proposal density is simply:
+\[
+  q(U', K-1 \mid U, K) = \rho_{K,K-1} \cdot \frac{1}{K}.
+\]
+
+\noindent \textbf{Metropolis--Hastings Ratio.}
+By symmetry with the Up move, the Gaussian terms for the deleted column in the numerator (current state posterior) cancel with the hypothetical reverse proposal density in the denominator. The acceptance probability becomes:
+\begin{equation}
+\boxed{
+\begin{aligned}
+  \log \alpha_{-} \;=\; & \log \pi(K-1) - \log \pi(K) \\
+  & + \log p_S(Y \mid h(U',\beta)) - \log p_S(Y \mid h(U,\beta)) \\
+  & + \log \frac{\rho_{K-1,K}}{\rho_{K,K-1}}.
+\end{aligned}
+}
+\end{equation}
+For $K > 2$, the proposal ratio log-term is 0. For $K=2$, the down move is always allowed (ratio term $\log(1/0.5) = \log 2$), and for $K=1$, the down move is forbidden.
+
+
+\section{Likelihood Details}
+\label{app:model-details}
+
+\subsection{Frontier-Softmax Likelihood with Successor Utility}
+\label{app:qscore-details}
+
+\noindent \textbf{Sequential Frontier Choice.}
+We model the generative process of a trace $y=(y_1,\dots,y_T)$ as a sequential selection from the set of currently available actions. Let $R_t=\{y_t,\dots,y_T\}$ denote the set of remaining actions at step $t$. Given a latent partial order $h$, the \textbf{Frontier} $\mathcal{F}_t(h)$ is the set of actions whose precedence constraints are fully satisfied:
+\[
+\mathcal{F}_t(h) = \{a \in R_t : \nexists\, b \in R_t \text{ s.t. } b \succ_h a\}.
+\]
+
+\noindent \textbf{Successor Utility}
+To differentiate between valid actions, we assume the agent is \emph{rational}: it prefers actions that unlock the most future work (minimizing the makespan). We define the \textbf{Successor Score} $S_t(a)$ as the count of remaining actions strictly dependent on $a$:
+\[
+    S_t(a) \triangleq \left|\{\,b\in R_t\setminus\{a\}: a \succ_{h} b\,\}\right|.
+\]
+We map this count to a utility score $Q_{\text{succ}}$ using a log-diminishing return function:
+\begin{equation}
+    Q_{\text{succ}}(a; h, t) = 
+    \begin{cases} 
+        \log(1 + S_t(a)) & \text{if } a \in \mathcal{F}_t(h), \\
+        -\infty & \text{if } a \notin \mathcal{F}_t(h).
+    \end{cases}
+    %\label{eq:q_succ}
+\end{equation}
+The case $Q=-\infty$ enforces strict structural consistency (zero probability for invalid actions).
+
+\noindent \textbf{Boltzmann Likelihood.}
+The probability of selecting action $y_t$ at step $t$ is modeled as a Boltzmann-rational policy over the frontier:
+\begin{equation}
+    p(y_t \mid y_{1:t-1}, h, \beta) = \frac{\exp(\beta \cdot Q_{\text{succ}}(y_t; h, t))}{\sum_{a' \in \mathcal{F}_t(h)} \exp(\beta \cdot Q_{\text{succ}}(a'; h, t))}.
+    \label{eq:app-boltzmann}
+\end{equation}
+The total log-likelihood of the trace $y$ is the sum of log-probabilities over $t=1 \dots T$.
+
+\noindent \textbf{Theoretical Properties.}
+This formulation provides three key advantages for structure learning:
+\begin{enumerate}
+    \item \textbf{Strict Structural Consistency:} If the observed action $y_t$ violates the partial order (i.e., $y_t \notin \mathcal{F}_t(h)$), then $Q_{\text{succ}}(y_t) = -\infty$ and the likelihood drops to zero. This ensures that the learned graph $h$ must be compatible with the observed topological order.
+    
+    \item \textbf{Efficiency Bias (Topological Guidance):} Among topologically valid actions, the model does not treat them uniformly. The utility $Q_{\text{succ}}$ biases the likelihood towards graphs where the observed trace follows a "path strategy" (executing high-dependency nodes first). This aligns the learned structure with the rational intent of the agent, rather than just random valid permutations.
+    
+    \item \textbf{Polynomial Tractability:} Unlike exact marginalization over all linear extensions (which is \#P-complete), computing the frontier and successor counts is polynomial. The likelihood evaluates in $\mathcal{O}(T \cdot |\mathcal{A}|)$, scaling efficiently to long execution logs.
+\end{enumerate}
+
+\noindent \textbf{Computational Complexity.}
+\label{app:complexity}
+We analyze the cost of evaluating the trace likelihood $\log p(y\mid h, \beta)$ for a single trace of length $T$. Let $|\mathcal{A}|$ be the action space size and $|\succ_h|$ be the number of edges in the candidate poset $h$. Assuming the graph structure and successor counts $S(a)$ are pre-computed for the candidate $h$ (a one-time cost per MCMC step), the trace evaluation involves two operations at each step $t$:
+
+\begin{enumerate}
+    \item \textbf{Frontier Maintenance:} We maintain the set of feasible actions $\mathcal{F}_t(h)$ using Kahn's algorithm logic \citep{kahn162sorting}. Upon observing action $y_t$, we decrement the unmet-prerequisite counts for its children. Since each dependency edge $(u, v) \in \succ_h$ is processed exactly once over the full trace, the total maintenance cost is linear in the graph size: $\mathcal{O}(|\succ_h|)$.
+    
+    \item \textbf{Policy Evaluation:} Computing the normalization constant for Eq.~\ref{eq:app-boltzmann} requires summing the exponential utilities over the current frontier. With pre-computed successor scores, looking up $Q_{\text{succ}}(a)$ is $\mathcal{O}(1)$. The cost is thus proportional to the frontier size at each step: $\mathcal{O}(\sum_{t=1}^T |\mathcal{F}_t(h)|)$.
+\end{enumerate}
+
+Combining these terms, and bounding the frontier size by $|\mathcal{A}|$, the total complexity per trace is:
+\begin{equation}
+    \mathcal{C}_{\text{trace}} \in \mathcal{O}\left(|\succ_h| + \sum_{t=1}^T |\mathcal{F}_t(h)|\right) \subseteq \mathcal{O}\big(|\succ_h| + T \cdot |\mathcal{A}|\big).
+    \label{eq:complexity_bound}
+\end{equation}
+This linear scaling in both graph density and trace length ensures the likelihood remains tractable for long execution logs, avoiding the factorial complexity of summing over all linear extensions.
+
+
+\subsection{Likelihood}
+\label{app:likelihood_visual}
+\noindent \textbf{Robust Mixture Model.}
+Real-world execution logs contain noise (e.g., asynchronous logging latency or manual interventions) that may appear to violate strict causal dependencies. To prevent the likelihood from collapsing to zero on these "trembling hand" errors, we define the choice probability as a mixture of a rational Boltzmann policy and a uniform noise distribution (Eq.~\ref{eq:frontier_softmax}).
+\begin{itemize}
+    \item \textbf{Rational Component ($1-\epsilon$):} The agent selects $y_t \in \mathcal{F}_t(h)$ proportional to $\exp(\beta Q(y_t))$. If $y_t \notin \mathcal{F}_t(h)$ (a structural violation), this term is strictly zero.
+    \item \textbf{Noise Component ($\epsilon$):} The agent selects $y_t$ uniformly from all remaining actions $R_t$, ensuring a non-zero "safety floor" probability $\frac{\epsilon}{|R_t|}$ for any physically possible action.
+\end{itemize}
+This formulation allows BPOP to learn structure from noisy data: the gradient is driven by the rational component (maximizing topological fit), while the noise component acts as a robust buffer against outliers (See Figure \ref{fig:frontier_softmax_diagram} and Table~\ref{tab:likelihood_calc} for the illustrated example).
+\begin{figure*}[h]
+    \centering
+\begin{tikzpicture}[
+  font=\footnotesize\sffamily,
+  >=Latex,
+  edge/.style={-Latex, thick, draw=black!65},
+  fadededge/.style={-Latex, thick, draw=black!25},
+  vnode/.style={circle, draw=black, thick, minimum size=5.5mm, inner sep=0pt, font=\scriptsize\bfseries},
+  done/.style={vnode, fill=black!10, draw=black!30, text=black!35},
+  frontier/.style={vnode, line width=1.25pt, draw=blue!80!black},
+  chosen/.style={vnode, fill=blue!10, draw=blue!80!black},
+  chosenfrontier/.style={chosen, line width=1.25pt},
+  violation/.style={vnode, fill=red!10, draw=red!80!black, dashed, line width=1.25pt},
+  qlbl/.style={font=\tiny, inner sep=1pt, text=blue!60!black, align=center},
+  errlbl/.style={font=\tiny, inner sep=1pt, text=red!60!black, align=center},
+  steptitle/.style={font=\small\bfseries, text=black!85},
+  stepmeta/.style={font=\scriptsize, text=black!80, align=center}
+]
+\centering
+% Panel Config
+\def\yTop{1.15} \def\yMid{0} \def\yBot{-1.15}
+\def\xL{-1.1} \def\xR{ 1.1}
+\def\xA{0.0} \def\xB{5.6} \def\xC{11.2}
+
+% --- Panel 1: t=1 ---
+\begin{scope}[xshift=\xA cm]
+  \node[steptitle] at (0,2.1) {$t=1$};
+  \node[chosenfrontier] (a1) at (0,\yTop) {1};
+  \node[vnode]  (a2) at (\xL,\yMid) {2};
+  \node[vnode]  (a3) at (\xR,\yMid) {3};
+  \node[vnode]  (a4) at (0,\yBot) {4};
+  \draw[edge] (a1) -- (a2); \draw[edge] (a1) -- (a3);
+  \draw[edge] (a2) -- (a4); \draw[edge] (a3) -- (a4);
+  \node[qlbl, right=2pt of a1] {$S=3$\\$Q{\approx}1.4$};
+  \node[stepmeta] at (0,-2.0) {$\mathcal{F}_1=\{1\}$\\$p(1) \approx 1-\epsilon$};
+\end{scope}
+
+% --- Panel 2: t=2 ---
+\begin{scope}[xshift=\xB cm]
+  \node[steptitle] at (0,2.1) {$t=2$};
+  \node[done] (b1) at (0,\yTop) {1};
+  \node[frontier] (b2) at (\xL,\yMid) {2};
+  \node[chosenfrontier] (b3) at (\xR,\yMid) {3};
+  \node[vnode] (b4) at (0,\yBot) {4};
+  \draw[fadededge] (b1) -- (b2); \draw[fadededge] (b1) -- (b3);
+  \draw[edge] (b2) -- (b4); \draw[edge] (b3) -- (b4);
+  \node[qlbl, left=2pt of b2] {$S=1$}; \node[qlbl, right=2pt of b3] {$S=1$};
+  \node[stepmeta] at (0,-2.0) {$\mathcal{F}_2=\{2,3\}$\\$p(3) \approx 0.5(1-\epsilon)$};
+\end{scope}
+
+% --- Panel 3: t=3 (Violation) ---
+\begin{scope}[xshift=\xC cm]
+  \node[steptitle] at (0,2.1) {$t=3$};
+  \node[done] (c1) at (0,\yTop) {1};
+  \node[done] (c3) at (\xR,\yMid) {3};
+  \node[frontier] (c2) at (\xL,\yMid) {2};
+  \node[violation] (c4) at (0,\yBot) {4};
+  \draw[fadededge] (c1) -- (c2); \draw[fadededge] (c1) -- (c3);
+  \draw[edge] (c2) -- (c4); \draw[fadededge] (c3) -- (c4);
+  \node[qlbl, left=2pt of c2] {$S=1$};
+  \node[errlbl, right=2pt of c4] {Violates\\$2{\to}4$};
+  \node[stepmeta] at (0,-2.0) {$y_3=4 \notin \mathcal{F}_3$\\$p(4) = \epsilon / |R_3|$};
+\end{scope}
+
+% --- Legend ---
+\begin{scope}[yshift=2.7cm, xshift=0.25cm]
+  \node[frontier] (k1) at (0,0) {}; \node[stepmeta, anchor=west] at (0.2,0) {Frontier ($\mathcal{F}_t$)};
+  \node[chosenfrontier] (k2) at (2.5,0) {}; \node[stepmeta, anchor=west] at (2.7,0) {Chosen Action};
+  \node[violation] (k3) at (5.5,0) {}; \node[stepmeta, anchor=west] at (5.7,0) {Violation (Noise Only)};
+\end{scope}
+\end{tikzpicture}
+\captionof{figure}{\textbf{Stepwise likelihood under the Robust Frontier-Softmax model.}  
+We score actions by Successor Utility $S_t(a)$.
+\textbf{(Left)} $t=1$: Action 1 is the only valid choice.
+\textbf{(Center)} $t=2$: Actions 2 and 3 are symmetric choices.
+\textbf{(Right)} $t=3$: Attempting action 4 (before 2) is a violation. The softmax term becomes 0, leaving only the "trembling hand" noise probability $\epsilon/|R_t|$.}
+\label{fig:frontier_softmax_diagram}
+\end{figure*}
+\vspace{1em}
+
+% ------------------------------------------------------------
+% TABLE BLOCK
+% ------------------------------------------------------------
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Likelihood calculation for the violation trace $y=(1, 3, 4, 2)$.} 
+The probability is a mixture of a rational softmax policy (over the frontier) and a uniform noise component.
+For the violation at $t=3$, the rational component is zero, so the likelihood relies entirely on the noise floor.}
+\label{tab:likelihood_calc}
+\small
+\begin{tabular}{@{}c l l l l@{}}
+\toprule
+\textbf{Step} & \textbf{State} ($R_t, \mathcal{F}_t$) & \textbf{Utilities} $S_t(\mathcal{F}_t)$ & \textbf{Choice} & \textbf{Mixture Probability} $p(y_t \mid \dots)$ \\
+\midrule
+$t=1$ & $R=\{1,2,3,4\}$ & $S(1)=3$ & \textbf{1} & $(1-\epsilon) \cdot \underbrace{1.0}_{\text{Softmax}} + \underbrace{\frac{\epsilon}{4}}_{\text{Noise}}$ \\ 
+      & $\mathcal{F}=\{1\}$ & $Q \approx 1.39$ & & \\
+\addlinespace[6pt]
+
+$t=2$ & $R=\{2,3,4\}$ & $S(2)=1, S(3)=1$ & \textbf{3} & $(1-\epsilon) \cdot \underbrace{0.5}_{\text{Softmax}} + \frac{\epsilon}{3}$ \\
+      & $\mathcal{F}=\{2,3\}$ & $Q \approx 0.69$ & & \\
+\addlinespace[6pt]
+
+$t=3$ & $R=\{2,4\}$ & $S(2)=1$ & \textbf{4} & $\underbrace{0}_{\text{Invalid}} + \underbrace{\frac{\epsilon}{2}}_{\text{Safety Floor}}$ \\
+      & $\mathcal{F}=\{2\}$ & $Q(4)=-\infty$ & & \textit{(Trembling Hand Only)} \\
+\addlinespace[6pt]
+
+$t=4$ & $R=\{2\}$ & $S(2)=0$ & \textbf{2} & $(1-\epsilon) \cdot 1.0 + \epsilon$ \\
+      & $\mathcal{F}=\{2\}$ & $Q \approx 0.0$ & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\section{From Structure to Efficient Execution}
+\label{app:execution}
+
+\subsection{Trace Parsing and Action Definition}
+\label{app:action_definition}
+
+
+Let the raw agent session be a sequence of tokens $S = (o_1, \dots, o_N)$ drawn from a mixed vocabulary $\mathcal{V} = \mathcal{A} \cup \mathcal{T}_{think}$.
+\begin{itemize}
+    \item \textbf{Cognitive Space ($\mathcal{T}_{think}$):} Includes all tokens generated for planning, self-correction, or reflection (e.g., \texttt{Thinking: "I need to check the VPC ID..."}). These are treated as transient computational overhead.
+    \item \textbf{Action Space ($\mathcal{A}$):} Includes only atomic, verifiable tool invocations that produce persistent side effects (e.g., \texttt{CreateInstance}, \texttt{blastn}). An action is typically a tuple $(f, \theta)$ of function identifier and arguments.
+\end{itemize}
+
+We define the training trace $y$ as the output of a projection operator $\Pi: \mathcal{V}^* \to \mathcal{A}^*$ that filters strictly for functional primitives:
+\begin{equation}
+    y = \Pi(S) = (a_1, a_2, \dots, a_T) \quad \text{where } a_i \in S \cap \mathcal{A}
+\end{equation}
+By discarding $\mathcal{T}_{think}$, BPOP effectively learns to compile the logic implicit in the reasoning steps directly into the structural dependencies of $y$.
+\
+\paragraph{Actions as Expert-Polished Primitives.}
+Our definition of atomic actions $\mathcal{A}$ is grounded in the existence of \textbf{Standard Operating Procedures (SOPs)}. 
+In high-stakes domains, human experts rely on "runbooks" or instruction booklets where each step has been carefully defined, polished, and validated to be safe and deterministic. 
+For example, a cloud provider defines \texttt{CreateVPC} not as a vague intent, but as a precise contract with specific parameters and return values. 
+In the ``Enough Thinking'' paradigm, we treat these actions as the fundamental units of truth. By projecting the agent's behavior onto this expert-defined subspace, we effectively align the agent's ``muscle memory'' with the polished instruction sets designed by system architects, discarding the noisy, ad-hoc reasoning that connects them.
+
+
+
+
+\subsection{GEE Architecture: Decoupling Control Flow and Data Flow}
+\label{subsec:gee-arch}
+
+The inferred SOP specifies control flow (what must precede what), but execution additionally requires data flow (how parameters propagate across tool calls). 
+\paragraph{Execution State and Frontier Semantics}
+\label{subsec:frontier}
+
+The executor maintains a completed set $S\subseteq \mathcal{A}$, per-action runtime status (pending/running/done/failed), and a global artifact store (blackboard) $\mathcal{B}$ for tool outputs. The set of currently feasible actions forms the \emph{frontier}. Frontier semantics makes concurrency explicit: actions in $F(S;h)$ are not ordered by $h$ given $S$ and can be dispatched in parallel, subject to tool and rate constraints.
+
+\paragraph{IO registry and blackboard.}
+We attach an IO signature $\mathcal{R}(a)=(\mathcal{I}_a,\mathcal{O}_a)$ to each action, where $\mathcal{I}_a$ is the required input-slot set and $\mathcal{O}_a$ is the output-field set(See\ref{tab:io-registry-example} as exmample). After executing $a$, GEE writes $\mathcal{O}_a$ to $\mathcal{B}$; before executing $b$, it fills $\mathcal{I}_b$ from $\mathcal{B}$. Missing inputs or API errors trigger a controlled fallback (Section~\ref{subsec:modes}).
+
+\begin{table}[t]
+\centering
+\caption{A minimal IO registry example (cloud provisioning). Output fields (bold) are stored in the blackboard and can satisfy subsequent inputs.}
+\label{tab:io-registry-example}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{l l l}
+\toprule
+\textbf{Action} & \textbf{Inputs} & \textbf{Outputs} \\
+\midrule
+CreateVpc & RegionId & \textbf{VpcId} \\
+CreateVSwitch & \textbf{VpcId}, ZoneId & \textbf{VSwitchId} \\
+RunInstances & \textbf{VSwitchId}, SecurityGroupId & \textbf{InstanceIds} \\
+\bottomrule
+\end{tabular}
+\end{table}
+\subsection{Tri-Modal Execution: Risk-Aware Automation Boundaries}
+\label{subsec:modes}
+
+Enterprise workflows require determinism and audit ability. BPOP provides three execution modes(See Figrue~\ref{fig:tri-modal}) that trade off automation efficiency against failure handling, selected by the operator based on scenario maturity and risk tolerance. When the inferred SOP is stable and trusted, \textsc{Expert} mode delivers maximal efficiency with strict determinism; when additional resilience is desired, \textsc{Hybrid} mode adds automatic recovery; when bootstrapping a new scenario or exploring alternative paths, \textsc{Explore} mode collects traces for future SOP inference.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\linewidth]{figures/tri-modal.png}
+    \caption{Tri-modal execution. \textsc{Expert}/\textsc{Hybrid} execute a posterior-compiled SOP via frontier scheduling;
+    \textsc{Hybrid} falls back to an LLM planner on runtime errors; \textsc{Explore} runs the full LLM loop to collect traces.}
+    \label{fig:tri-modal}
+\vspace{-10pt} % Pulls main text closer to figure bottom
+\end{figure}
+The three modes serve distinct operational scenarios:
+\begin{itemize}
+\item \textbf{\textsc{Expert}:} For stable, production-ready SOPs. The LLM performs a single intent-parsing and slot-filling call; execution is fully deterministic frontier traversal. On any error (API failure, missing input, deadlock), execution \emph{halts immediately} and escalates to human operators. This provides maximal efficiency ($\sim$1 LLM call) with strong stability and reproducibility.
+\item \textbf{\textsc{Hybrid}:} Designed for mature SOPs where resilience is desired. Execution follows the SOP identically to \textsc{Expert}, but upon error, it \emph{falls back to step-by-step reasoning} for LLM-guided recovery instead of halting. When the SOP is correct, \textsc{Hybrid} matches \textsc{Expert} in efficiency; the difference lies purely in the error-handling strategy.
+
+\item \textbf{\textsc{Explore}:} Targeted at cold-start scenarios (insufficient traces for SOP inference) or serving as the unconstrained baseline. The LLM operates in a full \emph{reasoning-action loop} with complete execution history. By varying base models, temperature, and prompts, operators can explore diverse execution paths and collect traces for future SOP learning.
+
+\end{itemize}
+The key efficiency gain in \textsc{Expert}/\textsc{Hybrid} comes from \emph{eliminating per-step LLM reasoning}---the inferred SOP encodes task structure, enabling deterministic frontier traversal rather than repeated LLM queries.
+
+
+
+\section{Evaluation}
+\subsection{Incomparable-pair coverage and trace sufficiency}
+\label{app:cp_cov_def}
+
+\noindent \textbf{Incomparable pairs.}
+Let $h^\star=(\mathcal{A}, \succ_{h^\star})$ be a strict partial order over $m=|\mathcal{A}|$ items. We define the set of \emph{incomparable pairs} as distinct indices with no reachability in either direction:
+\[
+\mathcal{P}_{\parallel}(h^\star)
+\;=\;
+\bigl\{(i,j) : 1\le i < j \le m, \; i \not\succ_{h^\star} j \land j \not\succ_{h^\star} i \bigr\}.
+\]
+\noindent \textbf{Incomparable-pair coverage (IP-Cov).}
+Each trace $y \in \mathcal{D}$ induces a total ordering over items, denoted $i \succ_y j$ if $i$ precedes $j$ in sequence $y$. We measure the diversity of the trace set $\mathcal{D}$ by quantifying how many ground-truth incomparable pairs are observed in \emph{both} directions:
+\[
+\mathrm{IP\text{-}Cov}(\mathcal{D}; h^\star)
+\;=\;
+\frac{1}{|\mathcal{P}(h^\star)|}
+\sum_{(i,j)\in\mathcal{P}(h^\star)}
+\mathbb{I}\Big[\exists\, y, y' \in \mathcal{D} : (i \succ_{y} j) \land (j \succ_{y'} i) \Big].
+\]
+Intuitively, $\mathrm{IP\text{-}Cov}$ reports the fraction of incomparable pairs that are statistically distinguishable from strict precedence given the observed data.
+
+\noindent \textbf{Trace Sufficiency (Discussion).}
+We define a trace set $\mathcal{D}$ as \emph{sufficient} for recovering $h^\star$ if $\mathrm{IP\text{-}Cov}(\mathcal{D};h^\star)=1$. This condition guarantees that every ground-truth incomparable pair is observed in both relative orderings, providing the statistical evidence necessary to distinguish concurrency from causality. In practice, $\mathrm{IP\text{-}Cov}$ acts as a tractable surrogate for the theoretical ideal of observing all linear extensions, serving as a quantifiable control knob for dataset diversity in our recoverability experiments.
+
+\subsection{Practical Trace Acquisition Strategy}
+\label{app:trace_acquisition}
+
+In real-world deployments, the ground-truth partial order $h^\star$ is unknown, making the calculation of $\mathrm{IP\text{-}Cov}$ impossible. To approximate trace sufficiency and ensure the recovered SOP is not biased by a single planner's "habits," we employ a \textbf{Heterogeneous Model Exploration} strategy combined with a \textbf{Saturation-Based Stopping Criterion}.
+
+\noindent \textbf{1. Heterogeneous Model Ensembling.}
+Standard LLMs exhibit distinct inductive biases in sequential planning. For example, given two concurrent tasks (e.g., \texttt{InitializeDB} and \texttt{ConfigNetwork}), Model A may deterministically prefer ordering $i \to j$, while Model B may prefer $j \to i$. Relying on a single model often leads to \emph{false causality}—inferring a dependency where none exists.
+
+To mitigate this, we generate the trace set $\mathcal{D}$ using an ensemble of distinct LLM backbones $\mathcal{M} = \{m_1, \dots, m_k\}$ (e.g., GPT-4o, Claude-3.5, Llama-3). This diversity maximizes the entropy of the induced total orders:
+\[
+\mathcal{D} = \bigcup_{m \in \mathcal{M}} \text{GenerateTraces}(m, \text{temperature}{>}0.7).
+\]
+By aggregating traces from diverse sources, we significantly increase the probability that true incomparable pairs are witnessed in opposing relative orders ($i \succ_y j$ and $j \succ_{y'} i$), allowing the intersection-based inference to correctly identify them as concurrent.
+
+\noindent \textbf{2. Trace Diversity Saturation (Stopping Criterion).}
+Since we do not infer the graph during data collection, we monitor the raw traces for \textbf{pairwise saturation}. We track the set of item pairs observed in both relative directions (the "flipped" pairs):
+\[
+\mathcal{R}_N = \{(i,j) \mid \exists y, y' \in \mathcal{D}_N : (i \text{ precedes } j \text{ in } y) \land (j \text{ precedes } i \text{ in } y') \}.
+\]
+We stop collecting data when the size of $\mathcal{R}_N$ plateaus (i.e., $|\mathcal{R}_{N+\Delta}| \approx |\mathcal{R}_N|$). This indicates that adding more traces is no longer revealing new concurrency, suggesting that the pairs which have \emph{never} flipped are likely true causal dependencies.
+W
+
+\subsection{Transitive Closure vs.\ Transitive Reduction}
+\label{app:tc_tr_metrics}
+
+Given a partial order $h=(\mathcal{A}, \succ_h)$, we evaluate recovery performance on two levels:
+
+\noindent \textbf{Transitive Closure (Semantics).}
+$\mathrm{TC}(h)$ is the exhaustive set of all precedence pairs $(i, j)$ such that $i \succ_h j$. Metrics computed on $\mathrm{TC}$ assess whether the inferred order captures the correct causal flow, regardless of redundancy. This is the standard for checking logical consistency.
+
+\noindent \textbf{Transitive Reduction (Skeleton).}
+$\mathrm{TR}(h)$ is the minimal subset of dependencies required to induce $h$. It consists strictly of \emph{covering pairs}: $(i,j)$ such that $i$ precedes $j$ with no intermediate action $k$ between them ($i \succ_h k \succ_h j$). Metrics computed on $\mathrm{TR}$ assess the ability to recover the clean, minimal "skeleton" of the workflow, which is critical for interpretability and efficient graph execution.
+
+\noindent \textbf{Metric Selection Strategy.}
+We utilize $\mathrm{TR}(\cdot)$ and $\mathrm{TC}(\cdot)$ to address distinct evaluative questions:
+
+\begin{itemize}
+    \item \textbf{Skeleton Recovery (Precision, Recall, F1, SHD):} 
+    We compare the inferred \emph{covering relation} $\mathrm{TR}(\widehat{h})$ against the ground truth $\mathrm{TR}(h^\star)$. This evaluates whether we have recovered the \emph{minimal executable SOP} without penalizing the omission of redundant transitive edges (which are logically implied but structurally unnecessary).
+
+    \item \textbf{Feasibility (Consistency with Data):}
+    Feasibility asks whether the inferred logic admits the observed traces. Since a valid trace must respect \emph{all} implied precedence constraints, this property is defined with respect to the transitive closure:
+    \[
+    \mathrm{Feas}(\widehat{h}; \mathcal{D}) = \frac{1}{|\mathcal{D}|}
+    \sum_{y \in \mathcal{D}} \mathbb{I}\left[ y \in \mathcal{L}(\widehat{h}) \right].
+    \]
+    Note that $y \in \mathcal{L}(\widehat{h})$ if and only if $y$ respects every constraint in $\mathrm{TC}(\widehat{h})$.
+
+    \item \textbf{IP-Cov (Trace Diversity):}
+    The set of ground-truth incomparable pairs is defined by \emph{mutual non-reachability}. Therefore, it must be computed from the zeros of the ground-truth closure $\mathrm{TC}(h^\star)$:
+    \[
+    \mathcal{P}_{\parallel}(h^\star) = \{(i,j) : i < j,\; (i,j) \notin \mathrm{TC}(h^\star),\; (j,i) \notin \mathrm{TC}(h^\star)\}.
+    \]
+    IP-Cov then measures the fraction of pairs in $\mathcal{P}_{\parallel}(h^\star)$ that are witnessed in both relative orders across the trace set.
+\end{itemize}
+
+\subsection{Efficiency Evaluation Metric Definition}
+Table~\ref{tab:metric_definitions} provides formal definitions for all metrics 
+used in our evaluation.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Metric definitions.}}
+\label{tab:metric_definitions}
+\begin{small}
+\begin{tabular}{@{}lp{8cm}@{}}
+\toprule
+Metric & Definition \\
+\midrule
+Success Rate & Proportion of tasks completing without API errors \\
+Completeness & Proportion of tasks executing all expert-required actions \\
+Task Fallback & Proportion of tasks triggering $\geq 1$ LLM fallback \\
+Action Fallback & Ratio of post-fallback actions to total actions \\
+LLM Calls & Intent parsing ($1$) + Step by step reasoning steps \\
+Tokens & Total input + output tokens consumed by LLM \\
+Cover-F1 & F1 score of inferred vs.\ ground-truth cover edges \\
+Fallback Layer & Poset layer index when fallback triggers \\
+\bottomrule
+\end{tabular}
+\end{small}
+\end{table}
+
+
+
+\section{Experiment}
+
+\subsection{Baselines.}
+\label{app:alog_base}
+We compare against three baselines: (i) \emph{Majority}, (ii) \emph{Inductive Miner (IMf)},
+and (iii) \emph{Heuristics Miner (HM)}.
+IMf and HM follow standard process-discovery pipelines from event logs~\cite{leemans2013discovering,weijters2006process}. 
+All baselines produce a directed acyclic \emph{cover} graph by:
+(a) extracting a precedence graph, (b) greedily breaking cycles,
+and (c) projecting to a cover via transitive closure + transitive reduction.
+
+\subsubsection{Algorithm: Cycle Breaking }
+See Algorithm \ref{alg:cyclebreak} for detail. 
+\begin{algorithm2e}[h]
+\footnotesize
+\caption{\textsc{CycleBreakAndCover}$(A,W)$}
+\label{alg:cyclebreak}
+\DontPrintSemicolon
+\KwRequire{$A\in\{0,1\}^{n\times n}$ adjacency; $W\in\mathbb{R}_{\ge 0}^{n\times n}$ weights (larger = stronger).}
+\KwEnsure{DAG cover $\widehat{H}$.}
+
+\While{\textsc{HasCycle}$(A)$}{
+  $C \leftarrow \textsc{FindCycle}(A)$ \tcp*[r]{any directed cycle}
+  $(u,v) \leftarrow \arg\min_{(i,j)\in C} W_{ij}$ \tcp*[r]{weakest edge}
+  $A_{uv} \leftarrow 0$\;
+}
+$\widetilde{H} \leftarrow \textsc{TransitiveClosure}(A)$\;
+$\widehat{H} \leftarrow \textsc{TransitiveReduction}(\widetilde{H})$\;
+\Return $\widehat{H}$\;
+\end{algorithm2e}
+
+\subsubsection{Baseline 1: Majority}
+See Algorithm \ref{alg:majority} for detail. 
+% --- Algorithm 2: Majority ---
+\begin{algorithm2e}[h!]
+\footnotesize
+\caption{Majority baseline (pairwise precedence $\rightarrow$ cycle breaking)}
+\label{alg:majority}
+\DontPrintSemicolon
+\KwRequire{Orders $\mathcal{O}=\{o^{(t)}\}_{t=1}^N$ over items $[n]$; threshold $\tau$ (default $0.5$).}
+\KwEnsure{DAG cover $\widehat{H}_{\mathrm{maj}}$.}
+
+$C \leftarrow 0_{n\times n}$; \quad $T \leftarrow 0_{n\times n}$\;
+
+\For{$t\leftarrow 1$ \KwTo $N$}{
+  compute positions $\mathrm{pos}^{(t)}(\cdot)$ in $o^{(t)}$\;
+  \ForEach{$i\neq j\in o^{(t)}$}{
+    $T_{ij}\leftarrow T_{ij}+1$ \tcp*[r]{pairs co-occurring}
+    \If{$\mathrm{pos}^{(t)}(i) < \mathrm{pos}^{(t)}(j)$}{
+      $C_{ij}\leftarrow C_{ij}+1$\;
+    }
+  }
+}
+
+\ForEach{$(i,j)$ with $T_{ij}>0$}{
+  $p_{ij}\leftarrow C_{ij}/T_{ij}$\;
+}
+
+$A \leftarrow 0_{n\times n}$; \quad $W \leftarrow 0_{n\times n}$\;
+
+\ForEach{$\{i,j\}$ with $i<j$}{
+  \uIf{$p_{ij}>\tau$ \textbf{and} $p_{ij}>p_{ji}$}{
+    $A_{ij}\leftarrow 1$; \quad $W_{ij}\leftarrow |p_{ij}-0.5|$\;
+  }
+  \uElseIf{$p_{ji}>\tau$ \textbf{and} $p_{ji}>p_{ij}$}{
+    $A_{ji}\leftarrow 1$; \quad $W_{ji}\leftarrow |p_{ji}-0.5|$\;
+  }
+}
+
+$\widehat{H}_{\mathrm{maj}} \leftarrow \textsc{CycleBreakAndCover}(A,W)$\;
+\Return $\widehat{H}_{\mathrm{maj}}$\;
+\end{algorithm2e}
+
+
+\subsubsection{Baseline 2: Inductive Miner (IMf)}
+See Algorithm \ref{alg:imf} for detail. 
+% --- Algorithm 3: IMf ---
+\begin{algorithm2e}[h!]
+\footnotesize
+\caption{Inductive Miner IMf (process discovery $\rightarrow$ footprints $\rightarrow$ precedence)}
+\label{alg:imf}
+\DontPrintSemicolon
+\KwRequire{Orders $\mathcal{O}=\{o^{(t)}\}_{t=1}^N$ over task names $V$; IMf noise threshold $\eta$.}
+\KwEnsure{DAG cover $\widehat{H}_{\mathrm{IMf}}$.}
+
+$L \leftarrow \textsc{EventLogFromOrders}(\mathcal{O})$ \tcp*[r]{each order = one case}
+$T \leftarrow \textsc{InductiveMinerIMf}(L;\eta)$ \tcp*[r]{process tree}
+$\mathit{FP} \leftarrow \textsc{Footprints}(T)$ \tcp*[r]{fallback to log if needed}
+$\mathit{Seq} \leftarrow \mathit{FP}.\textsc{Sequence}$ \tcp*[r]{ordered pairs $(a,b)$}
+
+$A \leftarrow 0_{|V|\times|V|}$; \quad $W \leftarrow 0_{|V|\times|V|}$\;
+\ForEach{$(a,b)\in \mathit{Seq}$}{
+  $A_{ab}\leftarrow 1$; \quad $W_{ab}\leftarrow 1$\;
+}
+$\widehat{H}_{\mathrm{IMf}} \leftarrow \textsc{CycleBreakAndCover}(A,W)$\;
+\Return $\widehat{H}_{\mathrm{IMf}}$\;
+\end{algorithm2e}
+
+
+\subsubsection{Baseline 3: Heuristics Miner}
+See Algorithm \ref{alg:hm} for detail. 
+% --- Algorithm 4: Heuristics Miner ---
+\begin{algorithm2e}[h!]
+\footnotesize
+\caption{Heuristics Miner (dependency graph $\rightarrow$ precedence)}
+\label{alg:hm}
+\DontPrintSemicolon
+\KwRequire{Orders $\mathcal{O}=\{o^{(t)}\}_{t=1}^N$ over task names $V$; dependency threshold $\delta$.}
+\KwEnsure{DAG cover $\widehat{H}_{\mathrm{HM}}$.}
+
+$L \leftarrow \textsc{EventLogFromOrders}(\mathcal{O})$\;
+$\mathit{HN} \leftarrow \textsc{HeuristicsMiner}(L;\delta,\ldots)$\;
+$\mathit{Dep} \leftarrow \mathit{HN}.\textsc{DependencyMatrix}$\;
+
+$A \leftarrow 0_{|V|\times|V|}$; \quad $W \leftarrow 0_{|V|\times|V|}$\;
+\ForEach{$a\neq b \in V$}{
+  \If{$\mathit{Dep}(a,b)\ge \delta$}{
+    $A_{ab}\leftarrow 1$; \quad $W_{ab}\leftarrow \mathit{Dep}(a,b)$\;
+  }
+}
+$\widehat{H}_{\mathrm{HM}} \leftarrow \textsc{CycleBreakAndCover}(A,W)$\;
+\Return $\widehat{H}_{\mathrm{HM}}$\;
+\end{algorithm2e}
+
+\subsubsection{Baseline 4: Bayesian Queue Jump}
+\label{app:alog_base_qj}
+
+The Queue-Jump (QJ) baseline \citep{nicholls2024bayesianinferencepartialorders} models each observed trace $y=(y_1,\ldots,y_N)$ as a sequential choice process on a latent
+poset $H$. At step $j$, let $R_j$ be the set of remaining actions and $H[R_j]$ the induced subposet. The noise-free probability
+of selecting the next action is
+\[
+q_{R_j}(y_j \mid H[R_j]) \;=\; \frac{\#\{\text{linear extensions of }H[R_j]\text{ that start with }y_j\}}{\#\{\text{linear extensions of }H[R_j]\}} .
+\]
+To allow violations of feasibility, QJ mixes this with a ``jump'' distribution. In the plain QJ variant, the jump is uniform on
+remaining actions, $\pi_{\text{jump}}(y_j\mid R_j)=1/|R_j|$, giving the stepwise likelihood
+\[
+p(y_j\mid H[R_j],p) \;=\; (1-p)\,q_{R_j}(y_j\mid H[R_j]) \;+\; p\,\pi_{\text{jump}}(y_j\mid R_j),
+\]
+and the full-trace likelihood factors as $\prod_{j=1}^{N} p(y_j\mid H[R_j],p)$.
+
+Evaluating $q_{R_j}(\cdot)$ requires counting linear extensions of $H[R_j]$ (and, for each candidate $y_j$, counting extensions
+conditioned to start with $y_j$). Counting linear extensions is \#P-complete in general \citep{brightwell1991counting}, so QJ
+must repeatedly invoke an exponential-time subroutine across steps, traces, and MCMC iterations. This makes QJ impractical
+beyond small graphs; in our experiments it incurs hundreds of NLE calls per iteration and quickly becomes prohibitive as $|A|$
+grows (Appendix~\ref{app:qj_runtime}).
+
+
+
+\subsection{WFCommons Experiment}
+\label{app:wfcommons_details}
+% =========================
+% Appendix E.3
+% =========================
+\subsubsection{WFCommons Workflow Dataset}\label{app:wfcommons_dataset}
+
+\noindent \textbf{Source and format.}
+We use workflow execution instances from WFCommons WfInstances.Each workflow execution instance is represented as a WfFormat JSON file describing an actual execution on a
+distributed platform and includes (i) a workflow specification DAG (task dependencies) and (ii) time-stamped
+task execution information.
+Per-workflow dataset documentation is provided in the WfInstances application READMEs
+\citep{wfcommons_srasearch}.
+
+\noindent \textbf{Workflows used.}
+Figure~\ref{fig:wfcommons_dags} visualizes the ground-truth dependency structures (DAG covers) for the two selected benchmarks:
+1. \textbf{SRASearch (Left):} A data-retrieval workflow (22 tasks) characterized by a "fork-join" pattern, where parallel download tasks eventually merge into a final analysis step.
+2. \textbf{Epigenomics (Right):} A genomics pipeline (41 tasks) with high parallel width (independent branches) and multi-stage synchronization points, offering a more complex structural recovery challenge. Those are the ground true graph that has been produced. 
+
+\begin{figure}[htbp]
+    \centering
+    % Ensure the file path matches where you upload the PDF
+    \includegraphics[width=0.95\textwidth]{figures/wfcommons/combined_dags.pdf}
+    \caption{\textbf{Ground-Truth WFCommons Structures.} 
+    \textbf{(Left)} \texttt{SRASearch} (22 nodes, 30 edges) exhibits simple parallel-download logic. 
+    \textbf{(Right)} \texttt{Epigenomics} (41 nodes, 48 edges) features complex interleaved chains and synchronization barriers. 
+    BPOP aims to recover these topologies solely from linearized execution logs.}
+    \label{fig:wfcommons_dags}
+\end{figure}
+
+
+\noindent \textbf{Trace construction (observed linearizations).}
+For each WFCommons instance, we treat the specification DAG as ground truth and convert each execution log into
+an observed linearization by ordering tasks by their recorded start times.
+When two tasks share the same start time (or when timestamps are missing/identical after parsing), we apply a
+deterministic tie-break rule (lexicographic by task identifier) to produce a total order.
+Formally, for tasks $u,v$, we sort by the key
+\[
+\kappa(u) \;=\; \big(\texttt{start\_time}(u),\; \texttt{task\_id}(u)\big),
+\]
+and define the observed trace $\pi$ as the resulting ordered list of tasks.
+
+\noindent \textbf{Ground truth target for recovery metrics.}
+Let $h$ be the workflow specification DAG with node $\mathcal{A}$.
+Because our model targets minimal precedence constraints, we evaluate recovery against the \emph{cover graph}
+(also called the transitive reduction) $E_{\mathrm{cov}}$, which removes edges implied by transitivity.
+We report Cover-F1 and SHD computed on $E_{\mathrm{cov}}$, as well as feasibility and IP-Cov as described in the main text.
+
+\subsubsection{Synthetic IP-Coverage targets}
+\noindent \textbf{Synthetic Trace Generation.}
+To systematically stress-test structural recovery under controlled diversity, we generate synthetic trace sets derived from the ground-truth DAGs of the \textsc{SRASearch} and \textsc{Epigenomics} benchmarks. We model traces as linear extensions of the underlying partial order, sampled via a randomized Kahn’s algorithm that selects uniformly from the available frontier at each step. To curate datasets with precise diversity levels, we employ an iterative greedy sampling procedure: starting from an empty set, we generate candidate linear extensions and retain only those that increase the \emph{Incomparable Pair Coverage} (IP-Cov)—specifically, those that reveal a previously unobserved ordering direction for concurrent pairs—until a target coverage threshold $\tau \in \{0.50, 0.70, 0.85, 0.95\}$ is met( See table~\ref{tab:wf_data_efficiency} for detail).
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Data Efficiency Analysis (WFCommons).} 
+Number of execution traces required to reach specific IP-Coverage targets. 
+\texttt{Epigenomics}, with a larger state space (576 incomparable pairs vs.\ 190 for \texttt{SRASearch}), requires nearly $2\times$ more traces to achieve high diversity ($0.95$), illustrating the impact of topological complexity on data requirements.}
+\label{tab:wf_data_efficiency}
+\small
+\begin{tabular}{l c c c c}
+\toprule
+\textbf{Workflow} & \textbf{Tasks ($|A|$)} & \textbf{Target IP-Cov} & \textbf{Realized IP-Cov} & \textbf{Num Traces} \\
+\midrule
+\multirow{4}{*}{\textsc{SRASearch}} & \multirow{4}{*}{22} 
+  & 0.50 & 0.689 & 7 \\
+& & 0.70 & 0.758 & 8 \\
+& & 0.85 & 0.868 & 9 \\
+& & 0.95 & 0.963 & 10 \\
+\midrule
+\multirow{4}{*}{\textsc{Epigenomics}} & \multirow{4}{*}{41} 
+  & 0.50 & 0.521 & 3 \\
+& & 0.70 & 0.738 & 4 \\
+& & 0.85 & 0.863 & 8 \\
+& & 0.95 & 0.951 & 19 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsubsection{MCMC experiment details}\label{app:wfcommons_mcmc}
+
+\subsubsection{Computational Cost Details}\label{app:wfcommons_time}
+Table~\ref{tab:runtime_wfcommons} details the runtime for each of the 8 experimental configurations (1,000,000 MCMC iterations per run). The inference tasks for different IP-Cov targets and workflows are independent, we execute them in parallel on an 8-core instance. This reduces the effective wall-clock time to the duration of the longest single run (\textbf{$\approx$ 4.6 hours}), making the approach feasible for overnight learning.
+
+\begin{table}[h!]
+\centering
+\caption{\textbf{MCMC Runtime on WFCommons Benchmarks.} 
+Runtime is reported for 1M iterations on a standard CPU. 
+By parallelizing the 8 independent experiments, the total turnaround time is determined by the single slowest run (275 min), rather than the sequential sum ($\sim$20 hours).}
+\label{tab:runtime_wfcommons}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{l c c c r}
+\toprule
+& \multicolumn{2}{c}{\textbf{IP-Coverage}} & & \\
+\cmidrule(lr){2-3}
+\textbf{Workflow} & \textbf{Target} & \textbf{Realized} & \textbf{Traces ($N$)} & \textbf{Runtime (min)} \\
+\midrule
+\texttt{SRASearch}   & 0.50 & 0.689 & 7  & 103.5 \\
+                     & 0.70 & 0.758 & 8  & 96.9 \\
+                     & 0.85 & 0.868 & 9  & 101.0 \\
+                     & 0.95 & 0.963 & 10 & 114.0 \\
+\midrule
+\texttt{Epigenomics} & 0.50 & 0.521 & 3  & 145.0 \\
+                     & 0.70 & 0.738 & 4  & 143.5 \\
+                     & 0.85 & 0.863 & 8  & 195.5 \\
+                     & 0.95 & 0.951 & 19 & \textbf{275.3} \\
+\midrule
+\textbf{Total (Sequential)} & & & & \textbf{1,174.7} \\
+\textbf{Wall-Clock (8x Parallel)} & & & & \textbf{275.3} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We discard the first $50\%$ ($500,000$ samples) as burn-in to ensure convergence to the stationary distribution. 
+\subsubsection{Queue-Jump (NLE) Runtime Diagnostics}
+\label{app:qj_runtime}
+Table~\ref{tab:qj_mcmc_cost} shows the resulting per-iteration
+cost on \textsc{SRASearch} when NLE is called repeatedly during MCMC. These measurements illustrate why the QJ baseline
+is not practical for larger WFCommons graphs.
+
+
+\begin{table}[h!]
+\centering
+\caption{\textbf{Queue-Jump MCMC cost from runtime logs (SRASearch).}
+The baseline requires hundreds of NLE calls per iteration, leading to prohibitive runtimes.}
+\label{tab:qj_mcmc_cost}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lrr}
+\toprule
+\textbf{Setting} & \textbf{Value} & \textbf{Unit} \\
+\midrule
+Workflow size ($|V|$) & 22 & tasks \\
+Num.\ traces          & 16 & traces \\
+NLE calls / iteration & 704 & calls \\
+Time / iteration      & 42.2 & seconds \\
+Projected time (10k iters)  & 117.3 & hours \\
+Projected time (100k iters) & 1173.3 & hours \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsubsection{Threshold Selection}
+The table \ref{app:threshold_wf} details the threshold selection for inference. 
+\label{app:threshold_wf}
+Individual topologies exhibit distinct preferences: the simpler \texttt{SRASearch} favors a conservative threshold ($\alpha=0.5$) to ensure precision, whereas the highly parallel \texttt{Epigenomics} pipeline benefits from the theoretical baseline ($\alpha=1/3$) to maximize recall of concurrent branches. These values were used for the qualitative DAG visualizations when we recover the true partial orders in Figure~\ref{fig:wfcommons_dags} in Appendix~\ref{app:wfcommons_details}.
+\begin{table}[h!]
+\centering
+\caption{\textbf{Impact of Topology on Threshold Sensitivity.} We observe a distinct divergence based on graph complexity: the simpler, structured \texttt{SRASearch} workflow benefits from conservative pruning ($\alpha=0.50$), while the highly parallel \texttt{Epigenomics} pipeline requires permissive thresholds lower to preserve valid concurrent edges.}
+\label{tab:wfcommons_sensitivity}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{l cc | cc}
+\toprule
+& \multicolumn{2}{c|}{\textbf{SRASearch} (Simple)} & \multicolumn{2}{c}{\textbf{Epigenomics} (Complex)} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+\textbf{Threshold} & \textbf{Edge F1} & \textbf{SHD} $\downarrow$ & \textbf{Edge F1} & \textbf{SHD} $\downarrow$ \\
+\midrule
+$\alpha=0.30$ & 0.841 & 11.0 & \textbf{0.811} & \textbf{21.0} \\
+$\alpha=1/3$ & -- & -- & 0.786 & 24.0 \\
+$\alpha=0.40$ & 0.879 & 8.0 & 0.737 & 30.0 \\
+$\alpha=0.50$ & \textbf{0.906} & \textbf{6.0} & 0.713 & 33.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\subsubsection{Posterior Diagnostics (WFCommons)}
+To validate inference stability, we examine the MCMC traces for both scientific workflows. 
+
+\textbf{SRASearch (Figure~\ref{fig:diag_sra}):} The sampler converges rapidly, estimating a low noise level ($\rho \approx 0.23$) and a topological depth of $K \approx 4.2$. This confirms the workflow is relatively clean and shallow.
+
+\textbf{Epigenomics (Figure~\ref{fig:diag_epi}):} Reflecting its complex parallel structure, the model infers a higher noise parameter ($\rho \approx 0.55$) and a deeper topology ($K \approx 6.0$). Despite the higher complexity, the log-likelihood trace indicates stable mixing after burn-in.
+
+% --- FIGURE 1: SRASearch Diagnostics ---
+\begin{figure}[h!]
+    \centering
+    % Row 1: Likelihood & Rho
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=1, trim=0 0 0 0.7cm, clip]{figures/wfcommons/diagnostics.pdf}
+        \caption{Log-Likelihood (Convergence)}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=2, trim=0 0 0 0.7cm, clip]{figures/wfcommons/diagnostics.pdf}
+        \caption{$\rho$ Trace (Mean $\approx 0.23$)}
+    \end{subfigure}
+    
+    \vspace{0.3cm} % Spacing
+    
+    % Row 2: K & Beta
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=3, trim=0 0 0 0.7cm, clip]{figures/wfcommons/diagnostics.pdf}
+        \caption{$K$ Trace (Mean $\approx 4.2$)}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=4, trim=0 0 0 0.7cm, clip]{figures/wfcommons/diagnostics.pdf}
+        \caption{$\beta$ Trace}
+    \end{subfigure}
+    
+    \caption{\textbf{MCMC Diagnostics: SRASearch.} The traces show stable convergence to a low-noise, moderate-depth posterior.}
+    \label{fig:diag_sra}
+\end{figure}
+
+% --- FIGURE 2: Epigenomics Diagnostics ---
+\begin{figure}[h!]
+    \centering
+    % Row 1: Likelihood & Rho
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=1, trim=0 0 0 0.7cm, clip]{figures/wfcommons/diagnostics_epi.pdf}
+        \caption{Log-Likelihood (Convergence)}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=2, trim=0 0 0 0.7cm, clip]{figures/wfcommons/diagnostics_epi.pdf}
+        \caption{$\rho$ Trace (Mean $\approx 0.55$)}
+    \end{subfigure}
+    
+    \vspace{0.3cm} % Spacing
+    
+    % Row 2: K & Beta
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=3, trim=0 0 0 0.7cm, clip]{figures/wfcommons/diagnostics_epi.pdf}
+        \caption{$K$ Trace (Mean $\approx 6.0$)}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=4, trim=0 0 0 0.7cm, clip]{figures/wfcommons/diagnostics_epi.pdf}
+        \caption{$\beta$ Trace}
+    \end{subfigure}
+    
+    \caption{\textbf{MCMC Diagnostics: Epigenomics.} The sampler stabilizes at a higher depth ($K \approx 6$) and noise level ($\rho \approx 0.55$), consistent with the workflow's complexity.}
+    \label{fig:diag_epi}
+\end{figure}
+
+
+
+\subsection{Aliyun Cloud-IaC-6 Experiment}
+\subsubsection{Cloud Iac 6 dataset}
+\label{app:cloud_iac_6_dataset}
+We evaluate our method on \textbf{Cloud-IaC-6}, a benchmark of cloud provisioning tasks ranging from simple instance creation to complex high-availability clusters (see Table~\ref{tab:cloud_iac_6} and \ref{tab:aliyun_sceario}). Those scenarios are named from Aliyun Cloud Infrastructure product (See Table~\ref{tab:aliyun_glossary}). The dataset contains 54 successful execution traces generated by a diverse pool of LLM agents (including Qwen-Plus, DeepSeek, and Kimi) to ensure behavioral diversity.The true graph are from experts, see Figure~\ref{fig:aliyun-gt-covers}. We provide the full implementation and benchmark datasets in our public repository.\footnote{\url{https://anonymous.4open.science/r/Cloud-IaC-6-B970/README.md}}
+
+\begin{table}[H]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|l|p{8.5cm}|}
+\hline
+\textbf{ID} & \textbf{Scenario Identifier} & \textbf{Description} \\ \hline
+1 & SIMPLE\_ECS & Provisions a VPC, VSwitch, and Security Group, followed by a single ECS instance. \\ \hline
+2 & SLB\_ECS\_RDS & A classic 3-tier web architecture integrating Server Load Balancer (SLB), ECS, and Relational Database Service (RDS). \\ \hline
+3 & SLB\_ECS\_REDIS & A web architecture featuring a caching layer, utilizing SLB, ECS, and Redis. \\ \hline
+4 & EIP\_SLB\_ECS & A public-facing application using an Elastic IP (EIP) bound to an SLB and an ECS backend. \\ \hline
+5 & DUAL\_ZONE\_ECS\_SLB & Implements High Availability (HA) across multiple Availability Zones at the compute layer. \\ \hline
+6 & DUAL\_ZONE\_ECS\_SLB\_RDS & A full-stack HA architecture featuring cross-zone ECS instances and a Primary/Secondary RDS deployment. \\ \hline
+\end{tabular}
+\caption{Cloud Infrastructure Benchmarking Scenarios}
+\label{tab:aliyun_sceario}
+\end{table}
+
+
+
+\begin{table}[h]
+    \centering
+    \caption{Glossary of Aliyun Cloud Infrastructure Terms}
+    \label{tab:aliyun_glossary}
+    \renewcommand{\arraystretch}{1.2} % Adds slightly more padding between rows
+    \begin{tabular}{l p{10cm}}
+        \toprule
+        \textbf{Term} & \textbf{Description} \\
+        \midrule
+        \textbf{ECS} (Elastic Compute Service) & A web service that provides resizable compute capacity in the cloud (virtual servers), allowing users to launch instances with a variety of operating systems and hardware configurations. \\
+        
+        \textbf{SLB} (Server Load Balancer) & A traffic distribution service that manages high traffic by distributing incoming network requests across multiple ECS instances to ensure high availability and reliability. \\
+        
+        \textbf{RDS} (Relational Database Service) & A managed database service that provides scalable and reliable relational databases (e.g., MySQL, PostgreSQL) without the need for manual hardware provisioning or maintenance. \\
+        
+        \textbf{VPC} (Virtual Private Cloud) & A private, isolated network environment within the cloud where users can configure IP address ranges, subnets, and routing tables to securely manage their resources. \\
+        
+        \textbf{VSwitch} (Virtual Switch) & A virtual networking component within a VPC that connects different cloud resources (like ECS instances) in a specific zone or subnet. \\
+        
+        \textbf{EIP} (Elastic IP) & A static, public IP address designed for dynamic cloud computing, allowing users to mask the failure of an instance or software by rapidly remapping the address to another instance. \\
+        
+        \textbf{Redis} & An in-memory data structure store used as a database, cache, and message broker, often utilized in web architectures to improve performance. \\
+        
+        \textbf{HA} (High Availability) & A system design approach that ensures a certain level of operational performance (uptime) for a higher-than-normal period, often achieved by deploying resources across multiple zones (e.g., Dual Zone). \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\noindent \textbf{Trace Data Structure.}
+Each entry in the dataset is a serialized execution trace $\tau = (I, \mathcal{A}, \mathcal{B})$, where:
+\begin{itemize}
+    \item \textbf{Intent ($I$):} The natural language instruction (e.g., ``Create a 2-core ECS in Hangzhou Zone H'').
+    \item \textbf{Action Sequence ($\mathcal{A}$):} The linear sequence of API calls executed by the agent (e.g., \texttt{CreateVpc} $\to$ \texttt{RunInstances}).
+    \item \textbf{Blackboard State ($\mathcal{B}$):} The shared context containing resource IDs (e.g., \texttt{VpcId}, \texttt{SecurityGroupId}) produced by earlier actions and consumed by later ones.
+\end{itemize}
+
+Figure~\ref{lst:trace_example} illustrates a sample trace from Scenario S1 (\texttt{simple\_ecs}). Although the agent executes the actions sequentially (System 2 behavior), the underlying dependencies reveals latent concurrency: \texttt{CreateVSwitch} and \texttt{CreateSecurityGroup} both depend on \texttt{CreateVpc}, but are independent of each other. 
+
+% --- COMPACT TABLE ---
+\begin{table}[t]
+\centering
+\caption{\textbf{Cloud-IaC-6 Benchmark Statistics.} $|A|$ and $|E|$ denote nodes/edges in the ground-truth graph. \textbf{IP-Cov} measures the diversity of action orderings observed in the dataset.}
+\label{tab:cloud_iac_6}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{l l ccc r}
+\toprule
+\textbf{ID} & \textbf{Scenario Name} & $\mathbf{|A|}$ & $\mathbf{|E|}$ & $\mathbf{n}$ & \textbf{IP-Cov} \\
+\midrule
+S1 & \texttt{simple\_ecs}            & 5  & 5  & 10 & 100.0\% \\
+S2 & \texttt{slb\_ecs\_rds}          & 12 & 14 & 9  & 12.5\% \\
+S3 & \texttt{slb\_ecs\_redis}        & 9  & 10 & 10 & 53.3\% \\
+S4 & \texttt{eip\_slb\_ecs}          & 9  & 10 & 10 & 43.8\% \\
+S5 & \texttt{dual\_zone\_ecs\_slb}   & 7  & 8  & 8  & 40.0\% \\
+S6 & \texttt{dual\_zone\_...\_rds}   & 10 & 12 & 7  & 22.2\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% --- CLEANED TRACE LISTING ---
+\begin{figure}[h!]
+\begin{minipage}{\linewidth}
+\small
+\begin{verbatim}
+{
+  "trace_id": "T01_qwen-plus_20260104",
+  "intent": "Create a 2-core 4G ECS instance in Hangzhou Zone H",
+  "action_sequence": [
+    { "step": 1, "action": "CreateVpc", 
+      "output": {"VpcId": "vpc-9517..."} },
+      
+    { "step": 2, "action": "CreateVSwitch", 
+      "params": {"VpcId": "vpc-9517...", "ZoneId": "cn-hangzhou-h"},
+      "output": {"VSwitchId": "vsw-191b..."} },
+      
+    { "step": 3, "action": "CreateSecurityGroup", 
+      "params": {"VpcId": "vpc-9517..."},
+      "output": {"SecurityGroupId": "sg-0fae..."} },
+      
+    { "step": 4, "action": "RunInstances", 
+      "params": {"VSwitchId": "vsw-191b...", "SecurityGroupId": "sg-0fae..."},
+      "output": {"InstanceId": "i-007d..."} }
+  ]
+}
+\end{verbatim}
+\captionof{figure}{\textbf{Sample Execution Trace (S1: Simple ECS).} The log captures the linear execution of actions. Note the explicit data dependencies: Step 4 requires outputs from Steps 2 and 3, while Steps 2 and 3 only require Step 1.}
+\label{lst:trace_example}
+\end{minipage}
+\end{figure}
+
+
+
+
+\begin{figure*}[t]
+\centering
+\begin{subfigure}[t]{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/aliyun/dual_zone_ecs_slb_rds.png}
+  \caption{\texttt{simple\_ecs}}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/aliyun/slb_ecs_redis.png}
+  \caption{\texttt{slb\_ecs\_redis}}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/aliyun/slb_ecs_rds.png}
+  \caption{\texttt{slb\_ecs\_rds}}
+\end{subfigure}
+
+\vspace{2mm}
+
+\begin{subfigure}[t]{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/aliyun/eip_slb_ecs.png}
+  \caption{\texttt{eip\_slb\_ecs}}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/aliyun/dual_zone_ecs_slb.png}
+  \caption{\texttt{dual\_zone\_ecs\_slb}}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{figures/aliyun/dual_zone_ecs_slb_rds.png}
+  \caption{\texttt{dual\_zone\_ecs\_slb\_rds}}
+\end{subfigure}
+\caption{Ground-truth action-precedence graphs (covers) for the six Aliyun scenarios.
+Nodes are cloud API actions; edges denote mandatory precedence constraints.}
+\label{fig:aliyun-gt-covers}
+\end{figure*}
+
+
+
+
+\subsubsection{Trace Generation Protocol}
+\textbf{Execution-derived linearizations} are generated via the following protocol:
+\begin{enumerate}
+    \item Running the workflow instance under the Pegasus workflow management system.
+    \item Recording task start/completion timestamps from execution logs.
+    \item Ordering tasks by start time to obtain a total order.
+    \item Generating multiple traces by:
+    \begin{itemize}
+        \item Re-running with different scheduler configurations.
+        \item Using Kahn's algorithm to sample valid topological sorts from the ground-truth DAG.
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Experimental Efficient Engine}
+The experiments in Section~\ref{sec:hybrid_execution} focus on Hybrid mode performance, 
+as this is the most practically relevant regime where partial order inference provides 
+value while maintaining robustness guarantees.
+\label{app:experiment_config}
+
+\begin{lstlisting}[basicstyle=\small\ttfamily,frame=single]
+# experiment_config.yaml
+experiment:
+  scenarios: 6       # Cloud-IaC-6
+  edge_threshold: 0.5
+  eps_values: [0.01, 0.02, 0.03, 0.05]
+  ip_cov_targets: [0.6, 0.7, 0.8, 0.9, 1.0]
+  total_configs: 120
+
+llm:
+  model: qwen3-max
+  temperature: 0.0
+  max_tokens: 4096
+
+execution:
+  mode: hybrid
+  max_workers: 20
+  fallback_enabled: true
+  timeout_seconds: 300
+\end{lstlisting}
+
+
+All experiments were conducted on a single workstation with:
+\begin{itemize}
+\item CPU: Apple M2 Max (12 cores)
+\item Memory: 32 GB
+\item LLM API: Alibaba Cloud DashScope (qwen3-max)
+\item Total API cost: approximately \$15 USD for all 120 configurations
+\item Total wall-clock time: approximately 4 hours with 20 parallel workers
+\end{itemize}
+
+
+
+
+\subsubsection{Computational Efficiency and Scalability}
+\label{sec:scalability}
+We report detailed runtime and memory measurements to address practical deployment concerns.
+\noindent \textbf{Runtime Analysis.}
+Table~\ref{tab:runtime} summarizes the computational cost. Each MCMC run ($10^6$ iterations) completes in approximately \textbf{9 minutes} on a single core of an Apple M1 CPU. With 8 parallel workers, the complete experiment suite (35 configurations ) finishes in \textbf{5.3 hours wall-clock time}.
+\begin{table}[htbp]
+\caption{Computational cost of BPOP inference.}
+\label{tab:runtime}
+\centering
+\small
+\begin{tabular}{lc}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+MCMC iterations & $10^6$ \\
+Parallel workers & 8 \\
+Wall-clock time (35 runs) & 5.3 hours \\
+Peak memory per run & $<$500 MB \\
+Posterior storage (H\_trace) & 9.6 MB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Compared to process mining baselines (Inductive/Heuristics Miner), which run in seconds, BPOP trades speed for principled uncertainty quantification and superior peak accuracy. This trade-off is justified for applications requiring high-fidelity structural recovery, such as compliance verification and workflow optimization.
+
+\subsubsection{The MCMC detail and results}
+Figure~\ref{fig:diagnostics_combined} illustrates MCMC convergence for a representative run on the \texttt{eip\_slb\_ecs} scenario (Experiment 108) at full trace diversity ($IP\text{-}Cov=1.0$). The traces demonstrate stable mixing after burn-in, with posterior estimates converging to a noise level of $\rho \approx 0.29$ and a topological depth of $K \approx 3.33$. 
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=1, trim=0 0cm 0 0.7cm, clip]{figures/aliyun/diagnostics.pdf}
+        \caption{Log-likelihood Trace (MCMC Convergence)}
+        \label{fig:diag_ll}
+    \end{subfigure}
+     \hfill % Pushes the images to the edges   
+    % --- Row 2: Rho and Tau (Pages 2 and 3) ---
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=2, trim=0 0cm 0 0.7cm, clip]{figures/aliyun/diagnostics.pdf}
+        \caption{Parameter $\rho$ (Trace \& Posterior)}
+        \label{fig:diag_rho}
+    \end{subfigure}
+
+
+    % --- Row 2: Rho and Tau (Pages 2 and 3) ---
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=3, trim=0 0cm 0 0.7cm, clip]{figures/aliyun/diagnostics.pdf}
+        \caption{Parameter $k$ (K \& Posterior)}
+        \label{fig:diag_k}
+    \end{subfigure}
+    \hfill % Pushes the images to the edges
+    \begin{subfigure}[b]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth, page=4, trim=0 0cm 0 0.7cm, clip]{figures/aliyun/diagnostics.pdf}
+        \caption{Parameter $\beta$ (Trace \& Posterior)}
+        \label{fig:diag_beta}
+    \end{subfigure}
+    \caption{\textbf{MCMC Diagnostics (Aliyun Cloud-IaC-6/\texttt{eip\_slb\_ecs}).} The log-likelihood trace (a) indicates stable convergence after burn-in. Panels (b),(c),(d) show the trace plots and posterior distributions for the latent parameters $\rho$,$k$ and $\beta$ extracted directly from the sampler output.}
+    \label{fig:diagnostics_combined}
+\end{figure}
+\label{appendix:scenarios}
+
+\subsubsection{Sensitivity Analysis: Posterior Threshold Selection}
+\label{subsec:threshold_sensitivity}
+\noindent \textbf{Theoretical Intuition vs. Empirical Optima.}
+The threshold $\alpha = 1/3 \approx 0.33$ is theoretically motivated by a "Three-State" prior. For any pair of nodes $(i, j)$, there are three mutually exclusive relationships: precedence ($i \to j$), reverse precedence ($j \to i$), or incomparability ($i \parallel j$). Under a uniform prior, each state has probability $p=1/3$. Thus, a posterior probability $\hat{\pi}_{ij} > 1/3$ indicates that the data provides positive evidence for an edge relative to the uniform baseline.
+
+By looking at table~\ref{tab:threshold_comparison}, we find that a slightly permissive threshold of $\alpha=0.30$ yields the best performance across all metrics (Edge F1: \textbf{0.771}, SHD: \textbf{5.7}). The method is robust near the theoretical baseline of $\alpha=1/3$ (Edge F1: $0.747$), validating our three-state intuition. However, performance degrades sharply at $\alpha \ge 0.40$. This indicates that many true dependency edges in sparse workflows carry posterior probabilities in the $[0.30, 0.40)$ range; using a conservative threshold (e.g., $0.50$) discards these ``weak but real'' signals, resulting in false negatives that compromise execution safety.
+
+\begin{table}[h]
+\centering
+\caption{Sensitivity Analysis of Posterior Thresholds. While $\alpha=1/3$ offers strong theoretical justification, $\alpha=0.30$ is empirically optimal, capturing weak dependencies without introducing noise.}
+\label{tab:threshold_comparison}
+\small
+\begin{tabular}{l c c c}
+\toprule
+\textbf{Threshold} & \textbf{Edge F1} & \textbf{IP F1} & \textbf{SHD} $\downarrow$ \\
+\midrule
+$\alpha=0.30$ (Empirical Best) & \textbf{0.771} & \textbf{0.898} & \textbf{5.7} \\
+$\alpha=1/3$ (Theoretical) & 0.747 & 0.893 & 6.2 \\
+$\alpha=0.40$ & 0.665 & 0.856 & 7.0 \\
+$\alpha=0.50$ & 0.514 & 0.801 & 9.3 \\
+\midrule
+Marginal Mode & 0.518 & 0.803 & 9.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+
+\subsubsection{Other Recovery Evaluation Result}
+\label{app:additional_results}
+
+\noindent \textbf{Detailed Feasibility Analysis}
+Figure~\ref{fig:app_feas_breakdown} provides a scenario-level breakdown of execution feasibility. While the aggregate results in the main text showed a general trend, these plots reveal that baseline failures are often catastrophic in specific complex environments. For instance, in \texttt{slb\_ecs\_redis} (S3) and \texttt{eip\_slb\_ecs} (S4), the Heuristics Miner produces graphs that are 100\% invalid (0.0 feasibility) at high trace diversity, whereas BPOP maintains near-perfect validity.
+
+\begin{figure*}[h]
+    \centering
+    \includegraphics[width=\textwidth]{figures/aliyun/feasibility_by_scenario.pdf}
+    \caption{\textbf{Feasibility vs.\ IP-Cov by Scenario.} Unlike baselines, which often degrade to 0.0 feasibility in complex scenarios (S3, S4, S6) as trace diversity increases (due to conflicting ordering signals), BPOP maintains high execution validity across all benchmarks.}
+    \label{fig:app_feas_breakdown}
+\end{figure*}
+
+\begin{table}[h]
+\centering
+\caption{BPOP Edge F1 across noise parameter $\epsilon$ and trace diversity (IP-Cov). At high IP-Cov ($\geq 0.9$), performance is stable across all $\epsilon$ values, confirming robustness to the noise parameter.}
+\label{tab:epsilon_robustness}
+\begin{tabular}{lcccc}
+\toprule
+IP-Cov & $\epsilon=0.005$ & $\epsilon=0.01$ & $\epsilon=0.02$ & $\epsilon=0.05$ \\
+\midrule
+0.6 & 0.544 & 0.571 & 0.582 & 0.621 \\
+0.7 & 0.549 & 0.553 & 0.599 & 0.643 \\
+0.8 & 0.642 & 0.645 & 0.702 & 0.722 \\
+0.9 & 0.955 & 0.945 & 0.945 & 0.945 \\
+1.0 & 0.940 & 0.946 & 0.946 & 0.952 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\noindent \textbf{Qualitative Recovery at Different Data Regimes}
+To assess safety in data-scarce regimes, 
+Figure~\ref{fig:qualitative_recovery_10} visualizes the recovered graphs at full trace coverage ($\text{IP-Cov}=1.0$)
+Figure~\ref{fig:app_po_06} visualizes the recovered graphs at only partial trace coverage ($\text{IP-Cov}=0.6$). Even with incomplete data, BPOP recovers the majority of the correct backbone (green edges). While more spurious edges (orange dashed) appear compared to the full-data setting (Main Text Figure), the method successfully avoids the missing edges (false negatives) that would cause runtime failures.
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.95\linewidth]{figures/aliyun/po_comparison_ipcov10.pdf}
+    \caption{\textbf{Qualitative Structure Recovery.} Comparison of BPOP-inferred SOPs against ground truth at high diversity ($IP\text{-}Cov=1.0$).}
+    \label{fig:qualitative_recovery_10}
+    \vspace{-10pt} % Tighten space below figure
+\end{figure}
+\begin{figure*}[h!]
+    \centering
+    \includegraphics[width=0.95\textwidth]{figures/aliyun/po_comparison_ipcov06.pdf}
+    \caption{\textbf{Qualitative Structure Recovery at Low Diversity (IP-Cov=0.6).} 
+    Even with limited observations (60\% coverage of ordering pairs), BPOP correctly identifies the core dependency structure (Solid Green). 
+    \textcolor{orange}{\textbf{Orange Dashed}} lines indicate spurious dependencies where the model defaulted to "sequential" due to lack of evidence for concurrency---a safe fallback behavior.}
+    \label{fig:app_po_06}
+\end{figure*}
+
+
+\subsubsection{Other Efficient Evaluation Result}
+\label{app:aliyun_efficient}
+\clearpage
+% Add to your preamble:
+\noindent \textbf{Example User Case.}
+\label{app:user_case}
+This boxed appendix illustrates a representative execution trace comparing \emph{Expert} and \emph{Hybrid} modes on the same cloud provisioning task, highlighting their different responses to execution errors.
+
+% Paste this in the appendix where you want the boxed section to appear:
+\begin{tcolorbox}[title=\large\bfseries  Expert vs.\ Hybrid Reasoning Traces]
+\label{app:expert_vs_hybrid_reasoning}
+\medskip
+\noindent\textbf{User Query.}
+
+\begin{quote}
+\small
+\textbf{Task:} \textit{Provision a public-facing load-balanced service by allocating an Elastic IP (EIP),
+binding it to a Server Load Balancer (SLB),
+and configuring a single Elastic Compute Service (ECS) instance as the backend}
+\end{quote}
+
+\medskip
+\noindent\textbf{Expert Mode Reasoning (Failure Case).}
+
+\textit{Reasoning summary.}
+Expert mode executes the compiled SOP deterministically without re-planning,
+assuming prerequisite resources (e.g., security groups) already exist.
+In this trace that assumption is violated, triggering an API error that Expert mode cannot recover from.
+
+\medskip
+\noindent\textbf{Observed actions (Expert, truncated):}
+\begin{center}
+\small
+\begin{tabular}{r l l}
+\toprule
+Step & Action & Outcome \\
+\midrule
+1 & AllocateEipAddress & Success \\
+2 & CreateVpc & Success \\
+3 & AuthorizeSecurityGroup & \textbf{Fail} (missing SecurityGroupId) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent\textbf{Hybrid Mode Reasoning (Recovery Case).}
+
+\textit{Reasoning summary.}
+Hybrid mode starts from the same compiled SOP but monitors execution outcomes.
+On error it triggers LLM-based fallback planning, infers missing prerequisites, and reorders actions before resuming execution.
+
+\medskip
+\noindent\textbf{Observed actions (Hybrid, truncated):}
+\begin{center}
+\small
+\begin{tabular}{r l l}
+\toprule
+Step & Action & Outcome \\
+\midrule
+1 & CreateVSwitch & Success \\
+2 & CreateSecurityGroup & Success \\
+3 & RunInstances (ECS) & Success \\
+4 & CreateLoadBalancer & Success \\
+5 & AddBackendServers & Success \\
+6 & AssociateEipAddress & Success \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent\textbf{Comparison of reasoning behavior.}
+
+\begin{center}
+\small
+\begin{tabular}{p{3.6cm} p{4.2cm} p{4.2cm}}
+\toprule
+ & \textbf{Expert Mode} & \textbf{Hybrid Mode} \\
+\midrule
+Reasoning strategy & Deterministic SOP execution & Error-aware replanning \\
+Assumptions & Prerequisites already satisfied & Prerequisites inferred dynamically \\
+Failure handling & None & LLM-guided recovery \\
+Outcome & Execution failure & Successful completion \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent\textbf{Discussion.}
+This boxed comparison highlights the complementary roles of the two modes:
+Expert execution offers low-latency, low-cost runs when the SOP is correct, while Hybrid execution
+acts as a safety net that guarantees completion under partial structural errors.
+We report summarized reasoning rather than verbatim chain-of-thought; full internal prompts and hidden reasoning tokens are omitted for clarity and safety.
+\end{tcolorbox}
+
+
+
+\begin{table}[t]
+\centering
+\caption{{\textbf{Scenario legend:}
+S1=simple\_ecs,
+S2=slb\_ecs\_rds,
+S3=slb\_ecs\_redis,
+S4=eip\_slb\_ecs,
+S5=dual\_zone\_ecs\_slb,
+S6=dual\_zone\_ecs\_slb\_rds.}}
+\label{tab:scenario_metrics}
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+Scenario & Comp. & Act. & Task FB & Act. FB & Calls & Tokens \\
+        & (\%)  & /task & (\%)    & (\%)    & /task & /task \\
+\midrule
+S1 & 100.0 & 5.0  & 0.0  & 0.0  & 1.0 & 0 \\
+S2 & 45.0  & 10.2 & 60.0 & 54.8 & 7.3 & 39{,}471 \\
+S3 & 80.0  & 8.2  & 40.0 & 45.0 & 5.3 & 27{,}815 \\
+S4 & 60.0  & 8.8  & 60.0 & 49.7 & 5.5 & 27{,}569 \\
+S5 & 100.0 & 7.0  & 0.0  & 0.0  & 1.0 & 0 \\
+S6 & 100.0 & 10.0 & 0.0  & 0.0  & 1.0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[h]
+\centering
+\caption{LLM Model Sensitivity in Trace Generation (Explore Mode). ``Low-level'' or high-temperature models (e.g., Qwen-Turbo at $T=0.5$) struggle to autonomously complete workflows (SR $<100\%$). However, once the graph is recovered, BPOP's Expert Mode enables these models to execute successfully by offloading reasoning to the engine.}
+\label{tab:model_sensitivity}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l c c c c c}
+\toprule
+\textbf{Model} & \textbf{Temp ($T$)} & \textbf{Success (SR)} & \textbf{Time (s)} & \textbf{Tokens} & \textbf{Rec.} \\
+\midrule
+\multicolumn{6}{l}{\textit{High Capability / Low Noise}} \\
+\texttt{qwen-turbo} & 0.3 & \textbf{100\%} & \textbf{74.4} & \textbf{40,982} & $\star\star\star$ \\
+\texttt{qwen-plus} & 0.0 & 100\% & 135.7 & 50,652 & $\star\star\hphantom{\star}$ \\
+\texttt{qwen-plus} & 0.3 & 100\% & 143.0 & 57,268 & $\star\star\hphantom{\star}$ \\
+\texttt{qwen3-max} & 0.0 & 100\% & 122.9 & 59,892 & $\star\star\hphantom{\star}$ \\
+\texttt{glm-4.7} & 0.3 & 100\% & 111.8 & 71,448 & $\star\star\hphantom{\star}$ \\
+\midrule
+\multicolumn{6}{l}{\textit{Lower Capability / High Noise (Autonomous Failure)}} \\
+\texttt{qwen-flash} & 0.5 & 83.3\% & 101.7 & 54,996 & $\star\hphantom{\star}\hphantom{\star}$ \\
+\texttt{qwen-turbo} & 0.5 & 66.7\% & 54.8 & 35,315 & $\star\hphantom{\star}\hphantom{\star}$ \\
+\texttt{deepseek-v3.2} & 0.0 & 83.3\% & 498.4 & 79,372 & $\star\hphantom{\star}\hphantom{\star}$ \\
+\texttt{kimi-k2} & 0.0 & 83.3\% & 626.1 & 98,781 & $\star\hphantom{\star}\hphantom{\star}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\end{document}

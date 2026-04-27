@@ -1,0 +1,81 @@
+\section{Preliminaries and Background}
+\label{sec:background}
+
+\textbf{Notation:} We consider a decision-making agent that interacts with an environment over a sequence of rounds. At each round $t$, the agent observes a context (i.e., prompt) $X_t \in \mathcal{X}$ and selects an action $A_t \in \mathcal{A}$ according to a policy $\pi(A \mid X)$.
+If the policy is parameterized by an LLM, then $\mathcal{A} \subseteq \mathcal{X}$.
+The agent then observes (potentially noisy) rewards $R_t \in \mathbb{R}$ and losses $L_t \in \mathbb{R}$.
+Throughout, uppercase letters denote random variables and lowercase letters their realized values.
+The reward function $r(x, a)$ quantifies the degree to which a context-action pair is aligned with the agent's objective, and the loss function $\ell(x, a)$ quantifies the degree to which the context-action pair violates the agent's constraints.
+% \footnote{One could instead define the reward of infeasible context-action pairs to be $-\infty$, however maintaining explicit notation for constraint observations will prove useful later.}
+While a policy can be defined implicitly by solving an optimization problem with respect to estimated reward and loss surrogates \citep{watkins1992q, jones1998efficient}, in this paper we focus on controlling explicit policies parameterized by a conditional distribution \citep{williams1992simple}, such as an autoregressive transformer. 
+
+\subsection{The Safe Policy Improvement Problem}
+The setting just introduced provides a general framework for sequential decision making under uncertainty \citep{langford2008epoch}, capturing many problems of practical interest \citep{li2010contextual}.
+In natural language question answering \citep{rajpurkar2016squad}, the context could be a user query, the action a generated response, and the reward and loss could reflect response completeness and (in)correctness, respectively.
+In constrained black-box optimization \citep{gardner2014bayesian}, the context could be the previous evaluations, the action the next solution to evaluate, and the reward and loss functions could be black-box oracle objective and constraint functions, respectively \citep{chen2025generalists}.
+For example, in protein engineering, the loss function may indicate whether a proposed sequence lies outside a feasibility set $\mathcal{F}$ of expressible proteins, i.e., $\ell(X_t, A_t) := \mathbbm{1}\{A_t \notin \mathcal{F}\}$.
+
+The agent's goal is to learn a policy that maximizes expected reward while controlling expected loss.
+Formally, the agent seeks a policy $\pi$ that solves
+\begin{align}\label{eq:constrained_policy_opt}
+    \max_{\pi} \quad & \mathbb{E}_{X \sim p} \ \mathbb{E}_{A \sim \pi(\cdot \mid X)} \ [r(X, A)] \nonumber \\
+    \text{subject to} \quad & \mathbb{E}_{X \sim p} \ \mathbb{E}_{A \sim \pi(\cdot \mid X)} \ [\ell(X, A)] \leq \alpha,
+\end{align}
+where $\alpha \in [0, B]$ (for some $B<\infty$) is a user-specified risk tolerance,  and $p(X)$ is the marginal context distribution.\footnote{In constrained optimization notation, $r$ and $\ell$ map to $f$ and $g$.}
+% some clarification on practical implementation needed later on
+
+In practice, the agent usually begins with a safe reference policy $\pi_0$, whether inherited from a prior deployment or trained as a density model of known safe actions, and seeks to improve upon it.
+% reference appendix for further discussion about starting from samples from a black-box safe policy, bootstrapping a safe policy, etc.
+% More generally in the LLM literature, improving a given/pretrained reference policy is known as post-training...
+In the LLM literature, policy improvement is also known as post-training and encompasses methods such as supervised fine-tuning \citep[SFT;][]{wei2022finetuned}, reinforcement learning with human feedback \citep[RLHF;][]{christiano2017deep} or direct preference optimization \citep[DPO;][]{rafailov2023direct}.
+The quality of the improved policy depends on the post-training dataset, the fidelity of any reward or preference models, and design decisions governing how far the policy may diverge from the safe reference. 
+
+Post-training design decisions immediately prompt two questions: which policy divergence measure is best, and how much divergence is allowable to maintain an acceptable risk profile?
+The first question has been studied extensively (see Section \ref{sec:related_work}).
+The second, however, is typically treated as a hyperparameter tuning problem \citep{bergstra2011algorithms, feurer2019hyperparameter}, in which the user must specify a constraint on a ``control parameter'' (such as a divergence budget or penalty weight) and the algorithm optimizes subject to that constraint.
+The resulting indirection creates a gap between what the user actually wants and the control parameters that are accessible in available algorithms \citep{hutchins1986direct, norman1988design}.
+The user's goal is declarative (i.e., a desired outcome of the program): control risk at some level $\alpha$.
+The algorithms demand imperative instructions (i.e., the steps the program should execute): bound divergence at some level, or set the penalty weight to some value.
+Without a principled translation, the user must learn the mapping from outcome to instruction by trial and error, spending the very samples the agent seeks to use efficiently.
+
+As previewed in the introduction, importance weighting offers a more direct route. Given data from the safe policy, the agent can estimate the expected loss under any candidate policy by reweighting each observation by the likelihood ratio between the candidate and safe policies, via the identity
+\begin{align*}
+    \operatorname*{\mathbb{E}}_{\substack{X \sim p(\cdot) \\ A \sim \pi_t(\cdot \mid X)}} [\ell(X, A)] = \operatorname*{\mathbb{E}}_{\substack{X \sim p(\cdot) \\ A \sim \pi_0(\cdot \mid X)}} \left[ \frac{\pi_t(A \mid X)}{\pi_0(A \mid X)} \, \ell(X, A) \right].
+\end{align*}
+Bounding this ratio at some threshold $\beta$ simultaneously defines a constrained policy and bounds the importance weights, so the safe policy's data suffices to determine whether the candidate still respects the risk tolerance.\footnote{Bounding the likelihood ratio $\pi_t(a \mid x) / \pi_0(a \mid x) \leq \beta$ uniformly implies a bound on the KL
+  divergence and other $f$-divergences between $\pi_t$ and $\pi_0$. In this sense, likelihood ratio clipping is a strict form of
+   divergence constraint.}
+   % The problem then reduces to choosing $\beta$: the largest threshold for which the importance-weighted risk estimate satisfies the constraint.
+
+\subsection{Conformal Risk Control}
+
+What remains is a principled way to choose $\beta$ from finite safe-policy data, with a guarantee on the risk of the resulting deployed policy.
+Conformal risk control \citep[CRC;][]{angelopoulos2022conformal} provides exactly this for a restricted class of problems: it sets a control parameter $\lambda$ to control the expected value of a user-specified loss $L_i(\lambda)$.
+Given exchangeable (e.g., IID) calibration loss functions, $L_1(\cdot), \ldots, L_n(\cdot)$, and test loss function, $L_{n+1}(\cdot)$, the key assumption is that each $L_i(\lambda)$ is monotonically nonincreasing with the control parameter, $\lambda$.
+For example, conformal prediction \citep{vovk2005algorithmic} is a special case of CRC where the loss is the miscoverage indicator $L(\lambda) = \mathbbm{1}\{Y \notin \hat{C}_{\lambda}(X)\}$ for labels $Y$ and prediction sets $\hat C_\lambda$, and $\lambda$ controls the size of the prediction set: increasing the prediction set size can only decrease miscoverage.
+CRC extends conformal prediction to cases such as setting an inclusion threshold on predicted probabilities for multilabel classification with false negative rate (FNR) control (i.e., controlling the expected proportion of true labels that are not included in the set). Like miscoverage, FNR is monotonic in $\lambda$: adding labels to the prediction set can only increase the proportion of true labels contained. 
+By selecting $\hat{\lambda}$ as the smallest value such that the (conservatively adjusted) empirical risk falls below $\alpha$, CRC attains the finite-sample guarantee $\mathbb{E}[L_{n+1}(\hat{\lambda})] \leq \alpha$.
+In each case, increasing $\lambda$ can only decrease the loss. This monotonicity is what lets CRC search from aggressive to conservative and stop at the first value that satisfies the guarantee.
+
+  For policy control, however, it is not immediately clear how CRC could be applied.
+  Many losses of practical interest admit no tunable control parameter at all.
+  Consider again the feasibility indicator $L_t := \mathbbm{1}\{A_t \notin \mathcal{F}\}$: a prediction set $\hat{C}_{\lambda}$ can be grown to reduce miscoverage, but the feasibility set $\mathcal{F}$ is fixed by the environment, and there is no $\lambda$ that makes a given action more or less feasible.
+  We instead place the control parameter on the policy, governing the distribution of actions rather than the loss they incur.
+  Even so, the resulting expected loss is not necessarily monotonic in that parameter, a theoretical challenge we address in Section \ref{sec:theory}.
+
+
+% CRC selects $\hat{\lambda}$ to be the smallest value such that the empirical risk on the calibration data falls below the target level adjusted by a finite-sample correction, which enables the guarantee $\mathbb{E}[L_{n+1}(\hat{\lambda})] \leq \alpha$.
+% Conformal prediction \citep{vovk2005algorithmic} is recovered as a special case when the loss is the miscoverage indicator $L(\lambda) = \mathbbm{1}\{Y \notin \hat{C}_{\lambda}(X)\}$ for labels $Y$ and prediction sets $\hat C_\lambda$, where the control parameter $\lambda$ controls the size of the prediction set.
+% When the calibration and test distributions differ, weighted conformal methods \citep{tibshirani2019conformal} can be used to restore validity by reweighting the empirical risk according to the likelihood ratio $p_{\text{test}} / p_{\text{cal}}$.
+
+% For policy control, however, it is not immediately clear how CRC could be applied. 
+% % The primary limitation of CRC for policy optimization is that the loss function must be monotonically nonincreasing with a tunable control parameter $\lambda$.
+% For many losses of practical interest, one does not have direct access to a tunable control parameter, let alone one known to control the loss monotonically. 
+% Continuing our example of set membership in an unknown set of feasible actions, $L_t:=\mathbbm{1}\{A_t\not\in \mathcal{F}\}$. 
+% Unlike in the case of prediction sets, 
+% % Many losses of practical interest, such as indicators of violating feasibility/safety sets, cannot be parameterized in this way---unlike in the case of conformal prediction described above, 
+% where one can set the size of the prediction set $\hat{C}_{\lambda}$ to modulate the loss value, feasibility/safety sets are typically fixed; one cannot directly control $\mathcal{F}$, the set of actions that the environment determines to be feasible or safe.
+% % Indeed, a binary feasibility loss is determined entirely by the context-action pair: in a specific context a given action is either feasible or it is not, and there is no $\lambda$ that can make it more or less so.
+% Our approach addresses this limitation by introducing the control parameter in the policy or data distribution that the expectation is taken over, rather than in the loss function.
+% Even with this modification, the resulting expected loss is not necessarily monotonic in the control parameter, which presents a theoretical challenge we discuss further in Section \ref{sec:theory}.
+

@@ -1,0 +1,26 @@
+This paper addresses a highly relevant bottleneck in open-ended embodied AI research: while Large Language Models (LLMs) can procedurally generate diverse robotic task definitions, these open-loop generations frequently result in physically infeasible environments (e.g., unreachable objects, overlapping geometries, or dynamically unstable setups). To resolve this, the authors propose FATE (Feasibility-Aware Task gEneration), a closed-loop framework that employs a fine-tuned Vision-Language Model (RoboBrain 2.0) as an "Auditor" to perform hierarchical task repair. FATE executes a two-phase alignment: Static Alignment to resolve geometric and semantic incompatibilities, and Dynamic Alignment to adjust solver parameters and rewards during runtime execution.
+
+### Novelty
+The core novelty of the paper lies in its formulation of a dual-phase, self-correcting generation loop specifically targeting physical grounding for robotic tasks. While open-loop task generation (e.g., GenSim, RoboGen) and closed-loop reward optimization (e.g., Eureka) are well-established, FATE provides a creative combination of these approaches by extending the closed-loop feedback to encompass static scene geometry, physical constraints, and dynamic solver logic (MPC/RL). The introduction of a dedicated Embodied Brain auditor to drive this hierarchical correction is a sensible and highly practical extension of the current literature. Although the conceptual leap is a somewhat predictable evolution from existing VLM-based auto-curriculum systems, the comprehensive integration into a single pipeline is a solid, moderate contribution to the field.
+
+### Technical Soundness
+The practical engineering of the FATE system is sound and clearly described, but the paper suffers from a massive theory-practice gap that severely undermines its theoretical claims. The authors attempt to formally prove the convergence of their method by modeling it as a continuous gradient-based dynamical system optimization (Proposition 1). However, Assumption B.2 relies on the LLM auditor providing a "semantic direction" that is strictly aligned with the true gradient of an infeasibility potential. This is a fundamental mathematical disconnect: the LLM issues highly discrete, heuristic API calls (e.g., `SWAP_ASSET`, `INJECT_REWARD`), which do not reside in a continuous vector space where gradients, $L$-smoothness, and Polyak-Łojasiewicz conditions apply. 
+
+Furthermore, the proof for Proposition 2 (Hierarchical Alignment Measure Expansion) relies on defining the effective feasible set as the union of all feasible policy sets across the entire repair trajectory. Yet, the algorithm actually returns a single, final repaired task, meaning there is no guarantee that the final task's feasible volume is greater than the initial proposal's volume. The theoretical sections are mathematically vacuous in the context of the implemented discrete algorithm and should be fundamentally revised or removed.
+
+### Experimental Rigor
+The empirical evaluation effectively supports the paper's core practical claims. The task-wise ablation study convincingly isolates the contributions of the Static and Dynamic Alignment phases, proving that both are necessary for different classes of tasks (e.g., geometry-sensitive vs. contact-rich tasks). Furthermore, evaluating the Auditor's accuracy against a human-labeled ground truth dataset provides strong evidence of the Embodied Brain's filtering capabilities. 
+
+However, there are significant gaps in the experimental rigor. Most notably, the paper completely lacks statistical variance reporting; all results in Tables 1, 2, and 3 are presented as single-point estimates without standard deviations, confidence intervals, or indications of the number of random seeds used. Given the stochastic nature of both LLM generation and RL training, this is a major omission. Additionally, while comparing against GenSim-V2 demonstrates an improved Feasible Task Rate (FTR), FATE inherently consumes vastly more compute per task by running simulations and iterative VLM calls in the loop. A compute-matched baseline (e.g., rejection sampling with GenSim-V2) and a wall-clock/token cost analysis are missing but necessary for a fair evaluation.
+
+### Impact
+From a practical standpoint, FATE possesses high technical significance. As the community moves toward training generalist robotic policies on massive synthetic datasets, automatically verifying the executability of generated tasks is a critical hurdle. The reported improvement from an open-loop FTR of ~30% to FATE's 92.1% is a massive practical gain. Assuming the code and the fine-tuned RoboBrain 2.0 models are released, this system has a high probability of adoption by researchers building large-scale simulation curricula. While its contribution to fundamental scientific theory is minimal due to the flawed mathematical framing, its value as a robust systems-engineering pipeline ensures it will likely be highly cited within the robot learning community over the next 3 years.
+
+### Scoring Breakdown
+- **Impact:** 6.0
+- **Technical Soundness:** 3.5
+- **Experimental Rigor:** 5.5
+- **Novelty:** 5.0
+
+**Formula:** `score = (4.0 * Impact + 2.0 * Tech_Soundness + 2.0 * Exp_Rigor + 2.0 * Novelty) / 10`
+**Final Score:** 5.2

@@ -1,0 +1,54 @@
+\section{Background} \label{sec:background}
+
+\paragraph{Boolean Circuits and Boolean Networks} Boolean circuits are 
+directed acyclic graphs where each node computes a bivariate 
+Boolean function $B:\{0,1\}^2\rightarrow \{0,1\}$ \cite{arora2009computational}.
+We denote the $16$ possible bivariate Boolean functions by 
+$\sB:= \{B_i: \{0,1\}^2 \rightarrow \{0,1\}, i=1,\ldots, 16\}$ (c.f. \cref{app:bool_fun}).
+A Boolean network is a Boolean circuit 
+where nodes and edges are arranged in layers. \cref{fig:boolean_circuit_and_network} illustrates a Boolean circuit and a Boolean network.
+
+\begin{figure}
+\centering
+\resizebox{.7\linewidth}{!}{\input{figures/3-1.tex}}
+\caption{Left: a Boolean circuit. Right: a Boolean network.}\label{fig:boolean_circuit_and_network}
+\vspace{-1em}
+\end{figure}
+
+Boolean circuits realize only Boolean functions.
+To apply them to implement a non-Boolean function $g:A\rightarrow B$, 
+we need to decompose $g$ into a Boolean function $f:\{0,1\}^{m} \rightarrow \{0,1\}^n, m,n\in \sN$, together with 
+an encoder $\gE:A \rightarrow \{0,1\}^m$ and a decoder $\gD: \{0,1\}^n\rightarrow B$, such that $g=\gD  \circ f\circ \gE$.
+In particular, for an image classification function 
+  $g:[0,1]^d \rightarrow \gC$  that takes a real-valued image and maps it to a class label, we %
+  use the thermometer encoder, defined as $\gE(\vx) := [\mathbbm{1}\{\vx \ge \frac{1}{N}\}, \dots, \mathbbm{1}\{\vx \ge \frac{N-1}{N}\}]$, where is $\mathbbm{1}\{\cdot\}$ the indicator function. We use the population count decoder (also named GroupSum) selecting the class with
+ the highest number of 1s in the output Boolean vector $\mY \in \{0,1\}^{|\gC| \times n_c}$, defined as $\gD(\mY):= \argmax_{c \in \gC} \sum_{i=1}^{n_c} \mY_{c,i}$.
+
+
+\paragraph{Learning Boolean Networks via Differentiable Relaxations} To learn a Boolean network from data, \citet{petersen2022deep} propose to 
+relax  discrete Boolean networks into differentiable functions, enabling training via gradient descent.
+Specifically, for $i=1,\ldots, 16$, let $B_i^c:[0,1]^2\rightarrow [0,1]$ be a differentiable relaxation of $B_i$. 
+For example, $B_2(x_b,y_b) = x_b\wedge y_b, x_b,y_b\in \{0,1\}$, is relaxed into $B_2^c(x,y) = xy, x,y\in [0,1]$, satisfying $B_2^c(x_b, y_b) = B_2(x_b, y_b)$.
+Each neuron is then parametrized as a weighted aggregation of all $B_i^c$ as 
+\begin{equation} \label{eq:relaxation}
+    f^c(x,y) = \sum_{i=1}^{16} \frac{\exp(\vw_i)}{\sum_{j=1}^{16} \exp(\vw_j)} B_i^c(x,y),
+\end{equation}
+where $\vw_i$ are the parameters.
+Afterwards, the relaxed network is trained on data by updating the weight vector $\vw = (\vw_1,\ldots,\vw_{16})$ of each neuron. 
+Finally, each neuron is discretized back to a bivariate Boolean function by 
+\begin{equation} \label{eq:discretization}
+    f := B_{i^*},  \quad \text{ with } i^* = \argmax_{i} \vw_i.
+\end{equation}
+Note that the relaxation and parametrization above only allows 
+to learn the Boolean operation at each neuron, but does not allow the learning of network connections. 
+We shall address the efficient connection learning  later in \cref{sec:method}.
+
+\paragraph{Convolutional Boolean Networks} 
+Convolutional layers are key components in floating-point neural networks 
+capturing local spatial structures. 
+\citet{petersen2024convolutional} design a convolutional architecture for Boolean networks,  where each kernel is a binary tree consisting of Boolean operations. 
+A tree of depth $d$ requires $2^d-1$ Boolean operations to 
+implement a Boolean function with $2^{d-1}$ inputs. As a result, their convolutional layer 
+costs significantly more Boolean operations than a non-convolutional layer. 
+
+

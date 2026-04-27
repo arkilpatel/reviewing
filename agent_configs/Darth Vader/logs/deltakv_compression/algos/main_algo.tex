@@ -1,0 +1,95 @@
+\begin{algorithm}[ht]
+% \small
+\caption{Training Procedure of DeltaKV}
+\label{alg:DeltaKV}
+\KwIn{
+Input token sequence $\mathcal{T}$; number of layers $L$; frozen LLM parameters $\Theta$; trainable compressor $f_\mathrm{c}$; trainable decompressor $f_\mathrm{d}$; stride $s$; number of references $k$;
+}
+\KwOut{Total loss $\mathcal{L}$;}
+\step{Step 1: Ground Truth Forward}
+$\{\bm{KV}, \cdots\} \gets \mathrm{Forward}(\mathcal{T}, \Theta)$ \cmt{Cache original KV states}
+
+\step{Step 2: DeltaKV Forward \& Reconstruction}
+$\mathcal{L}_{\mathrm{rec}} \gets 0$; $\bm{h} \gets \mathrm{Embed}(\mathcal{T})$\;
+
+\For{$l=1$ \KwTo $L$}{
+    $\mathcal{T}_{\mathrm{ref}} \gets \emptyset$\;
+
+    $\bm{KV}^{\mathrm{cur}} \gets \mathrm{Proj}(\bm{h}, \Theta_l)$ \cmt{Compute current-layer KV for all tokens}
+
+    \For{$i=1$ \KwTo $|\mathcal{T}|$}{
+        $\bm{kv}_i \gets \bm{KV}^{\mathrm{cur}}[i]$
+
+        $\mathcal{R}_i \gets \mathop{\mathrm{arg~top}k}_{\bm{kv}_{\mathrm{ref}} \in \mathcal{T}_{\mathrm{ref}}} \left( - \|\bm{kv}_i - \bm{kv}_{\mathrm{ref}}\|_2^2 \right)$\;
+        $\overline{\bm{KV}}_{R} \gets \mathrm{Mean}(\mathcal{R}_i)$ \cmt{Mean of retrieved references}
+
+        $\bm{z}_\Delta \gets f_\mathrm{c}(\bm{kv}_i) - f_\mathrm{c}(\overline{\bm{KV}}_{R})$ \cmt{Latent residual}
+        
+        $\widehat{\bm{KV}}_\Delta \gets f_\mathrm{d}(\bm{z}_\Delta)$\;
+        $\widehat{\bm{kv}}_i \gets \widehat{\bm{KV}}_\Delta + \overline{\bm{KV}}_{R}$ \cmt{Reconstruct KV}
+        $\widehat{\bm{KV}}^{\mathrm{cur}}[i] \gets \widehat{\bm{kv}}_i$\;
+
+        $\mathcal{L}_{\mathrm{rec}} \gets \mathcal{L}_{\mathrm{rec}} + \|\bm{KV}_l[i] - \widehat{\bm{kv}}_i\|^2$\;
+
+        \If{$i \bmod s = 0$}{
+            $\mathcal{T}_{\mathrm{ref}} \gets \mathcal{T}_{\mathrm{ref}} \cup \{\widehat{\bm{kv}}_i\}$ \cmt{Reference set: only tokens with index $i \bmod s = 0$}
+        }
+    }
+    $\bm{h} \gets \mathrm{AttnFFN}(\bm{h}, \widehat{\bm{KV}}^{\mathrm{cur}}, \Theta_l)$\; 
+}
+ \step{Step 3: End-to-End Loss Calculation}
+$\bm{O}^{\mathrm{DeltaKV}} \gets \mathrm{LMHead}(\bm{h})$\;
+$\mathcal{L}_{\mathrm{ntp}} \gets \mathrm{CrossEntropy}(\bm{O}^{\mathrm{DeltaKV}}, \mathcal{T}_{\mathrm{next}})$\;
+$\mathcal{L} \gets \mathcal{L}_{\mathrm{rec}} + \mathcal{L}_{\mathrm{ntp}}$ \cmt{Joint optimization}
+\Return $\mathcal{L}$\;
+\end{algorithm}
+\setlength{\textfloatsep}{1.0em}
+
+
+% =========================
+% Algo (one-column friendly)
+% =========================
+
+% \begin{algorithm}[t]
+% % \small
+% \caption{Training Procedure of DeltaKV}
+% \label{alg:DeltaKV}
+% \KwIn{
+% Input token sequence $\mathcal{T}$; number of layers $L$; frozen LLM parameters $\Theta$; trainable compressor $\phi_c$; trainable decompressor $\phi_d$; stride $s$; number of references $k$; weight $\lambda$\;
+% }
+% \KwOut{Total loss $\mathcal{L}$;}
+% % \step{Step 1: Ground Truth Forward (Teacher)}
+% $\{\bm{KV}^{\mathrm{GT}}, \cdots\} \gets \mathrm{Forward}(\mathcal{T}, \Theta)$\; 
+
+% % \step{Step 2: DeltaKV Forward \& Reconstruction (Student)}
+% $\mathcal{L}_{\mathrm{rec}} \gets 0$; $\bm{h} \gets \mathrm{Embed}(\mathcal{T})$\;
+
+% \For{$l=1$ \KwTo $L$}{
+%     $\mathcal{T}_{\mathrm{ref}} \gets \emptyset$
+
+%     $\bm{KV}^{\mathrm{cur}} \gets \mathrm{Proj}(\bm{h}, \Theta_l)$\; % 
+
+%     \For{$i=1$ \KwTo $|\mathcal{T}|$}{
+%         $\mathcal{R}_i \gets \mathrm{TopkSimilar}(\bm{KV}^{\mathrm{cur}}[i], \mathcal{T}_{\mathrm{ref}}, k)$\;
+%         $\overline{\bm{KV}}_{R} \gets \mathrm{Mean}(\mathcal{R}_i)$\; % 
+
+%         $\bm{P} \gets \phi_c(\bm{KV}^{\mathrm{cur}}[i]) - \phi_c(\overline{\bm{KV}}_{R})$\; % 
+%         $\widehat{\bm{KV}}^{\mathrm{cur}}[i] \gets \phi_d(\bm{P}) + \overline{\bm{KV}}_{R}$\; % 
+
+%         $\mathcal{L}_{\mathrm{rec}}\!\gets\!\mathcal{L}_{\mathrm{rec}}\!+\!\mathrm{MSE}(\widehat{\bm{KV}}^{\mathrm{cur}}[i], \bm{KV}^{\mathrm{GT}}_l[i])$\;
+
+%         \If{$i \bmod s = 0$}{
+%             $\mathcal{T}_{\mathrm{ref}} \gets \mathcal{T}_{\mathrm{ref}} \cup \{\widehat{\bm{KV}}^{\mathrm{cur}}[i]\}$\;
+%         }
+%     }
+%     $\bm{h} \gets \mathrm{AttnFFN}(\bm{h}, \widehat{\bm{KV}}^{\mathrm{cur}}, \Theta_l)$\; 
+% }
+% %  \step{Step 3: End-to-End Loss Calculation}
+% $\bm{O}^{\mathrm{DeltaKV}} \gets \mathrm{LMHead}(\bm{h})$\;
+% $\mathcal{L}_{\mathrm{ntp}} \gets \mathrm{CrossEntropy}(\bm{O}^{\mathrm{DeltaKV}}, \mathcal{T}_{\mathrm{next}})$\;
+% $\mathcal{L} \gets \mathcal{L}_{\mathrm{rec}} + \lambda \mathcal{L}_{\mathrm{ntp}}$\; 
+
+% \Return $\mathcal{L}$\;
+% \end{algorithm}
+
+

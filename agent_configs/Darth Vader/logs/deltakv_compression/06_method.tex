@@ -1,0 +1,128 @@
+\section{The DeltaKV Framework}
+\label{sec:method}
+
+Based on the preceding observations, we propose \textbf{DeltaKV}, a residual-based and GPU-friendly KV cache compression framework (Figure \ref{fig:DeltaKV}). 
+%%%
+DeltaKV compresses KV states by encoding the residuals between the current token and a small set of selected strided references, enabling high compression efficiency while preserving attention fidelity.
+\vspace{-0.25em}
+
+\subsection{Residual-based KV Cache Compression}
+\label{sec:method:compression}
+
+\vspace{-0.25em}
+Rather than compressing raw KV representations, DeltaKV exploits the \emph{long-range inter-token similarity} identified in Section~\ref{sec:observations}. 
+The core idea is to subtract information already captured by similar historical tokens and compress only the remaining residual signal. 
+
+\paragraph{Strided Reference Selection} 
+Searching the entire token history is both computationally and memory-intensive.
+%%%
+DeltaKV, therefore, maintains a strided reference set $\mathcal{T}$ by selecting tokens at a fixed interval (stride) $s$: 
+\vspace{-0.25em}
+\begin{displaymath}
+  \mathcal{T} = \{ \bm{kv}_t \mid t \mod s = 0, t < i \}, 
+  \vspace{-0.25em}
+\end{displaymath}
+where $\bm{kv}_t$ denotes the concatenation of key and value states across all heads \emph{for a single token}, with $\bm{kv}_t \in \mathbb{R}^{2d_\mathrm{k}}$ (typically $d_\mathrm{k}=d_\mathrm{v}=ND$, hence $\bm{kv}_t \in \mathbb{R}^{2ND}$).
+
+It is important to note that all operations in DeltaKV are performed on the \textbf{pre-RoPE}~\cite{su2024roformer} key-value states to ensure position-invariant representations.
+For the current token $i$, we retrieve the top-$k$ nearest tokens from $\mathcal{T}$ based on the $L_2$ distance, denoted as $\mathcal{R}_i$:
+\vspace{-0.25em}
+\begin{displaymath}
+  \textstyle \mathcal{R}_i = \mathop{\mathrm{arg~top}k}_{\bm{kv}_j \in \mathcal{T}} \big( - \|\bm{kv}_i - \bm{kv}_j\|_2^2 \big).
+  \vspace{-0.25em}
+\end{displaymath}
+The reference representation is computed as their means: % of these retrieved tokens:
+\vspace{-0.25em}
+\begin{displaymath}
+  \textstyle \overline{\bm{KV}}_R = \frac{1}{k} \sum_{j\in \mathcal{R}_i} \bm{kv}_j \in \mathbb{R}^{2d_\mathrm{k}}.
+  \vspace{-0.25em}
+\end{displaymath}
+
+
+\paragraph{Compression and Reconstruction}
+DeltaKV computes residuals in only two steps: compressing the token itself and the mean of the reference tokens, which allows for efficient parallel compression on the GPU.
+
+\vspace{-0.25em}
+\subparagraph{Compressor} 
+Both the current KV and the reference average are projected using an MLP $f_\mathrm{c}:\mathbb{R}^{2d_\mathrm{k}}\rightarrow \mathbb{R}^{d_\mathrm{c}}$, and then compute the residual vector $\bm{z}_\Delta \in \mathbb{R}^{d_\mathrm{c}}$:
+\vspace{-0.25em}
+\begin{displaymath}
+  \bm{z}_\Delta = f_\mathrm{c}(\bm{KV}) - f_\mathrm{c}(\overline{\bm{KV}}_R).
+  \vspace{-0.25em}
+\end{displaymath}
+Here, the compressor $f_\mathrm{c}(x) = \mathrm{GeLU}(x \bm{W}_{c1}+b_{c1}) \bm{W}_{c2}+b_{c2}$, where $\bm{W}_{c1}\in \mathbb{R}^{2d_\mathrm{k}\times d_\mathrm{h}}$ and $\bm{W}_{c2} \in \mathbb{R}^{d_\mathrm{h}\times d_\mathrm{c}}$ with hidden width $d_\mathrm{h}$.
+%%%
+Correspondingly, the compressed residual codes over a batch/sequence have shape $\bm{Z}_\Delta \in \mathbb{R}^{B\times L\times d_\mathrm{c}}$.
+
+\vspace{-0.25em}
+\subparagraph{Reconstruction} 
+To reconstruct the KV cache, the residual $\bm{z}_\Delta$ is decoded through a decompressor $f_\mathrm{d}: \mathbb{R}^{d_\mathrm{c}}\rightarrow \mathbb{R}^{2d_\mathrm{k}}$: 
+\vspace{-0.25em}
+\begin{displaymath}
+  \widehat{\bm{KV}}_\Delta = f_\mathrm{d}(\bm{z}_\Delta). 
+  \vspace{-0.25em}
+\end{displaymath}
+Here, $f_\mathrm{d}(\bm{z}_\Delta) = \mathrm{GeLU}(\bm{z}_\Delta \bm{W}_{d1} + \bm{b}_{d1})\bm{W}_{d2} + \bm{b}_{d2}$, with $\bm{W}_{d1}\in \mathbb{R}^{d_\mathrm{c}\times d_\mathrm{h}'}$, $\bm{b}_{d1}\in \mathbb{R}^{d_\mathrm{h}'}$, $\bm{W}_{d2}\in \mathbb{R}^{d_\mathrm{h}'\times 2d_\mathrm{k}}$, and $\bm{b}_{d2}\in \mathbb{R}^{2d_\mathrm{k}}$ with hidden width $d_\mathrm{h}'$.
+
+We provide two variants of the decompressor $f_\mathrm{d}$: an MLP for higher fidelity, and a linear decoder for latency-critical settings (Section \ref{para:light_decompressor}).
+%%%
+The final KV cache is recovered as:
+\vspace{-0.25em}
+\begin{displaymath}
+  \widehat{\bm{KV}}_i = \widehat{\bm{KV}}_\Delta + \overline{\bm{KV}}_R,
+  \vspace{-0.25em}
+\end{displaymath}
+and reshaped for attention computation.
+
+
+\subsection{Training and Inference}
+\label{sec:method:train-inference}
+
+\paragraph{Training with Hybrid Objective}
+Minimizing reconstruction error alone can suppress low-magnitude but attention-critical features.
+Thus, DeltaKV adopts a hybrid objective combining MSE and next-token prediction (NTP) loss:
+\vspace{-0.25em}
+\begin{displaymath}
+  \mathcal{L} = \sum {\|\bm{KV} - \widehat{\bm{KV}}\|^2} + {\mathcal{L}_\mathrm{ntp}(\theta, \phi)},
+  % \mathcal{L} = \sum \underbrace{\|\bm{KV} - \widehat{\bm{KV}}\|^2}_{\mathcal{L}_\mathrm{rec}} + \underbrace{\mathcal{L}_\mathrm{ntp}(\theta, \phi)}_{\mathcal{L}_\mathrm{end-to-end}},
+  \vspace{-0.25em}
+\end{displaymath}
+where $\theta$ denotes frozen LLM parameters and $\phi$ the learnable DeltaKV modules.
+The NTP loss ensures preservation of features essential for end-to-end generation. The training procedure is detailed in Appendix \ref{app:training}.
+
+\paragraph{Inference with Sparse Attention}
+DeltaKV is designed to seamlessly complement sparse attention methods such as OmniKV~\cite{hao2025omnikv}. 
+%%%
+OmniKV designates a small subset of \textit{filter layers} that compute global attention scores using the full KV Cache. 
+Subsequently, the computed KV cache is directly utilized in other layers (sparse layers), as illustrated in Figure~\ref{fig:DeltaKV} and detailed in Appendix~\ref{app:sect:omnikv_method}. 
+
+To avoid the overhead of reconstructing all tokens in the filter layers, DeltaKV does not apply compression within these layers. Crucially, these layers are not a heuristic tuning for specific datasets but are grounded in the intrinsic heterogeneity of Transformer layers~\cite{hao2025omnikv}. Since compression is performed independently per token, DeltaKV allows for \emph{selective decompression}: we only reconstruct the KV pairs required by the sparse attention mask.
+% Compared to channel-wise quantization methods (e.g., KIVI \cite{liu2024kivi}), which require dequantizing the entire channel, DeltaKV significantly reduces memory I/O during decoding.
+
+
+
+\subsection{Sparse-vLLM Implementation}
+\label{sec:method:sparse-vLLM}
+
+To enable efficient deployment, we design and implement \textbf{Sparse-vLLM}, a modular inference framework optimized for sparse and compressed KV layouts.
+%%%
+Unlike existing frameworks that tightly couple memory management with model execution \cite{kwon2023efficient_vllm, zheng2024sglang}, Sparse-vLLM cleanly decouples these concerns.
+%%%
+Its core design introduces a pluggable CacheManager to support diverse storage structures and a centralized Sparse Controller to uniformly manage sparse view construction and KV lifecycle. Implementation details are provided in Appendix~\ref{app:sparse_vllm}.
+
+\paragraph{Modular CacheManager} 
+Sparse attention algorithms differ substantially in how KV caches are allocated, updated, and reclaimed. 
+%%%
+Sparse-vLLM addresses this heterogeneity through a modular CacheManager abstraction that encapsulates physical memory allocation and logical–physical mapping, enabling flexible integration of diverse sparsification and compression strategies.
+
+\paragraph{Sparse Controller} 
+To decouple sparse algorithms from model architectures, we introduce a Sparse Controller that orchestrates sparse execution throughout the forward pass. 
+%%%
+It consists of the following stages: (1) Pre-Forward (View Construction): Before entering the attention operator, the Controller computes the logical view based on the currently configured algorithm; (2) Post-Forward (Lifecycle Management): After the computation is complete, the Controller is responsible for triggering the KV Cache update logic.
+
+\paragraph{Efficient Kernel Execution} 
+At the operator level, Sparse-vLLM reuses high-performance Triton operators from the open-source ecosystem and introduces optimized kernels tailored for DeltaKV. 
+%%%
+Notably, the token-level Triton attention operator from LightLLM~\cite{lightllm2} efficiently operates on non-contiguous memory, naturally matching the CacheManager's discrete storage layout and eliminating costly memory defragmentation.
+We further fuse attention score extraction into the Triton kernel, avoiding redundant PyTorch-level computation and improving throughput.
+

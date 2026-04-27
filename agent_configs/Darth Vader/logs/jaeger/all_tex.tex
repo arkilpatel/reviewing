@@ -1,0 +1,438 @@
+\section{Introduction}
+
+Despite the rapid evolution of audio-visual large language models (AV-LLMs), most existing systems continue to rely on RGB video and monaural audio \cite{xu2025qwen2, Qwen3-Omni, tang2025video, cheng2024videollama}, a design choice that fundamentally constrains their ability to perceive and reason about the three-dimensional (3D) physical world. Although 3D grounding has recently attracted significant attention, current research remains fragmented, with most approaches addressing spatial cues from vision or audio in isolation.
+In the visual domain, recent advances extend a 2D visual LLM by incorporating RGB-D inputs and chain-of-thought reasoning, leading to improved 3D grounding and spatial relationship understanding \cite{wang2025n3d}. In parallel, auditory approaches leverage binaural spatial encoders \citep{zheng2024bat} or intensity-vector representations \citep{tang2024can} to enable relative sound source localization. However, a unified paradigm for comprehensive 3D audio-visual scene understanding remains largely unexplored.
+Early multimodal efforts, such as Hear You Are \citep{ryu2025hear}, 
+pair spatial audio with panoramic RGB image and assume a single active source per scene, which precludes evaluating overlap-robust localization and depth-aware 3D grounding. 
+Similarly, while SAVVY \citep{chen2025savvy} integrates RGB-D perception with multi-channel audio, it relies on a cascaded pipeline that depends on traditional signal processing for sound source localization. 
+This modular design hinders end-to-end learning and prevents the AV-LLM from performing fully integrated spatial reasoning, underscoring the need for a more unified, learned approach.
+
+In this paper, we introduce JAEGER, a \textbf{j}oint 3D \textbf{a}udio-visual r\textbf{e}asoning and \textbf{g}rounding method in simulated physical \textbf{e}nvi\textbf{r}onments, an end-to-end framework that extends 2D audio-visual large language models (AV-LLMs) to 3D settings by explicitly modeling visual depth and multi-channel spatial audio. Initialized from Qwen2.5-Omni \citep{xu2025qwen2} and efficiently adapted via low-rank adaptation (LoRA) \cite{hu2022lora}, JAEGER integrates an RGB-D visual stream augmented with depth-projected 3D positional encodings together with a dual-path audio stream, in which semantic content extracted from the omnidirectional first-order ambisonics (FOA) channel is disentangled from spatial directional cues.
+To further enhance azimuth perception in reverberant environments and under overlapping sound sources, we propose a novel neural intensity vector (Neural IV) approach, which is a learnable FOA-based representation that encodes robust directional information for improved sound localization and cross-modal alignment.
+
+To support instruction tuning and systematic evaluation, we construct SpatialSceneQA, a benchmark comprising 61k high-fidelity RGB-D scenes paired with spatial audio and fine-grained 3D annotations. The dataset covers a diverse set of tasks, including single- and overlapping-source direction-of-arrival (DoA) estimation, 3D visual grounding of sound-emitting objects, and multi-speaker audio-visual matching. Experimental results show that JAEGER achieves a median angular error (MAE) of 2.21° for single sources and 13.13° under overlapping conditions, while showing strong generalization across varied source configurations. Leveraging explicit depth cues, the model attains a 3D intersection over union (IoU) of 0.32 with a median localization error of 0.16 meter (m). When FOA-based spatial cues are jointly modeled with RGB-D perception, JAEGER further achieves 99.2\% accuracy on joint audio-visual reasoning in simulated multi-speaker physical environments.
+
+In summary, our main contributions are as follows:
+\vspace{-0.2cm}
+\begin{itemize}[leftmargin=*]
+    \setlength\itemsep{-0.3em}
+    
+    \item We introduce joint grounding and reasoning with spatial audio and RGB-D geometry, which exposes a fundamental modality gap for current AV-LLMs even after fine-tuning. We adapt an AV-LLM with depth-aware visual encoding and FOA spatial cues for end-to-end DoA estimation, 3D box grounding, and multi-speaker matching.
+    \item We present \textsc{SpatialSceneQA}, a 61k-sample dataset that pairs 3D RGB-D images with 3D 4-channel FOA audio and dense object-level spatial annotations. To the best of our knowledge, it is the first spatial audio-visual benchmark with degree-level azimuth and elevation supervision, enabling precise localization, 3D grounding, and multi-speaker matching under source overlap.
+    \item We propose the \textit{Neural Intensity Vector}, a learnable FOA spatial representation that replaces STFT-based intensity features with a neural encoder, yielding more stable azimuth cues under reverberation and overlapping sources and improving cross-scenario generalization.
+\end{itemize}
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{data-pipeline-2.pdf}
+\caption{\textbf{Overview of the \textsc{SpatialSceneQA} 61k dataset.}. \textbf{Left:} Example question-answer pairs demonstrating diverse spatial tasks, including sound source localization (azimuth/elevation), visual grounding (bounding boxes), and overlapping sound source identification. \textbf{Right:} The data synthesis pipeline leveraging \textit{Habitat-Sim} and \textit{SoundSpaces 2.0}. The process consists of four stages: (1) selecting an HM3D scene, (2) sampling random source and receiver poses, (3) inserting 3D visual sound sources (e.g., speakers generated by Hunyuan3D-1.0), and (4) exporting synchronized RGB-D frames, FOA audio, and semantic and camera intrinsic/extrinsic metadata.}   
+    \label{fig:pipeline}
+\end{figure*}
+
+\section{Related Work}
+
+\subsection{Spatial Audio Understanding}
+
+Spatial audio understanding seeks to infer the spatial configuration of acoustic events from multi-channel recordings, including binaural signals, FOA, and microphone arrays. Early work has primarily focused on sound event localization and detection \citep{adavanne2018sound, cao2021improved, shimada2021accdoa, shimada2022multi}, where models jointly estimate event activity and coarse spatial attributes. Recent studies have begun to integrate spatial audio perception with large language models (LLMs), enabling instruction following and higher-level reasoning grounded in spatial acoustic cues.
+
+A major design choice is the spatial representation. 
+Binaural modeling leverages interaural time and level differences and head-related transfer functions (HRTFs) induced cues, and recent geometry-aware encoders improve the use of such signals \citep{zheng2024bat, biswas2025owl}. 
+However, binaural cues are tightly coupled to recording geometry and the underlying HRTFs, which hinders generalization across devices. 
+FOA has a hardware-agnostic alternative by encoding spatial information in the B-format. 
+\citep{devnani2024learning} aligns FOA-based spatial embeddings with semantics via contrastive learning, while \citep{tang2024can} injects intensity vector cues into an auditory LLM to support localization and localization-conditioned speech processing.
+
+Progress in this area is further constrained by data availability. 
+Real-world multi-channel datasets with dense spatial annotations remain scarce, with STARSS23 \citep{shimada2023starss23} serving as a representative benchmark. 
+However, STARSS23 pairs multi-channel audio with RGB-only paranomic video, and does not provide depth aligned to the visual stream. 
+This limitation has motivated simulation-driven data generation, where configurable simulators such as SoundSpaces 2.0 \citep{chen22soundspaces2} enable scalable synthesis of reverberant or anechoic audio-visual data with controllable scene geometry and precise ground-truth spatial annotations.
+
+\subsection{Visual 3D Object Grounding}
+
+Three-dimensional visual grounding and spatial reasoning have become increasingly important for modern vision–language models \citep{huang2024chat, chen2024grounded, Qwen3-VL, guo2025seed1, zhu2025internvl3} and AV-LLMs \citep{senocak2023sound, chowdhury2024meerkat, li2024groundinggpt}, as many downstream tasks demand object-level localization and relational reasoning beyond two-dimensional captioning. Existing approaches primarily differ along two dimensions: (i) how 3D geometric information is incorporated and (ii) whether the model natively predicts 3D outputs.
+
+A first line of work conditions models on explicit 3D structure, such as point clouds or object-centric 3D tokens, to impose direct geometric constraints \citep{huang2024chat, mao2025spatiallm}. 
+An alternative relies on multi-view video or RGB-D streams as implicit 3D supervision \citep{qi2025gpt4scene, zheng2025video, chen2024spatialvlm, zhu2024llava}. 
+\citep{zheng2025video} projects depth into global coordinates and injects 3D positional encodings into video representations, improving spatial awareness through geometry-aligned tokens. 
+Similarly, RGB-D-based approaches incorporate depth-derived cues into visual tokens to strengthen geometric grounding \citep{chen2024spatialvlm, zhu2024llava}.
+
+Several approaches rely on auxiliary components to obtain reliable 3D signals, such as external 3D segmenters for candidate proposal generation or specialized decoders for 3D grounding \citep{zheng2025video, zhu2024llava}. More recently, N3D-VLM \citep{wang2025n3d} advances a more native paradigm by explicitly reasoning about and directly predicting 3D bounding boxes within the model.
+
+\subsection{AV-LLMs for 3D Understanding}
+
+Recent AV-LLMs show strong multimodal understanding \citep{cheng2024videollama, xu2025qwen2, Qwen3-Omni, tang2025video}, but are largely trained on RGB video and monaural audio, leaving spatial structure and directional acoustics implicit. This limitation motivates a line of work that augments AV-LLMs with explicit spatial cues for precise localization and geometric reasoning. One representative approach builds modular pipelines that estimate geometry and spatial acoustics using specialized components, while delegating higher-level reasoning to an LLM. \citep{chen2025savvy} introduces a benchmark for dynamic 3D audio-visual spatial reasoning with synchronized spatial audio and proposes a training-free pipeline that estimates object trajectories and constructs a global spatial map to answer queries. Complementary simulation-based efforts, such as Hear You Are \citep{ryu2025hear}, exploit panoramic imagery and binaural audio cues for audio-visual spatial reasoning, but continue to rely on RGB-only visual inputs, leaving explicit depth information unmodeled.
+
+In contrast, our work adapts an existing AV-LLM to directly perceive and reason about spatial cues by incorporating RGB-D observations and FOA-based multi-channel audio in an end-to-end manner. We introduce a learned spatial audio representation, the Neural IV, and construct a large-scale instruction-tuning dataset, SpatialSceneQA, to jointly support spatial perception, grounding, and language-based reasoning within a unified framework.
+\section{SpatialSceneQA}
+
+Training a 3D AV-LLM demands large-scale supervision with tightly synchronized (i) metric geometry (RGB-D with camera calibration), (ii) multi-channel spatial audio, and (iii) 3D object-level annotations in a consistent reference frame. 
+To this end, we introduce \textsc{SpatialSceneQA} 61K, a synthetically generated dataset for high-fidelity 3D audio-visual instruction tuning. 
+Each sample contains synchronized RGB-D renderings, 4-channel FOA, and precise 3D annotations, enabling supervision for both spatial perception and audio-visual spatial reasoning.
+
+\begin{table*}[t]
+    \centering
+    \caption{Statistics of the \textsc{SpatialSceneQA} 61K dataset. Tasks are grouped into ``Perception'' and ``Reasoning categories. \textbf{\#Sources} denotes active audio sources for A--B and inserted loudspeaker assets for C--E. Regarding definitions of different types of tasks, \textbf{A--B} estimate source azimuth and elevation; \textbf{C} predicts the precise Bounding Box of the inserted speaker; \textbf{D--E} identify the correspondence between a target audio speaker and a visual loudspeaker based on spatial audio-visual cues.}
+
+    \label{tab:dataset_stats}
+    
+    \resizebox{\textwidth}{!}{
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabular}{l c c l}
+        \toprule
+        \textbf{Task Type} & \textbf{\#Sources} & \textbf{\#Samples} & \textbf{Question \& Answer Example} \\
+        \midrule
+        
+        % === Category 1: Perception ===
+        \rowcolor{Gray} 
+        \multicolumn{4}{l}{\textbf{\textit{Perception}}} \\
+        \addlinespace[0.5ex]
+        
+        \multirow{2}{*}{\textbf{A: Single-Source Audio DoA}} & \multirow{2}{*}{1} & \multirow{2}{*}{32K} & 
+        \textbf{Q:} Based on the audio cues, please output the precise azimuth and elevation. \\
+        & & & \textbf{A:} azimuth: -7; elevation: -22 \\
+        % \addlinespace[1ex]
+
+        \midrule
+        
+        \multirow{2}{*}{\textbf{B: Overlap-Source Audio DoA}} & \multirow{2}{*}{2} & \multirow{2}{*}{30K} & 
+        \textbf{Q:} Where is the female voice coming from? Output azimuth and elevation. \\
+        & & & \textbf{A:} azimuth: 28; elevation: -15 \\
+        
+        \midrule
+        
+        \multirow{3}{*}{\textbf{C: Visual Grounding}} 
+        & 1 & 17K & \multirow{3}{*}{\shortstack[l]{
+            \textbf{Q:} Identify the 3D box for the speaker in this scene. \\
+            \textbf{A:} $\texttt{bbox\_0} = \texttt{Bbox}(\text{speaker}, 0.14, -0.48, -1.15, 0.33, 0.88, 0.32)$ 
+        }} \\
+        & 2 & 34K & \\
+        & 3 & \phantom{0}9K & \\
+        \midrule[\heavyrulewidth]
+        % === Category 2: Reasoning ===
+        \rowcolor{Gray} 
+        \multicolumn{4}{l}{\textbf{\textit{Reasoning}}} \\
+        \addlinespace[0.5ex]
+        \multirow{2}{*}{\textbf{D: Single-Source Multi-speakers Matching}} 
+        & 2 & 10K & \textbf{Q:} Determine which speaker corresponds to the audio source. \\
+        & 3 & \phantom{0}4K & \textbf{A:} Left \\
+        % \addlinespace[1ex]
+        \midrule
+        \multirow{2}{*}{\textbf{E: Overlap-Source Multi-speakers Matching}} 
+        & 2 & 24K & \textbf{Q:} Can you tell which speaker the male voice originates from? \\
+        & 3 & \phantom{0}5K & \textbf{A:} Center \\
+        \bottomrule
+    \end{tabular}
+    }
+\end{table*}
+
+\subsection{Data Simulation Pipeline}
+
+We synthesize \textsc{SpatialSceneQA} using \textit{SoundSpaces 2.0} \citep{chen22soundspaces2}, which supports continuous, geometry-aware acoustic rendering in scanned 3D environments. 
+The pipeline generates synchronized FOA audio and RGB-D observations, together with calibrated camera metadata and 3D ground truth, as presented in Fig.~\ref{fig:pipeline}.
+
+
+\textbf{Audio Source Selection.}
+We use dry monaural speech from \textit{LibriSpeech} \citep{panayotov2015librispeech}, which contains read speech recordings with aligned transcripts and speaker metadata. To prevent data leakage, we construct the training set from train-clean-100, use dev-clean for validation, and reserve test-clean for evaluation. For tasks involving speaker identity attributes, the provided gender labels are used to specify the target speaker in the instruction.
+
+\textbf{Acoustic Simulation.} \textit{SoundSpaces 2.0} renders multi-channel spatial audio by simulating room impulse responses (RIRs) over realistic 3D meshes with material-dependent acoustics. 
+It employs bidirectional path tracing \citep{cao2016interactive} to model direct sound and higher-order effects, including reflections, transmission, diffraction, and air absorption. 
+Given a monaural source signal $A^{(s)}(t)$ emitted from position $\mathbf{s}\in\mathbb{R}^3$ and a receiver at position $\mathbf{r}\in\mathbb{R}^3$ with heading $\theta\in\mathbb{R}$, the received FOA signal on channel $c$ is
+\begin{equation}
+    A^{(r)}_c(t) = \bigl(R_c(\cdot;\mathbf{s},\mathbf{r},\theta)\ast A^{(s)}\bigr)(t),
+\end{equation}
+where $\ast$ denotes convolution over time, $t \in [1, T]$ and $c \in \{0, 1, 2, 3\}$ indexes time steps and FOA channels respectively, $R_c(t, \mathbf{s}, \mathbf{r}, \theta)$ stands for the channel-specific RIR.
+To reduce degenerate cases caused by fully occluded direct paths, we sample source--receiver pairs within the same room. 
+Consequently, we sample a navigable receiver pose, then sample a source position within 1--4\,m, enforcing a 0.5\,m clearance from obstacles. 
+Pairs were retained only when the geodesic distance was less than twice the Euclidean distance, ensuring navigability and connectivity.
+
+\textbf{Visual Scene Construction.} We use \textit{Habitat-Sim} \citep{szot2021habitat} for rendering RGB-D observations aligned to the audio. Scenes are drawn from the semantically annotated subset of the Habitat-Matterport 3D Dataset (HM3D) \citep{ramakrishnan2021habitat}, enabling precise instance-level ground truth. Scene-based data partitioning was employed, with 130/15/36 scenes for train/val/test, respectively. The synchronized RGB, depth, semantic instance masks, and calibrated camera metadata, along with the receiver pose and the ground-truth source poses, are exported.
+
+\textbf{Synthetic 3D Object Generation.} 
+Static HM3D scans contain limited diversity of visually salient sound-emitting objects. 
+To increase appearance and geometry diversity while keeping metric annotations exact, synthesized loudspeaker meshes were generated by \textit{Hunyuan3D-1.0} \cite{yang2024hunyuan3d} and further inserted. 
+We generate 120 distinct floor-standing loudspeaker models and split them into 96/12/12 for train/validation/test to evaluate generalization to unseen geometries. 
+A visibility constraint is enforced by requiring each target loudspeaker to occupy at least 500 pixels in the semantic frame (rendered at $1920 \times 1080$), filtering out heavily occluded or distant instances.
+
+\subsection{Creation of QA Dataset}
+
+We convert each simulated scene into instruction-answer pairs as shown in Table~\ref{tab:dataset_stats}, spanning two modules: \textit{Perception} and \textit{Reasoning}.
+
+\textbf{Perception Tasks (Task A--C).}
+Tasks A--B supervise acoustic localization by regressing DoA in spherical coordinates (azimuth, elevation) under both single-source task (A) and overlapping-source task (B) settings.
+We express angles in degrees under a right-handed camera coordinate system with $x$ pointing right, $y$ up, and $z$ pointing backwards; azimuth is measured on the horizontal plane with $0^\circ$ facing forward, and elevation is measured from the horizontal plane.
+
+Task C targets metric 3D visual grounding of sound-emitting objects. 
+Following N3D-VLM \cite{wang2025n3d}, we represent each 3D bounding box as a structured sequence $\texttt{bbox}(c, x, y, z, s_x, s_y, s_z)$, where $c$ is the category label, $(x,y,z)$ is the box center in the camera coordinate system, and $(s_x,s_y,s_z)$ are axis-aligned box dimensions. 
+To avoid learning shortcuts from domain gaps, $\{1,2,3\}$ loudspeaker instances were randomly inserted per scene and require the model to output 3D boxes for all visible loudspeakers, enforcing explicit geometric grounding.
+
+\textbf{Reasoning Tasks (Task D--E).}
+Tasks D--E evaluate cross-modal spatial correspondence: given spatial audio and an RGB-D observation containing multiple candidate loudspeakers, the model must identify which visual loudspeaker matches a target speech source. 
+Task D uses a single active source, while Task E introduces overlapping sources and specifies the target by gender. 
+To avoid the appearence of trivial solutions, at least two visible candidate loudspeakers in every reasoning sample are guaranteed. 
+Solving these tasks requires integrating (i) directional cues from FOA, (ii) 3D localization of candidate loudspeakers, and (iii) metric alignment between acoustic DoA and visual geometry, thereby directly probing audio-visual embedding alignment and multi-step spatial reasoning.
+\section{Method}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1.0\linewidth]{IV-2.pdf}
+    \caption{Comparisons between Classical IV and Neural IV.}
+    \label{fig:neural_iv}
+\end{figure}
+
+\subsection{Intensity Vector for Audio Localization}
+
+We extract spatial cues from FOA using the intensity vector (Classical IV) \cite{yasuda2020sound}. 
+Following \cite{tang2024can}, we compute Classical IV features and use them to augment semantic audio representations with directional information.
+%
+Let $F_W$ denote the complex spectrogram of the omnidirectional FOA channel $W$, and let $F_C$ denote the complex spectrogram of the directional channels $C \in \{X, Y, Z\}$. 
+The cross-spectrum for each axis is obtained as:
+\begin{equation}
+    I'_C = F_W^* \odot F_C,
+\end{equation}
+where $\odot$ denotes the Hadamard product and $F_W^*$ is the complex conjugate of $F_W$. 
+The active intensity feature is then constructed by concatenating the real parts:
+\begin{equation}
+    \mathbf{I} = \operatorname{Concat}_{C \in \{X,Y,Z\}} \left( \mathcal{R}(I'_C) \right),
+\end{equation}
+Finally, we apply $L_2$-normalized $\mathbf{I} / \|\mathbf{I}\|_2$ to ensure numerical stability during training.
+
+\subsection{Neural Intensity Vector}
+Classical IV rely on fixed STFT-based signal processing, which often produces suboptimal representations in highly reverberant or overlapping-source environments. To address this limitation, here we introduce the Neural IV, a data-driven spatial encoder that learns to extract robust geometric cues directly from raw FOA waveforms.
+
+As shown in Fig. \ref{fig:neural_iv}, Neural IV replaces the STFT transformation with a learnable CNN backbone. We adopt the data2vec \cite{baevski2022data2vec} frontend to ensure 50Hz frame rate, utilizing a 7-layer 1D-CNN with kernel sizes of $(10, 3, 3, 3, 3, 2, 2)$ and strides of $(5, 2, 2, 2, 2, 2, 2)$.
+%
+Let $f_W$ and $f_C$ denote the CNN-encoded latent features corresponding to the omnidirectional and directional channels ($C \in \{X, Y, Z\}$), respectively.
+We generalize the physical principle of acoustic intensity to the latent space by computing the element-wise product of the omnidirectional ($f_W$) and directional ($f_C$) features:
+\begin{equation}
+    h_C = f_W \odot f_C, \quad \text{where } C \in \{X, Y, Z\}.
+\end{equation}
+%
+These interaction features are then concatenated to form a unified spatial representation $\mathbf{H}'$:
+\begin{equation}
+    \mathbf{H}' = \operatorname{Concat}(h_X, h_Y, h_Z).
+\end{equation}
+%
+Finally, we use a multilayer perceptron (MLP) to project these features into the final robust spatial embedding $\mathbf{v}_\text{NIV}$:
+\begin{equation}
+    \mathbf{v}_\text{NIV} = \operatorname{Linear}(\operatorname{ReLU}(\operatorname{Linear}(\mathbf{H}'))).
+\end{equation}
+
+\begin{figure*}[t] 
+    \centering
+    \includegraphics[width=0.85\linewidth]{architecture-2.pdf}
+\caption{\textbf{Overview of the JAEGER Architecture.} The framework processes RGB-D and FOA inputs. 
+\textbf{(1) Visual Stream:} RGB features are fused with 3D-aware positional encodings derived from depth-projected Point Clouds. 
+\textbf{(2) Audio Stream:} Semantic features are extracted from the omnidirectional channel (FOA W). For spatial cues, we compare Classical IV with Neural IV (N. IV). Specifically, IV derives features via STFT followed by fetching real parts and normalization, whereas Neural IV extracts geometric features from raw waveforms using channel-wise 1D-CNNs followed by an MLP.}
+    \label{fig:architecture}
+\end{figure*}
+
+\subsection{3D-aware Visual Encoding}
+
+To empower the visual encoder with 3D awareness, we employ a widely used depth embedding strategy \cite{zheng2025video, wang2025n3d}. Specifically, we inject sinusoidal encodings of downsampled metric coordinates into the visual embeddings.
+
+\textbf{Metric Point Cloud Reconstruction.}
+Given an RGB image $I \in \mathbb{R}^{H \times W \times 3}$ and its aligned depth map $D \in \mathbb{R}^{H \times W}$, we reconstruct the metric point cloud $P \in \mathbb{R}^{H \times W \times 3}$. For each pixel location $(u, v)$ with depth value $D_{uv}$, the corresponding 3D coordinate $P_{uv}$ is obtained via back-projection:
+\begin{equation}
+    P_{uv} =  D_{uv} \cdot \begin{bmatrix} f_x & 0 & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}^{-1} \begin{bmatrix} u \\ v \\ 1 \end{bmatrix},
+\end{equation}
+where $(u, v)$ denotes the 2D pixel coordinates, and $f_x, f_y$ and $(c_x, c_y)$ represent the camera's focal lengths and principal point, respectively.
+
+\textbf{3D-aware Positional Encoding.}
+We align the dense geometry $P \in \mathbb{R}^{H \times W \times 3}$ with the spatial resolution of visual features $F_\text{visual} \in \mathbb{R}^{h \times w \times c}$ via adaptive average pooling. Each coordinate component $\alpha \in \{x, y, z\}$ of the aligned geometry is mapped to $\lfloor \frac{c}{3} \rfloor$ channels by sinusoidal functions:
+\begin{equation}
+    \begin{aligned}
+        \text{PE}(\alpha, 2j) &= \sin\left( \frac{\alpha}{10000^{2j / \lfloor \frac{c}{3} \rfloor}} \right), \\
+        \text{PE}(\alpha, 2j+1) &= \cos\left( \frac{\alpha}{10000^{2j / \lfloor \frac{c}{3} \rfloor}} \right),
+    \end{aligned}
+\end{equation}
+for $j = 0, 1, \dots, \lfloor \frac{c}{6} \rfloor - 1$. The embeddings for the three axes are concatenated to form $F_{3D} \in \mathbb{R}^{h \times w \times c}$, which is then fused with the visual features via element-wise addition:
+\begin{equation}
+    \tilde{F}_\text{visual} = F_\text{visual} + F_\text{3D}.
+\end{equation}
+
+\subsection{Overall Model Architecture}
+
+As shown in Figure \ref{fig:architecture}, JAEGER unifies multi-modal perception and reasoning through the following core modules:
+
+\textbf{Visual Stream.} We fuse RGB semantic tokens with geometric priors derived from our 3D-aware Positional Encoding to explicitly ground visual representations in metric space.
+
+\textbf{Audio Stream.} We adopt a dual-path design, extracting semantic content from the omnidirectional channel while capturing spatial cues via either \textit{Classical IV} or \textit{Neural IV}.
+
+\textbf{LLM Backbone.} All multi-modal features are aligned via MLP adapters and fed into the LLM. We employ LoRA \cite{hu2022lora} to efficiently fine-tune the model for joint 3D grounding and reasoning.
+
+\begin{table*}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt} 
+    \caption{Main results compared with baselines. \textbf{Task Definitions \& Metrics:} 
+(1) \textbf{Audio DoA}: Detection of sound source arrival direction. Metric: Median Angular Error (MAE) in degrees ($^\circ$). 
+(2) \textbf{Overlap Audio DoA}: MAE of a specific audio source's arrival angle when two audio clips overlap. 
+(3) \textbf{3D IoU}: Mean Intersection over Union of the predicted 3D bounding box.
+(4) \textbf{Visual Offset}:  Median distance deviation of the predicted object center coordinates from the ground truth. 
+(5) \textbf{Reasoning 1-speaker}: Localizing one of multiple visible loudspeakers in the scene based on spatial audio cues from a single speaker. 
+(6) \textbf{Reasoning 2-speaker}: Identifying a specific loudspeaker among multiple candidates based on the spatial location cues of a target speech in a two-speaker scenario. 
+Reasoning tasks are evaluated by \textbf{Accuracy}. ``--'' indicates the model is incapable of performing the task.}
+    \vspace{0.1in}
+    
+        \footnotesize
+    \begin{tabular}{l c cccc cc}
+
+    \toprule
+    \multirow{2}{*}{Model} & \multirow{2}{*}{Modality} & \multicolumn{4}{c}{Perception} & \multicolumn{2}{c}{Reasoning} \\
+    \cmidrule(lr){3-6} \cmidrule(lr){7-8}
+    & & Audio DoA $\downarrow$ & Overlap DoA $\downarrow$ & 3D IoU $\uparrow$ & Visual Offset $\downarrow$ & 1-speaker $\uparrow$ & 2-speaker $\uparrow$ \\
+    \midrule
+    
+    Random & N/A & \ang{90} & \ang{90} & 0.00 & $\infty$ & 45.6 & 47.4 \\
+    
+    \midrule
+    
+    \rowcolor{Gray}
+    \multicolumn{8}{l}{Open-source omni model} \\
+    Qwen2.5-Omni          & RGB+Mono      & -- & -- & 0.00 & 2.40 & 35.8 & 44.0 \\
+    
+    \midrule
+    
+    \rowcolor{Gray}
+    \multicolumn{8}{l}{Open-source specialized models} \\
+    BAT             & Binaural           & \textbf{\ang{2.16}} & \ang{19.09} & -- & -- & -- & -- \\
+    Qwen3-VL-8B     & RGB             & -- & -- & 0.01 & 1.11 & -- & -- \\
+    N3D-VLM             & RGB-D       & -- & -- & 0.00 & 2.04 & -- & -- \\
+    
+    \midrule
+    
+    JAEGER (Classical IV)     & RGB-D+FOA     & \ang{2.95} & \ang{16.09} & 0.32 & 0.16 & 99.5 & 98.6 \\
+    JAEGER (Neural IV)      & RGB-D+FOA     & \ang{2.21} & \textbf{\ang{13.13}} & \textbf{0.32} & \textbf{0.16} & \textbf{99.5} & \textbf{99.2} \\
+    
+    \bottomrule
+    \end{tabular}
+    \label{tab:main}
+\end{table*}
+\section{Experiments}
+
+\subsection{Implementation Details}
+
+\paragraph{Model Specifications.}
+To leverage the understanding capabilities of existing multimodal models, we initialize the core components of JAEGER, including the visual encoder, the monaural audio branch, and the LLM decoder, with pre-trained weights from Qwen2.5-Omni \cite{xu2025qwen2}. The proposed Neural IV is randomly initialized. Since the audio embedding dimension has been changed, the audio adaptor has also been initialized randomly.
+
+\paragraph{Data and Training Specifications.}
+We train JAEGER on \textsc{SpatialSceneQA} following the split protocols for \textit{LibriSpeech} \cite{panayotov2015librispeech} and \textit{HM3D} \cite{ramakrishnan2021habitat}. Each sample provides comprehensive 3D geometric annotations, including camera intrinsics/extrinsics, instance-level semantic IDs, and ground truth metadata for all sound sources and loudspeaker assets.
+
+\textbf{Optimization}. We fine-tune specific components selectively: the audio encoder, Neural IV, and projector for Audio DoA (Tasks A--B); the visual encoder and projector for Visual Grounding (Task C); and all modality encoders and projectors for Joint Reasoning (Tasks D--E). Across all tasks, the LLM is optimized via LoRA with $r=64$, $\alpha=128$, and a dropout rate of 0.05.
+%
+All experiments are conducted on NVIDIA A100 (40GB) GPUs. For audio-only localization, we train on eight GPUs with a batch size of 3 for 6k steps. For visual grounding, we utilize 24 GPUs with a minibatch size of 1 for 3k steps. For joint reasoning tasks, we employ twenty-four GPUs with a minibatch size of 1 for 4k steps. We utilize an optimizer with a cosine learning rate scheduler and a linear warm-up of 2,500 steps. The peak learning rate is set to $1 \times 10^{-5}$, with a weight decay of 0.05.
+
+\subsection{Main Results}
+
+\textbf{Evaluation Metrics.}
+We employ distinct metrics tailored to each task type to ensure a comprehensive evaluation.
+For Sound Source Localization (Tasks A \& B), we report the median \textbf{DoA Error}, defined as the angular distance between the predicted azimuth/elevation and the ground truth.
+For Visual Grounding (Task C), we utilize two standard metrics: \textbf{3D IoU}, which measures the volumetric overlap between the predicted and ground truth bounding boxes, and \textbf{Visual Offset}, calculated as the Euclidean distance ($L_2$ norm) between the centers of the predicted and ground truth objects in 3D spaces.
+For Joint Audio-Visual Reasoning (Tasks D \& E), which are formulated as multi-choice classification problems (\textit{i.e.}, identifying the correct speaker among candidates like Left/Center/Right), we report the \textbf{Accuracy}.
+
+\textbf{Baselines.}
+Since JAEGER is the first framework to integrate RGB-D visual streams with 4-channel FOA for joint grounding and reasoning, no direct baseline exists with an identical modality setup. To ensure a rigorous evaluation, we compare three categories of models:
+\textbf{(1)} Specialized models: We evaluate state-of-the-art models in isolated domains. For audio-only localization, we train BAT \cite{zheng2024bat} for 5 epochs on our Task A and B datasets, matching our train duration. To bridge the modality gap, we convert our 4-channel FOA data to binaural audio using the default SoundSpaces 2.0 HRTF. For 3D visual grounding, we assess N3D-VLM \cite{wang2025n3d} and Qwen3-VL-8B-Instruct \cite{Qwen3-VL} under a zero-shot setting.
+\textbf{(2)} Open-source 2D omni model: To assess the necessity of 3D spatial modalities, we test Qwen2.5-Omni \cite{xu2025qwen2} in a zero-shot manner. Notably, due to its monaural-only input, Qwen2.5-Omni is inherently incapable of Audio DoA estimation.
+\textbf{(3)} Random: We provide a theoretical random guess baseline to establish the lower bound of performance.
+
+\textbf{Analysis.} Regarding isolated perception tasks, JAEGER demonstrates high competency in both audio and visual domains. In audio localization, while our proposed Neural IV variant (MAE \ang{2.21}) achieves comparable precision to the specialized BAT baseline (\ang{2.16}) in single-source scenarios, it significantly outperforms BAT in the more challenging overlapping-source task, reducing the MAE from \ang{19.09} to \ang{13.13}. In terms of 3D visual grounding, JAEGER-3D achieves a 3D IoU of 0.32 and a visual offset of 0.16m, exhibiting strong competitive performance.
+
+A pronounced performance gap emerges on joint reasoning tasks: mainstream 2D AV-LLMs, constrained by monaural audio and the absence of depth perception, fail even after fine-tuning to reliably associate visual objects with acoustic sources in 3D space. In contrast, JAEGER achieves near-perfect accuracy in both single and overlapping-source scenarios, highlighting the necessity of explicit 3D modeling for robust spatial reasoning in complex environments.
+
+\subsection{Ablation Studies}
+
+We conduct a comprehensive ablation studies to validate our core design choices, focusing on efficacy of learnable spatial audio representations, depth-aware visual grounding and the both individual contributions to joint audio-visual reasoning tasks.
+
+\begin{table}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \caption{Cross-evaluation matrix (Median Angular Error in $^\circ$). We compare \textbf{Classical IV} and \textbf{Neural IV} by training and testing on matched or mismatched source scenarios.}
+    
+    \begin{tabular}{l cc}
+    \toprule
+
+    \diagbox[width=10em]{\textbf{Test Set}}{\textbf{Train Set}} & \textbf{Single Src.} & \textbf{Overlap Src.} \\
+    \midrule
+    
+    \multicolumn{3}{l}{\textbf{Classical IV}} \\
+    \quad Single Source   & \ang{2.95}  & \ang{18.35} \\
+    \quad Overlap Source  & \ang{22.06} & \ang{16.09} \\
+    
+    \midrule 
+    
+    \multicolumn{3}{l}{\textbf{Neural IV}} \\
+    \quad Single Source   & \textbf{\ang{2.21}}  & \textbf{\ang{14.91}} \\
+    \quad Overlap Source  & \textbf{\ang{16.36}} & \textbf{\ang{13.13}} \\
+    
+    \bottomrule
+    \end{tabular}
+    \label{tab:cross_eval_diag}
+\end{table}
+
+\textbf{Effectiveness and Generalization of Neural IV.}
+We compare the proposed {Neural IV}  against the {Classical IV} to evaluate robustness in complex acoustic environments. As shown in Table \ref{tab:cross_eval_diag}, Neural IV consistently achieves lower angular errors across all settings.
+To test generalization, we perform a cross-evaluation where models are trained on one source type (\textit{e.g.}, Single Source) and tested on the other (\textit{e.g.}, Overlap Source).
+The results indicate that while Classical IV suffers significant degradation in mismatched scenarios, Neural IV exhibits superior stability. This suggests that Neural IV learns robust, intrinsic spatial acoustic.
+
+\begin{table}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \caption{Ablation study on \textbf{Depth Encoding} for visual grounding. We report both Mean and Median values to better analyze the distribution of errors.}
+    \vspace{0.1in}
+    
+    \begin{tabular}{l cc cc}
+    \toprule
+    \multirow{2}{*}{\textbf{Model Setting}} & \multicolumn{2}{c}{\textbf{3D IoU} $\uparrow$} & \multicolumn{2}{c}{\textbf{Visual Offset} $\downarrow$} \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+    & Mean & Median & Mean & Median \\
+    \midrule
+    
+    Full Model (w/ Depth) & \textbf{0.32} & \textbf{0.31} & \textbf{0.22} & \textbf{0.16} \\
+    
+    w/o Depth Encoding    & 0.29 & 0.27 & 0.24 & 0.18 \\
+    
+    \bottomrule
+    \end{tabular}
+    \label{tab:ablation_visual}
+\end{table}
+
+\textbf{Impact of Depth Encoding on Visual Grounding.}
+We investigate the contribution of our 3D-aware positional encoding to the Visual Grounding task (Task C). Table \ref{tab:ablation_visual} demonstrates that explicitly integrating depth information is critical for precise localization. The inclusion of depth encoding improves the Mean 3D IoU from 0.29 to 0.32 and reduces the Median Visual Offset from 0.18m to 0.16m. These improvements confirm that explicit geometric priors enable the model to better map 2D visual features to metric 3D coordinates, reducing the ambiguity inherent in monocular RGB perception.
+
+\textbf{Component Analysis on Joint Reasoning.}
+Finally, we dissect the contribution of each core component to the joint audio-visual reasoning tasks (Tasks D \& E) in Table \ref{tab:ablation_reasoning}.
+First, Neural IV consistently yields higher accuracy than Classical IV, particularly in the challenging 2-speaker scenario (99.2\% vs. 98.6\%).
+Second, removing depth encoding leads to a noticeable drop in accuracy, validating that depth perception assists in spatially distinguishing potential target speakers.
+Most critically, removing the FOA encoder causes reasoning performance to collapse to near-random levels ($\sim$43--47\%), even after fine-tuning. This catastrophic drop empirically demonstrates that standard monaural representations are fundamentally insufficient for spatial disambiguation, underscoring the indispensable role of our native 3D architecture in solving complex physical reasoning tasks.
+
+\begin{table}[t]
+    \centering
+    \setlength{\tabcolsep}{3pt}
+    \caption{Component analysis on \textbf{Reasoning Tasks}. We evaluate the impact of audio encoders (Neural/Classical), Depth, and FOA on 1-speaker and 2-speaker scenarios.}
+    \vspace{0.1in}
+    
+    \begin{tabular}{l cc}
+    \toprule
+    \multirow{2}{*}{\textbf{Model Setting}} & \multicolumn{2}{c}{\textbf{Accuracy (\%)}} \\
+    \cmidrule(lr){2-3}
+    & 1-Speaker $\uparrow$ & 2-Speaker $\uparrow$ \\
+    \midrule
+    
+    % --- 1. Full Models ---
+    Ours (Neural IV)             & \textbf{99.5} & \textbf{99.2} \\
+    Ours (Classical IV)          & 99.5 & 98.6 \\
+    \midrule
+    
+    % --- 2. w/o Depth ---
+    Ours (Neural) w/o Depth      & 96.9 & 94.9 \\
+    Ours (Classical) w/o Depth   & 99.2 & 98.7 \\
+    \midrule
+    
+    % --- 3. w/o FOA or Both ---
+    Ours w/o FOA Encoder         & 43.8 & 47.6 \\
+    Ours w/o Depth \& FOA        & 43.8 & 45.7 \\
+    
+    \bottomrule
+    \end{tabular}
+    \label{tab:ablation_reasoning}
+\end{table}
+\section{Conclusion}
+In this paper, we introduced \textbf{JAEGER}, a novel end-to-end framework that bridges the dimensionality gap between current 2D-centric AV-LLMs and a simulated 3D physical environment. By synergizing RGB-D visual perception with multi-channel FOA, our model achieves precise joint localization and reasoning capabilities previously unattainable by monaural, RGB-only systems. We further proposed Neural IV, a data-driven acoustic representation that significantly enhances robustness in challenging, reverberant scenarios. We constructed \textsc{SpatialSceneQA}, the first large-scale, high-fidelity dataset for 3D audio-visual instruction tuning. Our extensive experiments show that explicit 3D modeling of both visual depth and spatial audio is indispensable for solving complex physical reasoning tasks. We hope this work advances the development of embodied agents with holistic 3D perception and interaction capabilities.

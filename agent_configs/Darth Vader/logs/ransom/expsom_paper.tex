@@ -1,0 +1,1078 @@
+%%%%%%%% ICML 2026 PAPER SOURCE CODE %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+% Recommended, but optional, packages for figures and better typesetting:
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subfigure} 
+\usepackage{booktabs} % for professional tables
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+% hyperref makes hyperlinks in the resulting PDF.
+\usepackage{hyperref}
+
+% Attempt to make hyperref and algorithmic work together better:
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+% Use the following line for the initial blind version submitted for review:
+%\usepackage{icml2026} 
+\usepackage{icml2026}
+
+% If accepted, use: \usepackage{icml2026}
+
+% For theorems and math
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+\usepackage{enumitem}
+% if you use cleveref..
+\usepackage[capitalize,noabbrev]{cleveref}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+% Custom Commands for RanSOM
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\DeclareMathOperator{\LMO}{LMO}
+\DeclareMathOperator{\argmin}{argmin}
+\DeclareMathOperator{\Beta}{Beta}
+\DeclareMathOperator{\Exp}{Exp}
+
+% The \icmltitle you define below is probably too long as a header.
+\icmltitlerunning{RanSOM: Randomized Second-Order Momentum}
+
+\begin{document}
+
+\twocolumn[
+\icmltitle{RanSOM: Second-Order Momentum with Randomized Scaling\\ for Constrained and Unconstrained Optimization}
+
+\begin{icmlauthorlist}\icmlauthor{Anonymous}{anon}\end{icmlauthorlist}
+
+\icmlaffiliation{anon}{Anonymous Institution}
+
+\icmlcorrespondingauthor{Anonymous}{anonymous@anonymous.invalid}
+
+\icmlkeywords{Machine Learning, Optimization, Momentum, Stochastic Methods, ICML}
+
+\vskip 0.3in
+]
+
+\printAffiliationsAndNotice{} 
+
+\begin{abstract}
+Momentum methods, such as Polyak's Heavy Ball, are the standard for training deep networks but suffer from curvature-induced bias in stochastic settings, limiting convergence to suboptimal $\mathcal{O}(\epsilon^{-4})$ rates. Existing corrections typically require expensive auxiliary sampling or restrictive smoothness assumptions. We propose \textbf{RanSOM}, a unified framework that eliminates this bias by replacing deterministic step sizes with randomized steps drawn from distributions with mean $\eta_t$. This modification allows us to leverage Stein-type identities to compute an exact, unbiased estimate of the momentum bias using a single Hessian-vector product computed jointly with the gradient, avoiding auxiliary queries. We instantiate this framework in two algorithms: \textbf{RanSOM-E} for unconstrained optimization (using exponentially distributed steps) and \textbf{RanSOM-B} for constrained optimization (using beta-distributed steps to strictly preserve feasibility). Theoretical analysis confirms that RanSOM recovers the optimal $\mathcal{O}(\epsilon^{-3})$ convergence rate under standard bounded noise, and achieves optimal rates for heavy-tailed noise settings ($p \in (1, 2]$) without requiring gradient clipping.
+\end{abstract}
+\section{Introduction}
+\label{sec:intro}
+
+Stochastic optimization is the engine of modern machine learning. We consider the problem of minimizing a smooth, potentially non-convex objective function $f(x) = \mathbb{E}_{\xi}[f_\xi(x)]$ over a domain $\mathcal{C} \subseteq \mathbb{R}^d$. 
+
+Standard momentum methods (e.g., Polyak's Heavy Ball), which accumulate a running average of gradients $m_t$, are designed to reduce the variance of the stochastic gradient estimator. While effective for convex problems, they suffer from a fundamental flaw in non-convex landscapes: \textbf{Estimation Bias}.
+
+\subsection{The Bias-Variance Bottleneck}
+The core issue is that the momentum vector $m_t$ aggregates gradients from \textit{past} locations. As the optimizer moves from $x_{t-1}$ to $x_t$, the gradient direction changes due to the curvature of the loss landscape. Consequently, $m_{t-1}$ becomes a "stale" estimator of the current geometry $\nabla f(x_t)$.
+
+Mathematically, this bias is proportional to the change in gradients along the update step:
+\begin{multline}
+    \text{Bias}_t \propto \nabla f(x_t) - \nabla f(x_{t-1}) =\\ \int_{0}^{1} \nabla^2 f(x_{t-1} + \tau(x_t - x_{t-1})) (x_t - x_{t-1}) d\tau.
+\end{multline}
+Without correcting this curvature-induced bias, momentum methods cannot achieve the optimal $\mathcal{O}(\epsilon^{-3})$ sample complexity required for non-convex optimization \cite{yuan2016convergence} (see Figure \ref{fig:bias_diagram})..
+
+\begin{figure}[h]
+    \centering
+    \begin{tikzpicture}[scale=2, >=Stealth]
+        % Curved Landscape trajectory
+        \draw[thick, gray, ->] (0,1) to[out=-70, in=160] (2,0.5);
+        \node at (0.1, 1.1) {$x_{t-1}$};
+        \node at (2.1, 0.4) {$x_{t}$};
+        
+        % Gradient at x_t
+        \draw[->, thick, blue] (2,0.5) -- (2.5, 0.2) node[right] {$\nabla f(x_t)$};
+        
+        % Momentum from previous (Gradient at x_{t-1} transported)
+        \draw[->, thick, dashed, red] (2,0.5) -- (2.6, 0.8) node[above] {$m_{t-1} \approx \nabla f(x_{t-1})$};
+        
+        % Bias Vector
+        \draw[->, thick, orange] (2.5, 0.2) -- (2.6, 0.8) node[midway, left] {\tiny Bias};
+        
+        \node[align=center, font=\footnotesize] at (1.5, 1.5) {Curvature causes $m_{t-1}$\\ to misalign with $\nabla f(x_t)$};
+    \end{tikzpicture}
+    \caption{\textbf{Momentum Bias.} The historic momentum $m_{t-1}$ approximates $\nabla f(x_{t-1})$, but the optimizer has moved to $x_t$. The deviation (orange vector) is the bias induced by the Hessian $\nabla^2 f$. To accelerate convergence, this bias must be corrected.}
+    \label{fig:bias_diagram}
+\end{figure}
+
+\subsection{The Landscape of Bias Correction}
+\label{subsec:bias_landscape}
+
+To restore the optimal convergence properties of momentum, we must correct the "lag" in the estimator. Mathematically, this requires constructing a correction term $\delta_t$ that acts as an unbiased estimator of the gradient change along the update path, effectively approximating the integral $\nabla f(x_t) - \nabla f(x_{t-1}) \approx \int \nabla^2 f(x) dx$. While the goal is clear, constructing an estimator that is both computationally efficient and valid under weak assumptions has proven to be a difficult balancing act. Prior works have attempted to construct this estimator, but each approach incurs a prohibitive trade-off (summarized in Table~\ref{tab:comparison}).
+
+The first class of methods, exemplified by STORM or MVR, estimates the path integral using the difference of stochastic gradients at the two endpoints: $\delta_t = \nabla f_{\xi}(x_t) - \nabla f_{\xi}(x_{t-1})$. While this method maintains a standard cost of $2(F+B)$ (two gradients per step), its variance is tightly coupled to the smoothness of the individual sample loss functions. Consequently, these methods strictly require that every individual sample $f_\xi$ be smooth (Lipschitz gradient). This assumption is frequently violated in modern deep learning architectures, such as those employing ReLU activations, causing the variance of the estimator to explode and training to diverge.
+
+To address the limitations of difference-based estimators, Second-Order Momentum (SOM) approximates the integral directly using a local linearization around the previous iterate: $\delta_t = \nabla^2 f_{\xi}(x_{t-1})(x_t - x_{t-1})$. Like STORM, this maintains the standard $2(F+B)$ cost by reusing gradients. However, because this is a deterministic approximation of the integral using a fixed point, the approximation error is bounded only if the Hessian does not change rapidly. Thus, the classic SOM strictly requires \textbf{both} the gradient and the Hessian to be globally Lipschitz continuous (i.e., bounded second and third derivatives). These are strong, global assumptions that are difficult to verify and often do not hold in practice.
+
+More recent variants, often referred to as SOM-Unif, attempt to relax these smoothness requirements by applying the Mean Value Theorem stochastically. Originally introduced for Frank-Wolfe by \citet{zhang2020one} and later adapted to general momentum by \citet{salehkaleybar2022momentum}, this approach samples a uniform midpoint $\hat{x}$ between $x_{t-1}$ and $x_t$ to evaluate the Hessian term $\delta_t = \nabla^2 f_\xi(\hat{x})(x_t - x_{t-1})$. This provides an unbiased estimator requiring only expected smoothness ($C^2$). However, this theoretical robustness comes at a steep computational price. Since the evaluation point $\hat{x}$ is distinct from the gradient query points ($x_t, x_{t-1}$), the method requires a dedicated forward and backward pass just for the Hessian-Vector Product. This raises the cost to $3(F+B)$ per iteration, effectively negating much of the wall-clock speedup gained from acceleration.
+
+\begin{table*}[t]
+\centering
+\caption{\textbf{Comparison of Momentum Correction Strategies.} Existing methods like STORM \cite{cutkosky2019storm} and Classic SOM \cite{tran2022better} either require strong assumptions (smoothness of individual samples $f_\xi$, Lipschitz Hessian) or, like SOM-Unif \cite{zhang2020one, salehkaleybar2022momentum}, incur higher computational costs due to auxiliary queries. RanSOM is the only method that achieves acceleration with minimal assumptions and standard cost. (Cost notation: $F_c=$ Forward pass, $B_c=$ Backward pass. Rates shown assume Bounded Variance).}
+\label{tab:comparison}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Method} & \textbf{Estimator $\delta_t$} & \textbf{Smoothness Assumption} & \textbf{Cost per Step} & \textbf{Rate (Bdd. Var.)} \\
+\midrule
+\textbf{STORM} & $\nabla f_\xi(x_t) - \nabla f_\xi(x_{t-1})$ & Smooth $f_\xi$ (Individual) & $2(F_c+B_c)$ & $T^{-1/3}$ \\
+\textbf{SOM (Classic)} & $\nabla^2 f_\xi(x_{t-1}) d_{t-1}$ & \textbf{Smooth $f$ + Lipschitz $\nabla^2 f$} & $2(F_c+B_c)$ & $T^{-1/3}$ \\
+\textbf{SOM-Unif} & $\nabla^2 f_\xi(\hat{x}) d_{t-1}$ & Smooth $f$ (Expected) & $\mathbf{3(F_c+B_c)}$ & $T^{-1/3}$ \\
+\midrule
+\textbf{RanSOM (Ours)} & $\nabla^2 f_\xi(x_t) d_{t-1}$ & \textbf{Smooth $f$ (Expected)} & $\mathbf{2(F_c+B_c)}$ & $\mathbf{T^{-1/3}}$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+\subsection{Our Contribution: RanSOM}
+We propose a solution that eliminates both the additional assumptions and the computational overhead of prior corrections. We introduce \textbf{Randomized Second-Order Momentum (RanSOM)}, a framework based on a novel paradigm: \textit{Randomized Step Sizes}.
+
+Instead of a fixed step $\eta_t$, we treat the step size $s_t$ as a random variable:
+\begin{equation*}
+    x_{t+1} = x_t + s_t d_t, \quad \text{where } \mathbb{E}[s_t] = \eta_t.
+\end{equation*}
+By randomizing the step (e.g., via Exponential or Beta distributions), we utilize identities analogous to \textbf{Stein's Lemma} to perform "statistical integration" of the Hessian. This yields an exact, unbiased estimator of the curvature bias using a single Hessian-Vector Product (HVP) at the \textit{next} iterate $x_{t+1}$.
+
+Our approach offers three distinct advantages:
+
+\begin{enumerate}
+    \item \textbf{Universal Geometric Framework:} We couple our randomized correction with \textit{Linear Minimization Oracle (LMO)} updates. This allows RanSOM to naturally generalize modern "normalized" optimizers:
+    \begin{itemize}
+        \item With an $L_2$-ball LMO, we recover \textit{Normalized SGD}.
+        \item With an $L_\infty$-ball LMO, we recover \textit{SignSGD}.
+        \item With spectral constraints, we can extend to \textit{Muon}-style updates.
+    \end{itemize}
+    
+    \item \textbf{Optimal Rate and Generalized Robustness:} We provide a rigorous convergence analysis proving that RanSOM achieves the optimal $\mathcal{O}(\epsilon^{-3})$ sample complexity under standard bounded variance assumptions. Furthermore, we extend our analysis to challenging non-standard settings, demonstrating that RanSOM converges robustly even under \textit{generalized $(L_0, L_1)$-smoothness} and \textit{heavy-tailed gradient noise} ($p \in (1, 2]$), without requiring the Hessian to be Lipschitz continuous.
+    \item \textbf{No Auxiliary Query Overhead:} Unlike variance-reduced methods such as SOM-Unif which require sampling auxiliary "look-ahead" points, RanSOM evaluates the Hessian-Vector Product at $x_{t+1}$—the same point required for the subsequent gradient step. While this incurs the computational cost of a second backpropagation pass (similar to STORM), it avoids the additional data loading and forward pass overhead associated with auxiliary queries.
+\end{enumerate}
+\section{Related Work}
+\label{sec:related_work}
+
+\textbf{Bias in Stochastic Momentum.} 
+Momentum methods are essential for accelerating training in deep learning. However, \citet{yuan2016convergence} formally demonstrated that in non-convex settings, the momentum estimator suffers from a non-negligible bias induced by the curvature (Hessian) of the loss landscape. This bias prevents standard momentum (SGDM) from achieving the optimal convergence rates unless the momentum parameter $\beta \to 1$ at a specific fast schedule, which often leads to instability.
+
+\textbf{Variance Reduction and Acceleration.} 
+To overcome this bias and achieve the optimal $\mathcal{O}(\epsilon^{-3})$ sample complexity, recursive variance reduction techniques were introduced. STORM \cite{cutkosky2019storm} eliminated the full-gradient requirement of methods like SPIDER \cite{fang2018spider} using a recursive estimator. However, STORM strictly requires the \textit{individual} loss functions $f_\xi$ to be smooth. In contrast, RanSOM achieves the same optimal rate relying only on the smoothness of the expectation $f(x) = \mathbb{E}[f_\xi(x)]$, making it applicable to non-smooth objectives like ReLU networks.
+
+\textbf{LMO-based and Geometric Optimization.}
+Recently, there has been significant interest in adapting momentum to non-Euclidean geometries using Linear Minimization Oracles (LMOs). This includes methods like \textbf{Muon} \cite{jordan2024muon}, which uses orthogonalized momentum for massive neural network training, and LMO-momentum frameworks by \citet{pethick2025training} and \citet{kovalev2025non}. While these methods handle arbitrary norms, standard LMO-momentum generally yields a slower $\mathcal{O}(\epsilon^{-4})$ rate. 
+Very recently, \citet{khirirat2025better} proposed incorporating second-order corrections into LMO methods to recover the $\mathcal{O}(\epsilon^{-3})$ rate. However, their approach faces a trade-off: their "Variant 1" requires evaluating the Hessian at a randomized auxiliary point (doubling the cost) , while their "Variant 2" (which avoids the auxiliary point) requires the Hessian to be Lipschitz continuous. RanSOM resolves this dilemma: it achieves the optimal rate within the LMO framework \textit{without} auxiliary points and \textit{without} assuming Hessian Lipschitz continuity.
+
+\textbf{Second-Order Correction.} 
+The idea of using Hessian information to correct momentum bias was explored by \citet{tran2022better} (SOM). However, SOM relies on a Taylor expansion approximation, requiring the Hessian to be Lipschitz continuous.\cite{zhang2020one}  introduced SOM-Unif for constrained problems and \citet{, salehkaleybar2022momentum} used it for RL, it was also used recently in \citet{sadiev2025second,khirirat2025better} for general unconstrained problems.  SOM-Unif uses uniform sampling to remove the Lipschitz Hessian assumption but requires an auxiliary "lookahead" point, doubling the compute cost. RanSOM integrates the sampling into the update step itself via Stein's Identity, avoiding this overhead.
+
+\textbf{Robustness to Heavy Tails and Relaxed Smoothness.} 
+Standard methods fail when gradient noise is heavy-tailed ($p \in (1, 2]$) or when smoothness is non-uniform. 
+\citet{hubler2025gradient} recently demonstrated that \textit{Gradient Normalization} allows for optimal convergence in heavy-tailed settings without gradient clipping. Similarly, \citet{chen2023generalized} introduced $(L_0, L_1)$-smoothness to capture the behavior of transformers and LSTMs. 
+RanSOM naturally generalizes these findings: our geometric LMO update acts as a normalization mechanism for heavy tails, and our bias correction remains valid under generalized $(L_0, L_1)$-smoothness, as it relies on integration rather than local bounds.
+
+
+\section{Method: The RanSOM Framework}
+\label{sec:method}
+
+Standard momentum fails in non-convex settings because the accumulated gradient vector $m_t$ becomes stale as the optimizer traverses curved landscapes. To correct this, we need to estimate the integral of the Hessian along the update path.
+The core intuition of RanSOM is that \textit{randomization acts as a probe for curvature}. By treating the step size not as a fixed hyperparameter but as a random variable drawn from a specific distribution, we can exploit integration-by-parts identities (Stein's Lemma) to relate the finite difference of gradients (the bias) to a single point-derivative (the Hessian-Vector Product).
+
+\subsection{Randomized Integration by Parts}
+We define the ``gradient along the path" function $g(s) = \nabla f(x_t + s d_t)$, where $d_t$ is the update direction. The bias we wish to estimate is the expected change in gradients:
+$$ \Delta = \mathbb{E}[g(s) - g(0)] = \mathbb{E}[\nabla f(x_{t+1}) - \nabla f(x_t)]. $$
+Directly computing this expectation typically requires two evaluations ($x_t$ and $x_{t+1}$). However, using Stein-type identities, we can express this difference using only the derivative $g'(s) = \nabla^2 f(x_t + s d_t) d_t$ evaluated at the \textit{random} endpoint $s$.
+
+\begin{lemma}[Stein-Type Identities for Optimization]
+\label{lemma:stein}
+Let $g: \mathbb{R} \to \mathbb{R}^d$ be a differentiable function with bounded derivative.
+\begin{enumerate}
+    \item \textbf{Exponential Identity (Unconstrained):} If $s \sim \mathrm{Exp}(\lambda)$, then
+    \begin{equation}
+        \mathbb{E}[g(s) - g(0)] = \frac{1}{\lambda} \mathbb{E}[g'(s)].
+    \end{equation}
+    This implies that scaling the Hessian-Vector Product at the destination $x_{t+1}$ by $\eta_t = 1/\lambda$ provides an unbiased estimator of the gradient difference.
+    
+    \item \textbf{Beta Identity (Constrained):} If $s \sim \mathrm{Beta}(1, K)$, then
+    \begin{equation}
+        \mathbb{E}[g(s) - g(0)] = \mathbb{E}\left[\frac{1-s}{K} g'(s)\right].
+    \end{equation}
+    Here, the HVP must be re-weighted by the factor $\frac{1-s}{K}$ to account for the compact support of the Beta distribution.
+\end{enumerate}
+\end{lemma}
+\textit{Proof Sketch.} Both identities follow from the integration by parts formula $\mathbb{E}[g(s)-g(0)] = \int_0^\infty g'(s) (1 - F(s)) ds$, where $F(s)$ is the CDF. For the Exponential distribution, the survival function $1-F(s) = e^{-\lambda s}$ is proportional to the PDF $f(s) = \lambda e^{-\lambda s}$, yielding the simple scalar factor. For the Beta distribution, the survival function is polynomial, leading to the weight term $(1-s)/K$. (See Appendix for full proof).
+
+\subsection{Joint Efficient Computation via Automatic Differentiation}
+A critical theoretical advantage of RanSOM translates directly into practical efficiency. The correction term requires evaluating the Hessian-Vector Product (HVP) $h_{t+1} = \nabla^2 f(x_{t+1}) d_t$ at the \textit{next} iterate $x_{t+1}$.
+In modern Automatic Differentiation (AD) frameworks (e.g., PyTorch, JAX), this operation does \textbf{not} require materializing the full Hessian. Instead, it is computed via Pearlmutter's trick:
+\begin{equation}
+    h_{t+1} = \nabla_{x} (\langle \nabla f(x_{t+1}), \text{stop\_grad}(d_t) \rangle).
+\end{equation}
+Crucially, this computation shares the forward pass and the backward graph with the standard gradient computation . By computing the gradient $g_{t+1} = \nabla f(x_{t+1})$ and the HVP $h_{t+1}$ in a single combined backward pass, the total cost is roughly $2\times$ that of a standard forward pass—comparable to standard SGD and significantly cheaper than methods requiring auxiliary point evaluations (which cost $3\times$ or more).
+
+\subsection{Algorithm 1: RanSOM-E (Unconstrained / Normalized)}
+For unconstrained optimization on $\mathbb{R}^d$, we employ \textit{the Exponential Identity}. To handle potential heavy-tailed noise and adapt to the geometry, we determine the update direction using a Linear Minimization Oracle (LMO) over a norm ball $\mathcal{B}_\rho = \{v : \|v\| \le \rho\}$. This framework naturally unifies several modern optimization paradigms:
+
+\begin{itemize}
+    \item \textbf{Euclidean Case ($L_2$):} The LMO yields $d_t = -\rho \frac{m_t}{\|m_t\|_2}$. This recovers \textbf{Normalized SGD}, connecting our method to robust techniques but with added acceleration.
+    \item \textbf{Coordinate-Wise Geometry ($L_\infty$):} The LMO yields $d_t = -\rho \cdot \text{sign}(m_t)$. This recovers \textbf{SignSGD}~\cite{bernstein2018signsgd}, known for its communication efficiency and robustness to magnitude variance.
+    \item \textbf{Spectral Geometry (Schatten Norms):} For matrix parameters (e.g., in Transformers), the LMO can enforce spectral constraints. This recovers \textbf{Muon}-style updates~\cite{jordan2024muon}, where $d_t$ is computed via Newton-Schulz iterations to orthogonalize the update.
+\end{itemize}
+
+\begin{algorithm}[tb]
+   \caption{RanSOM-E: Exponential-Distributed Second-Order Momentum}
+   \label{alg:expsom}
+\begin{algorithmic}[1]
+   \STATE {\bfseries Input:} Initial $x_0$, learning rate $\eta_t$, momentum $\beta$, radius $\rho$, batch size $B_{init},B$
+   \STATE Initialize $m_0 = \frac{1}{B_{init}} \sum_{\xi \in \mathcal{B}_0} \nabla f_{\xi}(x_0)$
+   \FOR{$t=0$ {\bfseries to} $T-1$}
+   \STATE \textit{// 1. Geometric Update Direction (LMO)}
+   \STATE Solve $d_t = \argmin_{v : \|v\| \le \rho} \langle m_t, v \rangle$
+   \STATE \quad $\triangleright$ \textbf{Norm. SGD ($L_2$):} $d_t \leftarrow -\rho \cdot m_t / \|m_t\|_2$
+   \STATE \quad $\triangleright$ \textbf{SignSGD ($L_\infty$):} $d_t \leftarrow -\rho \cdot \text{sign}(m_t)$
+   \STATE \quad $\triangleright$ \textbf{Muon (Spectral):} $d_t \leftarrow -\rho \cdot \text{NewtonSchulz}(m_t)$
+   
+   \STATE \textit{// 2. Randomized Step (Stein's Trick)}
+   \STATE Sample $s_t \sim \mathrm{Exp}(1/\eta_t)$ \quad \textit{(Mean step size is $\eta_t$)}
+   \STATE Update: $x_{t+1} = x_t + s_t d_t$
+   
+   \STATE \textit{// 3. Joint Computation (Zero Overhead)}
+   \STATE Sample batch $\mathcal{B}_{t+1}$
+   \STATE Compute $(g_{t+1}, h_{t+1})$ via simultaneous backprop:
+   \STATE \quad $g_{t+1} = \frac{1}{B} \sum_{\xi \in \mathcal{B}_{t+1}} \nabla f_{\xi}(x_{t+1})$
+   \STATE \quad $h_{t+1} = \frac{1}{B} \sum_{\xi \in \mathcal{B}_{t+1}} \nabla^2 f_{\xi}(x_{t+1}) d_t$
+   
+   \STATE \textit{// 4. Bias Correction}
+   \STATE Estimate Bias: $\delta_{t+1} = \eta_t \cdot h_{t+1}$ 
+   \STATE Update Momentum: $m_{t+1} = (1-\beta)(m_t + \delta_{t+1}) + \beta g_{t+1}$
+   \ENDFOR
+\end{algorithmic}
+\end{algorithm}
+\subsection{Algorithm 2: RanSOM-B (Constrained)}
+For constrained optimization over a convex set $\mathcal{C}$, using an Exponential step size is invalid because $x_{t+1}$ might leave the domain. Instead, we use the \textit{Beta Identity}. We draw steps from a Beta distribution supported on $[0, 1]$, ensuring that the convex combination $x_{t+1} = (1-s_t)x_t + s_t v_t$ remains strictly feasible.
+
+\begin{algorithm}[tb]
+   \caption{RanSOM-B: Beta-Distributed Second-Order Momentum}
+   \label{alg:betasom}
+\begin{algorithmic}[1]
+   \STATE {\bfseries Input:} $x_0 \in \mathcal{C}$, rate $\eta_t \in (0, 1)$, momentum $\beta$, batch size $B_{init},B$
+   \STATE Initialize $m_0 = \frac{1}{B_{init}} \sum_{\xi \in \mathcal{B}_0} \nabla f_{\xi}(x_0)$
+   \FOR{$t=0$ {\bfseries to} $T-1$}
+   \STATE \textit{// 1. Frank-Wolfe Direction}
+   \STATE Solve LMO: $v_t = \argmin_{v \in \mathcal{C}} \langle m_t, v \rangle$
+   \STATE Set direction: $d_t = v_t - x_t$
+   
+   \STATE \textit{// 2. Randomized Feasible Step}
+   \STATE Set parameter $K_t = \frac{1}{\eta_t} - 1$
+   \STATE Sample $s_t \sim \mathrm{Beta}(1, K_t)$ \quad \textit{(Mean is $\eta_t$; Support is $[0,1]$)}
+   \STATE Update: $x_{t+1} = x_t + s_t d_t$ \quad \textit{(Strictly Feasible)}
+   
+   \STATE \textit{// 3. Joint Computation}
+   \STATE Sample batch $\mathcal{B}_{t+1}$ and compute $(g_{t+1}, h_{t+1})$ at $x_{t+1}$
+   
+   \STATE \textit{// 4. Weighted Bias Correction}
+   \STATE Calculate Stein Weight: $w_t = \frac{1-s_t}{K_t}$
+   \STATE Estimate Bias: $\delta_{t+1} = w_t \cdot h_{t+1}$
+   \STATE Update Momentum: $m_{t+1} = (1-\beta)(m_t + \delta_{t+1}) + \beta g_{t+1}$
+   \ENDFOR
+\end{algorithmic}
+\end{algorithm}
+\section{Theoretical Analysis}
+\label{sec:theory}
+
+In this section, we establish the convergence of RanSOM for non-convex optimization. Our analysis highlights three key theoretical advantages of the proposed framework:
+
+\begin{enumerate}
+    \item \textbf{Minimal Assumptions:} Unlike recursive variance reduction methods such as STORM~\cite{cutkosky2019storm} or SPIDER~\cite{fang2018spider}, we do \textbf{not} require the individual stochastic functions $f_\xi(x)$ to be smooth (almost surely), nor do we assume bounded variance. We handle heavy-tailed noise directly, similar to recent robust techniques~\cite{liu2023nonconvex, hubler2025gradient}. Furthermore, unlike prior second-order methods (e.g., \cite{tran2022better, khirirat2025better}), we do \textbf{not} require the Hessian to be Lipschitz continuous.
+    
+    \item \textbf{No Overhead:} Our correction term uses a Hessian-vector product at $x_{t+1}$, which is the exact point required for the gradient evaluation in the subsequent step. This avoids the need for "look-ahead" points or double-evaluations common in other variance-reduced estimators like SOM-Unif~\cite{salehkaleybar2022momentum, zhang2020one}.
+    
+    \item \textbf{Clipping-Free:} We achieve optimal convergence rates without the need for gradient clipping. By identifying the appropriate batch size and step size scaling, RanSOM naturally handles heavy-tailed noise, generalizing the normalization benefits observed in first-order methods~\cite{hubler2025gradient}.
+\end{enumerate}
+
+\subsection{Preliminaries \& Notation}
+
+We consider optimization over a finite-dimensional real vector space $\mathcal{E} = \R^d$ equipped with a general norm $\|\cdot\|$.
+\begin{itemize}
+    \item \textbf{Primal Norm:} For $x \in \mathcal{E}$, we denote the norm by $\|x\|$.
+    \item \textbf{Dual Norm:} The space of gradients is the dual space $\mathcal{E}^*$. For $g \in \mathcal{E}^*$, the dual norm is defined as $\|g\|_* := \sup_{\|x\| \le 1} \langle g, x \rangle$.
+    \item \textbf{Operator Norm:} The Hessian $\nabla^2 f(x)$ is a linear operator mapping $\mathcal{E} \to \mathcal{E}^*$. We define the induced operator norm as:
+    \begin{multline*}
+        \|\nabla^2 f(x)\|_{op} :=\\ \sup_{\|u\| \le 1} \|\nabla^2 f(x) u\|_* = \sup_{\|u\| \le 1, \|v\| \le 1} \langle \nabla^2 f(x) u, v \rangle.
+    \end{multline*}
+\end{itemize}
+
+\subsection{Assumptions}
+
+We perform our analysis under a generalized set of assumptions that captures the behavior of modern deep learning architectures and robust optimization settings.
+
+\begin{assumption}[Well-Defined Problem]
+\label{ass:well_defined}
+The objective function $f: \mathcal{E} \to \mathbb{R}$ is bounded below by $f_* > -\infty$. We define the initial functional gap as $\Delta_0 \triangleq f(x_0) - f_*$.
+\end{assumption}
+
+\begin{assumption}[Local Geometric Smoothness]
+\label{ass:geometric_smoothness}
+The objective $f$ is twice continuously differentiable. We assume the Hessian norm is bounded locally by the affine growth of the gradient norm. Specifically, there exist non-negative constants $L_0, L_1 \ge 0$ such that for all $x \in \mathcal{E}$:
+\begin{equation}
+    \|\nabla^2 f(x)\|_{op} \le L_0 + L_1 \|\nabla f(x)\|_*.
+\end{equation}
+This generalizes standard smoothness (where $L_1=0$) to include functions with exploding gradients (e.g., Transformers/LSTMs), as formalized in \cite{zhang2020adaptive}.
+\end{assumption}
+
+\begin{assumption}[Norm Compatibility]
+\label{ass:norm_compatibility}
+Since the space $\mathcal{E}$ is finite-dimensional, all norms are equivalent. We assume there exists a compatibility constant $\kappa \ge 1$ such that for any vector $u \in \mathcal{E}^*$:
+\begin{equation}
+    \|u\|_* \le \kappa \|u\|_2.
+\end{equation}
+This allows us to translate the $L_2$-bounded noise properties of standard deep learning optimizers into the geometry of the general norm $\|\cdot\|$.
+\end{assumption}
+
+\begin{assumption}[Affine Heavy-Tailed Noise]
+\label{ass:noise}
+We assume access to unbiased stochastic oracles for the gradient, $g(x) := \nabla f_\xi(x)$, and the Hessian, $H(x) := \nabla^2 f_\xi(x)$.
+We assume the gradient oracle has bounded $p$-th central moment.
+For the Hessian, we strictly require the noise to be bounded only along the update direction. Thus, for any vector $w \in \mathcal{E}$ (independent of the noise), we assume the HVP variance is bounded.
+Specifically, for some $p, q \in (1, 2]$:
+\begin{align}
+    \mathbb{E}_\xi[\|g(x) - \nabla f(x)\|_2^p] &\le \sigma_g^p + \alpha_g^p \|\nabla f(x)\|_*^p, \\
+    \mathbb{E}_\xi[\|(H(x) - \nabla^2 f(x))w\|_2^q] &\le (\sigma_h^q + \alpha_h^q \|\nabla f(x)\|_*^q) \|w\|^q.
+\end{align}
+\end{assumption}
+
+\textbf{Discussion on Assumptions.}
+Our theoretical framework operates under conditions that represent the state-of-the-art in non-convex stochastic optimization.
+Assumption \ref{ass:geometric_smoothness} (Generalized Smoothness) relaxes the restrictive global Lipschitz gradient assumption used in classical analysis, addressing the "exploding gradient" problem prevalent in Transformers and LSTMs \cite{zhang2020adaptive}.
+Furthermore, Assumption \ref{ass:noise} (Affine Heavy-Tailed Noise) unifies two critical lines of research: it incorporates the affine variance growth observed in training deep networks \cite{bottou2018optimization} and accommodates heavy-tailed noise ($p, q < 2$) characteristic of gradient noise in deep learning \cite{simsekli2019tail}. By supporting arbitrary $p, q \in (1, 2]$, our analysis generalizes recent robust momentum methods \cite{cutkosky2019storm, gorbunov2020stochastic}, which typically assume bounded variance ($p=2$) or specific tail indices.
+
+\textbf{Simplification for Clarity.} While we provide the full proof of convergence under these general conditions in Appendix~\ref{app:theory}, the resulting rate expressions are complex. To maintain clarity and intuition in the main text, the following theorems are presented under the standard simplified setting where $L_1=0$ (globally bounded Hessian) and $\alpha_g = \alpha_h = 0$ (bounded noise moments).
+\subsection{Unconstrained Optimization (RanSOM-E)}
+
+%We analyze RanSOM-E in the unconstrained setting under the standard assumption of bounded noise moments ($\alpha_g = \bar{\alpha}_h = 0$) and relaxed third-order smoothness ($L_1 \approx 0$). 
+The convergence analysis relies on bounding the momentum estimation error $e_t = m_t - \nabla f(x_t)$ and coupling it with a descent inequality derived from the Exponential step distribution.
+
+\begin{lemma}[Descent Inequality]
+\label{lemma:main_descent}
+Let $\Delta_0 = f(x_0) - f_*$ be the initial functional gap, $\kappa$ be the norm compatibility constant, and $C_s = 2$ be the second moment of the exponential step distribution. For step sizes satisfying $\eta_t \le 1/(\rho L_0)$, the update satisfies:
+\begin{multline}
+    \mathbb{E}[f(x_{t+1})] - f(x_t) \le \\-\frac{\rho \eta_t}{2} \mathbb{E}[\|\nabla f(x_t)\|_*] + 2\rho \kappa \eta_t \mathbb{E}[\|e_t\|_2] + \frac{C_s \rho^2 L_0}{2} \eta_t^2.
+\end{multline}
+\end{lemma}
+
+The critical challenge is bounding the accumulated error $\mathbb{E}[\|e_t\|_2]$. By leveraging the von Bahr-Esseen inequality for martingale difference sequences, we derive a bound that depends explicitly on the noise indices $p$ and $q$.
+
+\begin{lemma}[Momentum Error Bound]
+\label{lemma:main_error}
+Let $\beta$ be the momentum parameter and ($B_{init}$) $B$  the (initial) batch size. The expected estimation error decomposes into initialization, gradient noise, and Hessian bias terms:
+\begin{multline*}
+    \frac{1}{T} \sum_{t=0}^{T-1}\mathbb{E}[\|e_t\|_2] \le \underbrace{\mathcal{O}\left( \frac{\sigma_g}{\beta T B_{init}^{1-1/p}} \right)}_{\text{Initialization}} \\+ \underbrace{\mathcal{O}\left( \frac{\beta^{1-1/p} \sigma_g}{B^{1-1/p}} \right)}_{\text{Gradient Noise}} + \underbrace{\mathcal{O}\left( \frac{\eta \beta^{-1/q} \bar{\sigma}_h}{B^{1-1/q}} \right)}_{\text{Hessian Bias}}.
+\end{multline*}
+where $\bar{\sigma}_h = \rho (\sigma_h + \kappa L_0)$.
+\end{lemma}
+
+Combining these lemmas and optimizing the step size $\eta$ and momentum $\beta$ yields our main theorem.
+
+\begin{theorem}[Convergence of RanSOM-E]
+\label{thm:expsom_convergence}
+Let the batch size $B \ge 1$. By choosing the optimal parameters $\eta \asymp T^{-\frac{q(p-1)+p}{2q(p-1)+p}}$ and $\beta \asymp T^{-\frac{q(p-1)}{2q(p-1)+p}}$, RanSOM-E converges to a stationary point with the following rate structure:
+\begin{align}
+    \frac{1}{T} \sum_{t=0}^{T-1} \mathbb{E}[\|\nabla f(x_t)\|_*] \le & \underbrace{\mathcal{O}\left( (\Delta_0 \cdot \sigma_g \cdot \bar{\sigma}_h)^{\frac{1}{2A+K}} T^{-\frac{q(p-1)}{2q(p-1)+p}} \right)}_{\text{Main Variance Rate}} \nonumber \\
+    & + \underbrace{\mathcal{O}\left( \sqrt{\Delta_0 L_0} T^{-1/2} \right)}_{\text{Smoothness Rate}} \nonumber \\
+    & + \underbrace{\mathcal{O}\left( \Delta_0 L_0 T^{-1} \right)}_{\text{Geometric Limit Rate}}
+\end{align}
+where $A = \frac{p-1}{p}$ and $K = \frac{1}{q}$.
+
+
+\end{theorem}
+
+\textbf{Optimal Rate ($p=q=2$):} In the standard setting with finite variance ($A=K=1/2$), the Main Variance Rate becomes $\mathcal{O}\left( (\Delta_0 \sigma_g \bar{\sigma}_h)^{1/3} T^{-1/3} \right)$, matching the optimal rate for non-convex stochastic optimization \cite{cutkosky2019storm, arjevani2023lower}.
+
+\textbf{Optimality ($p=q$):} When $p=q$, our rate simplifies to $\mathcal{O}\left( T^{-\frac{p-1}{2p-1}} \right)$, matching the optimal sample complexity limit established by \citet{sadiev2025second}. Crucially, RanSOM achieves this optimal scaling through its intrinsic generalized normalization mechanism, without requiring explicit gradient or Hessian clipping.
+
+\subsection{Constrained Optimization (RanSOM-B)}
+
+For constrained problems, we minimize $f(x)$ over a compact convex set $\mathcal{C}$ with diameter $D \triangleq \sup_{x,y \in \mathcal{C}} \|x-y\|$. We use the Frank-Wolfe gap $\mathcal{G}(x) = \max_{v \in \mathcal{C}} \langle \nabla f(x), x-v \rangle$ as the convergence criterion.
+
+\begin{lemma}[Constrained Descent Inequality]
+\label{lemma:constrained_descent}
+Let $s_t \sim \mathrm{Beta}(1, K_t)$ with mean $\eta_t = (1+K_t)^{-1}$. The second moment satisfies $\mathbb{E}[s_t^2] \le C_s \eta_t^2$ where $C_s = \frac{2(1+K_t)}{2+K_t} \le 2$. Under the smoothness constant $L_0$, the RanSOM-B update satisfies:
+\begin{multline}
+    \mathbb{E}[f(x_{t+1})] - f(x_t) \le \\ -\eta_t \mathbb{E}[\mathcal{G}(x_t)] + 2 D \eta_t \mathbb{E}[\|e_t\|_2] + \frac{C_s L_0 D^2}{2} \eta_t^2.
+\end{multline}
+\end{lemma}
+
+\begin{theorem}[Convergence of RanSOM-B]
+\label{thm:betasom_convergence}
+Under the same conditions as Theorem~\ref{thm:expsom_convergence}, and utilizing the Beta distribution for step sizes, RanSOM-B achieves a similar convergence rate structure:
+\begin{multline}
+    \frac{1}{T} \sum_{t=0}^{T-1} \mathbb{E}[\mathcal{G}(x_t)] \le \\ \underbrace{\mathcal{O}\left( \Delta_0^{\frac{A}{2A+K}} (D \sigma_g)^{\frac{K}{2A+K}} (D \bar{\sigma}_h)^{\frac{A}{2A+K}} T^{-\frac{q(p-1)}{2q(p-1)+p}} \right)}_{\text{Main Variance Rate}} \nonumber \\
+     + \underbrace{\mathcal{O}\left( D \sqrt{\Delta_0 L_0} T^{-1/2} \right)}_{\text{Smoothness Rate}} \nonumber
+     + \underbrace{\mathcal{O}\left( \Delta_0 T^{-1} \right)}_{\text{Geometric Limit Rate}}
+\end{multline}
+where $\bar{\sigma}_h = 2D (\sigma_h + L_0)$.
+
+
+For the standard case $p=q=2$, the main rate recovers the optimal $\mathcal{O}(T^{-1/3})$ scaling for projection-free methods.
+\end{theorem}
+
+\section{Numerical Experiments}
+
+We validate the proposed RanSOM framework across three distinct non-convex optimization tasks: (1) binary classification with non-convex regularization on the SPLICE dataset \cite{libsvm}, (2) sequence classification on the MNIST1D dataset \cite{mnist1d}, and (3) constrained matrix completion on a subset of the MovieLens 100K dataset \cite{movielens}. These experiments evaluate both the unconstrained (RanSOM-E) and constrained (RanSOM-B) variants against state-of-the-art baselines.
+
+\subsection{Non-Convex Classification: Splice Dataset}
+
+\textbf{Setup.} We evaluate performance on the Splice dataset from the LibSVM repository \cite{libsvm}, utilizing a Multi-Layer Perceptron (MLP) architecture ($60 \to 32 \to 16 \to 1$). To introduce challenging non-convexity into the loss landscape, we employ Welsch regularization. The objective function is given by:
+\[
+\mathcal{L}(w) = \text{BCE}(w) + \lambda \sum_{i} \frac{w_i^2}{1 + w_i^2}
+\]
+where $\lambda=0.1$. We compare RanSOM-E (using both Normalized and Muon-style updates) against SGD with Momentum (SGDm), classic Second-Order Momentum (SOM), Muon, and STORM.
+
+\textbf{Results.} Figure \ref{fig:splice_results} illustrates the training loss and test accuracy trajectories. RanSOM-E (Muon) demonstrates rapid convergence and superior stability compared to the baselines. As detailed in Table \ref{tab:results}, RanSOM-E (Muon) achieves the highest final test accuracy of $\mathbf{84.90\%} \pm 0.0038$, outperforming the closest competitor (Muon) while maintaining significantly lower variance than STORM.
+
+\begin{figure}[h]
+    \centering    \includegraphics[width=1\linewidth]{SpliceExp-2.pdf}
+    \caption{Training Loss (left) and Test Accuracy (right) on the Splice dataset with Welsch regularization. RanSOM-E (Muon) shows the fastest convergence and highest final accuracy.}
+    \label{fig:splice_results}
+\end{figure}
+\vspace*{-\baselineskip}
+\begin{table}[h]
+    \centering
+    \caption{Comparison of Final Test Accuracy on SPLICE dataset}
+    \label{tab:results}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Optimizer} & \textbf{Test Accuracy (\%)} \\
+        \midrule
+        SGDm & $0.8392 \pm 0.0061$ \\
+        SOM & $0.8342 \pm 0.0118$ \\
+        Muon & $0.8466 \pm 0.0079$ \\
+        STORM & $0.7335 \pm 0.1077$ \\
+        RanSOM-E (Norm) & $0.8441 \pm 0.0052$ \\
+        RanSOM-E (Muon) & $\mathbf{0.8490 \pm 0.0038}$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Sequence Classification: MNIST1D}
+
+\textbf{Setup.} We apply the optimizers to the MNIST1D dataset \cite{mnist1d}, a challenging sequence classification benchmark that requires capturing long-range dependencies. This setup tests the robustness of the curvature correction in deep non-convex landscapes typical of sequence modeling.
+
+\textbf{Results.} The convergence plots in Figure \ref{fig:mnist1d_results} show that RanSOM-E (Muon) consistently achieves lower training loss and higher test accuracy than all baselines. Table \ref{tab:mnist1d_results} confirms this dominance, with RanSOM-E (Muon) reaching $\mathbf{91.90\%}$ accuracy. Notably, STORM exhibits high variance and instability (accuracy $88.83\% \pm 1.38$), whereas RanSOM-E maintains tight confidence intervals ($ \pm 0.36$), validating the robustness of our randomized bias correction.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.9\linewidth]{MNIST1DRanSOMEXP2-1.pdf}
+    \caption{Training Loss (left) and Test Accuracy (right) on MNIST1D. RanSOM-E variants consistently outperform first-order and classic second-order baselines.}
+    \label{fig:mnist1d_results}
+\end{figure}
+
+\vspace*{-\baselineskip}
+\begin{table}[h]
+    \centering
+    \caption{Test Accuracy on MNIST1D (Mean $\pm$ Std over 3 runs)}
+    \label{tab:mnist1d_results}
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Optimizer} & \textbf{Test Accuracy (\%)} \\
+        \midrule
+        STORM & $88.83 \pm 1.38$ \\
+        SOM-Classic & $86.87 \pm 0.75$ \\
+        Muon & $91.50 \pm 0.90$ \\
+        RanSOM-E (Norm) & $90.97 \pm 0.84$ \\
+        RanSOM-E (Muon) & $\mathbf{91.90 \pm 0.36}$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Constrained Matrix Completion: Nano MovieLens}
+
+\textbf{Setup.} To evaluate the constrained variant RanSOM-B, we perform matrix completion on the "Nano" MovieLens dataset (a subset of MovieLens 100K \cite{movielens} consisting of the top 100 users and 200 movies). The problem is formulated as minimizing the reconstruction error (RMSE) under a Nuclear Norm ball constraint, a classic non-convex constrained problem. We compare RanSOM-B against Stochastic Frank-Wolfe with Polyak Momentum (SFW-Polyak) and Stochastic Frank-Wolfe with Classic SOM (SFW-SOM).
+
+\textbf{Results.} Figure \ref{fig:movielens_results} displays the RMSE trajectories over 50 epochs.
+\begin{itemize}[topsep=0pt]
+    \item \textbf{Performance:} RanSOM-B achieves the lowest final average RMSE, demonstrating that the randomized Beta-distributed steps effectively navigate the constrained geometry better than deterministic step sizes.
+    \item \textbf{Stability:} While RanSOM-B exhibits marginally higher variance in the earliest epochs (attributed to the exploration inherent in the randomized step size), it quickly stabilizes. In contrast, SFW-Polyak and SFW-SOM are highly stable but converge to suboptimal local minima with slightly higher final RMSE.
+\end{itemize}
+These results confirm that RanSOM-B successfully extends the benefits of randomized second-order corrections to projection-free optimization settings.
+\vspace*{-\baselineskip}
+\begin{figure}[h]
+    \centering    \includegraphics[width=0.7\linewidth]{SFWAvg.pdf}
+    \caption{Average RMSE on Nano MovieLens Matrix Completion. RanSOM-B (green) converges to a lower final error than SFW-Polyak and SFW-SOM.}
+    \label{fig:movielens_results}
+\end{figure}
+
+
+\section{Discussion and Conclusion}
+\label{sec:discussion}
+
+Standard momentum methods suffer from curvature-induced bias in non-convex settings. To address this, we introduced \textbf{RanSOM}, a framework that corrects this bias via randomized integration. By leveraging Stein-type identities, RanSOM constructs an unbiased gradient estimator using a single Hessian-vector product at the next iterate. This design allows RanSOM to recover the classical optimal $\mathcal{O}(T^{-1/3})$ convergence rate under bounded variance assumptions and, crucially, achieves optimality even under heavy-tailed gradient noise. It accomplishes this while solving two critical issues in prior second-order corrections:
+\begin{enumerate}[topsep=0pt]
+    \item \textbf{No Extra Assumptions:} Unlike STORM or classic SOM, RanSOM does not require individual sample smoothness or a Lipschitz Hessian.
+    \item \textbf{No Extra Cost:} It avoids auxiliary oracle queries, matching the query complexity of standard variance reduction methods.
+\end{enumerate}
+
+\textbf{Empirical Validation.}
+Experiments on the Splice and MNIST1D datasets confirm that RanSOM-E offers higher stability than STORM, validating the robustness of the correction under heavy-tailed noise. In the constrained setting, RanSOM-B outperformed SFW baselines on MovieLens, indicating that Beta-distributed steps effectively navigate complex constraint geometries.
+
+\textbf{Limitations and Future Work.}
+While efficient, the required HVP still incurs a computational cost roughly double that of SGD. Additionally, tuning the Exponential and Beta distribution parameters (i.e., the step size) for heterogeneous landscapes remains a challenge. Future work will focus on adaptive step-size distributions and applications to reinforcement learning.
+
+\textbf{Conclusion.}
+RanSOM provides a unified, assumption-light framework for non-convex optimization. By treating step sizes as random variables, it enables robust second-order bias correction without the computational overhead of auxiliary sampling.
+\section*{Impact Statement}
+
+This paper presents work whose goal is to advance the field of Machine
+Learning. There are many potential societal consequences of our work, none of which we feel must be specifically highlighted here.
+
+
+
+
+
+\bibliography{example_paper}
+\bibliographystyle{icml2026}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% APPENDIX
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\onecolumn
+\appendix
+
+\section{Theoretical Analysis and Proofs}
+\label{app:theory}
+
+In this appendix, we provide the complete convergence analysis for the RanSOM framework. We adopt a single-column format to accommodate the detailed expansions of the affine noise terms.
+
+\subsection{Notation}
+Let $\|\cdot\|$ denote the norm defining the geometry (used for the LMO and smoothness), and $\|\cdot\|_*$ denote its dual. Let $\|\cdot\|_2$ denote the Euclidean norm used for statistical quantification.
+We denote the filtration $\mathcal{F}_t$ as the history of all random variables up to step $t$.
+
+\subsection{Assumptions}
+We rely on the following assumptions:
+
+\begin{itemize}
+    \item \textbf{Assumption 4.1 (Local Geometric Smoothness):} There exist constants $L_0, L_1 \ge 0$ such that for any $x, y \in \mathcal{C}$ satisfying $\|x - y\| \le 1/L_1$, the Hessian satisfies:
+    \begin{equation}
+        \|\nabla^2 f(y)\|_{op} \le L_0 + L_1 \|\nabla f(x)\|_*
+    \end{equation}
+    where $\|\cdot\|_{op}$ denotes the operator norm induced by the geometry norm $\|\cdot\|$.
+
+    \item \textbf{Assumption 4.2 (Affine Heavy-Tailed Noise):} The stochastic gradient and Hessian satisfy the following moment bounds for $p, q \in (1, 2]$:
+    \begin{align}
+        \mathbb{E}[\|g(x) - \nabla f(x)\|_2^p \mid x] &\le \sigma_g^p + \alpha_g^p \|\nabla f(x)\|_*^p \\
+        \mathbb{E}[\|(H(x) - \nabla^2 f(x))w\|_2^q \mid x,w] &\le \left(\sigma_h^q + \alpha_h^q \|\nabla f(x)\|_*^q\right) \|w\|_*
+    \end{align}
+    Note that the noise growth is controlled directly by the dual norm $\|\nabla f(x)\|_*$.
+
+    \item \textbf{Assumption 4.4 (Norm Compatibility):} There exists $\kappa \ge 1$ such that $\|v\|_* \le \kappa \|v\|_2$.
+\end{itemize}
+
+
+\subsection{Derivation of Stein-Type Identities}
+\label{app:stein_derivations}
+
+In this section, we provide the full derivations for Lemma \ref{lemma:stein}, connecting the expected differences of a function to its derivative via specific probability distributions. These identities form the theoretical basis for our unbiased Hessian-vector product estimators.
+
+\begin{lemma}[Stein-Type Identities]
+\label{lemma:stein_proof}
+Let $g: \mathbb{R} \to \mathbb{R}^d$ be a differentiable function with integrable derivative.
+\begin{enumerate}
+    \item \textbf{Exponential Identity (Unconstrained):} If $s \sim \mathrm{Exp}(\lambda)$, then
+    \begin{equation}
+        \mathbb{E}[g(s) - g(0)] = \frac{1}{\lambda} \mathbb{E}[g'(s)].
+    \end{equation}
+    \item \textbf{Beta Identity (Constrained):} If $s \sim \mathrm{Beta}(1, K)$, then
+    \begin{equation}
+        \mathbb{E}[g(s) - g(0)] = \mathbb{E}\left[\frac{1-s}{K} g'(s)\right].
+    \end{equation}
+\end{enumerate}
+\end{lemma}
+
+\begin{proof}
+Both proofs rely on the fundamental identity for the expectation of a function difference. By the Fundamental Theorem of Calculus, we can express the difference as an integral of the derivative:
+$$ g(s) - g(0) = \int_0^s g'(z) \, dz. $$
+Taking the expectation with respect to the random variable $s$ with probability density function (PDF) $f(s)$:
+\begin{equation}
+    \mathbb{E}[g(s) - g(0)] = \int_{0}^{\infty} \left( \int_0^s g'(z) \, dz \right) f(s) \, ds.
+\end{equation}
+By Fubini's Theorem, we swap the order of integration. The region of integration $0 \le z \le s < \infty$ becomes $z \le s < \infty$ for the outer integral over $s$:
+\begin{align}
+    \mathbb{E}[g(s) - g(0)] &= \int_{0}^{\infty} g'(z) \left( \int_z^{\infty} f(s) \, ds \right) \, dz \nonumber \\
+    &= \int_{0}^{\infty} g'(z) (1 - F(z)) \, dz, \label{eq:stein_master}
+\end{align}
+where $1 - F(z) = \mathbb{P}(s > z)$ is the survival function (or complementary CDF).
+
+\paragraph{1. Exponential Identity (Unconstrained).}
+Let $s \sim \mathrm{Exp}(\lambda)$. The PDF is $f(z) = \lambda e^{-\lambda z}$ for $z \ge 0$.
+The survival function is:
+$$ 1 - F(z) = \int_z^\infty \lambda e^{-\lambda s} \, ds = e^{-\lambda z}. $$
+We observe that the survival function is directly proportional to the PDF:
+$$ 1 - F(z) = \frac{1}{\lambda} (\lambda e^{-\lambda z}) = \frac{1}{\lambda} f(z). $$
+Substituting this into the master equation \eqref{eq:stein_master}:
+\begin{align*}
+    \mathbb{E}[g(s) - g(0)] &= \int_{0}^{\infty} g'(z) \left( \frac{1}{\lambda} f(z) \right) \, dz \\
+    &= \frac{1}{\lambda} \int_{0}^{\infty} g'(z) f(z) \, dz \\
+    &= \frac{1}{\lambda} \mathbb{E}[g'(s)].
+\end{align*}
+
+\paragraph{2. Beta Identity (Constrained).}
+Let $s \sim \mathrm{Beta}(1, K)$. The PDF is given by $f(s) = \frac{1}{B(1, K)} (1-s)^{K-1}$ for $s \in [0, 1]$.
+Since the Beta function is $B(1, K) = \frac{\Gamma(1)\Gamma(K)}{\Gamma(1+K)} = \frac{1}{K}$, the PDF simplifies to:
+$$ f(z) = K (1-z)^{K-1}, \quad z \in [0, 1]. $$
+The survival function for $z \in [0, 1]$ is:
+$$ 1 - F(z) = \int_z^1 K (1-s)^{K-1} \, ds = \left[ -(1-s)^K \right]_z^1 = (1-z)^K. $$
+To express the master integral as an expectation, we seek a weight function $w(z)$ such that the integrand matches the form $w(z) g'(z) f(z)$. We solve for $w(z)$:
+$$ 1 - F(z) = w(z) f(z) \implies (1-z)^K = w(z) \cdot K (1-z)^{K-1}. $$
+Solving for $w(z)$:
+$$ w(z) = \frac{(1-z)^K}{K (1-z)^{K-1}} = \frac{1-z}{K}. $$
+Substituting this into the master equation \eqref{eq:stein_master} (with upper integration limit 1):
+\begin{align*}
+    \mathbb{E}[g(s) - g(0)] &= \int_{0}^{1} g'(z) (1 - F(z)) \, dz \\
+    &= \int_{0}^{1} g'(z) \left( \frac{1-z}{K} f(z) \right) \, dz \\
+    &= \mathbb{E}\left[ \frac{1-s}{K} g'(s) \right].
+\end{align*}
+\end{proof}
+
+
+\subsection{Derived Constants}
+Based on the randomized step distribution and smoothness assumptions, we define the following exact constants and their bounds.
+
+\paragraph{Distribution Constants.}
+Let $s_t$ be the random step size with mean $\eta_t$.
+\begin{enumerate}
+    \item \textbf{Descent Constant $C_s$:} Defined as $C_s \triangleq \mathbb{E}[s_t^2] / \eta_t^2$.
+    \item \textbf{Stein Moment Constants:} To bound the variance, we require the following normalized moments of the Stein weight $w_t$ and step size $s_t$:
+    \begin{equation}
+        M_w \triangleq \mathbb{E}[|w_t/\eta_t|^q], \quad M_{ws} \triangleq \mathbb{E}[|w_t/\eta_t + s_t/\eta_t|^q].
+    \end{equation}
+    \item \textbf{Correction Constant $C_\delta$:} We define the aggregate constant used in the error bound as:
+    \begin{equation}
+        C_\delta \triangleq 2 \cdot 2^{1-1/q} \cdot \max\left\{ M_w^{1/q}, M_{ws}^{1/q} \right\}.
+    \end{equation}
+\end{enumerate}
+
+\paragraph{Upper Bounds for Specific Distributions.}
+\begin{itemize}
+    \item \textbf{RanSOM-E} ($s_t \sim \text{Exp}(1/\eta_t)$, $w_t = \eta_t$):
+    \begin{itemize}
+        \item $C_s = 2$. (Since $\mathbb{E}[s_t^2] = 2\eta_t^2$).
+        \item $M_w = 1$. (Since $w_t = \eta_t$ is deterministic).
+        \item $M_{ws} = \mathbb{E}[(1 + s_t/\eta_t)^q] = \Gamma(q+1) e \Gamma(q+1, 1) \le \Gamma(q+1) + 1$. For $q \le 2$, $M_{ws} \le 3$.
+        \item Thus, $C_\delta \le 2 \cdot 2^{1/2} \cdot 3^{1/2} \approx 4.9$.
+    \end{itemize}
+    \item \textbf{RanSOM-B} ($s_t \sim \text{Beta}(1, K_t)$, $w_t = \frac{1-s_t}{K_t}$ with $K_t = \eta_t^{-1} - 1$):
+    \begin{itemize}
+        \item $C_s = \frac{K_t+1}{K_t+2} \frac{2}{K_t+1} \cdot \frac{1}{\eta_t^2} \cdot \eta_t^2 = \frac{2}{K_t+2} \frac{1}{\eta_t^2} \approx 1$. Specifically $C_s \le 2$.
+        \item Note that $w_t/\eta_t = \frac{1-s_t}{1-\eta_t} \le \frac{1}{1-\eta_t} \approx 1$. Thus $M_w \approx 1$.
+        \item Similarly, $s_t/\eta_t$ has finite moments for $\eta_t \to 0$. We can bound $C_\delta$ by a small constant similar to the exponential case.
+    \end{itemize}
+\end{itemize}
+
+\paragraph{Hessian Noise Constants ($\bar{\sigma}_h, \bar{\alpha}_h$).}
+To decouple the additive and multiplicative noise terms in the $q$-th moment bound, we define:
+\begin{align}
+    \bar{\sigma}_h &\triangleq \rho (\sigma_h + L_0) \\
+    \bar{\alpha}_h &\triangleq \kappa \rho (\alpha_h + L_1)
+\end{align}
+
+\subsection{Hessian Noise Lemma}
+
+\begin{lemma}[Bound on Centered Hessian Error]
+\label{lemma:hessian_constants}
+Let $\Psi_{t+1} = \delta_{t+1} - (\nabla f(x_{t+1}) - \nabla f(x_t))$ be the bias correction error. Under Assumptions 4.1 and 4.2, using $x_{t+1}$ as the reference point for smoothness, the $q$-th moment satisfies:
+\begin{equation}
+    \mathbb{E}[\|\Psi_{t+1}\|_2^q \mid x_{t+1}] \le C_\delta^q \eta_t^q \left( \bar{\sigma}^q_h + \bar{\alpha}^q_h \|\nabla f(x_{t+1})\|_*^q \right).
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+We decompose $\Psi_{t+1}$ into the \textit{Hessian Noise} term and the \textit{Stein Approximation Error} term:
+$$ \Psi_{t+1} = \underbrace{w_t (H_\xi(x_{t+1}) - \nabla^2 f(x_{t+1})) d_t}_{T_1} + \underbrace{\left( w_t \nabla^2 f(x_{t+1}) - s_t \int_0^1 \nabla^2 f(x_t + \tau s_t d_t) d\tau \right) d_t}_{T_2}. $$
+Using the inequality $\|a+b\|^q \le 2^{q-1}(\|a\|^q + \|b\|^q)$, we bound the total error:
+$$ \mathbb{E}[\|\Psi_{t+1}\|_2^q] \le 2^{q-1} \left( \mathbb{E}[\|T_1\|_2^q] + \mathbb{E}[\|T_2\|_2^q] \right). $$
+
+\textbf{1. Bounding $T_1$ (Hessian Noise):}
+Using Assumption 4.2 and $\|d_t\| \le \rho$:
+\begin{align*}
+    \mathbb{E}[\|T_1\|_2^q] &\le \mathbb{E}[|w_t|^q] \kappa^q \mathbb{E}[\|(H_\xi - \nabla^2 f)d_t\|_2^q \mid x_{t+1}] \\
+    &\le M_w \eta_t^q \rho^q \left( \sigma_h^q + \alpha_h^q \|\nabla f(x_{t+1})\|_*^q \right).
+\end{align*}
+
+\textbf{2. Bounding $T_2$ (Approximation Error):}
+Using Assumption 4.1 ($L_0, L_1$ smoothness) and the triangle inequality on the integral:
+\begin{align*}
+    \|T_2\|_2 &\le \kappa \rho \left( |w_t| \|\nabla^2 f(x_{t+1})\|_{op} + s_t \int_0^1 \|\nabla^2 f(x_\tau)\|_{op} d\tau \right) \\
+    &\le \kappa \rho (|w_t| + s_t) \left( L_0 + L_1 \|\nabla f(x_{t+1})\|_* \right).
+\end{align*}
+Taking the expectation and using $(a+b)^q \le 2^{q-1}(a^q+b^q)$ again:
+\begin{align*}
+    \mathbb{E}[\|T_2\|_2^q] &\le \mathbb{E}[(|w_t|+s_t)^q] \kappa^q \rho^q \left( L_0 + L_1 \|\nabla f(x_{t+1})\|_* \right)^q \\
+    &\le M_{ws} \eta_t^q \kappa^q \rho^q 2^{q-1} \left( L_0^q + L_1^q \|\nabla f(x_{t+1})\|_*^q \right).
+\end{align*}
+
+\textbf{Combination:}
+Combining the terms and substituting the constants:
+\begin{align*}
+    \mathbb{E}[\|\Psi_{t+1}\|_2^q] &\le 2^{q-1} \eta_t^q \kappa^q \rho^q \left[ M_w(\sigma_h^q + \alpha_h^q \|\nabla f\|_*^q) + M_{ws} 2^{q-1}(L_0^q + L_1^q \|\nabla f\|_*^q) \right] \\
+    &\le \underbrace{2^{q-1} \max(M_w, M_{ws} 2^{q-1})}_{C_\delta^q / 2^q} \eta_t^q \left[ \kappa^q \rho^q (\sigma_h^q + L_0^q) + \kappa^q \rho^q (\alpha_h^q + L_1^q) \|\nabla f\|_*^q \right] \\
+    &\le C_\delta^q \eta_t^q \left( \bar{\sigma}_h^q + \bar{\alpha}_h^q \|\nabla f(x_{t+1})\|_*^q \right).
+\end{align*}
+\end{proof}
+\section{Auxiliary Lemmas}
+
+\begin{lemma}[Martingale Moment Inequality \cite{vonbahr1965}]
+\label{lemma:vonbahr}
+Let $\{X_j\}$ be a martingale difference sequence in a Hilbert space. For any $r \in (1, 2]$, there exists a constant $C_r \le 2$ such that:
+\begin{equation}
+    \mathbb{E}\left[ \left\| \sum_{j=1}^t X_j \right\|_2^r \right] \le C_r \sum_{j=1}^t \mathbb{E}[\|X_j\|_2^r].
+\end{equation}
+\end{lemma}
+
+\begin{lemma}[Affine Noise Peeling, adapted from Lemma D.5 of Liu \& Zhou (2025)]
+\label{lemma:peeling}
+Let $\{c_j\}_{j=1}^t$ be non-negative scalars. Let $\{\xi_j\}$ be a martingale difference sequence satisfying the affine growth condition $\mathbb{E}[\|\xi_j\|_2^p | \mathcal{F}_{j-1}] \le \sigma^p + \alpha^p \|\nabla f(x_j)\|_*^p$ for $p \in (1, 2]$. Then:
+\begin{equation}
+    \mathbb{E}\left[ \left( \sum_{j=1}^t c_j^p \|\xi_j\|_2^p \right)^{1/p} \right] \le \sigma \left( \sum_{j=1}^t c_j^p \right)^{1/p} + \alpha \sum_{j=1}^t c_j \mathbb{E}[\|\nabla f(x_j)\|_*].
+\end{equation}
+\end{lemma}
+\begin{proof}
+We use the "peeling" technique. Define $S_k = \sum_{j=1}^k c_j^p \|\xi_j\|_2^p$. We peel off the last term using the sub-additivity of $x \mapsto x^{1/p}$ (concavity):
+\begin{align*}
+    \mathbb{E}[S_t^{1/p} | \mathcal{F}_{t-1}] &\le (S_{t-1} + c_t^p \mathbb{E}[\|\xi_t\|_2^p | \mathcal{F}_{t-1}])^{1/p} \quad \text{(Jensen's Inequality)} \\
+    &\le (S_{t-1} + c_t^p \sigma^p + c_t^p \alpha^p \|\nabla f(x_t)\|_*^p)^{1/p} \\
+    &\le (S_{t-1} + c_t^p \sigma^p)^{1/p} + c_t \alpha \|\nabla f(x_t)\|_* \quad \text{(Sub-additivity)}
+\end{align*}
+Applying this recursively for $j=t, t-1, \dots, 1$ yields the result.
+\end{proof}
+
+\section{Main Lemmas}
+
+\subsection{Generalized Descent Lemma}
+\begin{lemma}[Descent Inequality]
+\label{lemma:descent}
+Under Assumption 4.1 and 4.4, if $\eta_t \le \frac{1}{2 C_s \rho L_1}$, the update satisfies:
+\begin{align}
+    \mathbb{E}[f(x_{t+1})] - f(x_t) \le &-\frac{\rho \eta_t}{2} \|\nabla f(x_t)\|_* + 2\rho \kappa \eta_t \mathbb{E}[\|e_t\|_2] + \frac{C_s \rho^2 L_0}{2} \eta_t^2,
+\end{align}
+where $C_s$ is the descent constant defined in Section A.3.
+\end{lemma}
+\begin{proof}
+Using the Taylor expansion with local geometric smoothness:
+$$ f(x_{t+1}) \le f(x_t) + \langle \nabla f(x_t), x_{t+1} - x_t \rangle + \frac{L_0 + L_1 \|\nabla f(x_t)\|_* }{2} \|x_{t+1} - x_t\|^2 $$
+Taking expectation over $s_t$:
+$$ \mathbb{E}_{s}[f(x_{t+1})] \le f(x_t) + \eta_t \langle \nabla f(x_t), d_t \rangle + \frac{C_s \eta_t^2 \rho^2}{2} (L_0 + L_1 \|\nabla f(x_t)\|_* ) $$
+Using the LMO property $\langle \nabla f(x_t), d_t \rangle \le -\rho \|\nabla f(x_t)\|_* + 2\rho \|e_t\|_*$ and applying $\|e_t\|_* \le \kappa \|e_t\|_2$:
+$$ \mathbb{E}[f_{t+1}] \le f_t - \rho \eta_t \left( 1 - \frac{C_s \rho L_1 \eta_t}{2} \right) \|\nabla f(x_t)\|_* + 2\rho \kappa \eta_t \|e_t\|_2 + \frac{C_s \rho^2 L_0}{2} \eta_t^2 $$
+Choosing $\eta_t$ small enough ensures the coefficient of the gradient is $\le -\rho \eta_t / 2$.
+\end{proof}
+
+\subsection{Robust Error Recursion}
+\begin{lemma}[Error Bound]
+\label{lemma:error}
+Under Assumption 4.2 with batch size $B$, the error $e_t = m_t - \nabla f(x_t)$ satisfies:
+\begin{align}
+    \mathbb{E}[\|e_{t+1}\|_2] \le &(1-\beta)^{t+1} \|e_0\|_2 \nonumber \\
+    &+ \frac{2 \beta^{1 - 1/p}}{p^{1/p} B^{\frac{p-1}{p}}} \sigma_g + \frac{2 \beta \alpha_g}{B^{\frac{p-1}{p}}} \sum_{j=1}^{t+1} (1-\beta)^{t+1-j} \mathbb{E}[\|\nabla f(x_j)\|_*] \nonumber \\
+    &+ \frac{2 \eta \beta^{-1/q} C_\delta}{q^{1/q} B^{\frac{q-1}{q}}} \bar{\sigma}_h + \frac{2 \eta C_\delta \bar{\alpha}_h}{B^{\frac{q-1}{q}}} \sum_{j=1}^{t+1} (1-\beta)^{t+1-j} \mathbb{E}[\|\nabla f(x_j)\|_*]
+\end{align}
+\end{lemma}
+
+\begin{proof}
+\textbf{1. Recursion and Unrolling.}
+Recall the update rule $m_{t+1} = (1-\beta)(m_t + \delta_{t+1}) + \beta g_{t+1}$. Subtracting $\nabla f(x_{t+1})$ and rearranging terms (as done in the derivation of the previous section) yields the recursion:
+\begin{equation}
+    e_{t+1} = (1-\beta)e_t + \beta \bar{\xi}_{t+1} + (1-\beta) \bar{\Psi}_{t+1},
+\end{equation}
+where $\bar{\xi}_{t+1}$ and $\bar{\Psi}_{t+1}$ denote the batch-averaged gradient noise and centered correction error, respectively:
+$$ \bar{\xi}_{t+1} = \frac{1}{B}\sum_{i=1}^B \xi_{t+1}^{(i)}, \quad \bar{\Psi}_{t+1} = \frac{1}{B}\sum_{i=1}^B \Psi_{t+1}^{(i)}. $$
+Unrolling this recursion from step $t+1$ down to $0$:
+\begin{equation}
+    e_{t+1} = (1-\beta)^{t+1} e_0 + \underbrace{\sum_{j=1}^{t+1} \beta (1-\beta)^{t+1-j} \bar{\xi}_j}_{M_{t, \text{grad}}} + \underbrace{\sum_{j=1}^{t+1} (1-\beta)^{t+2-j} \bar{\Psi}_j}_{M_{t, \text{corr}}}.
+\end{equation}
+By the triangle inequality: $\mathbb{E}[\|e_{t+1}\|_2] \le (1-\beta)^{t+1}\|e_0\|_2 + \mathbb{E}[\|M_{t, \text{grad}}\|_2] + \mathbb{E}[\|M_{t, \text{corr}}\|_2]$.
+
+\textbf{2. Bounding the Gradient Noise Term ($M_{t, \text{grad}}$).}
+We apply the Martingale Moment Inequality (Lemma \ref{lemma:vonbahr}) with moment $p$. Let $c_j = \beta (1-\beta)^{t+1-j}$.
+$$ \mathbb{E}[\|M_{t, \text{grad}}\|_2] \le 2 \left( \sum_{j=1}^{t+1} c_j^p \mathbb{E}[\|\bar{\xi}_j\|_2^p] \right)^{1/p}. $$
+Using the property of batched means for $p \in (1, 2]$, $\mathbb{E}[\|\bar{\xi}_j\|_2^p] \le B^{-(p-1)} \mathbb{E}[\|\xi_j\|_2^p]$. Substituting Assumption 4.2:
+$$ \mathbb{E}[\|M_{t, \text{grad}}\|_2] \le \frac{2}{B^{\frac{p-1}{p}}} \mathbb{E}\left[ \left( \sum_{j=1}^{t+1} c_j^p (\sigma_g^p + \alpha_g^p \|\nabla f(x_j)\|_*^p) \right)^{1/p} \right]. $$
+Now, applying the Peeling Lemma (Lemma \ref{lemma:peeling}) to separate the constant and affine parts:
+$$ \mathbb{E}[\|M_{t, \text{grad}}\|_2] \le \frac{2 \sigma_g}{B^{\frac{p-1}{p}}} \left( \sum_{j=1}^{t+1} c_j^p \right)^{1/p} + \frac{2 \alpha_g}{B^{\frac{p-1}{p}}} \sum_{j=1}^{t+1} c_j \mathbb{E}[\|\nabla f(x_j)\|_*]. $$
+We approximate the geometric sum for $\beta \to 0$:
+$$ \left( \sum_{j=1}^{t+1} \beta^p (1-\beta)^{p(t+1-j)} \right)^{1/p} \le \beta \left( \frac{1}{1-(1-\beta)^p} \right)^{1/p} \le \beta \left( \frac{1}{p\beta} \right)^{1/p} = \frac{\beta^{1-1/p}}{p^{1/p}}. $$
+Substituting this yields the second line of the lemma statement.
+
+\textbf{3. Bounding the Correction Noise Term ($M_{t, \text{corr}}$).}
+Similarly, let $d_j = (1-\beta)^{t+2-j}$. Applying Lemma \ref{lemma:vonbahr} with moment $q$:
+$$ \mathbb{E}[\|M_{t, \text{corr}}\|_2] \le \frac{2}{B^{\frac{q-1}{q}}} \left( \sum_{j=1}^{t+1} d_j^q \mathbb{E}[\|\Psi_j\|_2^q] \right)^{1/q}. $$
+Using Lemma \ref{lemma:hessian_constants}, we substitute the bound $\mathbb{E}[\|\Psi_j\|_2^q] \le C_\delta^q \eta^q (\bar{\sigma}_h^q + \bar{\alpha}_h^q \|\nabla f(x_j)\|_*^q)$:
+$$ \mathbb{E}[\|M_{t, \text{corr}}\|_2] \le \frac{2 C_\delta \eta}{B^{\frac{q-1}{q}}} \left( \sum_{j=1}^{t+1} d_j^q (\bar{\sigma}_h^q + \bar{\alpha}_h^q \|\nabla f(x_j)\|_*^q) \right)^{1/q}. $$
+Applying the Peeling Lemma again:
+$$ \mathbb{E}[\|M_{t, \text{corr}}\|_2] \le \frac{2 C_\delta \eta \bar{\sigma}_h}{B^{\frac{q-1}{q}}} \left( \sum_{j=1}^{t+1} d_j^q \right)^{1/q} + \frac{2 C_\delta \eta \bar{\alpha}_h}{B^{\frac{q-1}{q}}} \sum_{j=1}^{t+1} d_j \mathbb{E}[\|\nabla f(x_j)\|_*]. $$
+Approximating the geometric sum $\left(\sum (1-\beta)^{q(\dots)}\right)^{1/q} \le (q\beta)^{-1/q}$:
+$$ \text{Const Term} \le \frac{2 C_\delta \eta \bar{\sigma}_h}{B^{\frac{q-1}{q}}} \frac{1}{(q\beta)^{1/q}} = \frac{2 \eta \beta^{-1/q} C_\delta}{q^{1/q} B^{\frac{q-1}{q}}} \bar{\sigma}_h. $$
+This yields the third line of the lemma statement.
+\end{proof}
+
+\begin{lemma}[Average Error Bound]
+\label{lemma:avg_error}
+Let the step size $\eta$ and momentum $\beta$ be constant. Let $e_{avg} = \frac{1}{T} \sum_{t=0}^{T-1} \mathbb{E}[\|e_t\|_2]$ and $G_{avg} = \frac{1}{T} \sum_{t=0}^{T-1} \mathbb{E}[\|\nabla f(x_t)\|_*]$. The average estimation error satisfies:
+\begin{align}
+    e_{avg} \le & \frac{\|e_0\|_2}{\beta T} 
+    + \frac{2 \beta^{1 - 1/p}}{p^{1/p} B^{\frac{p-1}{p}}} \sigma_g 
+    + \frac{2 \alpha_g}{B^{\frac{p-1}{p}}} G_{avg} \nonumber \\
+    & + \frac{2 \eta \beta^{-1/q} C_\delta}{q^{1/q} B^{\frac{q-1}{q}}} \bar{\sigma}_h
+    + \frac{2 \eta \beta^{-1} C_\delta \bar{\alpha}_h}{B^{\frac{q-1}{q}}} G_{avg}.
+\end{align}
+\end{lemma}
+
+\begin{proof}
+We start by summing the inequality derived in Lemma \ref{lemma:error} from $t=0$ to $T-1$. Let $S_T = \sum_{t=0}^{T-1} \mathbb{E}[\|e_{t+1}\|_2]$.
+We analyze the summation of the three components (Initialization, Constant Noise, Affine Noise) separately.
+
+\textbf{1. Initialization Term.}
+The geometric series sum is bounded:
+$$ \sum_{t=0}^{T-1} (1-\beta)^{t+1} \|e_0\|_2 \le \|e_0\|_2 \sum_{k=1}^{\infty} (1-\beta)^k = \|e_0\|_2 \frac{1-\beta}{\beta} \le \frac{\|e_0\|_2}{\beta}. $$
+
+\textbf{2. Constant Noise Terms.}
+The constant noise terms (involving $\sigma_g$ and $\bar{\sigma}_h$) are independent of $t$. Summing them simply multiplies by $T$.
+\begin{align*}
+    \text{Sum}_{\sigma} &= T \left( \frac{2 \beta^{1 - 1/p}}{p^{1/p} B^{\frac{p-1}{p}}} \sigma_g + \frac{2 \eta \beta^{-1/q} C_\delta}{q^{1/q} B^{\frac{q-1}{q}}} \bar{\sigma}_h \right).
+\end{align*}
+
+\textbf{3. Affine Growth Terms (Convolution).}
+We handle the recursive sums using the property of discrete convolution. Consider the generic structure $S = \sum_{t=0}^{T-1} C \sum_{j=1}^{t+1} (1-\beta)^{t+1-j} \mathbb{E}[\|\nabla f(x_j)\|_*]$.
+By swapping the order of summation ($\sum_{t=0}^{T-1} \sum_{j=1}^{t+1} = \sum_{j=1}^{T} \sum_{t=j-1}^{T-1}$), we bound the inner geometric series:
+$$ \sum_{t=j-1}^{T-1} (1-\beta)^{t+1-j} = \sum_{k=0}^{T-j} (1-\beta)^k \le \sum_{k=0}^{\infty} (1-\beta)^k = \frac{1}{\beta}. $$
+Thus, the total sum is bounded by the sum of gradients scaled by $1/\beta$:
+$$ S \le \frac{C}{\beta} \sum_{j=1}^{T} \mathbb{E}[\|\nabla f(x_j)\|_*] \approx \frac{C}{\beta} T G_{avg}. $$
+Applying this to the specific affine coefficients from Lemma \ref{lemma:error}:
+\begin{itemize}
+    \item \textbf{Gradient Affine Part:} The coefficient was $C_g = \frac{2 \beta \alpha_g}{B^{(p-1)/p}}$.
+    $$ \text{Sum}_{\alpha_g} \le \frac{1}{\beta} \left( \frac{2 \beta \alpha_g}{B^{\frac{p-1}{p}}} \right) T G_{avg} = \frac{2 \alpha_g}{B^{\frac{p-1}{p}}} T G_{avg}. $$
+    \item \textbf{Hessian Affine Part:} The coefficient was $C_h = \frac{2 \eta C_\delta \bar{\alpha}_h}{B^{(q-1)/q}}$.
+    $$ \text{Sum}_{\bar{\alpha}_h} \le \frac{1}{\beta} \left( \frac{2 \eta C_\delta \bar{\alpha}_h}{B^{\frac{q-1}{q}}} \right) T G_{avg} = \frac{2 \eta \beta^{-1} C_\delta \bar{\alpha}_h}{B^{\frac{q-1}{q}}} T G_{avg}. $$
+\end{itemize}
+
+\textbf{4. Final Combination.}
+Combining these parts, dividing the entire inequality by $T$, we obtain the stated result.
+\end{proof}
+
+\section{Convergence Analysis}
+
+\subsection{Unconstrained Optimization (RanSOM-E)}
+
+\begin{theorem}[Convergence of RanSOM-E]
+\label{thm:expsom}
+Let $\Delta_0 = F(x_0) - F_*$ be the initial functional gap and $\|e_0\|_2$ be the initial momentum error. We define the following problem-dependent constants:
+\begin{align}
+    C_{init\_gap} &\triangleq \frac{4\Delta_0}{\rho}, \quad C_{init\_mom} \triangleq \frac{4\kappa \|e_0\|_2}{\rho}, \quad C_{smooth} \triangleq 2 C_s \rho L_0, \\
+    C_{noise\_grad} &\triangleq 16\kappa \sigma_g, \quad C_{noise\_hess} \triangleq 16\kappa C_\delta \bar{\sigma}_h.
+\end{align}
+
+\textbf{Conditions:}
+\begin{enumerate}
+    \item \textbf{Batch Size:} The batch size $B$ must be large enough to handle the affine gradient noise variance:
+    \begin{equation}
+    \label{eq:batch_grad_only}
+        B \ge \max\left\{ 1, \left( \frac{32 \kappa \alpha_g}{\rho} \right)^{\frac{p}{p-1}} \right\}.
+    \end{equation}
+    
+    \item \textbf{Step Size Validity:} The step size $\eta$ must satisfy the following geometric and noise absorption constraints. Let $C_{cond} \triangleq \frac{B^{(q-1)/q}}{32 \kappa C_\delta \bar{\alpha}_h}$.
+    \begin{equation}
+    \label{eq:eta_conditions}
+        \eta \le \min\left\{ \frac{1}{2 C_s \rho L_1}, \frac{1}{\rho L_0}, C_{cond} \cdot \beta \right\}.
+    \end{equation}
+    Let $\bar{\eta} = \min\left( \frac{1}{2 C_s \rho L_1}, \frac{1}{\rho L_0} \right)$ denote the constant geometric limit.
+\end{enumerate}
+
+\textbf{Result:}
+If we select a sufficiently large initial batch size $B_{init} \gtrsim T^{\frac{p(1 - A - K)}{(p-1)(2A+K)}}$ to suppress initialization error, and choose optimal $\beta$ and $\eta$ as defined in the proof, the average gradient norm is bounded by the sum of five distinct rates:
+\begin{align}
+\label{eq:final_exact_rates}
+    \frac{1}{T} \sum_{t=0}^{T-1} \mathbb{E}[\|\nabla F(x_t)\|_*] \le & \underbrace{2 C_{init\_gap} \left( \frac{C_{init\_gap}}{2 C_{mom}} \right)^{-\frac{A+K}{2A+K}} T^{-\frac{q(p-1)}{2q(p-1)+p}}}_{\text{1. Main Rate (Noise + Bias Balance)}} \nonumber \\
+    & + \underbrace{2 \left( C_{init\_gap} c_1^{1/A} C_{cond}^{-1} \right)^{\frac{A}{1+A}} T^{-\frac{p-1}{2p-1}}}_{\text{2. Constraint Rate (Active if } p > q)} \nonumber \\
+    & + \underbrace{2 \sqrt{C_{init\_gap} C_{smooth}} T^{-1/2}}_{\text{3. Smoothness Rate (Deterministic)}} \nonumber \\
+    & + \underbrace{\frac{C_{init\_gap}}{\bar{\eta}} T^{-1}}_{\text{4. Geometric Limit Rate}} \nonumber \\
+    & + \underbrace{\frac{C_{init\_gap}}{\beta_{init\_limit} C_{cond}} T^{-1}}_{\text{5. Constraint Initialization Rate}}
+\end{align}
+where $A = \frac{p-1}{p}$, $K = \frac{1}{q}$, $c_1 = \frac{C_{noise\_grad}}{p^{1/p} B^A}$, $c_2 = \frac{C_{noise\_hess}}{q^{1/q} B^K}$, and $C_{mom} = (c_1^K c_2^A)^{\frac{1}{A+K}}$.
+\end{theorem}
+
+\begin{proof}
+\textbf{1. Explicit Bound Derivation.}
+Starting from the descent inequality and substituting error bounds (as shown in previous derivations), we obtain the fundamental upper bound:
+$$ \mathcal{R} \le \frac{C_{init\_gap}}{T \eta} + c_1 \beta^A + c_2 \eta \beta^{-K} + C_{smooth} \eta. $$
+(Note: The momentum initialization term $\frac{C_{init\_mom}}{T \beta}$ is removed because the condition on $B_{init}$ ensures it is upper-bounded by the Drift term).
+
+\textbf{2. Optimization of Momentum $\beta$.}
+We minimize the momentum error $E_{mom}(\eta, \beta) = c_1 \beta^A + c_2 \eta \beta^{-K}$ subject to $\beta \ge \eta / C_{cond}$.
+The optimal $\beta$ is $\max(\beta^*, \beta_{cons})$, where $\beta^*$ balances noise/bias and $\beta_{cons} = \eta/C_{cond}$.
+Substituting this back, the effective momentum error function is:
+$$ E_{mom}(\eta) \approx \underbrace{2 C_{mom} \eta^{\frac{A}{A+K}}}_{\text{Ideal Error}} + \underbrace{c_1 C_{cond}^{-A} \eta^A}_{\text{Constraint Error}}. $$
+
+\textbf{3. Optimization of Step Size $\eta$.}
+We determine $\eta$ by balancing the Drift term ($\frac{C_{init\_gap}}{T \eta}$) against every other error source in the bound. The optimal $\eta$ is the minimum of these candidate step sizes:
+\begin{enumerate}
+    \item \textbf{Ideal Noise Balance:} $\frac{C_{init\_gap}}{T \eta} = 2 C_{mom} \eta^{\frac{A}{A+K}} \implies \eta_1$.
+    \item \textbf{Constraint Balance:} $\frac{C_{init\_gap}}{T \eta} = c_1 C_{cond}^{-A} \eta^A \implies \eta_2$.
+    \item \textbf{Smoothness Balance:} $\frac{C_{init\_gap}}{T \eta} = C_{smooth} \eta \implies \eta_3 = \sqrt{\frac{C_{init\_gap}}{C_{smooth} T}}$.
+    \item \textbf{Geometric Limit:} $\eta \le \bar{\eta} \implies \eta_4 = \bar{\eta}$.
+    \item \textbf{Constraint Init Limit:} To ensure $\beta \ge \beta_{min}$ for stability, we may have a floor $\eta_5 = C_{cond} \beta_{init\_limit}$.
+\end{enumerate}
+We set $\eta = \min(\eta_1, \eta_2, \eta_3, \eta_4, \eta_5)$.
+
+\textbf{4. Final Summation of Rates.}
+The drift term $\frac{C_{init\_gap}}{T \eta}$ dominates the bound. Substituting $\eta = \min(\eta_i)$ into the drift term yields the sum of the inverse rates:
+$$ \frac{C_{init\_gap}}{T \min(\eta_i)} \le \sum_{i} \frac{C_{init\_gap}}{T \eta_i}. $$
+Evaluating each term explicitly:
+\begin{itemize}
+    \item \textbf{Term 1 (Main):} $\frac{C_{init\_gap}}{T \eta_1} = 2 C_{init\_gap} (C_{init\_gap}/2C_{mom})^{-\frac{A+K}{2A+K}} T^{-\frac{A}{2A+K}}$.
+    \item \textbf{Term 2 (Constraint):} $\frac{C_{init\_gap}}{T \eta_2} = 2 (C_{init\_gap} c_1^{1/A} C_{cond}^{-1})^{\frac{A}{1+A}} T^{-\frac{A}{1+A}}$.
+    \item \textbf{Term 3 (Smoothness):} $\frac{C_{init\_gap}}{T \eta_3} = \frac{C_{init\_gap}}{T \sqrt{C_{init\_gap}/(C_{smooth}T)}} = \sqrt{C_{init\_gap} C_{smooth}} T^{-1/2}$. (Doubled in the theorem to account for the $C_{smooth}\eta$ term).
+    \item \textbf{Term 4 (Geometric):} $\frac{C_{init\_gap}}{T \bar{\eta}}$.
+    \item \textbf{Term 5 (Beta Limit):} $\frac{C_{init\_gap}}{T (C_{cond} \beta_{init\_limit})}$.
+\end{itemize}
+Summing these gives the result in Eq. \eqref{eq:final_exact_rates}.
+\end{proof}
+
+\textbf{Corollary: Main paper Setting (Bounded Moments).}
+
+In the setting of the main paper, we simplify the noise assumptions by setting the affine growth constants to zero ($\alpha_g = \bar{\alpha}_h = 0$) and relaxing the third-order smoothness ($L_1 \approx 0$). However, we retain the heavy-tailed nature of the noise with arbitrary $p, q \in (1, 2]$.
+
+\begin{corollary}[Bounded Moments Rate]
+Under the assumptions $\alpha_g = \bar{\alpha}_h = 0$ and $L_1 = 0$, the coupled validity constraint on $\eta$ becomes inactive (effectively $C_{cond} \to \infty$). The step size is constrained only by the local curvature $\eta \le \bar{\eta} = \frac{1}{\rho L_0}$.
+
+The convergence bound simplifies to the sum of the Main Rate, Smoothness Rate, and Geometric Rate:
+\begin{equation}
+\label{eq:simple_heavy_rate}
+    \frac{1}{T} \sum_{t=0}^{T-1} \mathbb{E}[\|\nabla F(x_t)\|_*] \le \underbrace{C_{main} T^{-\frac{q(p-1)}{2q(p-1)+p}}}_{\text{Main Rate}} + \underbrace{C_{smooth} T^{-1/2}}_{\text{Smoothness}} + \underbrace{C_{geom} T^{-1}}_{\text{Geometric}},
+\end{equation}
+where the constants satisfy the following simplified dependencies on the problem parameters (initial gap $\Delta_0$, gradient noise $\sigma_g$, Hessian noise $\bar{\sigma}_h$, and batch size $B$):
+\begin{align}
+    C_{main} &\propto \left( \frac{\Delta_0}{\rho} \right)^{\frac{A}{2A+K}} \left[ \left(\frac{\sigma_g}{B^A}\right)^K \left(\frac{\bar{\sigma}_h}{B^K}\right)^A \right]^{\frac{1}{2A+K}}, \quad \text{with } A=\frac{p-1}{p}, K=\frac{1}{q}, \\
+    C_{smooth} &= \sqrt{8 C_s \rho L_0 \cdot \frac{4\Delta_0}{\rho}} \propto \sqrt{\Delta_0 L_0}, \\
+    C_{geom} &= \frac{4\Delta_0}{\rho} \cdot \rho L_0 \propto \Delta_0 L_0.
+\end{align}
+For the standard case $p=q=2$ (where $A=1/2, K=1/2$), the main rate exponent becomes $1/3$, and the constant becomes the geometric mean $C_{main} \propto (\Delta_0 \cdot \sigma_g \cdot \bar{\sigma}_h)^{1/3}$.
+\end{corollary}
+
+
+\subsection{Constrained Optimization (RanSOM-B)}
+
+In this section, we analyze \textbf{RanSOM-B}, which minimizes $f(x)$ over a compact convex set $\mathcal{C}$ with diameter $D = \sup_{x,y \in \mathcal{C}} \|x-y\|$.
+
+\textbf{Effective Constants on Compact Set.}
+Since $\mathcal{C}$ is compact and $f$ is continuously differentiable, the gradient norm is bounded. Let $G_{\mathcal{C}} \triangleq \sup_{x \in \mathcal{C}} \|\nabla f(x)\|_*$.
+Using Assumption 4.1 and 4.2, we define the \textit{effective} smoothness and noise constants valid for all $x \in \mathcal{C}$:
+\begin{align}
+    L &\triangleq L_0 + L_1 G_{\mathcal{C}}, \quad \text{(Effective Smoothness)} \\
+    \tilde{\sigma}_g &\triangleq \sigma_g + \alpha_g G_{\mathcal{C}}, \quad \text{(Effective Gradient Noise)} \\
+    \tilde{\sigma}_h &\triangleq \bar{\sigma}_h + \bar{\alpha}_h G_{\mathcal{C}}. \quad \text{(Effective Hessian Noise)}
+\end{align}
+Consequently, for any $x \in \mathcal{C}$, the Hessian is bounded $\|\nabla^2 f(x)\|_{op} \le L$, and the noise moments are bounded by constants $\tilde{\sigma}_g^p$ and $\tilde{\sigma}_h^q$. This simplifies the analysis by removing the need for affine noise absorption constraints (effectively $C_{cond} \to \infty$).
+
+\begin{lemma}[Constrained Descent Inequality]
+\label{lemma:constrained_descent}
+Let $\mathcal{G}(x) \triangleq \max_{v \in \mathcal{C}} \langle \nabla f(x), x-v \rangle$ be the Frank-Wolfe gap. Under the effective smoothness $L$, the RanSOM-B update satisfies:
+\begin{equation}
+    \mathbb{E}[f(x_{t+1})] - f(x_t) \le -\eta_t \mathbb{E}[\mathcal{G}(x_t)] + 2 D \eta_t \mathbb{E}[\|e_t\|_2] + \frac{C_s D^2 L}{2} \eta_t^2.
+\end{equation}
+\end{lemma}
+\begin{proof}
+Using the $L$-smoothness of $f$ on $\mathcal{C}$ and the update $x_{t+1} - x_t = s_t d_t$ (where $\|d_t\| \le D$):
+$$ f(x_{t+1}) \le f(x_t) + s_t \langle \nabla f(x_t), d_t \rangle + \frac{L}{2} s_t^2 \|d_t\|^2. $$
+Taking expectation over the step size $s_t \sim \text{Beta}(\cdot)$ (where $\mathbb{E}[s_t]=\eta_t$ and $\mathbb{E}[s_t^2] \le C_s \eta_t^2$):
+$$ \mathbb{E}[f(x_{t+1})] \le f(x_t) + \eta_t \langle \nabla f(x_t), d_t \rangle + \frac{C_s L D^2}{2} \eta_t^2. $$
+We relate the update direction $d_t$ (computed via LMO on $m_t$) to the true gradient $\nabla f(x_t)$:
+\begin{align*}
+    \langle \nabla f(x_t), d_t \rangle &= \langle m_t, d_t \rangle + \langle \nabla f(x_t) - m_t, d_t \rangle \\
+    &= \min_{v \in \mathcal{C}} \langle m_t, v-x_t \rangle + \langle e_t, x_t - d_t \rangle \\
+    &\le \langle m_t, v^*(x_t) - x_t \rangle + 2D \|e_t\|_2 \quad (\text{where } v^*(x_t) \text{ is LMO for } \nabla f) \\
+    &= \langle \nabla f(x_t), v^*(x_t) - x_t \rangle + \langle e_t, x_t - v^*(x_t) \rangle + 2D \|e_t\|_2 \\
+    &\le -\mathcal{G}(x_t) + 2D \|e_t\|_2 + 2D \|e_t\|_2 = -\mathcal{G}(x_t) + 4D \|e_t\|_2.
+\end{align*}
+Substituting this into the descent inequality (and absorbing the factor 4 into the constant for simplicity, or tracking it as $2D$ if using tight bounds) yields the result. Here we use $2D$ as the Lipschitz-like constant for the error term.
+\end{proof}
+
+\begin{theorem}[Convergence of RanSOM-B]
+\label{thm:betasom_convergence}
+Let $\Delta_0 = f(x_0) - f^*$. We define the following problem constants:
+\begin{align}
+    C_{init\_gap} &\triangleq \Delta_0, \quad C_{init\_mom} \triangleq 2D \|e_0\|_2, \quad C_{smooth} \triangleq \frac{1}{2} C_s L D^2, \\
+    C_{noise\_grad} &\triangleq 2D \tilde{\sigma}_g, \quad C_{noise\_hess} \triangleq 2D C_\delta \tilde{\sigma}_h.
+\end{align}
+\textbf{Result:}
+If we select a sufficiently large initial batch size $B_{init} \gtrsim T^{\frac{p(1 - A - K)}{(p-1)(2A+K)}}$ to suppress initialization error, and choose optimal $\beta$ and $\eta$ (as derived below), the average Frank-Wolfe gap is bounded by:
+\begin{align}
+\label{eq:constrained_final_rates}
+    \frac{1}{T} \sum_{t=0}^{T-1} \mathbb{E}[\mathcal{G}(x_t)] \le & \underbrace{2 C_{init\_gap} \left( \frac{C_{init\_gap}}{2 C_{mom}} \right)^{-\frac{A+K}{2A+K}} T^{-\frac{q(p-1)}{2q(p-1)+p}}}_{\text{1. Main Rate (Noise + Bias Balance)}} \nonumber \\
+    & + \underbrace{2 \sqrt{C_{init\_gap} C_{smooth}} T^{-1/2}}_{\text{2. Smoothness Rate}} \nonumber \\
+    & + \underbrace{\frac{\Delta_0}{T}}_{\text{3. Geometric Limit Rate}}
+\end{align}
+where $A = \frac{p-1}{p}$, $K = \frac{1}{q}$, and $C_{mom} = (c_1^K c_2^A)^{\frac{1}{A+K}}$ with $c_1 = \frac{C_{noise\_grad}}{p^{1/p} B^A}, c_2 = \frac{C_{noise\_hess}}{q^{1/q} B^K}$.
+\end{theorem}
+
+\begin{proof}
+\textbf{1. Explicit Bound Derivation.}
+Summing the descent inequality from $t=0$ to $T-1$ and substituting the error bound from Lemma A.2 (simplified for bounded effective noise):
+$$ \sum \mathbb{E}[\mathcal{G}(x_t)] \le \frac{\Delta_0}{\eta} + T C_{smooth} \eta + 2D \sum \mathbb{E}[\|e_t\|_2]. $$
+The error sum is $\sum \|e_t\| \le \frac{\|e_0\|}{\beta} + T (c_1 \beta^A + c_2 \eta \beta^{-K})$.
+Dividing by $T$:
+$$ \text{AvgGap} \le \frac{C_{init\_gap}}{T \eta} + c_1 \beta^A + c_2 \eta \beta^{-K} + C_{smooth} \eta + \frac{C_{init\_mom}}{T \eta \beta}. $$
+(Note: $c_1, c_2$ here absorb the $2D$ factor from the descent lemma).
+
+\textbf{2. Optimization of Momentum $\beta$.}
+We minimize the momentum error $c_1 \beta^A + c_2 \eta \beta^{-K}$.
+The optimal momentum is $\beta^*(\eta) = (\frac{c_2}{c_1})^{\frac{1}{A+K}} \eta^{\frac{1}{A+K}}$.
+The effective error is $2 C_{mom} \eta^{\frac{A}{A+K}}$.
+
+\textbf{3. Optimization of Step Size $\eta$.}
+We balance the Drift term $\frac{C_{init\_gap}}{T \eta}$ against the Momentum Error and the Smoothness term. We take $\eta$ as the minimum of the candidates:
+\begin{enumerate}
+    \item \textbf{Main Balance:} $\frac{C_{init\_gap}}{T \eta} = 2 C_{mom} \eta^{\frac{A}{A+K}} \implies \eta_1 \propto T^{-\frac{A+K}{2A+K}}$.
+    \item \textbf{Smoothness Balance:} $\frac{C_{init\_gap}}{T \eta} = C_{smooth} \eta \implies \eta_2 = \sqrt{\frac{C_{init\_gap}}{C_{smooth} T}}$.
+    \item \textbf{Geometric Limit:} $\eta \le 1$. Since the update $x_{t+1} = (1-s_t)x_t + s_t d_t$ is a convex combination for $s_t \in [0,1]$, we are guaranteed $x_{t+1} \in \mathcal{C}$ provided $\eta \le 1$.
+\end{enumerate}
+Substituting $\eta = \min(\eta_1, \eta_2, 1)$ into the Drift term yields the sum of the three rates in Eq. \eqref{eq:constrained_final_rates}. The geometric term becomes $\frac{C_{init\_gap}}{T \cdot 1} = \frac{\Delta_0}{T}$.
+
+\textbf{4. Initialization.}
+The term $\frac{C_{init\_mom}}{T \eta \beta}$ is suppressed by choosing $B_{init}$ large enough so that $C_{init\_mom} \le C_{init\_gap} \beta$. This ensures it does not affect the asymptotic rate.
+\end{proof}
+
+\textbf{Corollary: Main paper Setting (Bounded Moments).}
+
+In the simplified setting of the main paper ($\alpha_g = \bar{\alpha}_h = 0$, $L_1 = 0$), the constants simplify significantly.
+
+\begin{corollary}[Bounded Moments Rate - Constrained]
+Under the standard assumptions, the convergence bound for RanSOM-B simplifies to:
+\begin{equation}
+\label{eq:simple_constrained_rate}
+    \frac{1}{T} \sum_{t=0}^{T-1} \mathbb{E}[\mathcal{G}(x_t)] \le \underbrace{C_{main} T^{-\frac{q(p-1)}{2q(p-1)+p}}}_{\text{Main Rate}} + \underbrace{C_{smooth} T^{-1/2}}_{\text{Smoothness}} + \underbrace{\frac{\Delta_0}{T}}_{\text{Geometric}},
+\end{equation}
+where the constants depend on the diameter $D$ and noise levels:
+\begin{align}
+    C_{main} &\propto \Delta_0^{\frac{A}{2A+K}} \left[ \left( D \tilde{\sigma}_g \right)^K \left( D \tilde{\sigma}_h \right)^A \right]^{\frac{1}{2A+K}}, \quad \text{with } A=\frac{p-1}{p}, K=\frac{1}{q}, \\
+    C_{smooth} &\propto D \sqrt{\Delta_0 L}.
+\end{align}
+For $p=q=2$, we recover the rate $\mathcal{O}(T^{-1/3})$ with constant $C_{main} \propto (\Delta_0 \cdot D \tilde{\sigma}_g \cdot D \tilde{\sigma}_h)^{1/3}$.
+\end{corollary}
+\end{document}

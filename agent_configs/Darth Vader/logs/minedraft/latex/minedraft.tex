@@ -1,0 +1,54 @@
+%!TEX root =  main.tex
+
+
+Our parallelism follows a simple principle: at the beginning of each SD step, we regroup requests by filtering out those verified in the previous step, allowing the verifier to continue operating in parallel with the drafter. To fully utilize the verifier, if it processes $m$ requests per step, we maintain $2m$ requests partitioned into two batches and alternate between them, sending $m$ requests to the verifier at each SD step.
+
+In \cref{fig:overall-arch}, we illustrate the overall architecture of \alg{}, which consists of a \textit{Batch Manager}, a \textit{Scheduler}, a \textit{Drafter}, and a \textit{Verifier}. We describe the role of each component below and provide a concrete example of a \alg{} execution in \cref{app:example-illust}.
+
+
+\subsection{Batch Manager}
+\para{State variables and initialization.} 
+Given a maximum of $m$ requests processed per step, the system supports up to $2m$ concurrent requests, which the Batch Manager organizes into two batches. Each running request is assigned a batch ID, either $0$ or $1$, indicating membership in Batch~$0$ or Batch~$1$, respectively.
+The imbalance between the two batches is tracked by a state variable $\texttt{balance}$, defined as the difference in their sizes: $\texttt{balance} = |\text{Batch 1}| - |\text{Batch 0}|$. A positive $\texttt{balance}$ indicates that Batch~$1$ contains more requests, in which case new requests are assigned to Batch~$0$ for re-balancing; a negative value indicates the opposite.
+In each SD step, the state variable \texttt{skip\_batch} is used to identify the batch undergoing parallelized drafting, referred to as the \textit{draft batch}. The remaining batch--whose batch ID differs from \texttt{skip\_batch}--is the \textit{target batch}, whose draft tokens are verified concurrently in the same SD step.
+At initialization, $\texttt{balance}$ is set to $0$, indicating equal batch sizes, and \texttt{skip\_batch} is set to $1$, designating Batch~$1$ as the initial draft batch.
+
+\para{Batch ID assignment.}
+In the first SD step, the \texttt{assign} operation assigns a batch ID to each new running request and serves as a load-balancing mechanism between the two batches. If $\texttt{balance} \geq 0$, indicating that Batch~$1$ has at least as many requests as Batch~$0$, the request is assigned to Batch~$0$ and $\texttt{balance}$ is decremented. Otherwise, if $\texttt{balance} < 0$, the request is assigned to Batch~$1$ and $\texttt{balance}$ is incremented. This assignment rule maintains a balanced workload between the two batches.
+
+After the first SD step, assuming both batches have reached their capacity of $m$ requests, new running requests are assigned to the current $\texttt{skip\_batch}$ to ensure verification occurs only when draft tokens are available. This policy typically preserves balance between the two batches, since after the first SD step, a waiting request can be scheduled only when a request in the target batch finishes. However, exceptional terminations due to preemption or abort can disrupt this balance.
+Moreover, when chunked prefill is enabled, the Batch Manager may receive fewer than $2m$ requests from the Scheduler in the first SD step, resulting in batch sizes that fall below the capacity $m$. As subsequent requests are consistently assigned to the draft batch, this initial shortfall can lead to an irrecoverable workload imbalance between the two batches, degrading the expected performance gains of \alg{}. We further discuss the implications of this limitation and possible mitigation in \cref{sec:limitations}.
+
+
+\para{Batch ID recycling.} 
+The \texttt{recycle} operation is invoked when a request is finished, preempted, or aborted. It takes the batch ID $b$ of the terminated request as input, and updates \texttt{balance} to reflect the new distribution of requests. If the request belonged to Batch~$0$ ($b=0$), \texttt{balance} is incremented; if it belonged to Batch~$1$ ($b=1$), \texttt{balance} is decremented. This update is the inverse of the \texttt{assign} operation, preserving consistency of \texttt{balance}.
+
+
+\subsection{Drafter and Verifier}
+\para{Start-up of parallelism.} 
+Batch Parallelism uses a \textit{Drafter} and a \textit{Verifier}. In the first SD step, the Drafter generates drafts for the target batch and sends them to the Verifier. While the Verifier processes the target batch, the Drafter concurrently proposes draft tokens for the draft batch. After verification, the Verifier returns the sampled tokens and probability distributions (target sampler output) to the Drafter.
+
+\para{Batch state alternation.} 
+At the end of each SD step, the Verifier sends the target sampler output to the Drafter, which processes it and returns the output to the Scheduler. We refer to the moment when the Drafter returns output to the Scheduler as a \textbf{\emph{sync point}}. At each sync point, \texttt{skip\_batch} is alternated to the other batch.
+After the first SD step, the target batch, corresponding to the previous step's draft batch, is verified by the Verifier, while the Drafter concurrently proposes draft tokens for the new draft batch, which corresponds to the previous step's target batch.
+
+
+\para{Fallback mechanism.} 
+A corner case arises when one batch becomes empty as requests are finished and no new requests arrive. In this case, Batch Parallelism falls back to standard SD if draft tokens of the target batch are unavailable. This exposes a native limitation of \alg{}: when the two batches cannot be replenished to maintain balance, it eventually leads to an empty batch and degrades performance. We discuss this limitation and a potential mitigation in \cref{sec:limitations}.
+
+
+\subsection{Scheduler}
+\para{KV block management.} 
+In PagedAttention, a \textit{KV block} stores the key–value vectors for a fixed number of tokens, defined by the \textit{KV block size} ($B$). KV blocks associated with a request need not be contiguous in physical memory, allowing flexible memory management~\citep{kwon2023vllm}. Before token generation, the Scheduler allocates the required KV blocks for each running request.
+
+
+\para{Over-allocation issue in default scheduler.} 
+We observe that during drafting, the Drafter accesses newly allocated KV blocks without populating them, whereas during verification, the Verifier computes and writes KV caches to the allocated blocks. The default vLLM scheduler assumes that all running requests are generated in each step and allocates KV blocks for all of them. 
+Under Batch Parallelism, this causes redundant allocations for requests in the draft batch, which are drafted but not verified, leaving allocated blocks accessed but unwritten.
+We patch the vLLM scheduler's KV block allocation logic to maintain compatibility with PagedAttention and avoid unnecessary memory allocation.
+
+
+\para{Scheduler patch.}
+To implement this patch, we introduce a set \texttt{has\_deferred} tracking request IDs for which KV block allocation skipping has been deferred. The modified allocation logic proceeds as follows. If Batch~$0$ or Batch~$1$ is empty, the Scheduler allocates KV blocks for all running requests, except for the first occurrence of this condition.
+When both batches are non-empty, KV blocks are allocated for prefill requests to support the next prefill iteration. For requests in the decoding stage, KV blocks are allocated if the request ID is not in \texttt{has\_deferred} or if the request belongs to the current draft batch; otherwise, allocation is skipped.
+After this decision, the request ID of each decoding request is added to \texttt{has\_deferred}. This ensures that KV block allocation is not inadvertently skipped for requests in the target batch during the first SD step.

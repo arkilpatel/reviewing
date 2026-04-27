@@ -1,0 +1,28 @@
+\section{Experimental results}
+
+\subsection{Setup}
+\label{sec:experiments}
+\input{tables/main_results}
+We evaluate \methodname on Llama-3-8B~\cite{grattafiori2024llama3herdmodels}.
+We compare against the uncompressed FP16 model and the most accurate SVD-style baseline, EigenAttention~\cite{saxena2024eigenattention}, under matched KV cache budgets.
+
+We report results on both language modeling and zero-shot multiple-choice benchmarks.
+For language modeling, we measure perplexity on WikiText-2~\cite{wikitext} and C4~\cite{c4} datasets.
+For zero-shot evaluation, we use the LM Evaluation Harness framework~\cite{eval-harness} and report accuracy on HellaSwag~\cite{hellaswag}, PIQA~\cite{piqa}, and MMLU~\cite{mmlu1, mmlu2}. We run all experiments on two NVIDIA RTX A5000 GPUs, with 24\,GB each.
+
+% \paragraph{KV cache budgets.}
+% We compress the KV cache along the per-head feature dimension by storing low-rank projections (Sec.~\ref{sec:background}).
+% We sweep compression levels by varying the per-layer error budget $\epsilon_\ell$ and selecting layer-wise ranks $(r_K, r_V)$ such that $\Delta_\ell(r_K, r_V; \theta) \le \epsilon_\ell$; different budgets induce different KV cache compression ratios.
+
+Unless stated otherwise, ranks are allocated per layer %using the error surfaces computed on the calibration set from Sec.~\ref{sec:method}, 
+following the Weighted Pareto policy of Sec.~\ref{sec:rank_selection}.
+%We show the advantage of this rank-allocation policy in Sec.~\ref{sec:results_policies}.
+
+\paragraph{Calibration data and training.}
+All projection bases and rank profiles are obtained post-training from a held-out calibration set of 512 sequences sampled from WikiText-2~\cite{wikitext}.
+Due to GPU memory constraints, we use a sequence length of 2048 for both calibration and all evaluations, unless stated otherwise.
+For \methodname, we train the basis predictor independently for 5 down-projection ranks uniformly spaced between 50\% and 90\% of the per-head dimension $d_h$. We train for up to 50 epochs with early stopping (patience 5, delta $10^{-6}$).
+We use batch size 1 for keys and batch size 4 for values; we found value bases to be more numerically unstable and therefore use the largest stable batch size supported by our hardware.
+We optimize with AdamW (learning rate $5\cdot 10^{-3}$, weight decay $10^{-4}$) and a cosine annealing schedule with $T_{\max}$ set to the total number of training steps. We do not fine-tune on downstream tasks.
+For a fair comparison, we re-run EigenAttention in our setup, matching calibration data, sequence length, and evaluation protocol, and report all baselines under these identical conditions.
+

@@ -1,0 +1,8 @@
+### Impact Assessment
+**1. Technical Significance (70%):** The derivation of exact analytic loss trajectories for gradient flow in non-linear models is a remarkable mathematical feat. However, the technical utility of this paper is extremely low. The method is incredibly bespoke, relying heavily on the specific combinatorics of Canonical Polyadic (CP) tensor decomposition and the highly specific "identity" target tensor. The diagrammatic book-keeping and PDE reduction appear prohibitively complex to scale to standard architectures (e.g., Transformers, ResNets) or realistic datasets. Thus, its direct utility for practitioners or for solving real-world ML problems is virtually non-existent.
+
+**2. Scientific Significance (30%):** The scientific significance is considerably higher. The paper provides a beautiful new perspective on the origin of learning regimes. By mapping learning phases to the faces of a "Pareto polygon" defined by the scaling of width, input dimension, and initialization variance, it offers a unifying geometric understanding of NTK, mean-field, and other regimes. Demonstrating exactly why the NTK breaks down for symmetric tensors provides deep fundamental insight into the nature of feature learning.
+
+**3. The 3-Year Citation Projection:** The community interested in the exact solvable dynamics of neural networks (e.g., researchers working on infinite-width limits and the theoretical physics of deep learning) will find this paper interesting. However, because it is heavily constrained to a specific toy model without clear pathways to generalization, it will not penetrate the broader ML community. It will likely receive a modest number of citations (around 20-40) strictly from the physics-of-ML niche.
+
+**Impact Score: 4.5 / 10**

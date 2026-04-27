@@ -1,0 +1,159 @@
+\section{Experiments}
+\subsection{ConversationGoT-120h}
+The dataset is split into training/validation/test sets with a 6:2:2 ratio. 
+\paragraph{Quality Check}
+Dialogue quality is the upstream linchpin of the entire dataset, directly determining the fidelity and safety of all subsequent labels. To assess how well the synthetic dialogues match the distribution of real conversations and to mitigate LLM generation bias, we first manually curate the data by filtering out low-quality or low-authenticity samples; we then ask five volunteers and GPT-4o to independently score the dialogue content along four dimensions.
+\begin{table}[t]
+\centering
+\caption{Subjective comparison between human volunteers and GPT-4o across four conversational quality dimensions.}
+\label{tab:human_vs_gpt4o_subjective}
+{\fontsize{7}{8.5}\selectfont
+\renewcommand{\arraystretch}{0.92}
+\setlength{\tabcolsep}{3pt}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Rater} & \textbf{Naturalness} & \textbf{Consistency} & \textbf{SA Reasonableness} & \textbf{Human-Likeness} \\
+\midrule
+Volunteers & $6.71 \pm 1.32$ & $7.98 \pm 1.12$ & $6.36 \pm 0.90$ & $6.46 \pm 0.92$ \\
+GPT-4o     & $8.34 \pm 1.35$ & $8.10 \pm 1.34$ & $8.42 \pm 0.93$ & $7.64 \pm 0.90$ \\
+\bottomrule
+\end{tabular}
+}
+}
+\end{table}
+As shown in Table \ref{tab:human_vs_gpt4o_subjective}, after removing low-quality samples, the subjective quality of ConversationGoT-120h remains overall stable: Consistency is rated close to 8 by both volunteers and GPT-4o ($7.98\pm1.12$ vs. $8.10\pm1.34$), meeting the standard. The results indicate that model evaluation is more optimistic while humans are more conservative. The similar standard deviations (about $0.9\sim1.35$) suggest that the variability is controllable.
+
+The per-second rationale annotations provide the primary supervision for training GoT, guiding both evidence-chain/graph construction and rationale generation conditioned on selected evidence. Annotation quality is therefore critical for learning decision paths consistent with teacher traces (or human explanations) and for producing credible, verifiable explanations at inference time.
+To assess quality, we asked volunteers and GPT-4o to independently rate rationales on six dimensions. As shown in Table \ref{tab:rationale_quality_subjective}, both groups assign consistently high scores (6.8–8.3), suggesting that the rationales are generally reliable in plausibility, context dependency, and intra-/inter-utterance coherence, and thus provide strong supervision for GoT. The two evaluators also show close agreement: except for Intra-Utterance Coherence, differences across dimensions are within ~0.6 points, with consistent overall trends.
+\begin{table}[t]
+\centering
+\caption{Subjective comparison between human volunteers and GPT-4o across six rationale quality dimensions.}
+\label{tab:rationale_quality_subjective}
+{\fontsize{6}{6.5}\selectfont
+\renewcommand{\arraystretch}{0.92}
+\setlength{\tabcolsep}{3pt}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Rater} & \textbf{Reasonableness} & \textbf{Context Grounding} & \textbf{Intra-Utterance Coherence} \\
+\midrule
+Volunteers & $7.85 \pm 1.02$ & $7.88 \pm 0.86$ & $6.79 \pm 1.13$ \\
+GPT-4o     & $7.62 \pm 2.31$ & $8.28 \pm 1.49$ & $7.88 \pm 1.88$ \\
+\midrule
+\textbf{Rater} & \textbf{Inter-Utterance Coherence} & \textbf{Specificity \& Focus} & \textbf{Clarity \& Non-Template Style} \\
+\midrule
+Volunteers & $7.61 \pm 0.94$ & $7.72 \pm 0.87$ & $8.09 \pm 1.00$ \\
+GPT-4o     & $8.13 \pm 1.69$ & $7.89 \pm 1.84$ & $8.00 \pm 1.69$ \\
+\bottomrule
+\end{tabular}
+}
+}
+\end{table}
+
+
+We focus on the full-duplex task, where the richness of high-quality overlap events available for learning can significantly affect the conversational perception ability of the SA Perceiver. Overlap quality. Our simulated dialogs show denser micro-segmentation than human conversations (more IPUs/pauses per minute) while preserving similar gap/overlap ratios; overlaps are shorter and within-speaker pauses more frequent, suggesting more backchannels/hesitations rather than long monologues (see Appendix Table~\ref{tab:quality-check1}).
+
+\paragraph{Event Distribution.}
+The dataset shows clear head concentration at both levels. at the high level, Constatives dominate (54.18\%); at the low level, Continuation overwhelmingly leads (64.77\%), followed by Turn-taking (19.03\%), with the rest forming a long tail. Anchor statistics indicate moderate dispersion: a mean of 3.92 anchors per segment and a maean spacing of 60.55 s. More details are provided in the Appendix.
+\subsection{Experimental Setup}
+We train the behavior prediction model and the GoT reasoning model on the ConversationGoT-120h dataset, using a unified 90-second context window. Both models use the AdamW \citep{loshchilov2017decoupled} with a learning rate of $3\times10^{-4}$ and weight decay of $10^{-2}$, along with a linear learning-rate decay schedule with 1{,}000 warmup steps and gradient clipping at 1.0. Training is conducted with a batch size of 8 per GPU for 15 epochs, using automatic mixed precision (fp16). Audio is resampled to 16 kHz and segmented into 1-second frames. On a single A6000 GPU, training takes approximately 18 hours for speech-act prediction and 5 hours for GoT generation. Results use random seed 42 and are evaluated with statistical analysis over five independent runs. We report in-domain results on ConversationGoT-120h, and evaluate out-of-distribution (OOD) transfer on the real Candor dataset~\citep{reece2022advancinginterdisciplinaryscienceconversation}, which we use only for model evaluation (not training). More details are provided in Appendix.
+
+\subsection{Speech Acts Perceiver}
+Evaluating our Speech Acts Perceiver requires a protocol tailored to our setting: the model predicts at 1 Hz and uses a hierarchical SA taxonomy that does not align with prior label sets. As a result, cross-paper metric comparisons would confound modeling gains with differences in temporal granularity and taxonomy. We therefore adopt a three-pronged evaluation: (i) complementary in-distribution metrics—one for the relatively balanced high-level SAs and one for the imbalanced low-level SAs; (ii) out-of-distribution transfer to real dialogue data to test generalization beyond ConversationGoT-120h; and (iii) human judgments of per-second decisions to assess perceptual validity and capture aspects missed by automated scores.
+\paragraph{Metrics.}F1 is the harmonic mean of precision and recall; a larger value means fewer false positives (FP) and false negatives (FN) at the current threshold. AUC is the area under the ROC curve; a larger value indicates stronger overall discrimination between positive and negative examples.
+\paragraph{In-domain and OOD Experiments.}
+ConversationGoT-120h has a head-concentrated label distribution: the high-level Constatives accounts for 54.18%, the low-level Continuation accounts for 64.77%, and the long tail is Interruption/Backchannel (9.07%/7.13%). Therefore, we do not use overall accuracy that can be easily inflated by head classes, and instead evaluate with F1 (balance) and AUC (more robust to thresholds / imbalance).
+The SA Perceiver performs stably on core conversational mechanisms: the AUC of Turn-taking/Continuation is 0.938/0.971, and the F1 is 0.730/0.870. Although the long-tail classes have lower F1 due to data scarcity and ambiguous boundaries (Interruption 0.495, Backchannel 0.560), the AUC remains 0.872/0.889, indicating strong separability.
+When transferred OOD to real dialogues, performance degrades only slightly, suggesting good generalization of SA perception, and also validating that this synthetic data has transferable value for full-duplex conversational perception training.
+\begin{table}[t]
+\centering
+\caption{In-domain: Per-class metrics for High-level and Low-level Speech Acts.}
+\label{tab:simulation_results-detection}
+\scriptsize
+\resizebox{\linewidth}{!}{
+\begin{tabular}{lcc lcc}
+\hline
+\multicolumn{3}{c}{\textbf{High-level Speech Acts}} & \multicolumn{3}{c}{\textbf{Low-level Speech Acts}} \\
+\cline{1-3}\cline{4-6}
+\textbf{Class} & \textbf{F1 ($\uparrow$)} & \textbf{AUC ($\uparrow$)} &
+\textbf{Class} & \textbf{F1 ($\uparrow$)} & \textbf{AUC ($\uparrow$)} \\
+\hline
+Constatives     & 0.732 & 0.811 & Turn-taking   & 0.730 & 0.938 \\
+Directives      & 0.474 & 0.776 & Interruption  & 0.495 & 0.872 \\
+Commissives     & 0.474 & 0.800 & Backchannel   & 0.560 & 0.889 \\
+Acknowledgments & 0.514 & 0.850 & Continuation  & 0.870 & 0.971 \\
+\hline
+\end{tabular}
+}
+\end{table}
+\begin{table}[t]
+\centering
+\caption{OOD: Per-class metrics for High-level and Low-level Speech Acts.}
+\label{tab:ood_results-detection}
+\scriptsize
+\resizebox{\linewidth}{!}{
+\begin{tabular}{lcc lcc}
+\hline
+\multicolumn{3}{c}{\textbf{High-level Speech Acts}} & \multicolumn{3}{c}{\textbf{Low-level Speech Acts}} \\
+\cline{1-3}\cline{4-6}
+\textbf{Class} & \textbf{F1 ($\uparrow$)} & \textbf{AUC ($\uparrow$)} &
+\textbf{Class} & \textbf{F1 ($\uparrow$)} & \textbf{AUC ($\uparrow$)} \\
+\hline
+Constatives & 0.696 & 0.777 & Turn-taking & 0.709 & 0.918 \\
+Directives & 0.456 & 0.739 & Interruption & 0.486 & 0.847 \\
+Commissives & 0.445 & 0.753 & Backchannel & 0.537 & 0.855 \\
+Acknowledgments & 0.479 & 0.804 & Continuation & 0.827 & 0.938 \\
+
+\hline
+\end{tabular}
+}
+\end{table}
+\paragraph{Human Model Agreement.}
+We quantify human--model similarity by the agreement rate under per-second judgments. For each second $t$, the model predicts a high-level label $\hat{\ell}^{h}_{t}$ and a low-level label $\hat{\ell}^{l}_{t}$. Each volunteer independently annotates, at each level, whether they agree with the model's decision at time $t$, yielding binary responses (1 if \emph{agree}, otherwise 0). We then average over time and volunteers to compute the agreement rates, and report them for the two levels HMA. HMA measures the degree of agreement between humans and the model on per-second decisions. Its formal definition is provided in the appendix.
+\begin{table}[t]
+\centering
+\caption{Human--Model Agreement (HMA) for high- and low-level speech-act decisions, evaluated via per-second agree/disagree judgments. We report the mean and standard deviation over evaluated samples.}
+\label{tab:hma_human_vs_gpt4o}
+{\fontsize{7}{7.5}\selectfont
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.05}
+\resizebox{0.7\linewidth}{!}{
+\begin{tabular}{lcc}
+\toprule
+\textbf{Rater} & \textbf{HMA$^{h}$ ($\uparrow$)} & \textbf{HMA$^{l}$ ($\uparrow$)} \\
+\midrule
+Volunteers & 0.97 & 0.77 \\
+GPT-4o & 0.78 & 0.93 \\
+\bottomrule
+\end{tabular}
+}
+}
+\end{table}
+Table~\ref{tab:hma_human_vs_gpt4o} shows that both human volunteers and GPT-4o agree well with the model’s per-second decisions, indicating that the predicted speech-act labels are broadly plausible. The evaluators, however, differ systematically: humans almost fully endorse high-level intents (HMA$^{h}$=0.97) but are more conservative on low-level interaction acts (HMA$^{l}$=0.77), whereas GPT-4o shows lower agreement on high-level categories (0.78) yet strong alignment on low-level mechanics (0.93). We attribute the lower human agreement at the low level to limited use of long-range discourse context in ambiguous cases. Accordingly, we report GPT-4o agreement as a conservative, fully automatic reference for human–model similarity.
+\subsection{Graph of Thought}
+We evaluate explanation quality and generation latency of different methods under controlled conditions. For each test sample, all four methods use the same input context: (i) our method (ii) random selection: keeping the same GoT reasoner unchanged and only replacing anchors with uniform random sampling from $(k\in[2,8])$ candidates; (iii) GPT-4o: a lightweight LLM baseline (iv) GPT-5 (thinking): a stronger LLM baseline. For evaluation, we use GPT-4o as an automatic judge, scoring the generated outputs with a fixed rubric (Ruler) along four dimensions: Alignment, Justification, Caption Completeness, and Clarity. We report, under the same inputs, the required latency and the quality gap of the output rationale.
+
+\begin{table}[t]
+\centering
+\caption{Reasoning latency and subjective ruler scores across methods.}
+\label{fig:ruler_latency}
+{\fontsize{7}{7.5}\selectfont
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.10}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{l c cccc}
+\toprule
+\textbf{Method} & \textbf{Latency (s)} & \multicolumn{4}{c}{\textbf{Ruler}} \\
+\cmidrule(lr){3-6}
+ &  & \textbf{Alignment} & \textbf{Justification} & \textbf{Caption} & \textbf{Clarity} \\
+\midrule
+Ours & $0.74 \pm 0.12$ & 4.40 & 4.27 & 4.21 & 4.38 \\
+Random selector & $0.73 \pm 0.11$ & 3.28 & 3.13 & 3.21 & 3.88 \\
+GPT-4o & $2.98 \pm 1.04$ & 3.40 & 3.27 & 3.21 & 3.38 \\
+GPT-5 (thinking) & $16.98 \pm 5.29$ & 4.46 & 4.33 & 4.32 & 4.65 \\
+\bottomrule
+\end{tabular}
+}}
+\end{table}
+Compared with random anchors, as shown in Table~\ref{fig:ruler_latency}, our method significantly improves explanation quality with almost no increase in latency, indicating that selecting more informative anchors helps generate more consistent and traceable reasoning. Furthermore, compared with directly prompting GPT-4o, our method reduces latency from $(2.98\pm1.04)\mathrm{s}$ to about $(0.73\pm0.12)\mathrm{s}$, and improves all four dimensions by about 1 point. GPT-5 (thinking) achieves the highest scores ($4.32$--$4.65$), but its latency reaches $(16.98\pm5.29)\mathrm{s}$, which is over $(20\times)$ slower than our method. Overall, GoT maintains low latency while approaching GPT-5 quality, making it suitable for full-duplex scenarios that require high-frequency outputs.

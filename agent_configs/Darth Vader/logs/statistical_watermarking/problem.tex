@@ -1,0 +1,85 @@
+\section{Problem Formulation}
+
+In this section, we formulate the problem of \emph{Anchored E-Watermarking}. Similar to statistical watermarking, the goal is to embed statistical signals into samples from a target distribution to enable detection. However, in Anchored E-Watermarking, the generator and the detector share access to an anchor distribution that serves as a robust \emph{a priori} estimate of the target distribution. This setting is common in practice; for example, when watermarking Large Language Models or image generators, the target distribution is known to be human language or natural images, respectively. Consequently, watermarking efficacy can be improved by leveraging this structure. Besides, Anchored E-Watermarking uses e-values for detection, thus enjoying improved efficiency in sequential testing. In the following, we introduce the specific components of Anchored E-Watermarking.
+
+\paragraph{Anchor distribution.}
+
+In the Anchored E-Watermarking framework, we assume that both the generator and the detector share access to an \emph{anchor distribution} $p_0 \in \Delta(\cV)$, which is in the same probability simplex as the target distribution $q$. This $p_0$ serves as the best \emph{a priori} estimate of the target distribution. For instance, in the context of watermarking Large Language Models (LLMs), $p_0$ could be an open-source, smaller-scale LLM such as Qwen3-8B~\citep{qwen3technicalreport}. Leveraging its role as a known reference, we designate $p_0$ as the marginal distribution for the watermark signal (or random seed), denoted as $s$. Therefore, the seed space $\cS$ is equal to $\cV$ in our framework. Throughout the paper, we assume $p_0$ satisfies the condition $\inf_{v \in \cV}p_0(v) > \delta$ for a positive robustness tolerance parameter $\delta$. This condition ensures $p_0$ has enough randomness as required for watermarking~\citep{aaronson2022my} and that the $\delta$-neighborhood defined below is a strict subset of the probability simplex.
+
+\paragraph{Target distribution.}
+
+The target distribution $q \in \Delta(\cV)$ represents the desired distribution from which (watermarked) output samples $v$ are generated. Consistent with the definition of the anchor, we premise that $q$ remains sufficiently proximal to $p_0$. Formally, we assume $q$ resides within the $\delta$-neighborhood of the anchor:
+\begin{align*}
+    \cQ(p_0,\delta) = \left\{q \in \Delta(\cV): \|q - p_0\|_1 \leq \delta\right\}.
+\end{align*}
+Here $\|\cdot\|_1$ is the $\ell_1$ distance and the radius $\delta>0$ represents a robustness tolerance parameter that controls how the true target distribution $q$ can deviate from the anchor. 
+This assumption holds for most practical statistical watermarking scenarios; for example, in the LLM domain, high-performing models tend to converge towards the same underlying distribution of natural language, resulting in low statistical divergence between them.
+
+\paragraph{Generator.}
+
+The objective of the generator is to sample an output $v$ from the target distribution $q$ while embedding a statistical signal $s$. To achieve this, the generator constructs a joint distribution (or coupling) $w$ over $v$ and $s$, subject to the constraint that the marginals recover the target and anchor distributions, respectively. The feasible set of valid couplings is defined as:
+\begin{align*}
+    \cP(p_0,q) = \bigg\{w \in \Delta(\cV \times \cV): \sum_{s \in \cV}w(v,s) = q(v), \quad \sum_{v\in \cV}w(v,s) = p_0(s)\bigg\}.
+\end{align*}
+Note that the generator has access to $q$, as is common in practice (e.g., when the generator is a service provider). During generation, the system samples the outcome $v$ and the signal $s$ jointly from $w$. This procedure ensures that the marginal distribution of the outcome $v$ is unbiased (satisfying \Cref{def:unbias}), while the watermark signal is embedded within the statistical dependency between $v$ and $s$.
+
+\paragraph{E-value.}
+
+In the detection phase, the detector receives an outcome-signal pair $(v,s)$ and computes an e-value $e(v,s) \geq 0$. The objective is to distinguish between the following hypotheses:
+\begin{align*}
+    \textbf{H}_0: &~ v \text{ and } s \text{ are sampled independently},\\
+    \textbf{H}_1: &~ (v,s) \text{ are sampled from the joint coupling } w.
+\end{align*}
+The detector rejects the null hypothesis if $e(v,s) > 1/\alpha$. To guarantee a Type-I error rate of at most $\alpha$, the expectation of the e-value under the null hypothesis must be bounded by $1$. Adhering to the model-agnostic constraint (\Cref{def:agnostic}), the scoring function $e(\cdot, \cdot)$ must be defined prior to observing the specific target distribution $q$. The design of the e-value relies solely on the constraint that the target distribution lies within the anchor's neighborhood, i.e., $q \in \cQ(p_0,\delta)$. Consequently, to ensure validity, the e-value must satisfy the expectation bound uniformly across the entire uncertainty set $\cQ$:
+\begin{align}\label{eq:e-null}
+    \sup_{q \in \cQ(p_0,\delta)} \mathbb{E}_{v \sim q, s \sim p_0} [e(v,s)] \leq 1.
+\end{align}
+We let $\cE$ denote the set of all nonnegative functions $e: \cV \times \cV \to \R$ satisfying Eq.~\eqref{eq:e-null}.
+
+\subsection{Robust log-optimality}
+
+While the definition of an e-value ensures validity (safety) under the null, it does not guarantee power (growth) under the alternative. To reject $\textbf{H}_0$ effectively, we desire the e-value to be large when the data is generated from the alternative distribution $\textbf{H}_1$. The standard criterion for selecting an e-value is \textit{log-optimality}, often referred to as the ``Kelly criterion'' in the finance literature~\citep{kelly1956new}. This approach seeks to maximize the expected logarithmic growth rate of evidence against the null, under the alternative. For simple hypotheses where $\mathcal{P}_0 = \{P\}$ and $\mathcal{P}_1 = \{Q\}$, the likelihood ratio $e^* = \frac{dQ}{dP}$ is log-optimal, such that
+\begin{align*}
+    \mathbb{E}_Q[\log e^*] \ge \mathbb{E}_Q[\log e]
+\end{align*}
+for any valid e-value $e$.
+
+In Anchored E-Watermarking, the alternative is defined by the joint coupling $w$ constructed by the generator. However, since the target distribution $q$ lies in a set $\cQ(p_0,\delta)$ that is unknown to the detector (i.e., the designer of the e-value), we must optimize the worst-case log-growth rate over arbitrary $q \in \cQ(p_0,\delta)$. This gives rise to the following robust log-optimality problem.
+
+\begin{problem}[Robust log-optimality]\label{prob:robust-log-optimal}
+An e-value $e$ is \emph{robust log-optimal} in Anchored E-Watermarking if it optimizes the following objective:
+\begin{align}\label{eq:log-growth}
+    \sup_{e \in \cE} \inf_{q \in \cQ(p_0,\delta)} \sup_{w \in \cP(p_0,q)} &~  \sum_{v,s \in \cV} w(v,s) \cdot \log e(v,s).
+\end{align}
+\end{problem}
+
+In this formulation, the objective $\sum w(v,s) \log e(v,s)$ represents the log-growth rate under the alternative. The inner maximization $\sup_{w \in \cP(p_0,q)}$ reflects the generator's optimization of the coupling $w$ given knowledge of $q$; the minimization $\inf_{q \in \cQ(p_0,\delta)}$ enforces robustness against the worst-case target distribution in the family; and the outer maximization $\sup_{e \in \cE}$ seeks the optimal detector without access to $q$ subject to model-agnosticy (\Cref{def:agnostic}).
+
+\begin{remark}[Relationship to growth rate optimality in the worst case (GROW)~\citep{grunwald2020safe}]
+GROW studies the worst-case optimal expected capital growth rate under composite null $\mathcal{P}_0$ and alternative $\mathcal{P}_1$:
+\begin{align*}
+    \mathrm{GROW}(\mathcal{P}_1) = \sup_{E\in \mathcal{E}(\mathcal{P}_0)} \inf_{\theta \in \mathcal{P}_1}\E_{P_\theta}[log E],
+\end{align*}
+where $ \mathcal{E}(\mathcal{P}_0)$ is the set of all valid e-values for the null $\mathcal{P}_0$.
+Therefore, our problem in Eq.~\eqref{eq:log-growth} can be seen as generalizing GROW into an `active' scenario where a generator (corresponding to $\sup_{w \in \cP(p_0,q)}$) seeks to maximizes the power after the worst-case hypothesis selection $\inf_{\theta \in \mathcal{P}_1}$. Note that by designing the coupling $w$, the generator essentially alters the alternative, so our problem can not be reduced to GROW even if the watermark generator is fixed.
+\end{remark}
+
+
+\subsection{Stopping time}
+
+While \Cref{prob:robust-log-optimal} addresses the one-step growth rate, it remains to analyze the sample complexity of the framework. In the context of sequential hypothesis testing, sample efficiency is characterized by the stopping time $\tau_\alpha = \inf\left\{n \in \Z_+: W_n \geq \log(1/\alpha)\right\}$ under the alternative, where $$W_n = \sum_{t=1}^{n}\log e(v^t,s^t),$$ is the accumulated wealth process. This quantity represents the number of samples required to reject the null hypothesis. We consider a stochastic process $\mu(\cA,\cG)$ governed by the interaction between an adversary $\cA$ and a generator $\cG$. At each step $t \in \Z_+$:
+\begin{itemize}
+    \item The adversary $\cA$ selects $q^t \in \cQ(p_0,\delta)$ based on the e-value $e$ and the history $(v^1,s^1),\dots,(v^{t-1},s^{t-1})$;
+    \item The generator $\cG$ specifies the joint coupling $w^t$ given $q^t$ and $p_0$, and draws the sample $(v^t,s^t) \sim w^t$.
+\end{itemize}
+Due to the adaptive nature of the adversary, the outcome sequence $v^1, v^2, \dots$ may be generated autoregressively, conditional on previous outcomes. This formulation extends the i.i.d.\ setting of \citet{huang2023towards} to arbitrary dependent distributions. In this setting, we write the stopping time as $\tau_\alpha(e)$ to highlight the dependence on the e-value $e$. In the context of sequential testing \citep{breimualphanu2011optimal,chugg2023auditing,shekhar2023nonparametric,kaufmann2021mixture,waudby2025universal}, the expected stopping time $\mathbb{E}[\tau_\alpha]$ typically scales linearly with $\log(1/\alpha)$, modulated by an information-theoretic quantity capturing the complexity of the testing problem. Therefore, we are explicitly interested in the following question:
+
+\begin{problem}[Sample efficiency]\label{prob:stopping-time}
+For any e-value $e$ satisfying the constraint in Eq.~\eqref{eq:e-null}, define its \emph{sample complexity} by 
+\begin{align*}
+    \scomp(e) = \sup_{\cA} \inf_{\cG} \liminf_{\alpha \to 0} \frac{\mathbb{E}_{\mu(\cA,\cG)}[\tau_\alpha(e)]}{\log(1/\alpha)}.
+\end{align*}
+We are interested in identifying the e-value that minimizes this sample complexity.
+\end{problem}
+
+Note that this formulation is stronger than the classical expected stopping time because we allow the adversary to alter the distribution at each time step. This implies that samples are not generated in an i.i.d.\ fashion, a distinction crucial for applications such as the watermarking of autoregressive language models.

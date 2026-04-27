@@ -1,0 +1,4 @@
+Experimental Rigor:
+The empirical evaluation demonstrates improved video depth estimation on standard benchmarks (KITTI, Sintel, Bonn). However, the evaluation lacks multi-seed variance reporting, which is crucial for assessing marginal improvements in online systems. Furthermore, Table 3 exposes a severe failure mode on sparse inputs (7-Scenes), where the proposed method underperforms the baseline CUT3R. While discussing limitations is good practice, a sequence regularization method that degrades when frames drop is problematic for real-world robustness. Lastly, the ablation in Table 5 shows identical scores for k=16 and k=32, which raises questions about reporting discipline or suggests the method strictly relies on extremely local windows, contradicting the claim of solving "long-horizon" drift.
+
+Score: 4.0

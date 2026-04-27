@@ -1,0 +1,253 @@
+\section{Method}
+\paragraph{Speech Acts Definition}
+Low speech acts:
+\textbf{Backchannel}: the speaker changes, but the turn ownership does not change (brief acknowledgment or agreement followed by returning to the prior topic).
+\textbf{Interruption}: the speaker changes, and the turn ownership keeps changing rapidly within a short time (both sides speak simultaneously and try to take the turn).
+\textbf{Turn-taking}: the speaker changes, and the turn ownership changes normally (a smooth turn transition).
+\textbf{Continuation}: the speaker does not change.
+
+High speech acts:\textbf{Constatives}: the intent to state or describe facts, opinions, or information.
+\textbf{Directives}: the intent to make a request, ask a question, give an instruction, or guide the other party to act.
+\textbf{Acknowledgments}: the intent to confirm, agree with, thank, apologize for, or otherwise maintain interaction regarding the other party content.
+\textbf{Commissives}: the intent to express a commitment, plan, willingness, or taking on future actions.
+All speech acts are generated under strictly causal inputs. at time t, the model only accesses information available up to t, ensuring no future or external events leak into the current SA decision.
+
+\paragraph{Strictly causal protocol}
+Our strictly causal (strictly causal) convention governs the entire pipeline—data construction, annotation generation, and model training and deployment. When constructing the ConversationGoT-120 synthetic dialogues, the system is not allowed to access any information beyond the current time step, and it is also prohibited from exploiting implicit future cues such as how the current second’s utterance will continue in later seconds. Correspondingly, when generating speech act (SA) and rationale annotations, GPT-5 is constrained to take as input only the current second and the preceding history, thereby eliminating any form of causal leakage where labels are “filled in after seeing the future,” and ensuring that the annotations are producible from online streaming observations. Furthermore, when generating OOD annotations for the Candor dataset, we use a strictly causal streaming ASR that outputs transcripts only up to the current time, and we impose the same causality constraint on all subsequent modules: any large model or auxiliary component, including GPT-5, is forbidden from accessing future audio, future transcripts, or future semantic cues, ensuring that the OOD annotation process matches a real online perception setting. Aligned with these data- and annotation-side constraints, all modules proposed in this work also operate under a strictly causal setting during both training and deployment: at every time step, predictions depend only on the current input and historical states, never on any future segments, guaranteeing deployability and causal consistency in real streaming scenarios.
+
+\paragraph{Data Verification Protocol}
+To ensure the quality and usability of the verification data, all synthesized samples must undergo human review. If a sample’s score falls below 70\% of the maximum score defined in the rating rubric, the reviewer will discard the sample and trigger the pipeline to regenerate a new sample, repeating this process until a qualified sample is obtained. The failed sample will be retained as a case study to support iterative improvements to the pipeline.
+
+
+\section{Experiments}
+\paragraph{Experimental setup}
+We set the selector temperature to $T=1.0$. We use weighted BCE with logits, where the positive-class weight is computed once on the training split and kept fixed as $\alpha = N_{\text{neg}}/N_{\text{pos}}$ (counted over candidate positions), and is implemented via \texttt{pos\_weight}. We set $\lambda_{\text{count}}=0.01$ and $\lambda_{\text{rank}}=0.1$. Sentence candidates are formed from the past window $[t-W,t)$ with $W=90$\,s.
+
+
+
+\paragraph{Overlap Quality}
+\begin{table}[t]
+\centering
+\scriptsize
+\caption{Turn-taking event frequencies (per minute) and cumulative durations (\%) for the simulation dataset, a human reference, and model baselines.Human, dGSLM, and Moshi values are reproduced from Fig.~2 of \citep{arxiv:2503.01174}.}
+\label{tab:quality-check1}
+
+\begin{tabular}{lcccccccc}
+\toprule
+& \multicolumn{4}{c}{\textit{Number of events per minute}} & \multicolumn{4}{c}{\textit{Cumulative duration (\% of time)}} \\
+\textbf{Event type} & \textbf{Simulation} & \textbf{Human} & \textbf{dGSLM} & \textbf{Moshi} & \textbf{Simulation} & \textbf{Human} & \textbf{dGSLM} & \textbf{Moshi} \\
+\midrule
+IPU       & 23.06 & 15.7  & 24.2  & 21.6  & 84.7 & 97.3 & 99.0 & 81.0 \\
+Pause     & 10.7  & 3.8   & 5.4   & 10.2  & 9.6  & 5.7  & 6.0  & 10.3 \\
+Gap       & 7.3   & 5.5   & 7.2   & 6.7   & 1.6  & 3.7  & 4.8  & 11.8 \\
+Overlap   & 6.7   & 6.6   & 10.9  & 4.8   & 4.2  & 6.7  & 9.7  & 3.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As shown in Table~\ref{tab:quality-check1}, our simulation data exhibit denser micro-segmentation than human dialogues, with higher IPU and pause counts per minute but comparable gap and overlap rates. Cumulative durations further suggest shorter overlaps and more within-speaker pauses, indicating frequent short backchannels or clause-internal hesitations rather than long monologic turns. This pattern not only aligns with established observations of conversational floor management~\citep{sacks1974simplest, stivers2009universals}, but also indicates that our simulated data closely approximate the interactional structure of genuine full-duplex conversations. Additional quality measures, including speaking rate, noise level, and naturalness.
+
+\paragraph{HMA Definition}
+\[
+\mathrm{HMA}^{h}
+=\frac{1}{TR}\sum_{t=1}^{T}\sum_{r=1}^{R} a^{h}_{t,r},
+\mathrm{HMA}^{l}
+=\frac{1}{TR}\sum_{t=1}^{T}\sum_{r=1}^{R} a^{l}_{t,r}.
+\]
+where $T$ is the number of seconds, $R$ is the number of volunteers, and $a^{h}_{t,r}, a^{l}_{t,r}\in\{0,1\}$ denote whether volunteer $r$ agrees with the model’s decision at second $t$ for the high-level and low-level labels, respectively (1 if agree, 0 otherwise).
+
+\paragraph{Speech Acts Model}
+For each speech block $(U_i)$, we extract frozen acoustic and semantic embeddings (both 768-dimensional). The acoustic branch uses ESPnet \citep{watanabe2018espnetendtoendspeechprocessing} to encode $(U_i)$, and applies mean pooling over the frame dimension to obtain $(h_i^{B})$. The semantic branch first uses TorchAudio2.1 \citep{hwang2023torchaudio21advancingspeech} to transcribe $(U_i)$, then feeds the transcribed text into a frozen T5-Base encoder \citep{raffel2020exploring}, and applies mask-aware mean pooling to obtain $(h_i^{E})$. We then fuse them via element-wise gating:
+\[
+\lambda_i=\sigma(W_b h_i^{B}+W_e h_i^{E}),\quad
+e_i=(1-\lambda_i)\odot h_i^{B}+\lambda_i\odot h_i^{E},
+\]
+and map to a shared latent space $(\tilde z_i=g_{\text{shared}}(e_i))$.
+
+We use two task-specific causal Transformer decoders $(g_H)$ and $(g_L)$. Attention is strictly causal (masking keys for $(j>i)$), and adds an additional temporal-neighborhood bias $-\beta(i-j)$ when $(j\le i)$. They produce
+\[
+z_i^H=g_H(\tilde z_{i-K:i}),\qquad z_i^L=g_L(\tilde z_{i-K:i}).
+\]
+We use FiLM \citep{perez2018film} to modulate the low-level stream with high-level context, explicitly realizing high-level guidance for low-level prediction: $((\gamma_i,\eta_i)=g_{\text{FiLM}}(z_i^H))$, $(\tilde z_i^L=\gamma_i\odot z_i^L+\eta_i)$. Finally, two parallel classification heads output logits $((o_i^H,o_i^L))$, and convert them to class probabilities via softmax.
+
+\paragraph{Event Distribution}
+The dataset shows clear head concentration in both the high and low Speech Acts dimensions.
+Among the 4 high classes, Constatives accounts for 54.18\% and is strongly dominant, followed by Directives 18.93\%, Acknowledgments 14.43\%, and Commissives 12.37\%, indicating that the overall corpus is centered on statement/description utterances, while other functions are more dispersed.
+The concentration is stronger for the 5 lowSA classes: Continuation is an absolute peak at 64.77\%, followed by Turn-taking 19.03\%, with Interruption 9.07\%, Backchannel 7.13\%forming a long tail, suggesting that dialogue progression mainly relies on continuous continuation and regular turn-taking, while interruption and feedback signals are relatively less common.
+For anchor statistics, the mean number of anchors is 3.9206 with a standard deviation of 1.7153, indicating moderate dispersion; p95=7.4757. The average anchor distance is 60.55s.
+
+\paragraph{human evaluation rubric}
+\paragraph{Dimension 1: Naturalness \& Flow (Language + Topic Transitions)}
+\textbf{Question:} Does the dialogue read naturally? Do turns and topics flow smoothly?
+\begin{itemize}
+  \item \textbf{9--10: Very natural.}
+  Strong colloquial feel with almost no awkward phrasing;
+  responses clearly build on the previous turn;
+  topic transitions are explicit and smooth---feels like real conversation.
+
+  \item \textbf{7--8: Mostly natural.}
+  Most sentences are fluent; a few feel slightly stiff;
+  turn-to-turn flow is generally coherent;
+  topic transitions can be a bit abrupt at times but remain acceptable.
+
+  \item \textbf{5--6: Fair.}
+  Understandable but somewhat written/templated;
+  some loose connections or mild topic drifting;
+  several topic shifts are obvious ``hard cuts.''
+
+  \item \textbf{3--4: Poor.}
+  Many sentences feel unnatural for spoken language;
+  turns often fail to respond to each other;
+  topic jumps feel random or poorly motivated.
+
+  \item \textbf{1--2: Very poor.}
+  Heavy machine-translation / stitched-together feel;
+  dialogue is largely disjointed and not conversational;
+  topic changes feel completely random.
+\end{itemize}
+
+\paragraph{Dimension 2: Logical Consistency \& Identity Coherence}
+\textbf{Question:} Is the dialogue logically consistent and aligned with the given identities?
+\begin{itemize}
+  \item \textbf{9--10: Very consistent.}
+  No obvious contradictions;
+  frequently and correctly reuses earlier details (hometown, major, family, etc.);
+  topics strongly reflect the characters' backgrounds.
+
+  \item \textbf{7--8: Mostly consistent.}
+  Overall logic makes sense with only minor fuzziness;
+  most content fits the identities;
+  a few points may be slightly stretched but still plausible.
+
+  \item \textbf{5--6: Fair.}
+  Generally coherent, but includes a few inconsistencies or forced elements;
+  identity signals are weak---the dialogue could almost be said by anyone.
+
+  \item \textbf{3--4: Poor.}
+  Noticeable conflicts with earlier facts (places, jobs, family, timeline);
+  topics often feel unrelated to the character setup.
+
+  \item \textbf{1--2: Very poor.}
+  Frequent self-contradictions or impossible facts;
+  clearly violates core identity information.
+\end{itemize}
+
+\paragraph{Dimension 3: Interruption / Backchannel Reasonableness}
+\textbf{Question:} Are interruptions and backchannels used in appropriate places and amounts?
+\begin{itemize}
+  \item \textbf{9--10: Very reasonable.}
+  Occur at natural moments (long turns, high-information segments, emotional peaks);
+  inserted at good positions (not just at sentence ends);
+  frequency is moderate and improves conversational rhythm.
+
+  \item \textbf{7--8: Mostly reasonable.}
+  Generally appropriate usage, with minor overuse/underuse;
+  a few instances feel slightly off, but overall acceptable.
+
+  \item \textbf{5--6: Fair.}
+  Intention to include interruptions/backchannels is clear but somewhat coarse;
+  placement or frequency can feel awkward or repetitive;
+  some instances are unnecessary.
+
+  \item \textbf{3--4: Poor.}
+  Very noisy usage: almost none or far too many;
+  often inserted where they are clearly not needed;
+  frequently placed at sentence ends or disrupt semantics.
+
+  \item \textbf{1--2: Very poor.}
+  Usage is almost always unreasonable or violates the intended spec;
+  seriously harms readability.
+\end{itemize}
+
+\paragraph{Dimension 4: Human-Likeness (Disfluency, Hesitation, Emotion)}
+\textbf{Question:} Does the speaking style feel human, with natural disfluency and emotion?
+\begin{itemize}
+  \item \textbf{9--10: Highly human-like.}
+  Natural fillers/hesitations (not overused);
+  emotions and attitudes are clear (nervous, curious, embarrassed, etc.);
+  speakers have noticeably distinct speaking styles.
+
+  \item \textbf{7--8: Quite human-like.}
+  Some colloquial markers (``uh'', ``honestly'', ``to be fair'', etc.);
+  emotions are present but not very rich;
+  slight template flavor in places.
+
+  \item \textbf{5--6: Fair.}
+  Occasional fillers or affective words, but somewhat formulaic;
+  many lines still read like ``information dumps'' rather than lived speech.
+
+  \item \textbf{3--4: Poor.}
+  Either almost no colloquial traces, or mechanical overuse of fillers;
+  very little emotional coloring; monotone style.
+
+  \item \textbf{1--2: Very poor.}
+  Reads like formal documentation or rigid templates;
+  or filled with strange/unrealistic fillers that feel obviously fake.
+\end{itemize}
+
+\paragraph{Scoring Rules}
+The scoring rules are as follows:
+\paragraph{Rationale Quality Scoring (Score 1--10)}
+
+\paragraph{Dimension 1: Reasonableness / Discourse-Function Accuracy}
+\textbf{Question:} Does it correctly describe the discourse function of this second-level snippet (recommendation, explanation, response, shift, example, clarification, topic transition, etc.)?
+\begin{itemize}
+  \item \textbf{9--10:} Clear and accurate function judgment; tightly matches the intent of this second.
+  \item \textbf{7--8:} Mostly accurate; minor generalization without harming correctness.
+  \item \textbf{5--6:} Generally reasonable but somewhat vague or off the main point.
+  \item \textbf{3--4:} Partly unreasonable or misclassifies the function (e.g., treating an explanation as a question).
+  \item \textbf{1--2:} Largely invalid or opposite to the intended meaning.
+\end{itemize}
+
+\paragraph{Dimension 2: Context Grounding}
+\textbf{Question:} Is it grounded in information that is visible up to the current second (rather than generic commentary)?
+\begin{itemize}
+  \item \textbf{9--10:} Clearly grounded in prior visible context (correct reference and correct continuation).
+  \item \textbf{7--8:} Context dependence is evident, but the reference is somewhat broad.
+  \item \textbf{5--6:} Weak grounding; sounds more like generic dialogue commentary.
+  \item \textbf{3--4:} Forced linkage; could apply to almost any dialogue.
+  \item \textbf{1--2:} Essentially unrelated to the context, or links to the wrong context.
+\end{itemize}
+
+\paragraph{Dimension 3: Intra-Utterance Coherence}
+\textbf{Question:} Does it explain how this second relates to the earlier part of the same utterance (continuation, expansion, contrast, evidence, sharpening an example, etc.)?
+\begin{itemize}
+  \item \textbf{9--10:} Explicitly identifies the intra-utterance relation and strongly aligns with the immediately preceding content.
+  \item \textbf{7--8:} Mentions intra-utterance linkage but with less precision.
+  \item \textbf{5--6:} Uses vague continuity language (``continues/adds'') without specifying the relation type.
+  \item \textbf{3--4:} The intra-utterance relation is partly incorrect (e.g., calling an example a contrast).
+  \item \textbf{1--2:} No intra-utterance relation is captured, or it is clearly wrong.
+\end{itemize}
+
+\paragraph{Dimension 4: Inter-Utterance Linkage}
+\textbf{Question:} When cross-utterance linkage is truly needed (responding, returning to a prior topic, comparing two cities, reactivating a previously mentioned entity, etc.), does it do so accurately? When it is not needed, does it avoid forcing it?
+\begin{itemize}
+  \item \textbf{9--10:} Links across utterances accurately when appropriate; does not force cross-linking when unnecessary.
+  \item \textbf{7--8:} Cross-link direction is correct but slightly broad or mildly forced.
+  \item \textbf{5--6:} Cross-linking is present but vague, or shows mild over-referencing.
+  \item \textbf{3--4:} Clearly forced cross-linking, or links to an unrelated earlier utterance.
+  \item \textbf{1--2:} Needed cross-linking is missing entirely, or the cross-link is completely wrong.
+\end{itemize}
+\noindent
+\textit{Key principle:} Cross-utterance linkage is optional but must be accurate---it is not something that must appear every second.
+
+\paragraph{Dimension 5: Specificity \& Focus}
+\textbf{Question:} Does it focus on the incremental contribution of this second, rather than summarizing a larger span?
+\begin{itemize}
+  \item \textbf{9--10:} Tightly captures what is newly added in this second (e.g., a micro-step from ``recommendation'' $\rightarrow$ ``starting a reason'').
+  \item \textbf{7--8:} Mostly focused, with minor extra expansion.
+  \item \textbf{5--6:} Somewhat summarizes the whole utterance; second-level granularity is insufficient.
+  \item \textbf{3--4:} Clearly summarizes a larger span or drifts off-topic.
+  \item \textbf{1--2:} Fails to capture the incremental point of this second.
+\end{itemize}
+
+\paragraph{Dimension 6: Clarity \& Non-Template Style}
+\textbf{Question:} Is the wording natural, clear, and informative, and does it avoid repetitive template phrasing across seconds?
+\begin{itemize}
+  \item \textbf{9--10:} Natural, concise, and specific; does not read like a template.
+  \item \textbf{7--8:} Clear overall, with occasional templated phrasing.
+  \item \textbf{5--6:} Understandable but repetitive or overly formulaic.
+  \item \textbf{3--4:} Strongly templated with low information content.
+  \item \textbf{1--2:} Hard to read, ungrammatical, or mostly empty filler.
+\end{itemize}
+

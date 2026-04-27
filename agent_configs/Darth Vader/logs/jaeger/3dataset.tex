@@ -1,0 +1,107 @@
+\section{SpatialSceneQA}
+
+Training a 3D AV-LLM demands large-scale supervision with tightly synchronized (i) metric geometry (RGB-D with camera calibration), (ii) multi-channel spatial audio, and (iii) 3D object-level annotations in a consistent reference frame. 
+To this end, we introduce \textsc{SpatialSceneQA} 61K, a synthetically generated dataset for high-fidelity 3D audio-visual instruction tuning. 
+Each sample contains synchronized RGB-D renderings, 4-channel FOA, and precise 3D annotations, enabling supervision for both spatial perception and audio-visual spatial reasoning.
+
+\begin{table*}[t]
+    \centering
+    \caption{Statistics of the \textsc{SpatialSceneQA} 61K dataset. Tasks are grouped into ``Perception'' and ``Reasoning categories. \textbf{\#Sources} denotes active audio sources for A--B and inserted loudspeaker assets for C--E. Regarding definitions of different types of tasks, \textbf{A--B} estimate source azimuth and elevation; \textbf{C} predicts the precise Bounding Box of the inserted speaker; \textbf{D--E} identify the correspondence between a target audio speaker and a visual loudspeaker based on spatial audio-visual cues.}
+
+    \label{tab:dataset_stats}
+    
+    \resizebox{\textwidth}{!}{
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabular}{l c c l}
+        \toprule
+        \textbf{Task Type} & \textbf{\#Sources} & \textbf{\#Samples} & \textbf{Question \& Answer Example} \\
+        \midrule
+        
+        % === Category 1: Perception ===
+        \rowcolor{Gray} 
+        \multicolumn{4}{l}{\textbf{\textit{Perception}}} \\
+        \addlinespace[0.5ex]
+        
+        \multirow{2}{*}{\textbf{A: Single-Source Audio DoA}} & \multirow{2}{*}{1} & \multirow{2}{*}{32K} & 
+        \textbf{Q:} Based on the audio cues, please output the precise azimuth and elevation. \\
+        & & & \textbf{A:} azimuth: -7; elevation: -22 \\
+        % \addlinespace[1ex]
+
+        \midrule
+        
+        \multirow{2}{*}{\textbf{B: Overlap-Source Audio DoA}} & \multirow{2}{*}{2} & \multirow{2}{*}{30K} & 
+        \textbf{Q:} Where is the female voice coming from? Output azimuth and elevation. \\
+        & & & \textbf{A:} azimuth: 28; elevation: -15 \\
+        
+        \midrule
+        
+        \multirow{3}{*}{\textbf{C: Visual Grounding}} 
+        & 1 & 17K & \multirow{3}{*}{\shortstack[l]{
+            \textbf{Q:} Identify the 3D box for the speaker in this scene. \\
+            \textbf{A:} $\texttt{bbox\_0} = \texttt{Bbox}(\text{speaker}, 0.14, -0.48, -1.15, 0.33, 0.88, 0.32)$ 
+        }} \\
+        & 2 & 34K & \\
+        & 3 & \phantom{0}9K & \\
+        \midrule[\heavyrulewidth]
+        % === Category 2: Reasoning ===
+        \rowcolor{Gray} 
+        \multicolumn{4}{l}{\textbf{\textit{Reasoning}}} \\
+        \addlinespace[0.5ex]
+        \multirow{2}{*}{\textbf{D: Single-Source Multi-speakers Matching}} 
+        & 2 & 10K & \textbf{Q:} Determine which speaker corresponds to the audio source. \\
+        & 3 & \phantom{0}4K & \textbf{A:} Left \\
+        % \addlinespace[1ex]
+        \midrule
+        \multirow{2}{*}{\textbf{E: Overlap-Source Multi-speakers Matching}} 
+        & 2 & 24K & \textbf{Q:} Can you tell which speaker the male voice originates from? \\
+        & 3 & \phantom{0}5K & \textbf{A:} Center \\
+        \bottomrule
+    \end{tabular}
+    }
+\end{table*}
+
+\subsection{Data Simulation Pipeline}
+
+We synthesize \textsc{SpatialSceneQA} using \textit{SoundSpaces 2.0} \citep{chen22soundspaces2}, which supports continuous, geometry-aware acoustic rendering in scanned 3D environments. 
+The pipeline generates synchronized FOA audio and RGB-D observations, together with calibrated camera metadata and 3D ground truth, as presented in Fig.~\ref{fig:pipeline}.
+
+
+\textbf{Audio Source Selection.}
+We use dry monaural speech from \textit{LibriSpeech} \citep{panayotov2015librispeech}, which contains read speech recordings with aligned transcripts and speaker metadata. To prevent data leakage, we construct the training set from train-clean-100, use dev-clean for validation, and reserve test-clean for evaluation. For tasks involving speaker identity attributes, the provided gender labels are used to specify the target speaker in the instruction.
+
+\textbf{Acoustic Simulation.} \textit{SoundSpaces 2.0} renders multi-channel spatial audio by simulating room impulse responses (RIRs) over realistic 3D meshes with material-dependent acoustics. 
+It employs bidirectional path tracing \citep{cao2016interactive} to model direct sound and higher-order effects, including reflections, transmission, diffraction, and air absorption. 
+Given a monaural source signal $A^{(s)}(t)$ emitted from position $\mathbf{s}\in\mathbb{R}^3$ and a receiver at position $\mathbf{r}\in\mathbb{R}^3$ with heading $\theta\in\mathbb{R}$, the received FOA signal on channel $c$ is
+\begin{equation}
+    A^{(r)}_c(t) = \bigl(R_c(\cdot;\mathbf{s},\mathbf{r},\theta)\ast A^{(s)}\bigr)(t),
+\end{equation}
+where $\ast$ denotes convolution over time, $t \in [1, T]$ and $c \in \{0, 1, 2, 3\}$ indexes time steps and FOA channels respectively, $R_c(t, \mathbf{s}, \mathbf{r}, \theta)$ stands for the channel-specific RIR.
+To reduce degenerate cases caused by fully occluded direct paths, we sample source--receiver pairs within the same room. 
+Consequently, we sample a navigable receiver pose, then sample a source position within 1--4\,m, enforcing a 0.5\,m clearance from obstacles. 
+Pairs were retained only when the geodesic distance was less than twice the Euclidean distance, ensuring navigability and connectivity.
+
+\textbf{Visual Scene Construction.} We use \textit{Habitat-Sim} \citep{szot2021habitat} for rendering RGB-D observations aligned to the audio. Scenes are drawn from the semantically annotated subset of the Habitat-Matterport 3D Dataset (HM3D) \citep{ramakrishnan2021habitat}, enabling precise instance-level ground truth. Scene-based data partitioning was employed, with 130/15/36 scenes for train/val/test, respectively. The synchronized RGB, depth, semantic instance masks, and calibrated camera metadata, along with the receiver pose and the ground-truth source poses, are exported.
+
+\textbf{Synthetic 3D Object Generation.} 
+Static HM3D scans contain limited diversity of visually salient sound-emitting objects. 
+To increase appearance and geometry diversity while keeping metric annotations exact, synthesized loudspeaker meshes were generated by \textit{Hunyuan3D-1.0} \cite{yang2024hunyuan3d} and further inserted. 
+We generate 120 distinct floor-standing loudspeaker models and split them into 96/12/12 for train/validation/test to evaluate generalization to unseen geometries. 
+A visibility constraint is enforced by requiring each target loudspeaker to occupy at least 500 pixels in the semantic frame (rendered at $1920 \times 1080$), filtering out heavily occluded or distant instances.
+
+\subsection{Creation of QA Dataset}
+
+We convert each simulated scene into instruction-answer pairs as shown in Table~\ref{tab:dataset_stats}, spanning two modules: \textit{Perception} and \textit{Reasoning}.
+
+\textbf{Perception Tasks (Task A--C).}
+Tasks A--B supervise acoustic localization by regressing DoA in spherical coordinates (azimuth, elevation) under both single-source task (A) and overlapping-source task (B) settings.
+We express angles in degrees under a right-handed camera coordinate system with $x$ pointing right, $y$ up, and $z$ pointing backwards; azimuth is measured on the horizontal plane with $0^\circ$ facing forward, and elevation is measured from the horizontal plane.
+
+Task C targets metric 3D visual grounding of sound-emitting objects. 
+Following N3D-VLM \cite{wang2025n3d}, we represent each 3D bounding box as a structured sequence $\texttt{bbox}(c, x, y, z, s_x, s_y, s_z)$, where $c$ is the category label, $(x,y,z)$ is the box center in the camera coordinate system, and $(s_x,s_y,s_z)$ are axis-aligned box dimensions. 
+To avoid learning shortcuts from domain gaps, $\{1,2,3\}$ loudspeaker instances were randomly inserted per scene and require the model to output 3D boxes for all visible loudspeakers, enforcing explicit geometric grounding.
+
+\textbf{Reasoning Tasks (Task D--E).}
+Tasks D--E evaluate cross-modal spatial correspondence: given spatial audio and an RGB-D observation containing multiple candidate loudspeakers, the model must identify which visual loudspeaker matches a target speech source. 
+Task D uses a single active source, while Task E introduces overlapping sources and specifies the target by gender. 
+To avoid the appearence of trivial solutions, at least two visible candidate loudspeakers in every reasoning sample are guaranteed. 
+Solving these tasks requires integrating (i) directional cues from FOA, (ii) 3D localization of candidate loudspeakers, and (iii) metric alignment between acoustic DoA and visual geometry, thereby directly probing audio-visual embedding alignment and multi-step spatial reasoning.

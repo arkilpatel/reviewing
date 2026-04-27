@@ -1,0 +1,1988 @@
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Haitao Jiang 1 Lin Ge 2 Hengrui Cai 3 Rui Song 2
+Abstract
+Large Language Model (LLM) agents commonly
+condition actions on full action–observation histo-
+ries, which introduce task-irrelevant information
+that easily leads to redundant actions and higher
+inference cost. We propose Progress-Aware Be-
+lief Update (PABU), a belief-state framework that
+compactly represents an agent’s state by explicitly
+modeling task progress and selectively retaining
+past actions and observations. At each step, the
+agent predicts its relative progress since the previ-
+ous round and decides whether the newly encoun-
+tered interaction should be stored, conditioning fu-
+ture decisions only on the retained subset. Across
+eight environments in the AgentGym benchmark,
+and using identical training trajectories, PABU
+achieves an 81.0% task completion rate, outper-
+forming previous State of the art (SoTA) mod-
+els with full-history belief by 23.9%. Addition-
+ally, PABU’s progress-oriented action selection
+improves efficiency, reducing the average num-
+ber of interaction steps to 9.5, corresponding to a
+26.9% reduction. Ablation studies show that both
+explicit progress prediction and selective reten-
+tion are necessary for robust belief learning and
+performance gains.
+1. Introduction
+Large Language Models (LLMs) are increasingly deployed
+as agents (Wei et al., 2026) rather than merely as informa-
+tion extractors, leveraging capabilities such as self-reflection
+(Shinn et al., 2023), retrieval-augmented generation (Gao
+et al., 2024), and tool invocation (Schick et al., 2023). In
+many real-world and simulated settings (Shridhar et al.,
+2021; Yao et al., 2023), LLMs must perform sequential ac-
+Implementation available at:
+https://github.com/
+Hunter-Jiang/Progress-Aware-Belief-Update.
+1North Carolina State University, Raleigh, NC, USA 2Amazon,
+Seattle, WA, USA (This work does not relate to the positions at
+Amazon.) 3University of California, Irvine, CA, USA. Correspon-
+dence to: Rui Song <songray@gmail.com>.
+Preprint. April 22, 2026.
+tions while observing only the immediate outcomes of their
+interactions rather than the full environment state. This par-
+tial observability poses a fundamental challenge: interaction
+history is widely used as a proxy for latent state (Ma et al.,
+2024; Xi et al., 2024b), yet because agentic data are typically
+collected under outcome-level supervision, where a single
+terminal success signal is assigned to the entire episode,
+such histories often contain weakly informative or task-
+irrelevant content. As a result, full-trajectory conditioning
+entangles state-relevant signals with spurious details (Chung
+et al., 2025), increases computational overhead (Kang et al.,
+2025), and degrades overall performance (Lei et al., 2025).
+Effective state representation is therefore critical for en-
+abling LLM agents to act efficiently and generalize across
+heterogeneous environments. We argue that task progress
+provides a compact, task-agnostic signal for state tracking
+under partial observability.
+Many agentic works focus primarily on aligning LLMs
+to perform effectively in interactive environments, rather
+than on learning compact state representations from inter-
+action histories. For example, frameworks such as Qin
+et al. (2023) and Zhang et al. (2024b) unify instruction-
+following pipelines, while methods like Exploration-based
+Trajectory Optimization (Song et al., 2024c) and Group-
+in-Group Policy Optimization (Feng et al., 2025) optimize
+LLM behavior using success-failure trajectories or group-
+level action feedback via preference optimization. Agen-
+tEvol (Xi et al., 2024b) integrates reinforcement learning
+(RL) rewards directly into Supervised Fine-Tuning (SFT)
+loss, and Chen et al. (2025) shows that training on a care-
+fully selected subset of interactions can further improve
+agent performance. However, all these approaches treat the
+entire action–observation history as the agent’s state repre-
+sentation, which can lead to representation collapse when
+the history contains weakly informative or task-irrelevant ac-
+tions. As a result, learning effective agent behavior becomes
+brittle, even when overall task success improves.
+In traditional RL, belief states (Rodriguez et al., 1999; Li
+et al., 2009) address partial observability by maintaining
+an estimate of the latent environment state. However, such
+approaches typically rely on accurate transition or obser-
+vation models (Lauri et al., 2023), assumptions that are
+difficult to satisfy in complex, heterogeneous agentic set-
+tings. In LLMs, prior work on context management has
+1
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Figure 1. Motivation for Progress-aware Belief Update. In a task such as heating and drinking milk, conventional methods rely on
+full interaction histories (left), which are noisy, redundant, and expensive to process. Our method (right) performs progress-aware belief
+updates, preserving only essential information and yielding a compact context that supports efficient and reliable learning.
+largely focused on summarization or retrieval of interaction
+histories, including compression-based summaries and seg-
+mented memory retrieval (Lu et al., 2025; Kang et al., 2025;
+Lidayan et al., 2025; Pan et al., 2025). While practical for
+controlling context length, these approaches assume that the
+interaction history itself, whether summarized or retrieved,
+constitutes a sufficient state representation. This assumption
+introduces additional computational overhead and leaves
+the agent vulnerable to information loss, since summariza-
+tion mechanisms learned from web-scale corpora may not
+faithfully preserve the task-relevant information required in
+heterogeneous agentic environments.
+We aim to learn a compact belief state for long-horizon
+decision-making without relying on long-range summariza-
+tion. In our formulation, task progress is an estimated signal
+inferred from interaction trajectories, and belief updates are
+governed by a learned retention policy that decides whether
+newly observed actions and observations are stored. Using
+progress as a task-agnostic signal, the belief state is modeled
+end-to-end and represents both estimated task advancement
+and a selectively retained subset of past interactions. This
+allows LLM-based agents to operate over extended action-
+observation trajectories without treating the full interaction
+history as a monolithic context. Rather than summarizing or
+retrieving past interactions, our approach performs progress-
+aware belief updates that retain only information necessary
+for next-step planning and control. As a result, this belief-
+centric representation improves learning efficiency and deci-
+sion accuracy while reducing inference-time context length
+and computational cost.
+Our contributions are summarized as follows:
+1. We formalize PABU, a belief-state framework for
+LLM-based agents that tracks task progress via a
+learned signal and selectively updates context through
+learned retention policies, eliminating the need for
+long-horizon episode summaries.
+2. We introduce an LLM-driven training objective that
+partitions actions into progress-consistent and non-
+progress-consistent groups with the progress signal.
+The policy is trained on all explored belief states to
+promote generalization, while actions are augmented
+toward progress-consistent ones for efficiency.
+3. We present empirical results on the AgentGym suite.
+Agents trained with PABU achieve an 81% average task
+completion rate, a 23.9% improvement over previous
+SoTA baselines, while reducing the average number of
+interactions by 26.9% (from 13.0 to 9.5 rounds).
+4. We conduct ablation analyses on model scale, retention
+loss, and training objectives to examine their influence
+on learned belief update behavior, providing insights
+into belief design and when selective action or obser-
+vation retention and model scaling are most beneficial
+for agentic decision-making.
+2. Problem Formulation
+In this section, we formalize the agent–environment inter-
+action process of agentic tasks as a Partially Observable
+Markov Decision Processes (POMDP) and introduce the
+belief-state abstraction underlying our method.
+2.1. Environment and Agentic Tasks
+We consider agentic tasks in which an autonomous LLM
+iteratively respond to a user query by interacting with an
+external environment E. An episode begins with a user query
+and proceeds over a finite horizon H. At each interaction
+step, the agent selects an action, such as a tool or API
+request, and receives a response from the environment. The
+agent iteratively reasons and acts until it emits a designated
+final-answer action or the interaction budget is exhausted.
+2
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Figure 2. POMDP Formulation with Belief State Estimation.
+The LLM agent has no direct access to the latent environment
+states S· or their dynamics. Instead, it maintains a belief state B·
+to estimate the current status from partial observations O· and past
+actions A·, then uses this belief to guide action selection.
+Agentic tasks can be naturally modeled as a POMDP (He
+et al., 2024; Zhang et al., 2026), defined by the six-tuple
+M = (S, A, O, T , O, R), where S denotes the space of
+latent environment states, A is the action space, and O is
+the observation space consisting of textual feedback from
+the environment. The environment dynamics are governed
+by a transition function T (s′ | s, a) and an observation
+model O(o | s′, a). The reward function R(s) is defined
+only at terminal states and indicates task success.
+At step n, the agent executes an action an, the environ-
+ment transitions to a latent state sn ∼T (· | sn−1, an−1),
+and returns an observation on ∼O(· | sn, an−1). During
+inference, the agent has no access to sn or the reward signal.
+2.2. Belief State Abstraction
+To act effectively under partial observability, the agent
+maintains an internal Belief State bn ∈B that summa-
+rizes the interaction history up to step n.
+Let hn =
+(q, a1, o1, . . . , an, on) denote the user query q together with
+the full action-observation history. In principle, there exists
+an optimal belief mapping Φ∗such that b∗
+n = Φ∗(hn) is
+a sufficient statistic for decision making and satisfies the
+Markov property with respect to the underlying POMDP.
+In practice, neither the environment dynamics nor the op-
+timal belief mapping are known. Standard LLM agents
+therefore condition their actions directly on the full history
+hn, encoded as a growing textual prompt, which introduces
+task-irrelevant information, increases inference cost, and
+often leads to redundant or suboptimal actions. We instead
+model belief update as a learned function
+bn = Φ(bn−1, an−1, on−1),
+b0 = q,
+(1)
+and action selection as an ∼π(a | bn). where Φ produces a
+compact belief that conditions future decisions. Both Φ and
+π are realized by a single LLM πθ with θ being trainable pa-
+rameters, which jointly maintain beliefs and selects actions
+via generation. The belief state bn is a compact, text-based
+representation (bn ∈B) that conditions future decisions,
+while the underlying distribution over latent states is learned
+implicitly through joint training on action trajectories.
+2.3. Optimization Objective
+Our objective is to maximize the expected terminal reward
+max
+θ
+Eπθ [R(st)] ,
+(2)
+where t denotes the termination step of the episode. Here,
+Φθ constructs the belief state bn and πθ selects actions an ∼
+πθ(a | bn), both learned jointly. Our goal is to learn a belief-
+state mapping ˆΦ that approximates the optimal Φ∗while
+retaining only task-relevant information from the history.
+Building on this formulation, we introduce PABU, a belief-
+state framework that explicitly models task progress and
+selectively retains past actions and observations. The re-
+sulting belief state provides a compact, structured summary
+of the agent’s state, enabling more efficient and effective
+decision making than conditioning on full histories.
+3. Progress-Aware Belief Update
+In this section, we introduce PABU, which maintains a
+compact belief state composed of two elements: an explicit
+estimate of task progress and a selectively retained subset
+of past actions and observations. This learned belief state is
+updated at each decision step and used autoregressively for
+action selection, enabling efficient and robust state tracking
+under partial observability.
+3.1. Progress as the Backbone of Belief State
+LLM agents operate in diverse and heterogeneous environ-
+ments, making direct estimation of the underlying envi-
+ronment state, an assumption common in traditional RL,
+both intractable and costly. The latent state space is typi-
+cally unknown, high-dimensional, and only weakly reflected
+through textual observations.
+Instead, we model agentic progress, a text-based abstrac-
+tion that captures the agent’s intentional advancement to-
+ward task completion.
+Progress is task-dependent but
+environment-agnostic: it represents what must be achieved
+rather than how it is realized in a specific environment.
+This abstraction provides a more tractable and generaliz-
+able anchor for belief construction than the latent environ-
+ment state. Formally, let the progress associated with the
+action-observation pair at step n be denoted by pn. Progress
+evolves according to
+pn+1 ∼Tp(· | pn, an, on),
+(3)
+where Tp models how task progress advances in response
+to the agent’s interactions. If an action does not complete
+the current task stage, the progress remains unchanged, i.e.,
+pn+1 = pn. Progress is maintained until the agent com-
+pletes the current stage, at which point the next progress is
+predicted. At each step, the model estimates whether the
+3
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+current progress has been completed before selecting the
+next action.
+This design yields progress sequences that are consistent and
+interpretable while remaining flexible across diverse tasks.
+Intuitively, the progress transition approximates the latent
+environment dynamics (T , O) projected onto explored task-
+relevant subsets. For example, in a household task, progress
+may correspond to locating an object, manipulating it, or
+verifying its status. Because progress sequences can be syn-
+thesized from successful trajectories using an LLM-based
+annotation process (our implementation described in Sec-
+tion 3.3), a custom-tuned LLM can model these transitions
+without direct access to the latent environment state, pro-
+viding a stable backbone for belief-state construction under
+partial observability.
+Concatenating completed progress stages yields a high-
+level summary of task execution. While progress does not
+strictly satisfy the Markov property, it serves as an approx-
+imately Markovian abstraction that substantially reduces
+dependence on long action-observation histories. Compared
+to raw action sequences, progress representations are shorter
+since multiple failed attempts may correspond to the same
+progress, and more semantically meaningful. Training on
+successful trajectories encourages consistent semantic clus-
+tering of progress descriptions, enabling the LLM to predict
+only the current progress rather than summarize the full
+episode history. This design significantly reduces inference
+costs compared to summarizing past interaction histories at
+every step or whenever they exceed a preset length.
+3.2. Selective Retention Mechanism
+While progress provides a stable backbone for belief con-
+struction, it is insufficient when multiple action attempts
+correspond to the same progress stage. Conditioning solely
+on progress can cause the agent to repeat failed actions or
+ignore environment-specific constraints as illustrated in Fig
+3. To address this, PABU augments progress with a selec-
+tive retention mechanism that preserves task-relevant actions
+and observations across steps, which comprises three com-
+ponents: fixed retention rules, progress-conditioned action
+attempts, and learned observation retention.
+Certain elements are always retained due to their immediate
+relevance. The most recent observation is always included,
+as it provides the strongest signal for estimating whether the
+current progress has been completed, and the user query is
+retained throughout the episode as immutable task context.
+When multiple actions are attempted under the same
+progress stage, the agent must remember which actions have
+already been tried. PABU therefore maintains a progress-
+conditioned action memory, denoted Aatt, which records
+actions executed while the progress remains unchanged. If
+Figure 3. PABU Belief State Design. Progress-only belief states
+are under-specified when identical progress stages require different
+actions across environments, while PABU augments progress with
+selective retention of task-relevant actions and observations.
+the predicted progress at step n + 1 satisfies pn+1 = pn, the
+executed action an is appended to Aatt. This determinis-
+tic update prevents redundant retries and enables efficient
+exploration within a progress stage.
+Some observations contain information critical for future de-
+cisions, such as intermediate results and permissible actions.
+Retaining all past observations would reintroduce the ineffi-
+ciencies of full-history conditioning, so PABU employs a
+learned observation-retention policy that predicts whether
+newly observed information should update the retained set
+Osaved, which is typically sparse. Simultaneously, PABU
+extracts the set of available actions Aavailable directly from
+the observation text, without assuming oracle access.
+Combining progress with selectively retained context, the
+belief state at step n is represented as
+bn = ˆΦ(bn−1, an−1, on−1)
+= [q, pn, Aatt, Aavailable, Osaved],
+(4)
+where the update function ˆΦ integrates the previous belief,
+the last action, and the most recent observation to produce
+a compact, task-relevant memory summarizing the agent’s
+current progress and critical context. Note that such a belief
+state is not a probabilistic estimate over latent environment
+states, but a structured abstraction that supports efficient and
+interpretable decision making. All components are updated
+autoregressively, conditioning only on the previous belief,
+action, and observation, which avoids the inefficiencies of
+full-history conditioning and enables scalable inference.
+4
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+3.3. Training and Inference Pipelines
+We describe how the belief update and action policy are
+learned from data and used for inference. The goal is to
+equip an LLM to (i) update the belief state with progress and
+selectively retained context, and (ii) generate the progress-
+consistent action conditioned solely on this belief state.
+Trajectory Augmentation.
+We assume access to a set
+of successful trajectories D, each of the form hn
+=
+(q, a1, o1, . . . , an, on) with terminal reward 1 at step k. Tra-
+jectories with explicit progress, subgoal, or plan annotations
+can use these labels directly; otherwise, supervision signals
+are synthesized using LLM calls at the trajectory level with
+human verification.
+First, a set of critical actions is identified: actions essen-
+tial for task success whose removal prevents achieving the
+terminal reward, that are validated against the environment
+and used only for supervision, not during inference. This
+set separates the full action set into progress-consistent if
+critical and non-progress-consistent groups for later action
+augmentation. Next, free-form progress descriptions are
+synthesized for each critical action, producing a progress se-
+quence that captures task advancement. Finally, observation
+elements required for future actions after the current step
+are identified, yielding an observation-retention signal.
+After augmentation, each trajectory becomes
+h′ = (q, p1, a1, o1, l1, . . . , pk, ak, ok, lk),
+where pi denotes progress and li indicates whether to retain
+the observation. Belief-action pairs (bi, ai) are then con-
+structed by ˆΦ using these retention and progress labels, with
+beliefs updated autoregressively according to Eqn. 4.
+Progress-Aware Learning Objective.
+The LLM is fine-
+tuned to predict the next action and the belief update com-
+ponents: retention, and progress, for ˆΦ. Let C denote the
+critical actions in the current trajectory. The loss is
+LPABU = −
+X
+ai∈C
+log Pπθ(li, pi, ai | bi)
+−
+X
+ai /∈C
+log Pπθ(li, pi, ˜ai | bi),
+(5)
+where ˜ai is the augmented action, which is the next progress-
+consistent action if ai does not advance progress. Supervis-
+ing the next critical action encourages the model to complete
+the current progress stage and transition efficiently toward
+the next. Training on retention and progress labels teaches
+the LLM πθ where θ represents tunable parameters to main-
+tain only task-relevant context. A training procedure is
+detailed in Algorithm 1 with further discussion comparing
+Eqn. 5 with history-based conditioning can be found in
+Appendix A.
+Figure 4. PABU Inference pipeline, where the LLM policy gener-
+ates the retention decision for the previous observation, estimates
+the current progress, and predicts the next action sequentially.
+Inference Pipeline.
+At inference, retention, progress, and
+action are predicted in a single LLM call per step. The order
+is retention →progress →action: retention depends only
+on past observations, which inform progress, and progress
+in turn guides the next action autoregressively. This loop
+repeats until a final-answer action is emitted or the interac-
+tion budget is exhausted, enabling efficient, full-history-free
+decision making (see Fig. 4).
+Algorithm 1 Progress-Aware Augmented Learning
+1: Input: Successful trajectories D, LLM checkpoint πθ,
+progress synthesis prompt Pp, observation-retention
+prompt Po
+2: Output: Augmented dataset ˆD
+3: Initialize ˆD ←∅
+4: for each trajectory t = (q, a1, o1, . . . , ak, ok) in D do
+5:
+Identify critical actions C ⊆{a1, . . . , ak} and syn-
+thesize progress sequence (p1, . . . , pk) using Pp
+6:
+Predict obs. retention (l1, . . . , lk) using Po
+7:
+Let A(i)
+att = ∅, O(i)
+saved = ∅, initial belief b0
+8:
+for i = 1 to k do
+9:
+Select and execute action ˆai from {ai, ˜ai}, extract
+observation oi and retention label li
+10:
+Add training example (bi, ˆai, li) to ˆD
+11:
+Update A(i+1)
+att
+and O(i)
+saved from ˆai
+12:
+Update A(i+1)
+available from oi
+13:
+Set bi+1 = ˆΦ
+h
+bi, (A(i+1)
+att
+, A(i+1)
+available), O(i)
+saved
+i
+14:
+end for
+15: end for
+16: Update the policy checkpoint: πθ′ ←πθ using ˆD
+17: return πθ′, ˆD
+4. Numerical Study
+We conduct our experiments in the AgentGym Suites (Xi
+et al., 2024b), which provide a diverse set of environments
+and tasks designed for broad, real-time, unified-format, and
+5
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Table 1. Evaluating task completion and efficiency on the AgentGym suite. For each method, we report the task completion rate (↑
+succ %, higher is better) and the number of interaction steps (↓step #, lower is better). Aggregated performance across eight tasks is
+summarized in the P column, and the best-performing model is highlighted in bold.
+Model
+Metric
+ALF
+TC
+Sci
+Baby
+MZ
+WD
+WT
+MV
+P
+API-based Models & Agents
+DeepSeek-Chat
+↑succ %
+51.0
+23.0
+16.8
+45.7
+4.0
+24.0
+70.0
+70.0
+34.5
+↓step #
+20.4
+15.1
+20.7
+11.7
+14.5
+5.2
+6.1
+5.9
+16.9
+Claude-3-Sonnet
+↑succ %
+13.0
+38.0
+2.8
+79.3
+0.0
+36.0
+65.0
+80.0
+26.3
+↓step #
+27.9
+14.6
+28.7
+6.6
+15.0
+5.2
+6.9
+5.1
+20.8
+GPT-4-Turbo
+↑succ %
+67.5
+77.0
+14.4
+72.9
+68.0
+88.0
+80.0
+95.0
+55.9
+↓step #
+18.3
+9.9
+18.1
+9.1
+9.0
+4.0
+6.0
+4.5
+14.2
+General-purpose Models & Agents
+Llama2-Chat-7B
+↑succ %
+2.0
+0.0
+0.8
+0.2
+0.0
+0.0
+0.0
+0.0
+0.9
+↓step #
+22.6
+14.5
+27.5
+9.5
+15.0
+6.0
+9.9
+12.0
+19.5
+Llama2-Chat-13B
+↑succ %
+3.5
+0.0
+0.8
+0.1
+0.0
+0.0
+0.0
+0.0
+1.3
+↓step #
+19.6
+16.5
+21.3
+10.9
+13.4
+6.0
+10.0
+12.0
+17.3
+AgentLM-7B
+↑succ %
+71.0
+4.0
+1.6
+0.5
+12.0
+4.0
+0.0
+5.0
+22.7
+↓step #
+17.7
+19.4
+28.5
+7.5
+13.9
+2.0
+8.3
+11.7
+18.6
+AgentLM-13B
+↑succ %
+73.0
+0.0
+2.8
+0.5
+8.0
+0.0
+10.0
+5.0
+23.1
+↓step #
+17.8
+19.4
+28.5
+7.6
+13.9
+6.0
+6.6
+10.7
+18.7
+AgentLM-70B
+↑succ %
+67.0
+4.0
+10.7
+0.7
+8.0
+4.0
+0.0
+0.0
+24.0
+↓step #
+18.5
+18.8
+28.2
+6.3
+13.9
+5.2
+6.6
+11.6
+18.6
+Benchmark-tuned Models & Agents
+AgentEvol-7B
+↑succ %
+88.0
+64.0
+38.0
+82.7
+12.0
+12.0
+25.0
+60.0
+60.8
+↓step #
+14.0
+11.8
+18.9
+4.3
+13.8
+5.7
+5.9
+3.2
+13.0
+ATLAS-8B
+↑succ %
+84.5
+72.0
+42.0
+81.0
+48.0
+20.0
+60.0
+90.0
+65.4
+↓step #
+-
+-
+-
+-
+-
+-
+-
+-
+-
+PABU-8B(ours)
+↑succ %
+86.5
+73.0
+85.5
+94.4
+68.0
+40.0
+35.0
+75.0
+81.0
+↓step #
+11.0
+8.9
+12.5
+3.8
+9.7
+5.4
+5.1
+4.0
+9.5
+concurrent LLM agent evaluation. AgentGym enables sys-
+tematic benchmarking of agentic reasoning and interaction
+capabilities across heterogeneous tasks. Due to page limits,
+we highlight the key findings here; additional implementa-
+tion details are provided in Appendix B.
+4.1. Baselines and Metrics
+We compare our proposed LLM agent against three cate-
+gories of baselines: (1) proprietary API-based models and
+agents, (2) open-source, reproducible models and agents
+with diverse architectural designs, and (3) LLM agents and
+models explicitly optimized for AgentGym environments.
+A comprehensive description of all baselines is provided in
+Appendix B.3.
+For evaluation, we primarily report the task success rate
+(succ%) and completion efficiency, measured as the ex-
+pected number of interaction steps required to complete a
+task (step#). The latter is computed by averaging episode
+lengths over both successful and failed trajectories, provid-
+ing a holistic measure of agent efficiency. Additionally, in
+ablation studies, we analyze input/output token counts and
+inference wall-clock time to better understand performance
+trade-offs. Formal definitions and computation details for
+all metrics are provided in Appendix B.4.
+4.2. Main Results
+Table 1 summarizes the performance of different models
+on the AgentGym environments. Results for open-source
+models are taken directly from their original publications
+without reproduction or reimplementation. Unreported met-
+rics are denoted by -.
+Overall, the results demonstrate that models fine-tuned on
+the AgentGym Suites substantially outperform their cor-
+responding pre-trained checkpoints and consistently sur-
+pass general-purpose models by a clear margin, highlight-
+ing the importance of task-aligned agentic training for im-
+proved controllability and performance. Among proprietary
+models evaluated on AgentGym, GPT-4-turbo outperforms
+DeepSeek-v3 and Claude-3, achieving the highest task suc-
+cess rate (55.9%) while requiring the fewest interaction
+steps (14.2). For open-weight general-purpose models, the
+AgentLM family exhibits the strongest agentic capabilities;
+in particular, the 70B variant attains a 24.0% success rate
+with an average of 18.6 interaction steps.
+We next consider models explicitly trained on the Agent-
+Gym Suites, all of which are trained on the same trajectory
+6
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+0.00
+0.25
+0.50
+0.75
+Completion Rate
+ALFWorld
+TextCraft
+SciWorld
+BabyAI
+0.00
+0.25
+0.50
+0.75
+Completion Rate
+Maze
+Wordle
+Weather
+Movie
+LLaMA-2-7B-Chat
+LLaMA-3.2-1B
+LLaMA-3.2-3B
+LLaMA-3.1-8B
+Qwen3-0.6B
+Qwen3-1.7B
+Qwen3-4B
+Figure 5. Performance comparison across different backbone models. Smaller models can learn embodied environments effectively
+given sufficient training samples, while larger models generally perform better in environments that require deeper language understanding.
+11
+12
+13
+Interaction Steps
+0.75
+0.80
+0.85
+0.90
+Completion Rate
+ALFWorld
+10.0
+12.5
+15.0
+17.5
+20.0
+Interaction Steps
+0.4
+0.5
+0.6
+0.7
+0.8
+SciWorld
+11
+12
+13
+Interaction Steps
+0.45
+0.50
+0.55
+0.60
+TextCraft
+5.4
+5.6
+5.8
+6.0
+Interaction Steps
+0.0
+0.1
+0.2
+0.3
+0.4
+Wordle
+Pabu Full Belief State
+Pabu w/o Observation History
+Pabu w/o Action History
+Pabu w/o Available Actions
+Figure 6. Effect of context ablations on efficiency and performance. Each point shows the interaction steps and task completion rate
+after removing a context component. Retaining observation history is critical for tasks that require long-term referencing of multiple
+observations, action history is most important in environments where similar observations may require diverse responses, while removing
+available actions disproportionately degrades performance in environments with evolving action spaces. These results illustrate how task
+structure shapes optimal context-selection strategies.
+collection, AgentTraj-L, but with different training proce-
+dures. AgentEvol, which combines supervised fine-tuning
+and reinforcement learning, achieves a 60.8% success rate
+with an average of 13.0 interaction steps. ATLAS, which
+selectively trains on a subset of actions (30%), further im-
+proves performance to a 65.4% aggregated success rate,
+although the corresponding number of interaction steps is
+not reported. Finally, our proposed PABU achieves the best
+overall performance, attaining an 81.0% task success rate
+with only 9.5 interaction steps on average, corresponding to
+relative improvements of 23.9% in success rate and 26.9%
+in efficiency over the current state of the art.
+4.3. Backbone Model Ablation Study
+We first examine whether PABU generalizes across back-
+bone models from different families and at varying scales.
+Specifically, we apply PABU to LLMs from the LLAMA
+and QWEN families (see Appendix B.3 for details). No-
+tably, we also evaluate Llama-2-7B-Chat, which serves as
+the backbone model in Xi et al. (2024b), to control for po-
+tential baseline performance differences. All models are
+trained with PABU and evaluated under the same experi-
+mental settings as in the main experiments. Figure 5 shows
+side-by-side performance comparisons across benchmarks,
+and the full set of metrics is provided in Appendix B.7.
+Overall, PABU consistently improves agentic performance
+across backbone families and model sizes, demonstrating
+strong robustness to architectural and scale variations. No-
+tably, the older Llama-2-7B-Chat checkpoint also achieves
+a comparable task completion rate of 78.2%. While larger
+models yield better task performance, they incur substan-
+tially higher computational overhead. To strike a balance
+between efficiency and performance, we adopt Llama-3.2-
+1B as the backbone model for subsequent experiments.
+4.4. Attribution on Context Components
+In this experiment, we quantify the empirical contributions
+of historical actions and observations to gain insights into
+effective context management strategies. Specifically, we
+train separate models in which available actions, historical
+actions, or observations are masked throughout training
+and evaluation, and attribute performance differences to the
+removed components.
+Results are reported in Fig. 6 and Table 5. We find that
+sensitivity to context components varies substantially across
+environments, reflecting differences in task structure. In
+the AgentGym suite, ALFWorld and ScienceWorld do not
+necessarily need prior observations (e.g., inventory infor-
+mation), but both action history and available actions are
+important due to environment-specific action constraints. In
+Wordle, the action space is fixed, enabling generalization
+from successful trajectories; however, prior guesses (ac-
+7
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Table 2.
+Attribution Analysis across Training Procedures.
+Progress-based action filtering (ORM→PRM) and augmentation
+(PRM→progress-based action augmentation) consistently improve performance under history-based belief representations. Incor-
+porating PABU further refines belief design and yields additional gains beyond next decision filtering and augmentation alone.
+Training Objective
+Training Supervision
+Test Performance
+Token Cost
+samples
+belief rep.
+action
+succ %
+step #
+time
+input
+output
+Outcome Reward Model
+28,162
+History
+Original
+48.5
+14.5
+57.10
+1,672,162
+22,219
+Progress Reward Model
+12,963
+History
+Filtered
+80.5
+11.9
+33.87
+1,389,159
+18,495
+Progress Augmentation
+28,162
+History
+Augmented
+84.5
+8.2
+14.97
+1,015,571
+15,042
+PABU w/ Augmentation
+28,162
+PABU
+Augmented
+90.0
+8.1
+12.51
+502,426
+25,869
+tions) and feedback (observations) are essential for correct
+reasoning. In TextCraft, actions are largely deterministic
+(e.g., following recipes), making action history less critical,
+whereas retaining observation history and available actions
+significantly improves performance.
+Overall, these results suggest that (1) observation history is
+most important for tasks requiring cross-referencing prior re-
+sponses, (2) action history is crucial in environments where
+identical queries admit different correct actions, and (3) ex-
+plicit modeling of the available action space is most benefi-
+cial when permissible actions vary across task instances,
+highlighting how task structure shapes optimal context-
+selection strategies.
+4.5. Attribution on Training Procedures
+To empirically disentangle the contributions of the train-
+ing procedures introduced in Section 3.3, we conduct an
+ablation study on ALFWorld with progressively stronger
+supervision and decision augmentation. The baseline model
+uses the full interaction history as the belief state and is
+trained on decision actions from trajectories with outcome
+reward equal to 1. Following Chen et al. (2025), we then
+incorporate the progress-advancement signal to filter deci-
+sions and their associated history, approximating a progress
+reward model. Next, we augment the full-history belief state
+with progress-advancing actions to further enrich training
+supervision. Finally, we evaluate PABU, which integrates
+progress-aware belief modeling with action augmentation.
+Across these incremental settings shown in Table 2, we ob-
+serve consistent performance improvements that progress
+signals are effective for both action filtering and belief state
+augmentation. In particular, PABU achieves higher task
+success rates while requiring fewer token consumptions
+and interaction steps, demonstrating that jointly model-
+ing progress-aware beliefs and action augmentation, as in
+PABU, yields complementary benefits beyond isolated tech-
+niques.
+5. Limitations and Future Directions
+We highlight aspects of PABU for further study and defer
+these extensions to future work. To facilitate follow-up
+research, we will open-source our model checkpoints, envi-
+ronments, and training recipes upon publication.
+Data Coverage and Exploration. PABU operates as an
+offline optimization method that enables LLM agents to
+manage their own beliefs, and its performance can bene-
+fit from diverse and representative seed trajectories. As
+the current framework does not incorporate native online
+exploration during training, adaptivity under rare failure
+cases or previously unseen observations may be limited.
+Integrating PABU with complementary online or iterative
+data collection strategies, such as self-play or environment-
+driven exploration, could further improve robustness and
+generalization.
+State Abstraction and Representation. The PABU frame-
+work aims to learn improved representations or abstractions
+of partially observed environment states. In this work, we in-
+stantiate this objective through synthesized progress, which
+provides a practical and effective realization but may not
+fully capture all aspects of optimal abstraction. Exploring
+alternative abstraction mechanisms, such as hierarchical
+representations or learned latent-state models, is a natural
+direction for future research.
+6. Conclusion
+We presented PABU, a general framework for efficient LLM
+agents operating in POMDP settings. By explicitly mod-
+eling task progress through progress-aware belief updates,
+PABU enables agents to retain only task-relevant histori-
+cal information while avoiding long-range summarization,
+thereby improving both decision accuracy and computa-
+tional efficiency by prioritizing progress-consistent actions
+on all explored states. Experiments on AgentGym demon-
+strate substantial gains in task success rates and reduced
+interaction steps compared to strong baselines, highlighting
+the effectiveness of progress-aware history abstraction.
+Beyond overall performance improvements, our ablation
+studies show that the benefits of PABU generalize across
+different backbone architectures and model scales, with
+individual components contributing differently depending
+on task characteristics. These results suggest that explicit
+reasoning about task progress constitutes a broadly appli-
+cable design principle for building scalable and efficient
+LLM-based agents.
+8
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+References
+Abdulhai, M., White, I., Snell, C., Sun, C., Hong, J., Zhai,
+Y., Xu, K., and Levine, S. Lmrl gym: Benchmarks for
+multi-turn reinforcement learning with language mod-
+els, 2023. URL https://arxiv.org/abs/2311.
+18232.
+Cao, Z., Wang, R., Yang, Y., Ma, X., Zhu, X., Zheng, B.,
+and Zhao, H.
+Pgpo: Enhancing agent reasoning via
+pseudocode-style planning guided preference optimiza-
+tion, 2025. URL https://arxiv.org/abs/2506.
+01475.
+Chen, Z., Li, M., Huang, Y., Du, Y., Fang, M., and Zhou,
+T. Atlas: Agent tuning via learning critical steps, 2025.
+URL https://arxiv.org/abs/2503.02197.
+Chevalier-Boisvert, M., Bahdanau, D., Lahlou, S., Willems,
+L., Saharia, C., Nguyen, T. H., and Bengio, Y. Babyai: A
+platform to study the sample efficiency of grounded lan-
+guage learning, 2019. URL https://arxiv.org/
+abs/1810.08272.
+Choudhury, S. and Sodhi, P. Better than your teacher: Llm
+agents that learn from privileged ai feedback, 2024. URL
+https://arxiv.org/abs/2410.05434.
+Chung, A., Zhang, Y., Lin, K., Rawal, A., Gao, Q., and
+Chai, J. Evaluating long-context reasoning in llm-based
+webagents, 2025. URL https://arxiv.org/abs/
+2512.04307.
+DeepSeek-AI, Liu, A., Feng, B., Xue, B., Wang, B., Wu, B.,
+Lu, C., Zhao, C., Deng, C., Zhang, C., Ruan, C., Dai, D.,
+Guo, D., Yang, D., Chen, D., Ji, D., Li, E., Lin, F., Dai,
+F., Luo, F., Hao, G., Chen, G., Li, G., Zhang, H., Bao,
+H., Xu, H., Wang, H., Zhang, H., Ding, H., Xin, H., Gao,
+H., Li, H., Qu, H., Cai, J. L., Liang, J., Guo, J., Ni, J., Li,
+J., Wang, J., Chen, J., Chen, J., Yuan, J., Qiu, J., Li, J.,
+Song, J., Dong, K., Hu, K., Gao, K., Guan, K., Huang,
+K., Yu, K., Wang, L., Zhang, L., Xu, L., Xia, L., Zhao,
+L., Wang, L., Zhang, L., Li, M., Wang, M., Zhang, M.,
+Zhang, M., Tang, M., Li, M., Tian, N., Huang, P., Wang,
+P., Zhang, P., Wang, Q., Zhu, Q., Chen, Q., Du, Q., Chen,
+R. J., Jin, R. L., Ge, R., Zhang, R., Pan, R., Wang, R.,
+Xu, R., Zhang, R., Chen, R., Li, S. S., Lu, S., Zhou, S.,
+Chen, S., Wu, S., Ye, S., Ye, S., Ma, S., Wang, S., Zhou,
+S., Yu, S., Zhou, S., Pan, S., Wang, T., Yun, T., Pei, T.,
+Sun, T., Xiao, W. L., Zeng, W., Zhao, W., An, W., Liu,
+W., Liang, W., Gao, W., Yu, W., Zhang, W., Li, X. Q.,
+Jin, X., Wang, X., Bi, X., Liu, X., Wang, X., Shen, X.,
+Chen, X., Zhang, X., Chen, X., Nie, X., Sun, X., Wang,
+X., Cheng, X., Liu, X., Xie, X., Liu, X., Yu, X., Song,
+X., Shan, X., Zhou, X., Yang, X., Li, X., Su, X., Lin, X.,
+Li, Y. K., Wang, Y. Q., Wei, Y. X., Zhu, Y. X., Zhang,
+Y., Xu, Y., Xu, Y., Huang, Y., Li, Y., Zhao, Y., Sun, Y.,
+Li, Y., Wang, Y., Yu, Y., Zheng, Y., Zhang, Y., Shi, Y.,
+Xiong, Y., He, Y., Tang, Y., Piao, Y., Wang, Y., Tan, Y.,
+Ma, Y., Liu, Y., Guo, Y., Wu, Y., Ou, Y., Zhu, Y., Wang,
+Y., Gong, Y., Zou, Y., He, Y., Zha, Y., Xiong, Y., Ma, Y.,
+Yan, Y., Luo, Y., You, Y., Liu, Y., Zhou, Y., Wu, Z. F.,
+Ren, Z. Z., Ren, Z., Sha, Z., Fu, Z., Xu, Z., Huang, Z.,
+Zhang, Z., Xie, Z., Zhang, Z., Hao, Z., Gou, Z., Ma, Z.,
+Yan, Z., Shao, Z., Xu, Z., Wu, Z., Zhang, Z., Li, Z., Gu,
+Z., Zhu, Z., Liu, Z., Li, Z., Xie, Z., Song, Z., Gao, Z.,
+and Pan, Z. Deepseek-v3 technical report, 2025. URL
+https://arxiv.org/abs/2412.19437.
+Deng, Z., Dou, Z., Zhu, Y., Wen, J.-R., Xiong, R., Wang, M.,
+and Chen, W. From novice to expert: Llm agent policy
+optimization via step-wise reinforcement learning, 2024.
+URL https://arxiv.org/abs/2411.03817.
+Dubey, A., Jauhri, A., Pandey, A., Kadian, A., Al-Dahle, A.,
+Letman, A., Mathur, A., Schelten, A., Yang, A., Fan, A.,
+et al. The llama 3 herd of models, 2024. URL https:
+//arxiv.org/abs/2407.21783.
+Feng, L., Xue, Z., Liu, T., and An, B. Group-in-group
+policy optimization for llm agent training, 2025. URL
+https://arxiv.org/abs/2505.10978.
+Fereidouni, M., Mosharrof, A., and Siddique, A. Grounded
+language agent for product search via intelligent web
+interactions. In Proceedings of the 1st Workshop on Cus-
+tomizable NLP: Progress and Challenges in Customiz-
+ing NLP for a Domain, Application, Group, or Individ-
+ual (CustomNLP4U), pp. 63–75. Association for Com-
+putational Linguistics, 2024. doi: 10.18653/v1/2024.
+customnlp4u-1.7. URL http://dx.doi.org/10.
+18653/v1/2024.customnlp4u-1.7.
+Fu, D., He, K., Wang, Y., Hong, W., Gongque, Z., Zeng, W.,
+Wang, W., Wang, J., Cai, X., and Xu, W. Agentrefine:
+Enhancing agent generalization through refinement tun-
+ing, 2025. URL https://arxiv.org/abs/2501.
+01702.
+Gao, Y., Xiong, Y., Gao, X., Jia, K., Pan, J., Bi, Y., Dai, Y.,
+Sun, J., Wang, M., and Wang, H. Retrieval-augmented
+generation for large language models: A survey, 2024.
+URL https://arxiv.org/abs/2312.10997.
+He, J., Chen, S., Zhang, F., and Yang, Z. From words
+to actions: Unveiling the theoretical underpinnings of
+llm-driven autonomous systems, 2024. URL https:
+//arxiv.org/abs/2405.19883.
+Hu, Z., Liu, W., Qu, X., Yue, X., Chen, C., Wang, Z.,
+and Cheng, Y. Divide and conquer: Grounding llms as
+efficient decision-making agents via offline hierarchical
+reinforcement learning, 2025. URL https://arxiv.
+org/abs/2505.19761.
+9
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Kang, M., Chen, W.-N., Han, D., Inan, H. A., Wutschitz, L.,
+Chen, Y., Sim, R., and Rajmohan, S. Acon: Optimizing
+context compression for long-horizon llm agents, 2025.
+URL https://arxiv.org/abs/2510.00615.
+Lai, H., Liu, X., Iong, I. L., Yao, S., Chen, Y., Shen, P., Yu,
+H., Zhang, H., Zhang, X., Dong, Y., and Tang, J. Au-
+towebglm: A large language model-based web navigat-
+ing agent, 2024. URL https://arxiv.org/abs/
+2404.03648.
+Lauri, M., Hsu, D., and Pajarinen, J.
+Partially observ-
+able markov decision processes in robotics: A survey.
+IEEE Transactions on Robotics, 39(1):21–40, Febru-
+ary 2023.
+ISSN 1941-0468.
+doi: 10.1109/tro.2022.
+3200138. URL http://dx.doi.org/10.1109/
+TRO.2022.3200138.
+Lei, Y., Xu, J., Liang, C. X., Bi, Z., Li, X., Zhang, D.,
+Song, J., and Yu, Z. Large language model agents: A
+comprehensive survey on architectures, capabilities, and
+applications. Preprints, December 2025. doi: 10.20944/
+preprints202512.2119.v1. URL https://doi.org/
+10.20944/preprints202512.2119.v1.
+Li, H., Liao, X., et al. Multi-task reinforcement learning in
+partially observable stochastic environments. Journal of
+Machine Learning Research, 10(5), 2009.
+Lidayan, A., Bjorner, J., Golechha, S., Goyal, K., and Suhr,
+A. Abbel: Llm agents acting through belief bottlenecks
+expressed in language, 2025. URL https://arxiv.
+org/abs/2512.20111.
+Lu, M., Sun, W., Du, W., Ling, Z., Yao, X., Liu, K.,
+and Chen, J. Scaling llm multi-turn rl with end-to-end
+summarization-based context management, 2025. URL
+https://arxiv.org/abs/2510.06727.
+Ma, C., Zhang, J., Zhu, Z., Yang, C., Yang, Y., Jin, Y.,
+Lan, Z., Kong, L., and He, J. Agentboard: An analytical
+evaluation board of multi-turn llm agents, 2024. URL
+https://arxiv.org/abs/2401.13178.
+Murty, S., Zhu, H., Bahdanau, D., and Manning, C. D. Nnet-
+nav: Unsupervised learning of browser agents through
+environment interaction in the wild, 2025. URL https:
+//arxiv.org/abs/2410.02907.
+Ou, T., Xu, F. F., Madaan, A., Liu, J., Lo, R., Sridhar, A.,
+Sengupta, S., Roth, D., Neubig, G., and Zhou, S. Synatra:
+Turning indirect knowledge into direct demonstrations for
+digital agents at scale, 2024. URL https://arxiv.
+org/abs/2409.15637.
+Pan, Z., Wu, Q., Jiang, H., Luo, X., Cheng, H., Li, D.,
+Yang, Y., Lin, C.-Y., Zhao, H. V., Qiu, L., and Gao, J.
+On memory construction and retrieval for personalized
+conversational agents, 2025. URL https://arxiv.
+org/abs/2502.05589.
+Prasad, A., Koller, A., Hartmann, M., Clark, P., Sabharwal,
+A., Bansal, M., and Khot, T. Adapt: As-needed decom-
+position and planning with language models, 2024. URL
+https://arxiv.org/abs/2311.05772.
+Qi, Z., Liu, X., Iong, I. L., Lai, H., Sun, X., Zhao, W., Yang,
+Y., Yang, X., Sun, J., Yao, S., Zhang, T., Xu, W., Tang, J.,
+and Dong, Y. Webrl: Training llm web agents via self-
+evolving online curriculum reinforcement learning, 2025.
+URL https://arxiv.org/abs/2411.02337.
+Qin, Y., Liang, S., Ye, Y., Zhu, K., Yan, L., Lu, Y., Lin,
+Y., Cong, X., Tang, X., Qian, B., Zhao, S., Hong, L.,
+Tian, R., Xie, R., Zhou, J., Gerstein, M., Li, D., Liu,
+Z., and Sun, M. Toolllm: Facilitating large language
+models to master 16000+ real-world apis, 2023. URL
+https://arxiv.org/abs/2307.16789.
+Rita, M., Strub, F., Chaabouni, R., Michel, P., Dupoux, E.,
+and Pietquin, O. Countering reward over-optimization
+in llm with demonstration-guided reinforcement learn-
+ing, 2024. URL https://arxiv.org/abs/2404.
+19409.
+Rodriguez, A., Parr, R., and Koller, D.
+Reinforcement
+learning using approximate belief states. Advances in
+Neural Information Processing Systems, 12, 1999.
+Schick, T., Dwivedi-Yu, J., Dess`ı, R., Raileanu, R., Lomeli,
+M., Zettlemoyer, L., Cancedda, N., and Scialom, T.
+Toolformer: Language models can teach themselves to
+use tools, 2023. URL https://arxiv.org/abs/
+2302.04761.
+Shi, W., Yuan, M., Wu, J., Wang, Q., and Feng, F. Di-
+rect multi-turn preference optimization for language
+agents, 2025.
+URL https://arxiv.org/abs/
+2406.14868.
+Shinn, N., Cassano, F., Berman, E., Gopinath, A.,
+Narasimhan, K., and Yao, S.
+Reflexion: Language
+agents with verbal reinforcement learning, 2023. URL
+https://arxiv.org/abs/2303.11366.
+Shridhar, M., Yuan, X., Cˆot´e, M.-A., Bisk, Y., Trischler,
+A., and Hausknecht, M. Alfworld: Aligning text and
+embodied environments for interactive learning, 2021.
+URL https://arxiv.org/abs/2010.03768.
+Song, Y., Xiong, W., Zhao, X., Zhu, D., Wu, W., Wang,
+K., Li, C., Peng, W., and Li, S. Agentbank: Towards
+generalized llm agents via fine-tuning on 50000+ interac-
+tion trajectories, 2024a. URL https://arxiv.org/
+abs/2410.07706.
+10
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Song, Y., Yin, D., Yue, X., Huang, J., Li, S., and Lin, B. Y.
+Trial and error: Exploration-based trajectory optimization
+for llm agents, 2024b. URL https://arxiv.org/
+abs/2403.02502.
+Song, Y., Yin, D., Yue, X., Huang, J., Li, S., and Lin, B. Y.
+Trial and error: Exploration-based trajectory optimization
+for llm agents, 2024c. URL https://arxiv.org/
+abs/2403.02502.
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+Bhosale, S., Bikel, D., Blecher, L., Ferrer, C. C., Chen,
+M., Cucurull, G., Esiobu, D., Fernandes, J., Fu, J., Fu, W.,
+Fuller, B., Gao, C., Goswami, V., Goyal, N., Hartshorn,
+A., Hosseini, S., Hou, R., Inan, H., Kardas, M., Kerkez,
+V., Khabsa, M., Kloumann, I., Korenev, A., Koura, P. S.,
+Lachaux, M.-A., Lavril, T., Lee, J., Liskovich, D., Lu, Y.,
+Mao, Y., Martinet, X., Mihaylov, T., Mishra, P., Moly-
+bog, I., Nie, Y., Poulton, A., Reizenstein, J., Rungta, R.,
+Saladi, K., Schelten, A., Silva, R., Smith, E. M., Subra-
+manian, R., Tan, X. E., Tang, B., Taylor, R., Williams,
+A., Kuan, J. X., Xu, P., Yan, Z., Zarov, I., Zhang, Y.,
+Fan, A., Kambadur, M., Narang, S., Rodriguez, A., Sto-
+jnic, R., Edunov, S., and Scialom, T. Llama 2: Open
+foundation and fine-tuned chat models, 2023.
+URL
+https://arxiv.org/abs/2307.09288.
+Vattikonda, D., Ravichandran, S., Penaloza, E., Nekoei,
+H., Thakkar, M., de Chezelles, T. L. S., Gontier, N.,
+Mu˜noz-M´armol, M., Shayegan, S. O., Raimondo, S., Liu,
+X., Drouin, A., Charlin, L., Pich´e, A., Lacoste, A., and
+Caccia, M. How to train your llm web agent: A statistical
+diagnosis, 2025. URL https://arxiv.org/abs/
+2507.04103.
+Wang, H., Hao, S., Dong, H., Zhang, S., Bao, Y., Yang,
+Z., and Wu, Y. Offline reinforcement learning for llm
+multi-step reasoning, 2024a. URL https://arxiv.
+org/abs/2412.16145.
+Wang, K., Lu, Y., Santacroce, M., Gong, Y., Zhang, C., and
+Shen, Y. Adapting llm agents with universal feedback in
+communication, 2024b. URL https://arxiv.org/
+abs/2310.01444.
+Wang, R., Jansen, P., Cˆot´e, M.-A., and Ammanabrolu, P. Sci-
+enceworld: Is your agent smarter than a 5th grader?, 2022.
+URL https://arxiv.org/abs/2203.07540.
+Wang, Z., Yang, J., Nag, S., Varshney, S., Tang, X., Jiang, H.,
+Shang, J., and Sarwar, S. M. Rro: Llm agent optimization
+through rising reward trajectories, 2025. URL https:
+//arxiv.org/abs/2505.20737.
+Wei, T., Li, T.-W., Liu, Z., Ning, X., Yang, Z., Zou, J.,
+Zeng, Z., Qiu, R., Lin, X., Fu, D., Li, Z., Ai, M., Zhou,
+D., Bao, W., Li, Y., Li, G., Qian, C., Wang, Y., Tang,
+X., Xiao, Y., Fang, L., Liu, H., Tang, X., Zhang, Y.,
+Wang, C., You, J., Ji, H., Tong, H., and He, J. Agentic
+reasoning for large language models, 2026. URL https:
+//arxiv.org/abs/2601.12538.
+Xi, Z., Ding, Y., Chen, W., Hong, B., Guo, H., Wang, J.,
+Yang, D., Liao, C., Guo, X., He, W., Gao, S., Chen,
+L., Zheng, R., Zou, Y., Gui, T., Zhang, Q., Qiu, X.,
+Huang, X., Wu, Z., and Jiang, Y.-G. Agentgym: Evolving
+large language model-based agents across diverse envi-
+ronments, 2024a. URL https://arxiv.org/abs/
+2406.04151.
+Xi, Z., Ding, Y., Chen, W., Hong, B., Guo, H., Wang, J.,
+Yang, D., Liao, C., Guo, X., He, W., Gao, S., Chen,
+L., Zheng, R., Zou, Y., Gui, T., Zhang, Q., Qiu, X.,
+Huang, X., Wu, Z., and Jiang, Y.-G. Agentgym: Evolving
+large language model-based agents across diverse envi-
+ronments, 2024b. URL https://arxiv.org/abs/
+2406.04151.
+Xia, Y., Fan, J., Chen, W., Yan, S., Cong, X., Zhang, Z., Lu,
+Y., Lin, Y., Liu, Z., and Sun, M. Agentrm: Enhancing
+agent generalization with reward modeling, 2025a. URL
+https://arxiv.org/abs/2502.18407.
+Xia, Y., Shen, Y., Wu, J., Yu, T., Kim, S., Rossi, R. A.,
+Yao, L., and McAuley, J. Sand: Boosting llm agents with
+self-taught action deliberation, 2025b. URL https:
+//arxiv.org/abs/2507.07441.
+Xiong, W., Song, Y., Zhao, X., Wu, W., Wang, X., Wang, K.,
+Li, C., Peng, W., and Li, S. Watch every step! llm agent
+learning via iterative step-level process refinement, 2024.
+URL https://arxiv.org/abs/2406.11176.
+Xiong, W., Song, Y., Dong, Q., Zhao, B., Song, F., Wang, X.,
+and Li, S. Mpo: Boosting llm agents with meta plan op-
+timization, 2025. URL https://arxiv.org/abs/
+2503.02682.
+Xu, F., Sun, Q., Cheng, K., Liu, J., Qiao, Y., and Wu, Z.
+Interactive evolution: A neural-symbolic self-training
+framework for large language models, 2024.
+URL
+https://arxiv.org/abs/2406.11736.
+Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng,
+B., Yu, B., Gao, C., Huang, C., Lv, C., et al. Qwen3
+technical report, 2025. URL https://arxiv.org/
+abs/2505.09388.
+Yao, S., Chen, H., Yang, J., and Narasimhan, K. Web-
+shop: Towards scalable real-world web interaction with
+grounded language agents, 2023.
+URL https://
+arxiv.org/abs/2207.01206.
+11
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Yao, W., Heinecke, S., Niebles, J. C., Liu, Z., Feng, Y.,
+Xue, L., Murthy, R., Chen, Z., Zhang, J., Arpit, D.,
+Xu, R., Mui, P., Wang, H., Xiong, C., and Savarese,
+S. Retroformer: Retrospective large language agents
+with policy gradient optimization, 2024. URL https:
+//arxiv.org/abs/2308.02151.
+Yin, D., Brahman, F., Ravichander, A., Chandu, K., Chang,
+K.-W., Choi, Y., and Lin, B. Y. Agent lumos: Unified and
+modular training for open-source language agents, 2024.
+URL https://arxiv.org/abs/2311.05657.
+Yuan, S., Chen, Z., Xi, Z., Ye, J., Du, Z., and Chen, J.
+Agent-r: Training language model agents to reflect via
+iterative self-training, 2025. URL https://arxiv.
+org/abs/2501.11425.
+Zeng, A., Liu, M., Lu, R., Wang, B., Liu, X., Dong, Y.,
+and Tang, J. Agenttuning: Enabling generalized agent
+abilities for llms, 2023a. URL https://arxiv.org/
+abs/2310.12823.
+Zeng, A., Liu, M., Lu, R., Wang, B., Liu, X., Dong, Y., and
+Tang, J. Agenttuning: Enabling generalized agent abil-
+ities for llms, 2023b. URL https://arxiv.org/
+abs/2310.12823.
+Zhang, G., Geng, H., Yu, X., Yin, Z., Zhang, Z., Tan, Z.,
+Zhou, H., Li, Z., Xue, X., Li, Y., Zhou, Y., Chen, Y.,
+Zhang, C., Fan, Y., Wang, Z., Huang, S., Piedrahita-
+Velez, F., Liao, Y., Wang, H., Yang, M., Ji, H., Wang, J.,
+Yan, S., Torr, P., and Bai, L. The landscape of agentic
+reinforcement learning for llms: A survey, 2026. URL
+https://arxiv.org/abs/2509.02547.
+Zhang, J., Lan, T., Murthy, R., Liu, Z., Yao, W., Zhu, M.,
+Tan, J., Hoang, T., Liu, Z., Yang, L., Feng, Y., Kokane,
+S., Awalgaonkar, T., Niebles, J. C., Savarese, S., Hei-
+necke, S., Wang, H., and Xiong, C. Agentohana: De-
+sign unified data and training pipeline for effective agent
+learning, 2024a. URL https://arxiv.org/abs/
+2402.15506.
+Zhang, J., Lan, T., Murthy, R., Liu, Z., Yao, W., Zhu, M.,
+Tan, J., Hoang, T., Liu, Z., Yang, L., Feng, Y., Kokane,
+S., Awalgaonkar, T., Niebles, J. C., Savarese, S., Hei-
+necke, S., Wang, H., and Xiong, C. Agentohana: De-
+sign unified data and training pipeline for effective agent
+learning, 2024b. URL https://arxiv.org/abs/
+2402.15506.
+Zhang, J., Lan, T., Zhu, M., Liu, Z., Hoang, T., Kokane, S.,
+Yao, W., Tan, J., Prabhakar, A., Chen, H., Liu, Z., Feng,
+Y., Awalgaonkar, T., Murthy, R., Hu, E., Chen, Z., Xu,
+R., Niebles, J. C., Heinecke, S., Wang, H., Savarese, S.,
+and Xiong, C. xlam: A family of large action models
+to empower ai agent systems, 2024c. URL https://
+arxiv.org/abs/2409.03215.
+Zhong, V., Misra, D., Yuan, X., and Cˆot´e, M.-A. Policy im-
+provement using language feedback models, 2024. URL
+https://arxiv.org/abs/2402.07876.
+Zhou, Q., Zhang, Z., Xiang, X., Wang, K., Wu, Y., and
+Li, Y. Enhancing the general agent capabilities of low-
+parameter llms through tuning and multi-branch rea-
+soning, 2024a.
+URL https://arxiv.org/abs/
+2403.19962.
+Zhou, R., Du, S. S., and Li, B. Reflect-rl: Two-player online
+rl fine-tuning for lms, 2024b. URL https://arxiv.
+org/abs/2402.12621.
+Zhou, Y., Zanette, A., Pan, J., Levine, S., and Kumar, A.
+Archer: Training language model agents via hierarchical
+multi-turn rl, 2024c. URL https://arxiv.org/
+abs/2402.19446.
+Zhu, Y., Qiao, S., Ou, Y., Deng, S., Lyu, S., Shen, Y.,
+Liang, L., Gu, J., Chen, H., and Zhang, N.
+Knowa-
+gent: Knowledge-augmented planning for llm-based
+agents, 2025.
+URL https://arxiv.org/abs/
+2403.03101.
+12
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+A. Comparing Pabu and History-based Formulation
+Efficient reasoning in LLM agents requires focusing on actions that meaningfully advance task progress while avoiding
+redundant or irrelevant steps. We achieve this by identifying critical actions, augmenting trajectories with progress
+information, and training the model to prioritize progress-consistent actions. This section describes how full-history
+imitation is extended into a trajectory-level, progress-aware refinement framework with numerical support from an ablation
+study in Section 4.5.
+From Full Trajectory Imitation to Progress-Consistent Actions.
+A common approach is to imitate every action in
+successful trajectories:
+LORM = −
+X
+i≤n
+log Pπθ(ai | hi−1).
+(6)
+Alternatively, one can focus only on actions leading to critical states:
+LPRM = −
+X
+ai∈C
+log Pπθ(ai | hi−1).
+(7)
+Unlike PRM derived from MCTS, this history-based setup may include prior actions with zero progress reward before the
+next progress-consistent action. Learning from all actions risks replicating unnecessary steps, whereas learning only from
+critical actions can omit knowledge of intermediate transitions needed to reach those states. Progress-aware refinement
+addresses both issues by guiding the model to skip avoidable steps while preserving essential context.
+Trajectory-Level Action Refinement.
+Consider a trajectory segment from the underlying MDP: h2 = (q, a1, s1, a2, s2)
+with cumulative cost C1 = C(a1, h0) + C(a2, h1), where h0 = (q) and h1 = (q, a1, s1). Suppose a refined action a[1]
+exists such that:
+e(h0, a[1]) = s2
+and
+C(a[1], h0) < C1.
+Encouraging the agent to take a[1] bypasses the intermediate state s1, producing a synthesized trajectory with lower
+cumulative cost. This captures the essence of progress-aware reasoning: the model skips unnecessary steps while still
+reaching subsequent critical states efficiently.
+Learning Refined, Progress-Consistent Actions.
+Given a trajectory hn = (q, a1, o1, . . . , an, on) and a set of critical
+actions C, we define the Progress Augmentation loss:
+LPA = −
+X
+ai∈C
+log Pπθ(ai | hi−1)
+−
+X
+ai /∈C
+log Pπθ(a[i] | hi−1),
+(8)
+where a[i] is the next progress-consistent action toward overall task completion. This encourages the policy to prioritize
+actions that advance progress while skipping avoidable intermediate steps.
+PABU Loss for Progress-Aware Learning.
+In PABU, the model is fine-tuned to predict the next action along with belief
+update components, retention and progress, for the current belief bi. Let C denote the critical actions in a trajectory. The
+loss is:
+LPABU = −
+X
+ai∈C
+log Pπθ(li, pi, ai | bi)
+−
+X
+ai /∈C
+log Pπθ(li, pi, ˜ai | bi),
+(9)
+where ˜ai is the augmented action, i.e., the next progress-consistent action if ai does not advance progress. Supervising
+critical actions ensures the model completes the current progress stage efficiently and transitions toward the next. Training
+on retention and progress labels enables the model to maintain only task-relevant context, improving both efficiency and
+robustness.
+13
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+B. Experiment Reproduction Statement
+All experiments are conducted by training on servers equipped with NVIDIA H100 (or GH200) GPUs and evaluating
+on a local machine with an Intel i5-9600K CPU, 32GB RAM, and an RTX 3090 GPU, running Ubuntu 22.04 LTS and
+Python 3.11. Detailed environment setup instructions, dependency versions, and reproducibility scripts are provided in the
+accompanying support materials.
+B.1. Experiment Environments
+We adopt all multi-step environments from AgentGym that provide reproducible training trajectories (excluding To-Do here
+as each rerun generates trajectories with different ids) and avoid potential conflicts of interest (e.g., WebShop (Yao et al.,
+2023)). The following environment descriptions follow the definitions in Xi et al. (2024b)1. As these environments and
+AgentTraj-L2 are prior works, we briefly summarize their setups and focus on our critical step identification and progress
+synthesis procedures.
+MAZE (MZ). (Abdulhai et al., 2023)
+MAZE is a grid-based word game in which agents navigate toward a goal using
+four directional actions, incurring a reward of −1 per step until success. We use AgentTraj-L trajectories filtered to exclude
+trivial starts at the goal, with a maximum episode length of 15. Progress is heuristically synthesized from the agent’s
+Manhattan distance to the goal, providing a continuous notion of advancement. As the environment is fully observable and
+memory-free, no observation retention mechanism is applied. Critical steps are identified as moves that strictly reduce the
+distance to the goal or resolve navigation dead-ends.3
+Wordle (WD). (Abdulhai et al., 2023)
+Wordle evaluates letter-level reasoning through iterative word guesses, with
+a reward of −1 per attempt until the correct word is found. AgentTraj-L trajectories are directly reused. Since Wordle
+does not admit a natural scalar notion of intermediate progress, no explicit progress estimation is applied. Observation
+retention instead focuses on translating structured feedback (e.g., “g y b b y”) into persistent constraints over letter inclusion,
+exclusion, and positional validity. Critical steps correspond to guesses that introduce new constraints or eliminate large
+portions of the candidate space.4
+ALFWorld (ALF). (Shridhar et al., 2021)
+ALFWorld is a household task environment requiring exploration and object
+manipulation through text-based interactions. We use AgentTraj-L trajectories collected from state-of-the-art models and
+human demonstrations. For each trajectory, both critical actions and progress summaries are synthesized using a unified
+LLM prompt (Llama-3.3-70B). Critical steps are identified as irreversible or goal-enabling actions (e.g., acquiring a required
+object or unlocking a location), while progress synthesis abstracts low-level action sequences into task-relevant subgoals,
+yielding a compact semantic trajectory.5
+SciWorld (Sci). (Wang et al., 2022)
+ScienceWorld targets elementary-level scientific reasoning across diverse experimen-
+tal tasks. Due to the availability of golden paths and the difficulty of achieving strong performance with existing agents,
+we generate trajectories by prompting GPT-4-Turbo to produce reasoning traces aligned with these golden paths. Progress
+is heuristically synthesized from task-specific reward signals and experiment milestones (e.g., successful measurement or
+setup completion). Critical actions are first annotated by humans and then filtered using an LLM-based consistency check,
+focusing on actions unlocking subsequent steps.6
+BabyAI (Baby). (Chevalier-Boisvert et al., 2019)
+BabyAI is a partially observable grid world with instruction-following
+tasks. We use the AgentBoard textual abstraction, which converts visual observations into language and exposes high-level
+actions. AgentTraj-L trajectories are reused with a maximum episode length of 20. Critical steps are identified heuristically
+as actions that complete sub-instructions (e.g., picking up a specified object or opening a required door). Progress is
+synthesized using a scene-based abstraction that tracks instruction satisfaction and environment state transitions rather than
+1https://github.com/WooooDyy/AgentGym/blob/main/LICENSE
+2https://huggingface.co/datasets/AgentGym/AgentTraj-L/tree/main
+3https://github.com/abdulhaim/LMRL-Gym/blob/main/LICENSE
+4https://github.com/abdulhaim/LMRL-Gym/blob/main/LICENSE
+5https://github.com/alfworld/alfworld/blob/master/LICENSE
+6https://github.com/allenai/ScienceWorld/blob/main/LICENSE
+14
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+raw movement actions.7
+TextCraft (TC). (Prasad et al., 2024)
+TextCraft is a text-only crafting environment derived from Minecraft recipes, where
+tasks require compositional planning over up to four crafting steps. AgentTraj-L trajectories are used with a maximum
+of 20 rounds. Critical actions are defined as successful item acquisitions and crafting operations that advance the recipe
+tree. Progress synthesis abstracts the current inventory and crafted items into the next required recipe step, yielding a
+forward-looking representation of task completion status rather than a retrospective action log.8
+Weather (WT). (Ma et al., 2024)
+The Weather environment enables agents to query structured weather information via
+tool calls. Trajectories from AgentTraj-L are reused, with success evaluated by exact answer matching and a maximum of
+10 rounds. Critical steps are identified as tool invocations that return valid (non-error) responses, contributing necessary
+information for the final answer. Observation retention and progress synthesis are determined using an LLM prompt
+(gpt-oss-120B), which filters redundant queries and summarizes acquired information into a compact knowledge state.9
+Movie (MV). (Ma et al., 2024)
+The Movie environment allows agents to query cinematic metadata via a movie database
+API. We reuse AgentTraj-L trajectories annotated by GPT-4-Turbo, with a maximum episode length of 12. Similar to
+Weather, critical actions are tool calls yielding valid responses that introduce new entities or relations relevant to the query.
+Progress synthesis is performed via an LLM prompt (gpt-oss-120B) that aggregates retrieved facts and tracks remaining
+informational gaps toward answering the question.10
+B.2. Processed Dataset Statistics
+Table 3 summarizes the number of trajectories and decision steps for each environment in the full dataset used in this work.
+For the main experiment and the first two ablation studies, the training datasets are either directly taken from or transformed
+versions of this full dataset. In the final ablation study, we restrict training to the ALFWorld dataset only. This choice is
+motivated by the fact that ALFWorld is not sensitive to the observation retention mechanism, allowing us to isolate and
+evaluate the effect of different training objectives without confounding factors.
+Table 3. Number of trajectories and decision counts per dataset
+ALF
+TC
+Sci
+Baby
+MZ
+WD
+WT
+MV
+P
+# Trajectories
+2164
+374
+1986
+761
+10
+955
+311
+215
+6776
+# Decisions
+39775
+5084
+63855
+7022
+528
+7134
+3312
+1682
+128392
+B.3. Baseline Models
+For the main experiments, a range of closed-source models is evaluated, including GPT-3.5-Turbo, GPT-4-Turbo, Claude-3,
+and DeepSeek-Chat (DeepSeek-AI et al., 2025). We also benchmark open-source models such as Llama-2 (Touvron et al.,
+2023), as well as agents trained on expert trajectories, namely AgentLM (Zeng et al., 2023b).
+For fine-tuned backbones, we use Llama-3.1-8B (Dubey et al., 2024) as the primary model in the main experiments. For the
+model size ablation study, we evaluate Llama-3.2 models at 1B and 3B scales, Llama-2-7B-Instruct, and Qwen3 models
+(Yang et al., 2025) at 0.7B, 1.6B, and 4B scales. For the component and learning objective ablation, we adopt Llama-3.2-1B
+as the backbone.
+B.4. Evaluation Metrics
+For the main experiment, we report the task completion rate (succ.%) and the number of interaction steps (Steps). The task
+completion rate is defined as the proportion of tasks that are successfully completed with an environment return of 1 within
+the predefined step limit. The number of interaction steps counts the number of interaction rounds required to complete a
+7https://github.com/mila-iqia/babyai/blob/master/LICENSE
+8https://github.com/archiki/ADaPT/blob/main/LICENSE
+9https://github.com/hkust-nlp/AgentBoard. The codebase is licensed under an Apache-2.0 License and the dataset is
+licensed under a GNU General Public License, version 2.
+10https://github.com/hkust-nlp/AgentBoard
+15
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+ALFWorld Critical Action Selection and Progress Synthesis Prompt
+Given example key steps with their sub-goals for finishing an example goal, identify
+the key steps in a trajectory with the format of "action -> observation" for
+accomplishing a target goal. Directly reply in bullets without comments.
+Example goal:
+find two book and put them in bed.
+Example plan with sub-goals:
+- go to desk 1 -> find the book (1 of 2)
+- take book 3 from desk 1 -> take the book (1 of 2)
+- go to bed 1 -> go to the bed (1 of 2)
+- put book 3 in/on bed 1 -> put the book in the bed (1 of 2)
+- go to drawer 1 -> find the book (2 of 2)
+- open drawer 1 -> take the book (2 of 2)
+- take book 2 from drawer 1 -> go to the bed (2 of 2)
+- go to bed 1 -> put the book in the bed (2 of 2)
+- put book 2 in/on bed 1 -> put the book in the bed (2 of 2)
+Target goal:
+{g}
+Trajectory:
+{t}
+Key steps with sub-goals:
+Figure 7. Critical Step Identification and Progress Synthesis for ALFWorld. Here g and t serve as two placeholders, which is formatted
+with the actual goal and the trajectory during API calling.
+task, with the step limit serving as an upper bound for unsuccessful cases. Aggregated performance is computed using the
+macro average across different settings for each environment.
+For the backbone model ablation and context ablation studies, we use the same evaluation metrics as those in the main
+experiment.
+For the training procedure ablation, we additionally report the number of training samples (Samples), the type of belief
+representation (Belief Rep.), and the action acquisition method used to extract actions from the original trajectories (Action).
+We also report the task completion rate together with the wall-clock time required to complete the evaluation. Finally, we
+report the total number of input and output tokens, counted within the relevant XML tags, aggregated over all evaluated
+cases.
+B.5. Prompt Examples
+Figure 7 illustrates the prompt used in ALFWorld for extracting critical actions and synthesizing progress from example
+trajectories, showing how target goals are decomposed into actionable steps with progresses (sub-goals).
+B.6. LLM Input-Output Format and Context Management Logic
+As shown in Figure 8, the agent maintains a structured PABU belief state including goal, progress, last observation, and
+available actions, and then outputs updates to its observations, progress, and next action.
+B.7. Model Size Ablation Performance
+Table 4 provides a detailed breakdown of final task completion rates and action counts for each backbone model across all
+evaluated environments. The results show that PABU maintains strong performance across different model families (LLAMA
+and QWEN) and scales, with some variation depending on environment complexity. Smaller models like Llama-3.2-1B
+16
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+PABU Environment Input Format
+<goal>
+clean some knife and put it in diningtable.
+</goal>
+<progress>
+find the knife
+</progress>
+<last_observation>
+You open the cabinet 3. The cabinet 3 is open. In it, you see a dishsponge 2.
+</last_observation>
+<saved_observation>
+{}
+</saved_observation>
+<available_action>
+close cabinet 3,examine cabinet 3,go to cabinet 1,go to cabinet 10,
+go to cabinet 2,go to cabinet 4,go to cabinet 5,go to cabinet 6,
+go to cabinet 7,go to cabinet 8,go to cabinet 9,go to coffeemachine 1,
+go to countertop 1,go to diningtable 1,go to drawer 1,go to drawer 2,
+go to fridge 1,go to garbagecan 1,go to microwave 1,go to sinkbasin 1,
+go to stoveburner 1,go to stoveburner 2,go to stoveburner 3,
+go to stoveburner 4,go to toaster 1,inventory,look,
+take dishsponge 2 from cabinet 3
+</available_action>
+<attempted_action>
+go to drawer 1,go to cabinet 1,open cabinet 1,
+go to cabinet 2,open cabinet 2,go to cabinet 3,open cabinet 3
+</attempted_action>
+<observation_update>
+PABU Environment Output Format
+None
+</observation_update>
+<progress_update>
+find the knife
+</progress_update>
+<action_update>
+go to diningtable 1
+</action_update>
+Figure 8. Agent Input-output format. Everything before the observation update xml tag is the proposed PABU belief state, and after it
+are the expected model responses.
+17
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+Table 4. Model Scale × Environment Results
+Model
+Metric
+ALF
+TC
+Sci
+Baby
+MZ
+WD
+WT
+MV
+LLaMA-3.2-1B
+Final label
+89.5
+56.1
+76.5
+87.8
+52.0
+40.0
+30.0
+60.0
+Action counts
+10.4
+11.4
+11.1
+4.9
+10.9
+5.5
+5.3
+3.8
+LLaMA-3.2-3B
+Final label
+87.5
+71.0
+76.5
+91.1
+60.0
+52.0
+35.0
+40.0
+Action counts
+10.6
+9.2
+11.2
+4.2
+10.0
+5.1
+5.2
+4.0
+LLaMA-2-Chat-7B
+Final label
+87.5
+64.0
+80.5
+93.3
+32.0
+60.0
+45.0
+80.0
+Action counts
+10.9
+10.0
+9.7
+3.9
+11.4
+5.2
+5.3
+4.0
+LLaMA-3.1-8B
+Final label
+86.5
+73.0
+85.5
+94.4
+68.0
+40.0
+35.0
+75.0
+Action counts
+11.0
+8.9
+12.5
+3.8
+9.7
+5.4
+5.1
+4.0
+Qwen-3-0.6B
+Final label
+88.5
+49.0
+75.5
+91.1
+60.0
+12.0
+25.0
+55.0
+Action counts
+10.6
+12.1
+11.2
+4.5
+10.2
+5.8
+5.5
+4.0
+Qwen-3-1.7B
+Final label
+90.0
+62.0
+75.0
+91.1
+44.0
+36.0
+40.0
+60.0
+Action counts
+10.5
+10.3
+11.2
+4.5
+11.2
+5.3
+5.6
+4.2
+Qwen-3-4B
+Final label
+84.5
+68.0
+75.5
+91.1
+80.0
+52.0
+40.0
+75.0
+Action counts
+11.2
+9.7
+11.3
+4.1
+9.0
+5.0
+5.2
+4.1
+Table 5. Component × Environment Results
+Model
+Metric
+ALF
+TC
+Sci
+Baby
+MZ
+WD
+WT
+MV
+No action history
+Final label
+75.0
+59.0
+68.0
+88.9
+64.0
+0.0
+25.0
+50.0
+Action counts
+13.1
+10.6
+12.8
+4.8
+9.4
+6.0
+5.2
+4.1
+No available actions
+Final label
+80.5
+46.0
+34.5
+90.0
+52.0
+36.0
+15.0
+70.0
+Action counts
+13.3
+12.9
+21.3
+4.3
+11.5
+5.4
+5.2
+4.1
+No observation history
+Final label
+88.0
+49.0
+77.0
+92.2
+44.0
+4.0
+25.0
+60.0
+Action counts
+10.4
+12.3
+10.7
+4.0
+11.8
+5.9
+5.2
+3.9
+PABU Full Belief
+Final label
+89.5
+60.0
+76.5
+87.8
+52.0
+40.0
+35.0
+65.0
+Action counts
+10.4
+10.7
+11.1
+4.9
+10.9
+5.5
+5.3
+3.8
+achieve competitive completion rates with lower action counts, highlighting their efficiency, while larger models generally
+show modest improvements at the cost of increased computation. These findings complement the summary in the main text
+and support the choice of Llama-3.2-1B as the backbone for subsequent experiments.
+B.8. Component Ablation Performance
+Table 5 presents detailed results for the component ablation study across all environments. Consistent with Section
+4.4, removing action history, available actions, or observation history leads to environment-specific performance drops,
+highlighting the differential importance of each context component. For instance, masking action history or available actions
+significantly reduces performance in ALFWorld and Wordle, while omitting observation history most strongly affects
+TextCraft. The full belief model with all components retained consistently achieves the best balance of task completion and
+action efficiency, reinforcing the value of comprehensive context modeling in PABU.
+C. More References on LLM Agent
+Agentic tasks represent one of the most demanding frontiers for LLM applications, as they require models to operate not just
+as passive responders but as autonomous decision-makers embedded within dynamic environments. Agentic applications
+demand continuous perception of the external state, integration of contextual signals, and formulation of multi-step action
+plans that unfold over time. This requires long-horizon reasoning, robust history management, and adaptability to feedback
+18
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+loops where each action reshapes the environment and constrains future options.
+Agentic training with optimized data pipelines.
+In supervised fine-tuning (SFT), some works focus on instruction
+generation models. For example, (Yao et al., 2024) fine-tuned an instruction model using outputs from actor and reflection
+models powered by proprietary OpenAI APIs, while (Murty et al., 2025) trained an instruction sampling model from
+seed instructions and generated action sequences for downstream policy training. Other works (Zeng et al., 2023a; Yin
+et al., 2024; Zhang et al., 2024a;c; Song et al., 2024a; Ou et al., 2024) developed alternative data collection pipelines for
+agentic tasks and applied SFT on small language models (SLMs) to behavior-clone full trajectories and acquire task-specific
+abilities.
+To reduce noise in otherwise successful trajectories, (Zhong et al., 2024) used an LLM judge to filter actions, (Fu et al., 2025)
+generated and refined trajectories while excluding erroneous steps from the SFT loss, and (Xia et al., 2025b) synthesized
+reflections based on action consistency to augment training data. Building on these approaches, (Zhu et al., 2025) proposed
+knowledge-based self-learning to evaluate and filter trajectories with a continuously updated memory, and (Xu et al., 2024)
+introduced a self-iterative fine-tuning method on positive solutions, leveraging augmented correct steps to reflect on previous
+mistakes.
+In reinforcement learning (RL), several works carefully design task-specific feedback for agentic training. For example,
+(Choudhury & Sodhi, 2024) curated preference pairs by synthesizing reasoning traces for ground-truth actions using
+proprietary models. Other approaches construct RL data through repeated sampling: ETO (Song et al., 2024b) proposed to
+use successful and failure trajectories for preference pairs in DPO, (Yuan et al., 2025) applied MCTS with corrections at
+the first error step of a failed trajectory, and (Wang et al., 2025) dynamically adjusted the scope of action exploration and
+prioritized critical action steps for downstream DPO.
+Some works adopt a sequential training pipeline combining SFT followed by RL. For example, (Zhou et al., 2024b)
+incorporated LLM API reflections into training, improving policy performance through both SFT and RL. (Lai et al., 2024)
+studied the optimal timing to start the RL phase, showing that early RL is beneficial but requires several initial epochs of
+SFT, with data generated from a 70B teacher model.
+Additionally, (Xiong et al., 2025) introduced a top-layer planner that is first fine-tuned on seed plans and then optimized via
+DPO with interaction data. A third stage, Rejected Sampling Fine-Tuning (RFT), is applied by (Vattikonda et al., 2025) after
+the SFT-then-RL pipeline to further refine the policy on high-reward actions.
+For test-time scaling, (Zhou et al., 2024a) proposed mixing general and agentic data (inspired by (Zeng et al., 2023a)) and
+incorporating multi-path reasoning at inference time. Similarly, (Xia et al., 2025a) fine-tuned the policy model on one
+quarter of the collected data, used the remaining three quarters to train the reward model, and found that explicit reward
+modeling with beam search yielded the best performance.
+Agentic training with novel algorithms.
+Several works have proposed novel algorithmic approaches for agentic tasks.
+(Fereidouni et al., 2024) introduced a reward function for web shopping that evaluates both product and attribute selection.
+Building on reinforcement learning, (Zhou et al., 2024c; Hu et al., 2025) proposed a hierarchical multi-turn RL framework
+that assigns rewards at the sentence or utterance level while updating policies at the token level, similar to DMPO (Shi et al.,
+2025), which introduced an RL-based step-wise alternative to DPO with discounting factors, and (Qi et al., 2025) with a
+curriculum learning procedure with critic model scoring and modify the learning objective to relax the need of paired data.
+To better use multi-step reasoning, (Wang et al., 2024a) proposed OREO for maximum-entropy learning, eliminating the
+need for pairwise data and relying solely on a value function. Complementary approaches include (Deng et al., 2024), which
+learns stepwise rewards via inverse reinforcement learning (IRL) and tunes LLM agents with PPO, and (Rita et al., 2024),
+which calibrates rewards using L2 distances from demonstrations to mitigate reward hacking.
+On the one hand, some reseraches jointly trained the policy model on a mixture of SFT and RL losses. (Wang et al., 2024b)
+combined SFT and RL loss with special masked loss with designed buffer structure, (Xi et al., 2024a) proposed a new
+objective weighted SFT by the learned reward, (Xiong et al., 2024) combined outcome-based and step-based DPO losses
+with SFT loss, and (Cao et al., 2025) enhanced RL method with pseudocode planning, which incorporated SFT, DPO, and
+planning execution losses.
+19
+PABU: Progress-Aware Belief Update for Efficient LLM Agents
+D. Use of AI Assistants
+We utilized LLM-based tools solely for language refinement in manuscript preparation and for drafting icons in Fig. 1 (the
+final figure was manually produced in draw.io). All content generated by these models was thoroughly reviewed and verified
+by the authors, who take full responsibility for any errors or inaccuracies.
+20

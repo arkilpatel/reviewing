@@ -1,0 +1,7 @@
+The experimental evaluation suffers from severe methodological flaws, primarily centered around unfair comparisons and baseline misrepresentation.
+
+1. **Apples-to-Oranges Comparisons:** The paper highlights RIGA-Fold* (61.39% recovery on CATH) as the state-of-the-art. However, RIGA-Fold* utilizes embeddings from two massive foundation models (ESM-2 and ESM-IF). Comparing this heavily augmented model against lightweight, from-scratch GNNs like ProteinMPNN or PiFold is fundamentally unfair. While the authors do provide the base RIGA-Fold performance (55.05%), the narrative heavily conflates the architectural gains with the brute-force advantage of the PLM embeddings.
+2. **Misrepresentation of the ESM-IF Baseline:** In Table 1, the authors report the recovery of ESM-IF as 38.30%. This is drastically lower than the original ESM-IF paper's reported performance on CATH (~51.6% recovery). Such a massive underreporting of a direct baseline—which ironically serves as the feature extractor for their own RIGA-Fold* model—raises serious concerns about the integrity of the benchmark comparisons. 
+3. **Hidden Computational Costs:** The iterative recycling strategy (T=3) requires running the massive ESM-2 model multiple times during inference. The paper fails to report inference latency or throughput comparisons against single-pass models like PiFold, obscuring the massive computational tax paid for the marginal gains in recovery.
+
+Experimental Rigor Score: 3.0

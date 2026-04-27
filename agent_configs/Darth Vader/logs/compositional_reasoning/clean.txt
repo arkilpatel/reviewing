@@ -1,0 +1,918 @@
+3. Learning Compositions Without
+Supervision
+Many algorithmic problems are naturally expressed as com-
+positions of simpler tasks applied sequentially. In mod-
+ern language models, such compositions often correspond
+to chains of thought (CoTs), where intermediate tokens
+represent partial computations leading to a final answer
+(Wei et al., 2022; Guo et al., 2025). A central question
+underlying recent progress in reasoning models is whether
+such compositional structure can be learned without ex-
+plicit supervision of intermediate steps. To reason about
+this, we formalize the notion of an autoregressive com-
+position.
+Throughout this paper, we let V be a vocab-
+ulary and Vdenote all finite strings over V, meaning
+V:= {(w1, . . . , wn) | n N, wi V} (also known
+as the Kleene closure of V).
+Definition 3.1 (Autoregressive Compositions). Let V be a
+vocabulary and T = {j : VV}J
+j=1 be a set of tasks,
+where each task maps a sequence of tokens to a single token.
+A function f : VV is an autoregressive composition
+(relative to T) if there exist indices j1, . . . , jS such that
+for any input x, applying j1, . . . , jS sequentially in an
+autoregressive manner produces a final token equal to f(x).
+Autoregressive compositions formalize the idea that a com-
+plex computation can be carried out as a sequence of simpler
+operations, each producing an intermediate token that is then
+used in subsequent steps. For example, adding two large
+numbers can be decomposed into many simpler addition
+tasks (see Fig 1).
+It is by now known that such CoTs can significantly improve
+the expressiveness of the model (Malach, 2023; Merrill &
+Sabharwal, 2024). The central question we study in this
+paper is not whether a good composition exists, but whether
+it can be learned when only the correctness of the final
+output is observed. In particular, we consider a setting in
+which the individual tasks j are already available, but the
+learner must discover how to compose them.
+Learning in this regime is nontrivial because outcome-level
+feedback does not uniquely identify which intermediate
+choices were responsible for success. Multiple compositions
+may yield a verified final output, and incorrect intermediate
+steps may be compensated for later in the sequence. As a
+result, even when a correct composition exists and achieves
+perfect verification accuracy, it is not immediate that training
+from final outcomes alone should recover a correct chain
+of intermediate decisions. In this paper, we analyze when
+outcome-level training induces correct step-wise behavior
+and when it does not.
+4. Setting and Preliminaries
+Autoregressive generation.
+We consider an autoregres-
+sive language model f(x) that given a context x V
+predicts the logits for the next token. This defines a policy
+for the next token
+(y | x) = Softmax(f(x))[y],
+where [y] denotes the index corresponding to token y. Given
+an initial prompt x0, the model generates a completion of
+fixed length S in an autoregressive fashion. Specifically,
+tokens are generated sequentially according to
+s [S],
+ys  ( | xs1) ,
+xs := (xs1, ys) ,
+so that xs is the prefix consisting of the prompt followed by
+the first s generated tokens. This procedure induces a dis-
+tribution over entire sequences of tokens, which we denote
+by P (so for any token v, P(ys = v) (the probability of
+sampling v at step s) is determined by the distribution of
+prompts and that P(ys = v | xs1) = (v | xs1)).
+Model structure.
+We model the language model as pos-
+sessing a finite collection of deterministic tasks (or skills)
+that can be selected at each autoregressive step. Each task
+proposes a next token as a deterministic function of the cur-
+rent prefix, and fine-tuning redistributes probability mass
+over these tasks without altering their internal behavior.
+This is motivated by empirical work indicating that the core
+features underlying reasoning behavior are learned during
+pretraining, and that reinforcement learning primarily se-
+lects and sharpens these features (Yue et al., 2025; Guo et al.,
+2025).
+Tasks. Let T = {j : VV}J
+j=1 denote a set of determin-
+istic tasks, where each task j maps a prefix to a single next
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+When are Compositions Learnable from RLVR?
+Figure 2. RLVR as sequential task selection. An autoregressive
+model chooses among tasks at each step, each deterministically
+producing the next token. Only the final output is verified, and
+intermediate decisions receive no direct supervision. Dark arrows
+indicate the correct task composition.
+token, with Vdenoting the Kleene closure of the vocabu-
+lary. We associate to each task a function gj : VR|V|
+defined by
+gj(x) = ej(x),
+where  > 0 is a fixed constant (to be thought of as large)
+and ev denotes the standard basis vector corresponding to
+token v. Intuitively, gj(x) represents the logits proposed
+by task j at prefix x. When  is large, sampling accord-
+ing to Softmax(gj(x)) yields the token j(x) with high
+probability. Each task may depend arbitrarily on the current
+prefix, but produces only a single deterministic next token.
+No single task is assumed to be capable of solving the full
+problem on its own.
+Positional task embeddings. LLMs incorporate positional
+embeddings that explicitly encode the step, allowing the
+model to select different tasks at different stages of a chain of
+thought. To capture this, we associate each task j and each
+autoregressive step s with a positional embedding vector
+hs,j Rp. We assume that the collection {hs,j}s,j is
+orthonormal, ensuring that task selection at one step does not
+interfere with task selection at other steps. This abstraction
+captures the role of positional embeddings and allows step-
+specific task selection while keeping tasks disentangled.
+Model definition. Given these components, we define the
+model as
+f(x) =
+J
+X
+j=1
+gj(x)hs(x),j, ,
+(1)
+where s(x) denotes the number of generated CoT tokens in
+x, and  Rp are the trainable parameters.
+We emphasize that the model above is a behavioral abstrac-
+tion of an LLM during fine-tuning. Nevertheless, it may
+also be linked to real LLMs as follows. Many works have
+shown that a large pretrained model f when fine-tuned with
+a small learning rate satisfies
+f(x) f(0)(x) + (0) f(0)(x)  ( (0)),
+so that the features (0) f(0)(x) remain fixed during fine-
+tuning (Jacot et al., 2018; Lee et al., 2019; Allen-Zhu et al.,
+2019; Arora et al., 2019; Jang et al., 2024).
+From this perspective, fine-tuning corresponds to learning
+a linear combination of fixed pretrained features. One may
+further decompose these features (e.g., via a singular value
+decomposition) (0) f(0)(x) = P
+j gj(x)hj(x)T , yield-
+ing a decomposition of the same for as (1).
+Compositional target and learning objective.
+We con-
+sider problems that admit a correct solution in the form
+of an autoregressive composition of tasks. For clarity, we
+restrict attention to compositions of fixed length S. Let
+(1), . . . , (S) [J] denote the indices of the tasks appear-
+ing in the correct composition. Given an initial prompt x0,
+define the target CoT by composing tasks (1), . . . , (S).
+Formally, let f 
+0 (x0) := x0, and for all s [S]
+f 
+s (x0) :=
+fs1(x0), (s) (fs1(x0))
+
+,
+and f (x0) := f 
+S(x0) denotes the final output.
+Unsupervised post-training.
+We assume access to a ver-
+ifier V that evaluates the final strings xS, with V (xS) 
+{0, 1} denoting an incorrect or correct answer. When the
+input is clear, we may simply write V
+= 1 to denote
+the event that V (xS) = 1. We are interested in a proce-
+dure where the pre-trained weights (0) are fine-tuned via
+a procedure analogous to REINFORCE (Williams, 1992).
+Specifically, at each iteration t, we consider a batch of B
+prompts x(t,1)
+0
+, . . . , x(t,B)
+0
+sampled i.i.d from some distribu-
+tion D. We then generate a completion of length S in an
+auto-regressive fashion, where for each b [B] and each
+step s [S] is generated at
+y(t,b)
+s
+t
+
+ | x(t,b)
+s1
+
+,
+x(t,b)
+s
+:=
+
+x(t,b)
+s1 , y(t,b)
+s
+
+,
+where we use the notation t for (t). We denote by As,j
+the event that task j is selected at step s, equivalently
+As,j = {ys = j(xs1)}.
+Given a learning rate  > 0, we update the parameters at
+each step as
+(t+1) = (t) + 
+B
+B
+X
+b=1
+V (x(t,b)
+S
+)
+S
+X
+s=1
+log t
+
+y(t,b)
+s
+| x(t,b)
+s1
+
+.
+For simplicity, we train only on positive samples, i.e., se-
+quences satisfying V (xS) = 1. Formally, for each sampled
+prompt x(t,b)
+0
+, we resample completions until a sequence
+with V = 1 is obtained. Also, we do not use any KL regu-
+larization. Such regularization limits the models ability to
+adapt to new problem structures, as we do here.
+We denote by Pt the distribution over sequences induced
+by (t), and by Et the corresponding expectation. We let
+Bt denote the batch of positive samples at time t (sampled
+from P(t)( | V = 1)).
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+When are Compositions Learnable from RLVR?
+We emphasize that because the model generates the CoT
+steps that are fed to the verifier, the dynamics may differ
+greatly from supervised training. As we will later show
+explicitly, in this setting, it is possible to converge to poor
+local minima.
+Assumptions.
+First, since f represents the ideal function
+we are trying to learn we assume that it indeed passes the
+verifier.
+Assumption 4.1. For prompts x0 D it holds with proba-
+bility 1 that V (f (x0)) = 1.
+We emphasize that the target composition need not be the
+only one that produces a correct final output according to
+the verifier V . Next, we assume that the tasks do not overlap
+in the following sense:
+Assumption 4.2. For any j = j and input x, it holds that
+j(x) = j(x).
+The assumption is made to simplify analysis. It is always
+possible to satisfy Theorem 4.2 by expanding the vocabulary.
+Specifically, one can consider an expanded vocabulary of
+the form V  [J] containing tuples of the form (v, j) which
+signify token v given by task j.
+5. Main Results: Learning Compositions With
+RLVR
+To understand when RLVR can recover an autoregressive
+composition without intermediate supervision, we analyze
+the learning signal induced at a single step of the CoT. Since
+each task deterministically proposes a next token j(xs1),
+fine-tuning effectively adjusts the probability with which
+different tasks are selected at each step. The central question
+is therefore: under what conditions does RLVR increase the
+probability of selecting the correct tasks?
+The answer turns out to depend only on how choosing a
+given task at step s affects the probability that the final
+rollout is verified as correct. To formalize this dependence,
+we introduce the following quantity.
+Definition 5.1 (task-advantage ratio). For any parameters
+, step s, and task j, we define the task-advantage ratio1
+
+s,j := P (V = 1 | As,j)
+P
+V = 1 | Ac
+s,j
+,
+and
+(t)
+s,j := (t)
+s,j
+t,
+where As,j denotes the event that task j is selected at step
+s, and Ac
+s,j its complement (the event j is not selected).
+1The task-advantage ratio may be , in which case we use the
+convention that 1/
+s,j = 0. Likewise, if it is 0 then 1/
+s,j = .
+This is purely for notational convenience and does not impact the
+results in any way.
+Intuitively, the task-advantage ratio measures whether choos-
+ing a task at a given step makes verified success more or
+less likely than avoiding it. The following theorem shows
+that the task-advantage ratio fully determines if RLVR will
+increase or decrease the probability of selecting each task.
+Importantly, the expression in the theorem is exact and iso-
+lates the effects of outcome-level feedback on selecting
+specific tasks.
+Theorem 5.2. Under assumptions 4.1-4.2, for any CoT step
+s [S], time t N {0}, task j [J] and new sample
+xs1 that contains a prompt plus s1 additional CoT steps,
+then if (t)
+s,j > 0, the expectation of the logit updates (with
+respect to the training batch Bt) at token j(xs1) is given
+by
+EBt
+h
+(f(t+1)(xs1) f(t)(xs1)) [j(xs1)]
+i
+=2Pt (As,j | V = 1) (1 Pt (As,j))
+ 
+1 
+1
+(t)
+s,j
+!
+.
+Otherwise, if (t)
+s,j = 0, then the expected value is equal
+2Pt (As,j).
+Theorem 5.2 shows that the expected learning signal at each
+step decomposes into a few interpretable factors. The first
+is a directional term 1 1/(t)
+s,j, whose sign determines the
+probability of selecting task j. In particular, if choosing
+task j increases the probability of verification success, then
+(t)
+s,j > 1 and the expected update favors that task; if it de-
+creases success probability, then (t)
+s,j < 1 and the update
+suppresses it. The other important term in Theorem 5.2
+is a magnitude term Pt(As,j | V = 1)
+1 Pt(As,j)
+
+,
+which determines how fast the logits change, and vanishes
+only when the task is either never or always selected. This
+characterization makes precise how global outcome-based
+feedback induces step-wise learning dynamics in autoregres-
+sive compositions.
+5.1. Successfully Learning Compositions
+Assumption 4.1 ensures that the target function f always
+produces a verified solution, but does not specify anything
+about other task compositions. In many compositional prob-
+lems, however, correctness is not arbitrary: selecting the
+appropriate intermediate operation at each step strictly in-
+creases the likelihood that the overall computation succeeds.
+In such settings, the ground-truth CoT is distinguished by
+being the one whose intermediate steps are consistently
+aligned with verification success. There may be other CoTs
+that occasionally lead to correct solutions, but one expects
+deviations from the ground truth CoT to reduce the chance
+of reaching a correct solution. The following assumption
+formalizes this property in terms of the task-advantage ratio
+introduced in Theorem 5.1.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+When are Compositions Learnable from RLVR?
+Figure 3. Iteration Complexity needed to reach an accuracy of 0.9
+as a function of the CoT length (log-log scale). Problems with an
+inductive structure have a constant task advantage, and the iteration
+complexity scales like S2. Without such a structure (e.g., solving
+parities), the advantage may decrease exponentially in S, and the
+iteration complexity becomes exponentially large.
+Assumption 5.3 (Uniform task-advantage). Let (0) be
+the initial policy parameters, and let + = { : s 
+[S], P(As,(s)) P(0)(As,(s))}. There exists a constant
+ > 0 such that for any step s [S], any task j [J], and
+any parameter vector  +
+(
+
+s,j < 1,
+j = (s),
+
+s,j 1 + ,
+j = (s),
+Essentially, the assumption implies the correct task has an
+advantage at each step of the CoT. The parameter  can be
+thought of as the margin, where a larger margin implies a
+larger advantage that the correct tasks have over incorrect
+ones. The set + limits the policies for which we require the
+assumption to hold. Instead of requiring an advantage over
+all possible polices, we require an advantage only within
+policies that have a higher likelihood of outputting the cor-
+rect next composition than the initial policy. Indeed, in many
+problems, if such an advantage exists in the base model, it
+is maintained throughout training.
+Why this represents LLM behavior in reasoning:
+In
+the next section, we will discuss examples of compositional
+problems satisfying assumption 5.3, and show that it applies
+for very general compositional problems. We argue however,
+that it is particularly consistent with the conditions of typical
+reasoning problems in LLMs. The reason being that LLMs
+are known to be strong generators for solutions to such
+problems, even when exposed to incomplete and incorrect
+reasoning steps (Yu et al., 2025). During RLVR training,
+correct final answers are generated even if the CoT contains
+some mistakes; over time, RLVR reinforces reasoning steps
+that are correlated with the true composition.
+Positive Theorem.
+We now show how, under a uniform
+task advantage, RLVR can indeed converge to a solution
+that passes the verifier with high probability. The proof is
+deferred to the appendix.
+Theorem 5.4. Under assumptions 4.1-4.2 and Theo-
+rem 5.3, for any  (0, 1/2),  (0, 1), let p0 :=
+mins[S] P0
+As,(s)
+
+, and let the batch size B and learn-
+ing rate  be as specified in Appendix A.4. There exists and
+absolute constant C > 0, such that with probability at least
+1 , at time T :=
+
+C(1+ 1
+)S2 log(S/ min(,p0))
+min(,p0)2
+
+,
+PT (V (xS) = 1) 1 .
+In words, the proof ensures that when the target task indeed
+exhibits a positive task-advantage ratio, RLVR recovers
+it. We highlight a few implications of the result. First,
+the convergence rate depends on the initial probabilities of
+selecting the correct tasks, reflecting the empirical observa-
+tion that skills weakly represented during pre-training are
+substantially harder to amplify through post-training (Yue
+et al., 2025; Wu et al., 2025). Second, the dependence of
+T on the composition length S is quadratic rather than ex-
+ponential, indicating thatunder a uniform task-advantage
+conditionRLVR can scale to moderately long chains of
+thought without incurring an exponential sample complexity
+penalty. Lastly, regarding the task-advantage ratio, the time
+to convergence scales with  as 1 + 1/. So when  is
+large, convergence is very quick. By contrast, if  is very
+close to 0 (indicating the advantage for the correct task is
+small) then convergence is slow (c.f. Figure 3).
+6. What compositions are learnable without
+supervision?
+In this section we dissect the properties of compositional
+problems that are learnable with a verifiable reward. The
+learnability is characterized by advantage assumption 5.3,
+which is a combined property of the compositional prob-
+lems structure and the base model, 0. In subsection
+6.1, we explain through examples the role of the inductive
+structure of the learnable compositional problems and in
+subsection 6.2, we demonstrate the role of the base model.
+6.1. The Inductive Structure of Compositional Problems
+We showed above that compositional problems that satisfy
+Assumption 5.3 are learnable without any intermediate su-
+pervision. Here, we provide intuition through synthetic
+problems on the task-advantage ratio and the implied induc-
+tive structure. We will see that without the structure that
+rewards partially reasoning paths, a compositional problem
+may still be learned without supervision, but may require an
+exponential time complexity to learn. On the other hand, in
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+When are Compositions Learnable from RLVR?
+problems where partially correct reasoning paths are incen-
+tivized, unsupervised RL can learn in iteration complexity
+that scales at most quadratically in the composition length.
+See Figure 3 for a comparison of these two problems.
+No inductive structure - a case study with parities.
+Bit
+parities are a canonical example of problems that are diffi-
+cult to learn (Blum et al., 1994; Kearns, 1998; Abbe & Boix-
+Adsera, 2022; Shoshani & Shamir, 2025), and have there-
+fore gained much attention in the literature as a testing bed
+to compare various algorithms (Barak et al., 2022; Kim &
+Suzuki, 2024; Wen et al., 2024; Kou et al., 2024; Abedsoltan
+et al., 2025). Specifically, given inputs on the cube {1, 1}d,
+and an unknown subset of indices P {1, . . . , d}, the goal
+is to learn the function P (x) := Q
+iP xi.
+There are many ways to view the parities as a compositional
+task. To best match our setting, we consider the case where
+the string is scanned from left to right, and each bit is
+either selected to contribute to the parity or ignored. See
+Fig. 2 for a visual depiction. The parity P and its size are
+unknown. The model, as before, is given by (1), and the
+tasks contain two components: 1(x) = xd  x1 which
+outputs the product between the last bit in the string and
+the bit d positions from the end, and 0(x) = x1 which
+does nothing, and just copies the last bit in the string. We
+assume that the inputs (prompts) x0 Rd+1 contain d bits
+sampled uniformly from the cube {1, 1}d followed by a
+last bit which is always 1 (adding this bias term simplifies
+the setting).
+In this way, the model essentially goes over the string bit by
+bit, and decides if each bit either contributes to the parity
+or is ignored. So, if the desired parity is P , for any s 
+[S], letting (s) = 1sP , the model can always output the
+right token by composing the tasks (1), . . . , (d). The
+verifier accepts a solution iff the final bit is correct. We now
+characterize the task-advantage ratio for such a problem.
+Proposition 6.1. Under the setting above, suppose that the
+base model yields a uniform distribution across all tasks
+(meaning that for any s, hs,j, 0is a constant across js).
+Then assumption 5.3 holds with
+ =
+1
+2d1 .
+The proof can be found in appendix B. As can be seen,
+the advantage is exponentially decreasing with d. This
+is not a limitation of the framework, but is an inherent
+property of learning parities (Abbe & Boix-Adsera, 2022;
+Shoshani & Shamir, 2025). The exponential rate is due
+to a combination of factors. First, incorrect compositions
+lead to the correct solution half the time (meaning they are
+uncorrelated with the correct composition). Moreover, the
+advantage of choosing a correct hidden bit is manifested
+only if all other hidden bits are chosen in the rest of the CoT.
+Figure 4. How the base model can impact RLVR: We consider a
+base model whose quality is determined by p0, the probability of
+picking the correct tasks at initialization. Within the setting defined
+in Sec. 6.2, the model converges to a suboptimal solution whenever
+p0 < 1
+3 (with Prt(V = 1) 1/2) but to the optimal solution
+whenever p0 > 1/3. This is aligned with the task-advantage
+ratio s,1 which we show is > 1 when p0 > 1/3 and < 1 when
+p0 < 1/3. At each step, samples are drawn i.i.d. with a batch size
+of 256, and the accuracy is computed with respect to the last batch.
+One may wonder if such exponential rates naturally arise
+in practice. This is unlikely, and when using LLMs to
+solve reasoning problems, the situation is usually different.
+Typically, incorrect reasoning steps decrease the likelihood
+of a correct final solution. Moreover, in many problems, an
+LLM may increase the chance of a correct final solution even
+if it takes a few wrong steps along the CoT (Yu et al., 2025).
+In the next chapter, we analyze a structure of compositions
+that we believe better reflects the properties of problems
+where LLMs are used.
+Inductive structure - when imperfect task selection is still
+meaningful.
+Let us now consider a problem that can be
+solved by composing the S tasks (1), ..., (S). To better
+model standard reasoning tasks, we consider a case where
+each correct task that is chosen by the policy increases
+the probability that the verifier accepts. This is meant to
+model the fact that partially correct CoTs may still help
+LLMs reach a correct solution (Yu et al., 2025). Note that
+unlike the parity problem considered earlier, we will show
+that each correct task chosen provides an advantage.
+To formalize this setting, fix some s
+(0, 1), and
+let Sbad(xS) be the set of incorrect tasks chosen by the
+model. Then the probability the verifier accepts is given by
+Q
+sSbad s (where the randomness is over prompts). We
+also assume that the policy at each step does not depend on
+the prefix, so that each choice of tasks doesnt influence the
+probability of choosing a correct task at a future step. Intu-
+itively, s should be thought of as the chance of recovering
+from an incorrect CoT step.
+In this case, not only does assumption 5.3 hold, but it also
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+When are Compositions Learnable from RLVR?
+does not vanish as S is increased:
+Proposition 6.2. Under the above setting, assumption 5.3
+holds with:
+ min
+s[S]
+1 s
+s
+.
+The proof is in appendix C. We see here that  can remain
+bounded by a constant as S increases. Consequently, by
+our main result, RLVR can learn this composition with an
+iteration complexity that scales quadratically with S. This
+demonstrates the strength of RLVR for reasoning problems,
+where LLMs can succeed even when initially making incor-
+rect reasoning steps.
+RLVR learns this problem quickly because the chance of
+an incorrect composition to succeed on a given problem
+drops exponentially with incorrect components. As such,
+there is a clear advantage to picking the correct task at each
+intermediate step. This is an important difference from the
+parity problem, where all incorrect compositions can pass
+the verifier with the same probability, 1/2, so acceptance
+does not meaningfully disambiguate correct intermediate
+choices.
+6.2. How RLVR Depends on The Base Model
+With a model given by (1), one may wonder if RLVR is
+always expected to succeed. We now complement our result
+by providing an example in which learning fails because
+Theorem 5.3 does not hold. In fact, surprisingly simple
+constructions can already provably converge to poor local
+minima if the base model is poor, and Theorem 5.3 is vio-
+lated.
+To see this, let V := {1, 2}, and the prompt x0 is 1 with
+probability 1/2, and 2 with probability 1/2. We consider
+tasks that are simply constant functions, such that 1(x) :=
+1 and 2(x) := 2 for all x of any length. The verifier is
+defined as follows:
+V (xS) =
+(
+1
+xS {(1, 1, 1), (2, 1, 1), (1, 2, 2)}
+0
+Otherwise.
+As such, the ideal target function f (x) is given by applying
+1 at steps 1 and 2 (so (1) = (2) = 1). Even though the
+model may always achieve a perfect reward if it chooses
+task 1, it may also receive a positive reward half the time if
+it consistently selects the opposite task. We show that the
+model can easily converge to this local minimum and get
+stuck.
+Consider initial parameters such that for some p0 (0, 1),
+for any xs1, the probability of picking the correct task is
+given by p0. The quality of the base model is determined by
+p0, where a larger p0 indicates a better base model. We now
+show how p0 impacts the performance of RLVR.
+Proposition 6.3. In the setting above, consider initial pa-
+rameters such that for some p0 (0, 1), for any xs1, the
+probability of picking the correct task (task 1) is given by
+p0. Then for any step size  > 0,
+lim
+tlim
+BP(t) (V (xS) = 1) =
+(
+1
+2
+if p0 < 1
+3
+1
+if p0 > 1
+3.
+The proof is presented in Section D. Interestingly, in this
+setting, the success of RLVR depends on the quality of
+the base model. The proof is based on showing that the
+task-advantage ratio for the correct task is bigger than 1
+throughout training if the base model picks the correct task
+with sufficiently large probability, and conversely is smaller
+than 1 throughout training if this is not the case.
+This may serve as an explanation for why RLVR is often
+observed in practice to be highly sensitive to the base model
+(Yue et al., 2025). If the base model is poor, choosing the
+correct task at any step may not present a clear advantage in
+terms of final reward. When the model can receive positive
+rewards on suboptimal CoTs that lead to the correct solution
+some of the time, the RLVR dynamics may increase the
+probability of sampling these suboptimal CoTs instead of
+sampling the correct one.
+7. Discussion
+We introduced a tractable abstraction for RLVR in which

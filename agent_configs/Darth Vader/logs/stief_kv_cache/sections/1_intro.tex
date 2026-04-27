@@ -1,0 +1,29 @@
+\section{Introduction}
+\label{sec:intro}
+Large language models (LLMs)~\cite{touvron2023llama2openfoundation, grattafiori2024llama3herdmodels} achieve strong performance across a wide range of language tasks, and are increasingly deployed in interactive and long-context settings.
+Yet, long-context inference is often bottlenecked by memory capacity and bandwidth.
+
+In particular, during autoregressive decoding, to avoid recomputing past tokens keys and values for each new generated token in attention layers, those projections are usually stored in a Key Value (KV) cache.
+% In particular, during autoregressive decoding, attention layers~\cite{VaswaniAttention} require the availability of key and value projections from all previous tokens, together with the current token's query. To avoid recomputing past keys and values for each new generated token, those projections are usually stored in a Key Value (KV) cache.
+% 
+While this greatly reduces compute, the KV cache size grows linearly with both sequence length and batch size~\cite{scalingLLM}: for example, even for a relatively small model such as Llama3-8B with Grouped-Query Attention (GQA), caching keys and values in half-precision at a relatively short context length $32{,}768$ and assuming a batch size of $4$ requires $\approx 16$\,GB, comparable to the model's fp16 weights footprint. This pressure becomes more pronounced as context lengths continue to increase~\cite{openrouter}, potentially exceeding available High Bandwidth Memory (HBM) capacity and bandwidth.
+
+To mitigate the memory-occupancy issues, high data-transfer latency, and energy consumption associated with KV caching, one approach is to reduce KV cache memory \emph{by design} via architectural changes that cache low-dimensional latent states rather than full keys and values.
+Multi-Head Latent Attention (MLA) is a representative example~\cite{deepseekv2}, which however requires re-training to adapt to the modified attention mechanism.
+TransMLA~\cite{transmla} converts a model to MLA post-training, yet still relies on a fine-tuning stage for adaptation.
+
+In this paper, we focus instead on post-training methods, that operate on a fixed pre-trained model. %, without the need for expensive re-training.
+Within this category, several optimization axes have been explored, including quantization~\cite{hooper2024kvquant, LiuIcml24}, token eviction~\cite{streamingLLM, h2o}, and context sharing~\cite{ZhengNips24}. Orthogonal to these methods, recent work focuses on compressing the embedding dimension of the KV cache~\cite{asvd, chang2025palu, saxena2024eigenattention}. This is achieved applying low-rank matrix decomposition techniques, such as Singular Value Decomposition (SVD), to reduce KV cache size, with an objective function that minimizes the compression error of key and value vectors. Although these methods reduce KV cache size by up to 1.67$\times$~\cite{saxena2024eigenattention}, they often suffer from significant accuracy drops, which hinder their effectiveness.
+
+In this paper, we argue that the accuracy degradation observed in SVD-based compression techniques primarily stems from their proxy optimization objectives. 
+Minimizing reconstruction error for each cached key or value vector can yield low per-vector distortion, but it does not model how these distortions interact with the attention softmax, value mixing, and subsequent decoder-layer computations (normalization, residual pathways, and nonlinearities).
+Consequently, a projection that is optimal under a proxy reconstruction objective can still induce a large decoder-layer output error, which compounds across depth and ultimately degrades end-to-end generation quality.
+
+To address this mismatch, we propose \textit{\methodname}, a post-training KV cache compression method that \textbf{minimizes error directly at the decoder layer output}. Our method trains a lightweight predictor using activation statistics to find optimal orthonormal projection bases lying on the Stiefel manifold~\cite{stella}. At inference time, keys and values are stored in compressed form, resulting in a significant reduction in HBM footprint and bandwidth requirements. We evaluate {\methodname} on Llama3-8B and compare it to EigenAttention under the same KV budget, finding improved end-to-end quality and better layer-output reconstruction quality under KV cache compression.
+
+Our contributions are:
+\begin{itemize}
+    \item We study KV cache compression along the per-head feature dimension under a layer-wise \emph{decoder-layer output} reconstruction error budget.
+    \item We introduce \textit{\methodname}, which learns orthonormal bases from activation statistics and improves end-to-end quality at matched KV cache budgets (e.g., $-11.9$ C4 perplexity and $+5.4$ MMLU points vs.\ EigenAttention).
+    \item We provide analyses showing that optimizing decoder-layer outputs improves directional consistency ($+3.3\%$ cosine similarity and $5.2\%$ lower layer-output error), even though SVD-style methods better reconstruct attention outputs ($29.6\%$ lower attention-output error).
+\end{itemize}

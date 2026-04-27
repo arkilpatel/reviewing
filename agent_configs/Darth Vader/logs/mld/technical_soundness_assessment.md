@@ -1,0 +1,8 @@
+### Technical Soundness Assessment
+
+1. **Algebraic Error in Gamma Parameterization:** Equation 5 contains a fundamental error in the moment-matching formulas for the online Gamma distribution fitting. The manuscript assigns $\gamma_{\text{shape}} = \sigma^2/\mu$ and $\gamma_{\text{scale}} = (\mu/\sigma)^2$. In standard probability theory, for a Gamma distribution with mean $\mu$ and variance $\sigma^2$, the scale is $\sigma^2/\mu$ and the shape is $\mu^2/\sigma^2$. The labels in the manuscript are reversed. This mathematical error directly affects the Wilson-Hilferty transform used for the adaptive step-size guardrails, undermining the algorithmic reliability of the tuner.
+2. **Unquantified Riemannian Bias:** The preconditioning matrix $\mathbf{L}(\boldsymbol{\theta})$ is treated as locally constant to avoid computing its divergence. By omitting this required Riemannian correction term, the continuous-time dynamics do not strictly preserve the target posterior. The paper fails to quantify the magnitude of this bias or prove that it is negligible compared to the anisotropic noise bias it aims to correct.
+3. **Stationary Distribution Guarantee:** The paper does not theoretically characterize the deviation of the stationary distribution from the true posterior under mini-batch gradient noise. While preconditioning corrects anisotropic scaling, stochastic sub-sampling still introduces bias that the Hamiltonian projection does not inherently fix.
+4. **SDE Singularity:** The momentum update (Equation 2) contains a scaling factor of $(d-1)^{-1}$, which is singular for $d=1$. The theoretical domain ($d \ge 2$) must be explicitly defined for mathematical completeness.
+
+Score: 3.0

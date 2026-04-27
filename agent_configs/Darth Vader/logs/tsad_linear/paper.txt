@@ -1,0 +1,3110 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Strong Linear Baselines Strike Back:
+Closed-Form Linear Models as Gaussian Process
+Conditional Density Estimators for TSAD
+Anonymous Authors1
+Abstract
+Research in time series anomaly detection
+(TSAD) has largely focused on developing
+increasingly sophisticated, hard-to-train, and
+expensive-to-infer neural architectures. We re-
+visit this paradigm and show that a simple lin-
+ear autoregressive anomaly score with the closed-
+form solution provided by ordinary least squares
+(OLS) regression consistently matches or outper-
+forms state-of-the-art deep detectors. From a the-
+oretical perspective, we show that linear models
+capture a broad class of anomaly types, estimat-
+ing a finite-history Gaussian process conditional
+density. From a practical side, across extensive
+univariate and multivariate benchmarks, the pro-
+posed approach achieves superior accuracy while
+requiring orders of magnitude fewer computa-
+tional resources. Thus, future research should
+consistently include strong linear baselines and,
+more importantly, develop new benchmarks with
+richer temporal structures pinpointing the advan-
+tages of deep learning models.
+1. Introduction
+Time series anomaly detection (TSAD) emerges in safety-
+and reliability-critical applications, including predictive
+maintenance in industrial IoT, early warning in health-
+care monitoring, and fraud detection in finance (Zaman-
+zadeh Darban et al., 2024). Data there are complex: often
+they are high-dimensional, non-stationary, and noisy. Mo-
+tivated by this finding, recent research has shifted toward
+deep learning methods designed to capture complex tempo-
+ral patterns.
+Early statistical approaches – including autoregressive mod-
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+els (AR) (Rousseeuw & Leroy, 2003), density-based meth-
+ods such as Sub-LOF (Breunig et al., 2000), and nearest-
+neighbor search, exemplified by Matrix Profile (Zhu et al.,
+2018), laid the foundation for anomaly scoring but were
+soon eclipsed by neural architectures capable of richer fea-
+ture extraction.
+A more recent method has introduced
+deep learning to these core prediction, reconstruction,
+and density estimation ideas (Zamanzadeh Darban et al.,
+2024).
+Prediction-based approaches leverage recurrent
+and attention mechanisms to forecast future values, e.g.,
+LSTMAD (Malhotra et al., 2015), TimesNet (Wu et al.,
+2022), and OFA (Zhou et al., 2023). Transformer-based
+detectors such as the Anomaly Transformer (Xu et al.,
+2021) and TFAD (Zhang et al., 2022) quantify associa-
+tion discrepancies or exploit hybrid time–frequency fea-
+tures.
+Reconstruction-based paradigms employ autoen-
+coders (Ng et al., 2011; Malhotra et al., 2016), variational
+models such as Donut (Xu et al., 2018c) or FCVAE (Wang
+et al., 2024).
+Recent additions like TShape and KAN-
+AD (Zhou et al., 2024) incorporate patch-wise attention
+and parameter-efficient reasoning, respectively. While in-
+creasing benchmark scores, the growing architectural com-
+plexity raises several questions. First, incremental gains
+on standard benchmarks often reflect saturation rather than
+breakthroughs, especially in the absence of strong base-
+lines. Second, pointwise metrics such as Best-F1 (Xu et al.,
+2018b; Si et al., 2024) can obscure true event-level quality
+and reward overfitting. Last but not least, deep detectors are
+resource-intensive and highly sensitive to hyperparameters,
+which complicates practical deployment.
+While a similar stock of deep learning methods emerged
+in long-term time series forecasting, researchers there have
+reported an interesting phenomenon. (Zeng et al., 2023)
+showed that a one-layer linear model outperforms sophisti-
+cated Transformer architectures on long-range forecasting
+benchmarks. (Toner & Darlow, 2024) further explore sim-
+ple models: they tie most of them to an equivalent OLS
+regression problem, differing only in minor architectural
+details, and show, that using the available closed-form solu-
+tion OLS solutions helps to further outperform deep models.
+However, for anomaly detection, we would expect richer
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+families of possible anomaly types — and therefore suffi-
+ciently complex TSAD problems, deep architectures can be
+justified. On the one hand, more advanced benchmarking
+appeared in the TSAD domain augmented with the demon-
+stration of the strength of linear models (Liu & Paparrizos,
+2024). On the other hand, the piece of evidence reported a
+need for deep models in some problems there.
+Our findings explore the heavy reliance on architectural so-
+phistication in the TSAD field and its necessity. We revisit
+the field not by introducing another architecture, but by ex-
+ploring ordinary least squares (OLS)-based linear regression
+applied to lagged time-series features for TSAD with appro-
+priate regularization and optimization procedure. The linear
+model consistently outperforms state-of-the-art deep detec-
+tors across both univariate and multivariate TSAD bench-
+marks, widely used in recent studies (Zhou et al., 2024).
+Beyond accuracy, OLS-based detection is orders of magni-
+tude more efficient and robust, as it is based on an analytical
+solution.
+Our analysis extends beyond empirical comparisons to clar-
+ify why such a simple model can be successful. Drawing
+on Gaussian process (Williams & Rasmussen, 2006) the-
+ory and its connection with the interpolation theory (Zayt-
+sev & Burnaev, 2017), we show that the introduced linear
+model enjoys the minimal risk under the assumption that the
+anomaly corresponds to the low conditional density of obser-
+vations. This finding holds for the wide range of functions,
+which are dense in the space of continuous functions (Van
+Der Vaart et al., 2008), and can handle periodicity and noise
+in sequential observations. Such an approach can be gen-
+eralized to cases where change points in the function are
+observed (Saatc¸i et al., 2010). On the other hand, we dis-
+cuss how appropriate is linear models for more complex
+anomaly types, proposing focusing on anomaly types that
+would likely benefit from more complex models.
+In light of these findings, we propose a recalibration of
+TSAD research: appropriate linear baselines must be in-
+cluded in future evaluations, and new benchmarks should
+feature richer temporal structures that expose the advantages
+of deep models.
+Our main claims are the following:
+• Our simple linear regression model trained via ordi-
+nary least squares (OLS) or reduced-rank regression
+(RRR) with the past history as features achieves state-
+of-the-art results in a wide range of univariate and
+multivariate TSAD benchmarks, consistently outper-
+forming recent deep learning detectors while being
+orders of magnitude more efficient. Thus, future evalu-
+ations in TSAD should include strong linear baselines
+and develop benchmarks with richer temporal struc-
+tures to pinpoint the advantages of deep models that
+originate from the inherent complexity of considered
+problems.
+• The major source of improvement for the introduced
+model is the use of closed-form analytical solutions for
+estimating model parameters, which guarantees opti-
+mal solutions and eliminates the instability associated
+with gradient-based optimization.
+• Despite the model simplicity, we prove that such mod-
+els can reliably capture a broad class of anomalies
+as a conditional density estimator, using a theoreti-
+cal perspective that links OLS-based autoregression to
+Gaussian process realizations, the first time according
+to our knowledge.
+2. Background & Literature Review
+TSAD is commonly organized into three families: statistical,
+prediction-based, and reconstruction-based. Each making
+distinct assumptions about how normality is modeled and
+how deviations should be scored. Statistical methods moni-
+tor local density or neighborhood structure; prediction-based
+methods forecast the next value and alarm on large residu-
+als; reconstruction-based methods learn an autoencoding of
+normal behavior and flag poorly reconstructed windows.
+Statistical. Sub-LOF (Breunig et al., 2000) flags density de-
+viations locally; SAND (Boniol et al., 2021) clusters subse-
+quences by shape in streaming settings; Matrix Profile (Zhu
+et al., 2018) scores each window by its nearest-neighbor
+distance. They are lightweight but can struggle with high-
+dimensional multivariate drift.
+Prediction-based. Classical AR (Rousseeuw & Leroy,
+2003) models provide robust linear baselines;
+LST-
+MAD (Malhotra et al., 2015) captures nonlinear dynamics;
+TimesNet (Wu et al., 2022) brings 2D “vision-style” tem-
+poral variation; OFA (Zhou et al., 2023) frames many TS
+tasks under a pretrained LM; Transformer detectors like
+Anomaly Transformer (Xu et al., 2021) further quantify
+association discrepancies; TFAD (Zhang et al., 2022) cou-
+ples time–frequency decomposition with detection. Recent
+works KAN-AD (Zhou et al., 2024) boost detection accuracy
+with orders-of-magnitude fewer parameters – both comple-
+ment linear readouts by clarifying where deviations arise.
+Long-horizon forecasters are increasingly repurposed for de-
+tection by thresholding forecast residuals. Autoformer (Wu
+et al., 2021) introduces an Auto-Correlation mechanism
+with progressive decomposition for long-term forecasting,
+alleviating pointwise attention bottlenecks and improving
+periodic pattern capture. ModernTCN (Luo & Wang, 2024)
+revisits temporal convolutions with a modern, pure-CNN
+block that scales receptive fields and cross-variable coupling,
+yielding state-of-the-art tradeoffs across forecasting, impu-
+tation, classification, and anomaly detection. In contrast,
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+CATCH (Wu et al., 2025) targets TSAD directly: it patchi-
+fies the frequency domain and fuses channels via masked
+attention to capture fine-grained spectral characteristics and
+channel correlations – key for heterogeneous multivariate
+anomalies.
+Reconstruction-based. Autoencoders such as AE (Ng
+et al., 2011) and EncDecAD (Malhotra et al., 2016) learn
+normal reconstructions; TranAD (Tuli et al., 2022) adds ad-
+versarial training; Donut (Xu et al., 2018c) uses a VAE for
+seasonal KPIs; and FCVAE (Wang et al., 2024) strengthens
+this line by decomposing signals into frequency components
+to model uncertainty. Industrial deployments such as SR-
+CNN (Ren et al., 2019) blend signal transforms with neural
+scoring and are widely used in practice.
+3. Methods
+3.1. Problem Setup
+Let {yt}T
+t=1 be a univariate (d = 1) or multivariate (d > 1)
+time series with yt ∈Rd. We fix an autoregressive order
+p ≥1, which specifies how many past observations are used
+as predictors. To capture temporal dependencies, we define
+lagged feature vectors
+xt =
+ 1, y⊤
+t−1, . . . , y⊤
+t−p
+⊤∈R1+dp,
+and collect all T −p samples into feature and response
+matrices as:
+X =
+
+
+x⊤
+p+1
+...
+x⊤
+T
+
+∈R(T −p)×(1+dp), Y =
+
+
+y⊤
+p+1
+...
+y⊤
+T
+
+∈R(T −p)×d.
+3.2. Linear Modeling with OLS and RRR
+We use a linear predictor based on lagged features xt:
+yt = W ⊤xt + εt,
+εt ∼N(0, σ2Id),
+(1)
+where W ∈R(1+dp)×d denotes the matrix of regression
+coefficients. Anomalies are scored using the squared pre-
+diction error, a standard practice in time series anomaly
+detection:
+st =
+yt −W ⊤xt
+2
+F .
+(2)
+Ordinary Least Squares (OLS).
+Under the Gaussian
+noise assumption, the maximum likelihood estimate corre-
+sponds to minimizing the squared Frobenius norm:
+L(W) = ∥Y −XW∥2
+F .
+(3)
+The minimizer of L(W) has a closed form, known as the
+ordinary least squares estimator:
+ˆWOLS = arg min
+W ∥Y −XW∥2
+F =
+=
+ X⊤X
+−1 X⊤Y.
+(4)
+In practice, however, the matrix X⊤X may be ill-
+conditioned or singular. To address this, we use a small
+ridge regularization for numerical stability:
+ˆWridge = arg min
+W ∥Y −XW∥2
+F + λ∥W∥2
+F
+= (X⊤X + λI)−1X⊤Y.
+(5)
+In our experiments, λ is chosen to be very small, so
+the method remains effectively OLS, while ensuring well-
+conditioned matrix inversion.
+Reduced-Rank Regression (RRR).
+For multivariate out-
+puts, different series often share common temporal patterns,
+suggesting that the coefficient matrix W in (1) may be effec-
+tively low-rank. To exploit this latent structure and reduce
+the number of free parameters, we consider reduced-rank
+regression (Izenman, 1975):
+ˆWRRR = arg
+min
+rank(W )≤r ∥Y −XW∥2
+F .
+We can decompose the loss around the OLS solution 4:
+∥Y −XW∥2
+F = ∥Y −X ˆWOLS∥2
+F
+|
+{z
+}
+constant w.r.t. W
++∥X ˆWOLS −XW∥2
+F .
+Since the first term does not depend on W, minimizing the
+loss reduces to finding a rank-r approximation of X ˆWOLS
+in Frobenius norm.
+Let X ˆWOLS = UΣV ⊤be the singular value decomposition
+(SVD). By the Eckart–Young theorem (Golub & Van Loan,
+2013), the best rank-r approximation is UrΣrV ⊤
+r , yielding
+ˆWRRR = ˆWOLSVrV ⊤
+r ,
+where VrV ⊤
+r projects onto the r-dimensional subspace cap-
+turing the main latent factors. For numerical stability, we
+replace ˆWOLS with the weakly ridge-regularized estimate
+ˆWridge from (5).
+3.3. Computational Complexity
+Assuming T ≫dp, OLS costs O(T(dp)2), while RRR
+adds a full-rank (in worst case) SVD of ˆY = X ˆWOLS ∈
+R(T −p)×d, costing O(Td2). Both methods scale linearly
+with T and polynomially with dp, making them simple,
+efficient, and practical baselines.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+3.4. Linear models justification
+A natural question is what kinds of anomalies a linear au-
+toregression can detect? To answer this, we connect our
+OLS and RRR with Gaussian process (GP) (Williams &
+Rasmussen, 2006) modeling and conditional density-based
+anomaly detection. We start with a principled approach in a
+univariate case, then extend to multivariate and reduced-rank
+multivariate cases with the later two resulting in anomaly
+score for OLS and RRR approaches correspondingly.
+3.4.1. UNIVARIATE CONDITIONAL DENSITY
+ESTIMATION
+We assume the target function is a realization of a stationary
+GP f(t) ∼GP(0, k(t, t′)), t ∈R. The covariance function
+that doesn’t depend on the location of t and t′, but only on
+their difference t −t′. We observe the GP realization at a
+uniform grid D = {(t = i, yi)}T
+i=1. For any i, the posterior
+conditional on all other points is
+p(yi | D−i) = N(yi | m(i), σ2(i)),
+with mean m(i) = k⊤
+i K−1
+−i y−i and variance σ2(i) =
+k(i, i) −k⊤
+i K−1
+−i ki, where ki = {k(i, j)}j̸=i and K−i =
+{k(j, j′)}j,j′̸=i. A natural anomaly score is the negative
+log-likelihood
+s(yi) = −log p(yi | D−i) =
+= 1
+2
+"
+log(2πσ2(i)) + (yi −m(i))2
+σ2(i)
+#
+.
+(6)
+In anomaly detection, we cannot condition on the fu-
+ture. Restricting to the last h lags, Di−h:i−1 = {(xj =
+j, yj)}i−h≤j<i, corresponds to marginalizing out all other
+observations, yielding a Gaussian:
+p(yi | Di−h:i−1) =
+=
+Z
+p(yi | D−i)p(D−i | Di−h:i−1)dD−i =
+= N
+ yi | mh(i), σ2
+h
+
+with mh(i)
+=
+k⊤
+h K−1
+h yi−h:i−1, σ2
+h
+=
+k(i, i) −
+k⊤
+h K−1
+h kh, and blocks kh = {k(i, j)}i−h≤j<i, Kh =
+{k(j, j′)}i−h≤j,j′<i. For a stationary GP, kh, Kh don’t de-
+pend on i, and for most kernels, like squared exponential and
+Matern, recent lags correspond to the major part of the spec-
+trum. The mean can be written as mh(i) = α⊤
+h yi−h:i−1, a
+linear function with coefficients αh = K−1
+h kh independent
+of the index i. Hence, estimating αh corresponds exactly
+to fitting a linear regression on the lagged features, as we
+do in (1). The latter anomaly score in (6) reduces, up to an
+additive constant, to the squared prediction error:
+s(yi) ∼(yi −mh(i))2,
+recovering the linear model-based anomaly score (2).
+Thus, the GP-based anomaly score, when restricted to a
+fixed window, is equivalent to the squared error of a linear
+model, regardless of the underlying kernel’s complexity.
+This means that the rich class of anomalies detectable by
+a full density GP is, in the finite-history setting, ultimately
+captured by a simple linear form.
+3.4.2. MULTIVARIATE CONDITIONAL DENSITY
+ESTIMATION
+Now, let us provide a unified probabilistic interpretation of
+OLS for multivariate time series anomaly detection, con-
+necting finite-history conditional density estimation to multi-
+output Gaussian processes.
+Let yt ∈Rd be a multivariate time series and Xt =
+[1, y⊤
+t−1, . . . , y⊤
+t−h]⊤the vector of lagged observations. As-
+sume that yt is generated from a latent stochastic process
+and that anomalies correspond to low conditional density
+events.
+A common anomaly score is the negative log-
+likelihood under these probabilistic assumptions:
+st = −log p(yt | Xt).
+(7)
+Consider a vector-valued stationary Gaussian process under
+a linear model of coregionalization (LMC):
+f(t) ∼GP
+
+0,
+Q
+X
+q=1
+kq(t, t′)Bq
+
+,
+(8)
+where kq are stationary kernels on the time indices and Bq ∈
+Rd×d are positive semidefinite coregionalization matrices.
+Conditioning the GP on a finite history window of size h
+yields a Gaussian posterior:
+p(yt | Xt) = N
+ W⊤Xt, Σh
+
+,
+(9)
+The posterior covariance depends only on the kernels, the
+coregionalization matrices, and the window size. Due to
+stationarity and uniform sampling, Σh is constant across
+time. If we assume a diagonal form for Σh and homoscedas-
+ticity, the negative log-likelihood reduces, up to an additive
+constant, to the squared prediction error:
+st ∝∥yt −W⊤Xt∥2
+2.
+3.4.3. LOW-RANK COREGIONALIZATION
+In multivariate systems, different channels often share a
+small number of latent temporal patterns. This is captured
+by the classical linear model of coregionalization (8), which
+is widely used to model shared structure across outputs due
+to its efficiency and deep roots in real-life dependencies
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+(Bonilla et al., 2008; ´Alvarez et al., 2012). Each temporal
+kernel kq defines a temporal pattern, while the rank of its
+coregionalization matrix Bq indicates the number of inde-
+pendent spatial directions along which it influences the chan-
+nels. Having a small number of temporal patterns Q with
+low-rank coregionalization matrices Bq allows the model
+to flexibly capture complex spatio-temporal dependencies,
+while keeping it parsimonious.
+Under the low-rank coregionalization assumption, the pos-
+terior mean (9) satisfies the rank constraint
+rank(W) ≤
+Q
+X
+q=1
+rank(Bq) ≤r ≪d,
+and the maximum likelihood estimation of the conditional
+mean reduces to
+c
+W = arg
+min
+rank(W)≤r ∥Y −XW∥2
+F ,
+(10)
+which is exactly the reduced-rank regression problem (Izen-
+man, 1975).
+Thus, RRR-based anomaly scores can be
+viewed as a natural approximation for a multi-output Gaus-
+sian process with low-rank coregionalization.
+3.4.4. INTERPRETATION
+Typically, anomalies are classified into several types: point
+anomalies, point-context anomalies, pattern-shape anoma-
+lies, pattern-seasonal anomalies, and pattern-trend anoma-
+lies, etc. (Liu & Paparrizos, 2024). All of them admit a
+unified probabilistic interpretation as events with low con-
+ditional probability given recent observations. A GP con-
+ditioned on a finite history window provides an explicit
+model for this conditional density: the posterior mean cap-
+tures expected local temporal dynamics, while the posterior
+variance defines a consistent uncertainty scale.
+Restricting conditioning to a finite window reduces the GP-
+based negative log-likelihood, up to additive constants, to
+the squared prediction error, which our OLS and RRR con-
+sider in univariate and multivariate settings. All anomaly
+types, if approximated properly (but not compromising the
+family of random processes considered), emerge as sus-
+tained violations of the temporal structure encoded by the
+conditional model. In the multivariate case, imposing a
+low-rank structure further improves robustness and statisti-
+cal efficiency by explicitly modeling shared latent temporal
+dynamics, an assumption established in multivariate geo-
+statistics (Wackernagel, 2003) and later formalized in multi-
+task and multi-output machine learning through low-rank
+coregionalization models ( ´Alvarez et al., 2012). While the
+individual connections between linear autoregression, Gaus-
+sian processes, and reduced-rank models are classical, their
+joint interpretation as a unified conditional density estimator
+for diverse complex anomaly types has not been previously
+articulated in the TSAD literature.
+4. Results
+4.1. Experimental Settings
+Datasets. To ensure comprehensive coverage of anomaly
+distributions, we have integrated a diverse suite of both
+univariate and multivariate benchmarks spanning multiple
+domains.
+Univariate. We adopt five annotated datasets, each empha-
+sizing different anomaly types and application contexts:
+• AIOPS (AIO, 2018): Sourced from five leading Inter-
+net firms (Sogou, eBay, Baidu, Tencent, Alibaba), this
+multidimensional collection comprises system logs, re-
+source metrics, and event traces. It challenges models
+with evolving distributions, and heterogeneous anoma-
+lies ranging from hardware faults to security breaches.
+• UCR (Wu & Keogh, 2021b): A canonical repository
+of 203 time-series across domains (such as power-grid,
+medical sensors, industrial IoT), each containing a sin-
+gle expert-verified anomaly interval. UCR measures
+a model’s generalization across distinct domains and
+anomaly types.
+• TODS (Lai et al., 2021): A synthetic suite in which
+anomalies are injected with precise control over sea-
+sonality, trend, and noise parameters. Its ground-truth
+clarity and tunable complexity enable incisive analysis
+of design components.
+• NAB (Ahmad et al., 2017): Streaming data from
+real-world AWS cloud metrics, social media activity,
+and IoT sensors, augmented with synthetic sequences.
+NAB reflects operational detection scenarios where
+real-time processing and hybrid anomaly sources coex-
+ist.
+• Yahoo (Laptev et al., 2015): Yahoo dataset encom-
+passes both real-world time series and synthetically
+generated datasets. The real data capture intricate hol-
+iday effects and infrastructure migrations, while the
+synthetic subset is designed to rigorously probe the
+sensitivity of models to controlled interventions.
+Each univariate time series is treated independently: we
+train a separate model instance per sequence and evaluate
+on its held-out test split. To ensure fairness and compa-
+rability, our training and evaluation protocol follows the
+EASYTSAD benchmark1.
+Multivariate. For the multivariate setting, we rely on five
+widely used benchmarks covering diverse domains and
+anomaly characteristics:
+1https://adeval.cstcloud.cn/
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+Table 1. Model F1-based metrics (↑) on six univariate datasets
+Method
+AIOPS
+NAB
+TODS
+UCR
+WSD
+Yahoo
+Average Rank
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+SubLOF
+0.7273
+0.4994
+0.2416
+0.9787
+0.3169
+0.0062
+0.7997
+0.7169
+0.5285
+0.8811
+0.4539
+0.5285
+0.8683
+0.4917
+0.3580
+0.5720
+0.5560
+0.4660
+11.50
+12.83
+14.50
+AR
+0.9106
+0.8411
+0.7262
+0.9985
+0.5113
+0.0881
+0.7302
+0.6240
+0.5462
+0.7190
+0.2741
+0.5462
+0.9766
+0.6534
+0.5702
+0.7425
+0.7299
+0.6810
+8.33
+8.00
+7.83
+POLY
+0.7256
+0.6343
+0.4172
+0.9976
+0.4591
+0.1034
+0.4344
+0.3659
+0.1719
+0.4216
+0.1383
+0.0049
+0.6280
+0.4253
+0.3113
+0.5223
+0.5156
+0.4172
+16.50
+17.33
+16.50
+AE
+0.8934
+0.8096
+0.6692
+0.9896
+0.4533
+0.0434
+0.8472
+0.7088
+0.5801
+0.7157
+0.2007
+0.5801
+0.9742
+0.6684
+0.5950
+0.6847
+0.6753
+0.6219
+10.33
+10.17
+9.17
+LSTMAD
+0.9395
+0.8791
+0.7648
+0.9907
+0.4894
+0.0645
+0.8295
+0.7402
+0.6633
+0.7763
+0.3583
+0.6633
+0.9875
+0.6690
+0.6139
+0.6096
+0.6044
+0.5464
+6.67
+5.50
+5.67
+PCA
+0.6172
+0.3460
+0.3207
+0.9752
+0.5517
+0.1379
+0.7401
+0.5998
+0.4298
+0.7103
+0.2819
+0.0836
+0.5970
+0.3155
+0.2412
+0.4463
+0.3969
+0.3084
+16.33
+12.67
+14.83
+EncDecAD
+0.9121
+0.8328
+0.7177
+0.9903
+0.5432
+0.0702
+0.7107
+0.5504
+0.4809
+0.6759
+0.2059
+0.4809
+0.9829
+0.6620
+0.6043
+0.5682
+0.5601
+0.4956
+11.50
+9.67
+9.17
+Donut
+0.8588
+0.7897
+0.6584
+0.9829
+0.5004
+0.1381
+0.8648
+0.7349
+0.5885
+0.7619
+0.2224
+0.5885
+0.9642
+0.6441
+0.5653
+0.7302
+0.7283
+0.6766
+9.67
+9.67
+7.17
+MatrixProfile
+0.1915
+0.0698
+0.0125
+0.7873
+0.3321
+0.0079
+0.5284
+0.4038
+0.1288
+0.7992
+0.2359
+0.1288
+0.1233
+0.0704
+0.0134
+0.3079
+0.2944
+0.1926
+18.33
+19.00
+20.83
+SRCNN
+0.4176
+0.1583
+0.0447
+0.8945
+0.3340
+0.0110
+0.6140
+0.4221
+0.1785
+0.7424
+0.2349
+0.1785
+0.4187
+0.1999
+0.0657
+0.2289
+0.1996
+0.1062
+17.83
+18.17
+19.00
+SAND
+0.2823
+0.0893
+0.0310
+0.6731
+0.2561
+0.0500
+0.5336
+0.5136
+0.2430
+0.7467
+0.5637
+0.2430
+0.1822
+0.1323
+0.0740
+0.5646
+0.5601
+0.4554
+18.00
+15.50
+18.17
+AT
+0.5924
+0.3500
+0.2184
+0.9762
+0.4263
+0.0284
+0.4808
+0.3184
+0.1401
+0.6806
+0.1368
+0.1400
+0.3986
+0.1323
+0.0639
+0.2644
+0.2517
+0.1793
+18.83
+20.00
+19.17
+TFAD
+0.3486
+0.1390
+0.0342
+0.9543
+0.3029
+0.0107
+0.6131
+0.4595
+0.2789
+0.6317
+0.1938
+0.2789
+0.8462
+0.5203
+0.4613
+0.8134
+0.8013
+0.7538
+15.50
+15.33
+14.17
+TranAD
+0.8029
+0.6469
+0.5786
+0.9961
+0.4594
+0.0332
+0.5305
+0.3945
+0.2174
+0.6184
+0.1937
+0.2174
+0.7698
+0.4398
+0.3813
+0.6111
+0.6003
+0.5417
+14.33
+15.50
+15.17
+TimesNet
+0.7853
+0.6969
+0.5941
+0.9901
+0.4347
+0.0595
+0.6602
+0.4731
+0.3199
+0.5999
+0.1789
+0.3199
+0.9015
+0.5782
+0.5345
+0.4976
+0.4902
+0.4551
+15.50
+15.83
+13.67
+DLinear
+0.9313
+0.8689
+0.7865
+0.9991
+0.5124
+0.1089
+0.8169
+0.7027
+0.6038
+0.7859
+0.3551
+0.1362
+0.9843
+0.6604
+0.5920
+0.7849
+0.7769
+0.7304
+4.50
+5.50
+7.33
+TSMixer
+0.8997
+0.8315
+0.7160
+0.9984
+0.5459
+0.1162
+0.7939
+0.6709
+0.6066
+0.7303
+0.2736
+0.0727
+0.9777
+0.6465
+0.5681
+0.7338
+0.7232
+0.6682
+8.17
+8.50
+9.83
+OFA
+0.8402
+0.7643
+0.6223
+0.9851
+0.4761
+0.0519
+0.7023
+0.5716
+0.4425
+0.6780
+0.1642
+0.4425
+0.9782
+0.6580
+0.5781
+0.7520
+0.7327
+0.6833
+11.50
+11.67
+10.67
+FITS
+0.9125
+0.8236
+0.6575
+0.9942
+0.4428
+0.0478
+0.7772
+0.5969
+0.5071
+0.7570
+0.3215
+0.5071
+0.9714
+0.6471
+0.5483
+0.8074
+0.7976
+0.7424
+7.67
+9.67
+10.17
+FCVAE
+0.9220
+0.8486
+0.7420
+0.9922
+0.4936
+0.1184
+0.8559
+0.7339
+0.6221
+0.8291
+0.3269
+0.6221
+0.9640
+0.6553
+0.5967
+0.7409
+0.7389
+0.6983
+6.83
+6.67
+4.50
+KANAD
+0.9458
+0.8790
+0.7848
+0.9911
+0.5075
+0.0618
+0.9469
+0.8356
+0.8456
+0.9050
+0.5217
+0.8356
+0.9867
+0.6607
+0.5997
+0.9597
+0.9553
+0.9439
+2.83
+3.00
+3.67
+OLS
+0.9418
+0.8716
+0.7927
+0.9979
+0.5016
+0.1173
+0.9100
+0.8322
+0.8266
+0.8332
+0.5020
+0.8266
+0.9877
+0.7284
+0.6613
+0.9695
+0.9648
+0.9534
+2.33
+2.83
+1.83
+Table 2. Model F1-based metrics (↑) on five multivariate datasets
+Method
+SMD
+MSL
+SMAP
+SWAT
+PSM
+Average Rank
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+Autoformer
+0.5449
+0.1149
+0.0061
+0.8549
+0.3260
+0.0218
+0.9516
+0.3366
+0.0147
+0.8520
+0.2634
+0.0073
+0.9037
+0.5504
+0.0193
+6.00
+6.00
+5.40
+TimesNet
+0.7137
+0.1630
+0.0070
+0.8475
+0.2893
+0.0203
+0.9368
+0.3068
+0.0101
+0.8823
+0.3840
+0.0047
+0.9540
+0.6571
+0.0162
+5.20
+4.80
+6.60
+OFA
+0.7181
+0.1498
+0.0092
+0.8749
+0.3854
+0.0273
+0.9472
+0.2947
+0.0107
+0.8936
+0.3887
+0.0065
+0.9699
+0.6473
+0.0310
+3.40
+4.80
+4.60
+ModernTCN
+0.6999
+0.1840
+0.0079
+0.8627
+0.3274
+0.0195
+0.9163
+0.2920
+0.0064
+0.8875
+0.3814
+0.0037
+0.9650
+0.6761
+0.0221
+5.00
+4.80
+6.60
+CATCH
+0.7520
+0.3918
+0.0781
+0.7403
+0.3350
+0.0873
+0.8054
+0.3294
+0.1075
+0.9138
+0.7669
+0.0471
+0.9232
+0.8050
+0.1357
+5.60
+2.60
+2.60
+KANAD
+0.6657
+0.1564
+0.0069
+0.8424
+0.2732
+0.0162
+0.9254
+0.3027
+0.0142
+0.9309
+0.4263
+0.0048
+0.9527
+0.5417
+0.0133
+5.40
+6.00
+6.80
+OLS
+0.8991
+0.5231
+0.3194
+0.9096
+0.3968
+0.0581
+0.7716
+0.2843
+0.1094
+0.9707
+0.8188
+0.1551
+0.9840
+0.5767
+0.3537
+3.10
+3.50
+1.80
+RRR
+0.8995
+0.4859
+0.3226
+0.9154
+0.3970
+0.0665
+0.7719
+0.2707
+0.1094
+0.9733
+0.8647
+0.1359
+0.9840
+0.5767
+0.3537
+2.30
+3.50
+1.60
+• SMD (Su et al., 2019): A large-scale dataset of server
+machine logs from an Internet company. It contains
+28 groups of multivariate sensor measurements with
+annotated anomalies caused by hardware and software
+faults.
+• MSL and SMAP (Hundman et al., 2018): Both datasets
+originate from NASA telemetry of spacecraft compo-
+nents. They include dozens of channels monitoring
+spacecraft systems, with anomalies reflecting system
+failures and sensor malfunctions.
+• SWAT (Mathur & Tippenhauer, 2016): Multivariate
+time series collected from a water treatment testbed,
+designed to simulate cyber-physical attacks and equip-
+ment faults. It is widely used to evaluate anomaly
+detection in industrial control systems.
+• PSM (Abdulaal et al., 2021): Real-world server met-
+rics from eBay’s production environment. It captures
+performance anomalies related to distributed system
+operations and large-scale web services.
+For multivariate time series, we follow the standard train-test
+splits commonly used in the literature. Models are trained
+on the training set and evaluated on the held-out test set to
+assess their performance.
+Baselines.
+We compare OLS against 21 baselines:
+SubLOF (Breunig et al., 2000), AR (Rousseeuw & Leroy,
+2003), POLY (Li et al., 2007), AE (Ng et al., 2011), LST-
+MAD (Malhotra et al., 2015), PCA (Aggarwal, 2016),
+EncDecAD (Malhotra et al., 2016), Donut (Xu et al.,
+2018c), MatrixProfile (Zhu et al., 2018), SRCNN (Ren
+et al., 2019), SAND (Boniol et al., 2021), AT (Xu et al.,
+2021), TFAD (Zhang et al., 2022), TranAD (Tuli et al.,
+2022), TimesNet (Wu et al., 2022), DLinear (Zeng et al.,
+2023), TSMixer (Chen et al.), OFA (Zhou et al., 2023),
+FITS (Xu et al., 2023), FCVAE (Wang et al., 2024) and
+KANAD (Zhou et al., 2024). For multivariate datasets
+we compare OLS and RRR against six baselines: Aut-
+oformer (Wu et al., 2021), TimesNet (Wu et al., 2022),
+OFA (Zhou et al., 2023), ModernTCN (Luo & Wang, 2024),
+CATCH (Wu et al., 2025) and KANAD (Zhou et al., 2024).
+For each baseline, we use recommended hyperparameters
+from the original papers.
+Metrics. To evaluate anomaly detection performance, we
+report three F1-type metrics in our tables: F1 – the classi-
+cal point-adjusted Best F1 score (Xu et al., 2018b), which
+counts a detection as correct if at least one point in a ground-
+truth anomalous interval is predicted; B-F-5 – the k-delay
+Best F1 (k = 5) on point-adjusted labels, which requires
+the first detected point to occur within the first 5 time steps
+of each anomalous interval; E-F-5 – the event-level k-delay
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+1
+3
+5
+7
+9
+11
+13
+15
+17
+19
+21
+23
+25
+27
+29
+31
+33
+POLY
+OLS
+Series2Graph
+CNN
+Sub-PCA
+SR
+MOMENT (FT)
+MOMENT (ZS)
+Sub-KNN
+KShapeAD
+KMeansAD
+MatrixProfile
+SAND
+LSTMAD
+USAD
+IForest
+TimesFM
+Sub-LOF
+Lag-Llama
+Chronos
+TimesNet
+AutoEncoder
+OmniAnomaly
+FITS
+Sub-MCD
+Sub-OCSVM
+OFA
+TranAD
+Sub-IForest
+Sub-HBOS
+LOF
+Donut
+AnomalyTransformer
+VUS-PR ranking, unvariate (all)
+1
+3
+5
+7
+9
+11
+13
+15
+17
+19
+21
+23
+25
+27
+29
+31
+33
+OLS
+TimesFM
+Chronos
+SR
+Lag-Llama
+CNN
+MatrixProfile
+KMeansAD
+IForest
+KShapeAD
+LSTMAD
+Sub-KNN
+Sub-MCD
+Sub-LOF
+POLY
+SAND
+MOMENT (FT)
+MOMENT (ZS)
+TimesNet
+Sub-OCSVM
+LOF
+OFA
+Series2Graph
+TranAD
+AutoEncoder
+FITS
+OmniAnomaly
+Sub-PCA
+Donut
+Sub-IForest
+Sub-HBOS
+AnomalyTransformer
+USAD
+VUS-PR ranking, univariate (point anomalies)
+1
+3
+5
+7
+9
+11
+13
+15
+17
+19
+21
+23
+25
+27
+29
+31
+33
+POLY
+Sub-PCA
+Series2Graph
+MOMENT (FT)
+OLS
+CNN
+MOMENT (ZS)
+SR
+Sub-KNN
+KShapeAD
+KMeansAD
+USAD
+MatrixProfile
+SAND
+LSTMAD
+IForest
+Sub-LOF
+AutoEncoder
+OmniAnomaly
+TimesFM
+TimesNet
+FITS
+Lag-Llama
+OFA
+Sub-MCD
+Sub-OCSVM
+Chronos
+Sub-IForest
+TranAD
+Sub-HBOS
+Donut
+LOF
+AnomalyTransformer
+VUS-PR ranking, univariate (sequence anomalies)
+1
+4
+7
+10
+13
+16
+19
+22
+25
+RRR
+CNN
+KMeansAD
+LSTMAD
+OLS
+PCA
+OmniAnomaly
+USAD
+AutoEncoder
+Donut
+CBLOF
+MCD
+EIF
+TranAD
+OCSVM
+RobustPCA
+COPOD
+IForest
+HBOS
+OFA
+FITS
+TimesNet
+KNN
+LOF
+AnomalyTransformer
+VUS-PR ranking, multivariate
+Figure 1. Critical Difference (CD) diagrams comparing the performance of OLS/RRR and baseline methods on the TSB-AD benchmark.
+Results are shown separately for univariate series (all anomalies), univariate series with point anomalies, univariate series with sequence
+anomalies, and multivariate series. Methods connected by a horizontal line are not significantly different according to the Nemenyi test
+(p < 0.05).
+F1 (k = 5), treating each contiguous anomalous interval as
+a single event.
+These metrics collectively account for conventional point-
+level accuracy, temporal responsiveness, and event-level
+detection, aligning evaluation with practical requirements in
+real-world anomaly detection scenarios. Full definitions and
+formal rules for these metrics are provided in Appendix A.
+TSB-AD.
+To further validate our models on a large-scale,
+diverse, and carefully curated benchmark, we evaluate on
+the TSB-AD (Liu & Paparrizos, 2024) datasets, which com-
+prises over 1000 univariate and multivariate time series
+across multiple domains. TSB-AD includes both point-level
+and segment-level anomalies, providing a rigorous test of
+models’ event-level detection and temporal responsiveness.
+For consistency with prior work on TSB-AD, we report
+results using the VUS-PR metric (Boniol et al., 2025), while
+on our main univariate and multivariate benchmarks we
+continue to report F1, B-F-5, and E-F-5. Our experiments
+confirm that the relative performance trends observed on the
+main datasets generalize to TSB-AD.
+4.2. Main results
+Table 1 presents a rigorous comparison of OLS against
+21 state-of-the-art baselines across five diverse anomaly
+detection datasets. OLS achieves the lowest average rank
+across all three metrics and obtains the highest mean E-F-5
+(0.6963) and B-F-5 (0.7335) scores, while achieving the
+second-highest mean F1 (0.9399), slightly below KANAD
+(0.9559).
+This demonstrates the accuracy of OLS in detecting anoma-
+lous events. Our method, relying on a single window-size
+hyperparameter, sets a new state-of-the-art in time- series
+anomaly detection, particularly for dynamic systems with
+complex local patterns. The consistent gains across metrics
+and datasets further confirm its suitability for operational
+deployments. An important observation emerges from the
+comparison between AR and OLS. While AR and DLinear
+employ a linear model discrepancy score and estimates pa-
+rameters via a gradient-based optimization, this approach
+yields results in lower performance compared to the closed-
+form OLS solution, highlighting the advantage of the ana-
+lytical formulation for accurately capturing anomalies.
+As shown in Table 2, these trends remain consistent in mul-
+tivariate TSAD scenarios as well. OLS consistently out-
+performs most baselines, confirming that analytical linear
+reconstruction remains highly competitive even in high-
+dimensional settings. RRR, which enforces a low-rank struc-
+ture on the model, further improves robustness under strong
+cross-channel correlations. Together, these results demon-
+strate that simple analytic models, when properly structured,
+are powerful and reliable tools for practical multivariate
+anomaly detection.
+To further evaluate robustness on modern real-world chal-
+lenges, we additionally conduct experiments on the recent
+and more comprehensive TSB-AD benchmark. Notably,
+while the original benchmark study highlights the strength
+of classical statistical baselines such as PCA and POLY, and
+even claims that deep learning methods dominate in point-
+anomaly and multivariate scenarios, our results provide a
+counter-example to this narrative. As shown in the CD
+diagrams in Figure 1, OLS remains highly competitive in
+univariate settings, achieving first place on point anomalies
+and strong performance in overall, although ranked lower on
+sequence anomalies. In the more complex multivariate case,
+RRR takes the top rank, demonstrating that well-structured
+linear statistical methods can outperform modern deep archi-
+tectures even on challenging industrial benchmark datasets.
+4.3. Discussion on OLS and Deep Learning Methods
+Table 3 slices evaluation by anomaly types, including point
+classes (global and context), and three pattern classes (shape,
+seasonal and trend) shown in Figure 2 . There are two
+consistent observations emerge. First, linear autoregres-
+sion (OLS) dominates point-type anomalies, achieving the
+best scores across all three metrics for both point-global
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+Table 3. F1 scores (↑) on univariate datasets across anomaly types
+Method
+Point-global
+Point-context
+Pattern-shape
+Pattern-seasonal
+Pattern-trend
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+F1
+B-F-5
+E-F-5
+AR
+0.6822
+0.3863
+0.3374
+0.5411
+0.5283
+0.4222
+0.7615
+0.4686
+0.1384
+0.9478
+0.6525
+0.3731
+0.8496
+0.2416
+0.1727
+LSTMADalpha
+0.7183
+0.4167
+0.3675
+0.5347
+0.5347
+0.4311
+0.6639
+0.4338
+0.1422
+0.9679
+0.6878
+0.2926
+0.9276
+0.2263
+0.0931
+AE
+0.7562
+0.4591
+0.4063
+0.3719
+0.3603
+0.2616
+0.7319
+0.1750
+0.0907
+0.8022
+0.4847
+0.0710
+0.7061
+0.0908
+0.0071
+EncDecAD
+0.6236
+0.3246
+0.2501
+0.3810
+0.2788
+0.1906
+0.4624
+0.1306
+0.0081
+0.8133
+0.3604
+0.0965
+0.7088
+0.0876
+0.0075
+SRCNN
+0.2399
+0.1759
+0.0865
+0.2819
+0.2763
+0.1696
+0.6076
+0.1852
+0.0147
+0.9436
+0.4058
+0.0577
+0.3892
+0.2754
+0.1105
+AT
+0.1875
+0.1341
+0.0815
+0.2657
+0.1621
+0.0988
+0.5385
+0.1061
+0.0083
+0.8472
+0.3038
+0.0400
+0.6947
+0.0946
+0.0058
+TranAD
+0.5910
+0.2893
+0.1972
+0.3154
+0.3053
+0.2028
+0.0658
+0.0420
+0.0025
+0.7032
+0.3000
+0.0156
+0.5519
+0.0212
+0.0008
+Donut
+0.7064
+0.4060
+0.3800
+0.3733
+0.3733
+0.2790
+0.7846
+0.2777
+0.1763
+0.8627
+0.4520
+0.0613
+0.8336
+0.0578
+0.0065
+FCVAE
+0.7399
+0.4400
+0.3650
+0.3718
+0.3573
+0.2613
+0.4971
+0.1951
+0.0189
+0.7926
+0.3815
+0.1551
+0.7415
+0.0986
+0.0109
+TimesNet
+0.7273
+0.4299
+0.4132
+0.3946
+0.3946
+0.3478
+0.6395
+0.0710
+0.0037
+0.7598
+0.2502
+0.0182
+0.6782
+0.0446
+0.0037
+FITS
+0.7716
+0.4744
+0.4490
+0.7275
+0.6104
+0.5091
+0.8220
+0.5841
+0.3999
+0.9668
+0.5232
+0.3281
+0.8080
+0.2654
+0.1209
+KANAD
+0.9004
+0.6131
+0.5926
+0.9374
+0.9360
+0.9094
+0.9817
+0.7342
+0.7713
+0.9947
+0.7187
+0.3649
+0.9871
+0.4444
+0.3063
+OLS
+0.9297
+0.6325
+0.6086
+0.9447
+0.9431
+0.9178
+0.9666
+0.6796
+0.4790
+0.9968
+0.8027
+0.3826
+0.8066
+0.3770
+0.2533
+and point-context, with sizeable gaps in event-aware scor-
+ing. Second, deep models excel on shape-type phenomena,
+where non-linear deformations within a contiguous event
+matter most; here KANAD attains the highest event level
+detection, while OLS remains competitive on pointwise met-
+rics but lags markedly on E-F-5. Pattern-seasonal is mixed,
+whereas pattern-trend favors KANAD on all three metrics,
+suggesting trend-coupled intra-window nonlinearity where
+parameterized priors over smooth, long-range dynamics
+help.
+Point-global
+Point-context
+Pattern-shape
+Pattern-seasonal
+Pattern-trend
+Figure 2. Examples of different types of anomalies.
+Why linear models win where they do.
+OLS-based lag
+regression estimates the conditional mean of the next ob-
+servation from a finite history and scores squared residuals,
+with a small ridge only for numerical stability. This closed
+form estimator is the maximum likelihood estimation under
+Gaussian noise and avoids the optimization instabilities that
+often plague deep detectors. In our pipeline, this simplicity
+translates to both robustness and speed. When restricting
+attention to an h-lag window, OLS on lagged features is
+equivalent to the finite-history posterior mean of a broad
+family of stationary Gaussian processes; the squared resid-
+ual is the negative log likelihood under that posterior. Thus,
+any anomaly that is a low conditional density event under
+such processes is well captured by a linear predictor with
+finite memory. Point-global and point-context deviations
+abrupt spikes, local level shifts, and simple contextual depar-
+tures fit precisely into this regime, hence the strong linear
+performance.
+Where deep models buy headroom.
+Event level suc-
+cess on pattern–shape and pattern–trend indicates situations
+where (i) the relevant evidence is distributed across a win-
+dow or a shape, (ii) the anomaly is partly invariant to time
+warps or frequency localized deformations, which looking
+at only a part of it does not constitute an anomaly, (iii) long
+range interactions and cross channel couplings fuel non
+linear effects that exceed finite order linear memory. Archi-
+tectures that encode patch level nonlinearity, cross channel
+attention, or frequency aware reasoning can shape a deci-
+sion surface that better aggregates weak, temporally spread
+cues into a single event hence KANAD’s higher E-F-5 in
+Pattern-shape and its lead in Pattern-trend.
+5. Conclusion
+We revisited time series anomaly detection (TSAD) through
+the lens of simplicity and showed that ordinary least squares
+(OLS) regression and reduced-rank regression (RRR) estab-
+lish a strong new baseline. Across diverse univariate and
+multivariate benchmarks, OLS consistently surpassed state-
+of-the-art deep detectors while being vastly more efficient,
+highlighting that progress in TSAD should be measured
+against principled baselines rather than architectural nov-
+elty.
+Our analysis traced these gains to the use of closed-form
+solutions, which guarantee optimal parameters and avoid the
+instability of gradient-based methods. Extending to multi-
+variate settings, RRR further improved robustness, with rank
+and window size tuning reflecting the temporal complexity
+of each dataset. From a theoretical perspective, we linked
+OLS-based autoregression to Gaussian process-based con-
+ditional density, showing why linear models capture many
+anomaly types while clarifying where deep models may still
+be needed.
+These findings naturally lead to two imperatives: strong
+linear baselines must be included in future evaluations, and
+new benchmarks should feature richer temporal structures
+that expose when deep architectures truly provide benefits
+due to their ability to model complex interdependices.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+References
+Aiops competition, 2018.
+https://github.com/
+huggingface/candle.
+Abdulaal, A., Liu, Z., and Lancewicki, T. Practical ap-
+proach to asynchronous multivariate time series anomaly
+detection and localization. In Proceedings of the 27th
+ACM SIGKDD conference on knowledge discovery &
+data mining, pp. 2485–2494, 2021.
+Aggarwal, C. C. Linear models for outlier detection. In
+Outlier analysis, pp. 65–110. Springer, 2016.
+Ahmad, S., Lavin, A., Purdy, S., and Agha, Z. Unsupervised
+real-time anomaly detection for streaming data. Neuro-
+computing, 262:134–147, 2017.
+´Alvarez, M. A., Rosasco, L., and Lawrence, N. D. Kernels
+for vector-valued functions: A review. Foundations and
+Trends in Machine Learning, 2012.
+Bonilla, E. V., Chai, K. M., and Williams, C. K. I. Multi-task
+gaussian process prediction. In NeurIPS, 2008.
+Boniol, P., Paparrizos, J., Palpanas, T., and Franklin, M. J.
+Sand: streaming subsequence anomaly detection. Pro-
+ceedings of the VLDB Endowment, 14(10):1717–1729,
+2021.
+Boniol, P., Krishna, A. K., Bruel, M., Liu, Q., Huang, M.,
+Palpanas, T., Tsay, R. S., Elmore, A., Franklin, M. J.,
+and Paparrizos, J. Vus: effective and efficient accuracy
+measures for time-series anomaly detection. The VLDB
+Journal, 34(3):32, 2025.
+Breunig, M. M., Kriegel, H.-P., Ng, R. T., and Sander, J. Lof:
+identifying density-based local outliers. In Proceedings
+of the 2000 ACM SIGMOD international conference on
+Management of data, pp. 93–104, 2000.
+Chen, S.-A., Li, C.-L., Arik, S. O., Yoder, N. C., and Pfis-
+ter, T. Tsmixer: An all-mlp architecture for time se-
+ries forecast-ing. Transactions on Machine Learning
+Research.
+Golub, G. H. and Van Loan, C. F. Matrix computations.
+JHU press, 2013.
+Hundman, K., Constantinou, V., Laporte, C., Colwell, I.,
+and Soderstrom, T. Detecting spacecraft anomalies us-
+ing lstms and nonparametric dynamic thresholding. In
+Proceedings of the 24th ACM SIGKDD international con-
+ference on knowledge discovery & data mining, pp. 387–
+395, 2018.
+Izenman, A. J. Reduced-rank regression for the multivariate
+linear model. Journal of Multivariate Analysis, 5(2):
+248–264, 1975.
+Lai, K.-H., Zha, D., Xu, J., Zhao, Y., Wang, G., and Hu,
+X. Revisiting time series outlier detection: Definitions
+and benchmarks. In Thirty-fifth conference on neural
+information processing systems datasets and benchmarks
+track (round 1), 2021.
+Laptev, N., Amizadeh, S., and Flint, I. Generic and scalable
+framework for automated time-series anomaly detection.
+In Proceedings of the 21th ACM SIGKDD international
+conference on knowledge discovery and data mining, pp.
+1939–1947, 2015.
+Li, Z., Ma, H., and Mei, Y. A unifying method for outlier
+and change detection from data streams based on local
+polynomial fitting. In Pacific-Asia Conference on Knowl-
+edge Discovery and Data Mining, pp. 150–161. Springer,
+2007.
+Liu, Q. and Paparrizos, J. The elephant in the room: Towards
+a reliable time-series anomaly detection benchmark. Ad-
+vances in Neural Information Processing Systems, 37:
+108231–108261, 2024.
+Luo, D. and Wang, X. Moderntcn: A modern pure convo-
+lution structure for general time series analysis. In The
+twelfth international conference on learning representa-
+tions, pp. 1–43, 2024.
+Malhotra, P., Vig, L., Shroff, G., Agarwal, P., et al. Long
+short term memory networks for anomaly detection in
+time series. In Proceedings, volume 89, pp. 94, 2015.
+Malhotra, P., Ramakrishnan, A., Anand, G., Vig, L., Agar-
+wal, P., and Shroff, G. Lstm-based encoder-decoder for
+multi-sensor anomaly detection. In Anomaly Detection
+Workshop at 33rd ICML, volume 1607, 2016.
+Mathur, A. P. and Tippenhauer, N. O. Swat: A water treat-
+ment testbed for research and training on ics security. In
+2016 international workshop on cyber-physical systems
+for smart water networks (CySWater), pp. 31–36. IEEE,
+2016.
+Ng, A. et al. Sparse autoencoder. CS294A Lecture notes, 72
+(2011):1–19, 2011.
+Ren, H., Xu, B., Wang, Y., Yi, C., Huang, C., Kou, X.,
+Xing, T., Yang, M., Tong, J., and Zhang, Q. Time-series
+anomaly detection service at microsoft. In Proceedings
+of the 25th ACM SIGKDD international conference on
+knowledge discovery & data mining, pp. 3009–3017,
+2019.
+Rousseeuw, P. J. and Leroy, A. M. Robust regression and
+outlier detection. John wiley & sons, 2003.
+Saatc¸i, Y., Turner, R. D., and Rasmussen, C. E. Gaussian
+process change point models. In Proceedings of the 27th
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+International Conference on Machine Learning (ICML-
+10), pp. 927–934, 2010.
+Si, H., Li, J., Pei, C., Cui, H., Yang, J., Sun, Y., Zhang,
+S., Li, J., Zhang, H., Han, J., et al. Timeseriesbench:
+An industrial-grade benchmark for time series anomaly
+detection models. In 2024 IEEE 35th International Sym-
+posium on Software Reliability Engineering (ISSRE), pp.
+61–72. IEEE, 2024.
+Su, Y., Zhao, Y., Niu, C., Liu, R., Sun, W., and Pei, D.
+Robust anomaly detection for multivariate time series
+through stochastic recurrent neural network. In Proceed-
+ings of the 25th ACM SIGKDD international conference
+on knowledge discovery & data mining, pp. 2828–2837,
+2019.
+Toner, W. and Darlow, L. N. An analysis of linear time
+series forecasting models. In International Conference
+on Machine Learning, pp. 48404–48427. PMLR, 2024.
+Tuli, S., Casale, G., and Jennings, N. R. Tranad: deep trans-
+former networks for anomaly detection in multivariate
+time series data. Proceedings of the VLDB Endowment,
+15(6):1201–1214, 2022.
+Van Der Vaart, A. W., Van Zanten, J. H., et al. Reproducing
+kernel hilbert spaces of gaussian priors. IMS Collections,
+3:200–222, 2008.
+Wackernagel, H. Multivariate Geostatistics. Springer, 2003.
+Wang, Z., Pei, C., Ma, M., Wang, X., Li, Z., Pei, D., Rajmo-
+han, S., Zhang, D., Lin, Q., Zhang, H., et al. Revisiting
+VAE for unsupervised time series anomaly detection: A
+frequency perspective. In Proceedings of the ACM Web
+Conference 2024, pp. 3096–3105, 2024.
+Williams, C. K. and Rasmussen, C. E. Gaussian processes
+for machine learning, volume 2. MIT press Cambridge,
+MA, 2006.
+Wu, H., Xu, J., Wang, J., and Long, M. Autoformer: Decom-
+position transformers with auto-correlation for long-term
+series forecasting. Advances in neural information pro-
+cessing systems, 34:22419–22430, 2021.
+Wu, H., Hu, T., Liu, Y., Zhou, H., Wang, J., and Long,
+M. Timesnet: Temporal 2d-variation modeling for gen-
+eral time series analysis. In The Eleventh International
+Conference on Learning Representations, 2022.
+Wu, R. and Keogh, E. J. Current time series anomaly detec-
+tion benchmarks are flawed and are creating the illusion
+of progress. IEEE transactions on knowledge and data
+engineering, 35(3):2421–2429, 2021a.
+Wu, R. and Keogh, E. J. Current time series anomaly detec-
+tion benchmarks are flawed and are creating the illusion
+of progress. IEEE transactions on knowledge and data
+engineering, 35(3):2421–2429, 2021b.
+Wu, X., Qiu, X., Li, Z., Wang, Y., Hu, J., Guo, C., Xiong,
+H., and Yang, B. Catch: Channel-aware multivariate
+time series anomaly detection via frequency patching.
+In The Thirteenth International Conference on Learning
+Representations, 2025.
+Xu, H., Chen, W., Zhao, N., Li, Z., Bu, J., Li, Z., Liu, Y.,
+Zhao, Y., Pei, D., Feng, Y., et al. Unsupervised anomaly
+detection via variational auto-encoder for seasonal kpis
+in web applications. In Proceedings of the 2018 world
+wide web conference, pp. 187–196, 2018a.
+Xu, H., Chen, W., Zhao, N., Li, Z., Bu, J., Li, Z., Liu, Y.,
+Zhao, Y., Pei, D., Feng, Y., et al. Unsupervised anomaly
+detection via variational auto-encoder for seasonal KPIs
+in web applications. In Proceedings of the 2018 world
+wide web conference, pp. 187–196, 2018b.
+Xu, H., Chen, W., Zhao, N., Li, Z., Bu, J., Li, Z., Liu, Y.,
+Zhao, Y., Pei, D., Feng, Y., et al. Unsupervised anomaly
+detection via variational auto-encoder for seasonal kpis
+in web applications. In Proceedings of the 2018 world
+wide web conference, pp. 187–196, 2018c.
+Xu, J., Wu, H., Wang, J., and Long, M. Anomaly trans-
+former: Time series anomaly detection with association
+discrepancy. arXiv preprint arXiv:2110.02642, 2021.
+Xu, Z., Zeng, A., and Xu, Q. Fits: Modeling time series
+with 10k parameters. arXiv preprint arXiv:2307.03756,
+2023.
+Zamanzadeh Darban, Z., Webb, G. I., Pan, S., Aggarwal,
+C., and Salehi, M. Deep learning for time series anomaly
+detection: A survey. ACM Computing Surveys, 57(1):
+1–42, 2024.
+Zaytsev, A. and Burnaev, E. Minimax approach to variable
+fidelity data interpolation. In Artificial Intelligence and
+Statistics, pp. 652–661. PMLR, 2017.
+Zeng, A., Chen, M., Zhang, L., and Xu, Q. Are transformers
+effective for time series forecasting? In Proceedings of
+the AAAI conference on artificial intelligence, volume 37,
+pp. 11121–11128, 2023.
+Zhang, C., Zhou, T., Wen, Q., and Sun, L. Tfad: A decom-
+position time series anomaly detection architecture with
+time-frequency analysis. In Proceedings of the 31st ACM
+international conference on information & knowledge
+management, pp. 2497–2507, 2022.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+Zhou, Q., Pei, C., Sun, F., Han, J., Gao, Z., Pei, D., Zhang,
+H., Xie, G., and Li, J. Kan-ad: time series anomaly de-
+tection with kolmogorov-arnold networks. arXiv preprint
+arXiv:2411.00278, 2024.
+Zhou, T., Niu, P., Sun, L., Jin, R., et al.
+One fits all:
+Power general time series analysis by pretrained LM.
+Advances in neural information processing systems, 36:
+43322–43355, 2023.
+Zhu, Y., Yeh, C.-C. M., Zimmerman, Z., Kamgar, K., and
+Keogh, E. Matrix profile xi: Scrimp++: time series motif
+discovery at interactive speeds. In 2018 IEEE interna-
+tional conference on data mining (ICDM), pp. 837–846.
+IEEE, 2018.
+A. Metrics
+To mitigate the inherent threshold-selection bias in anomaly
+detection systems (Xu et al., 2018b), we adopt the Best F1
+protocol: given continuous anomaly scores, we sweep a
+decision threshold over all possible values and report the
+maximum F1 score obtained. In all tables, the column de-
+noted by F1 corresponds to this classical point-adjustment
+Best F1: for each ground-truth anomalous interval, the de-
+tection is counted as correct as long as at least one time
+point within the interval is predicted as anomalous, regard-
+less of when the first alarm occurs. This is exactly the “Point
+Adjustment F1” metric widely used in AIOps benchmarks.
+However, prior work (Wu & Keogh, 2021a; Xu et al., 2018a)
+Ground Truth
+Detected Result
+Best F1
+Event F1
+Anomaly Point
+True Positive
+False Positive
+False Negative
+Best F1 - 2delay
+Figure 3. Score Machine.
+has shown that such point-adjusted Best F1 scores are sus-
+ceptible to artificial inflation, since long anomalous intervals
+are rewarded multiple times by redundant point-wise detec-
+tions. Moreover, practitioners care about detecting coherent
+anomalous events in a timely manner, rather than labeling
+every single anomalous point. To better align with this
+requirement, we additionally employ event-centric and time-
+sensitive variants. First, we use the Event F1 score (Si et al.,
+2024), which treats each maximal contiguous anomalous in-
+terval as a single event and measures precision or recall over
+events; a ground-truth event is considered detected if any
+prediction overlaps this interval, thereby decoupling event
+duration from the evaluation of detection capability. Follow-
+ing common practice in time-series anomaly detection for
+industrial systems, we evaluate models using F1-type scores
+computed over anomalous segments rather than individual
+time steps.
+Second, to explicitly encode the time-critical nature of
+anomaly detection, we adopt the F1 k-delay metric, a stricter
+evaluation protocol that enforces a delay constraint on suc-
+cessful detections. Under this protocol, an anomalous inter-
+val is counted as detected only if the first predicted alarm
+occurs within the first k time steps after the onset of that in-
+terval; alarms raised later than k steps are treated as misses.
+Concretely, the two delay-aware metrics reported in our ta-
+bles are denoted by B-F-5 and E-F-5. B-F-5 is the k-delay
+Best F1 on point-adjusted labels (also known as k-Delay
+Point Adjustment F1): it uses the same point-adjustment
+rule as F1, but requires the first detected anomalous point
+to fall within the first k = 5 time steps of each ground-truth
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+anomalous interval. E-F-5 is the event-level analogue, i.e.,
+the k-delay Event F1: each anomalous interval is treated as
+a single event, and it is counted as correctly detected only if
+an alarm is raised within the first k = 5 time steps after its
+onset.
+B. Rank selection for RRR-based approach
+Figure 5 shows that the optimal configuration of reduced-
+rank regression (RRR) is highly dataset-dependent. For
+example, MSL and SMAP achieve their best F1 scores
+with relatively low ranks, while SMD and SWAT benefit
+from higher-rank projections before performance saturates.
+Similarly, the effect of the temporal window size varies:
+smaller windows often yield competitive results on datasets
+with short-range dependencies (e.g., MSL, SMAP), whereas
+longer histories help capture the broader context required
+by SMD, PSM, and SWAT. These trends highlight that both
+the latent rank and the input window must be tuned to the
+temporal complexity of each dataset rather than treated as
+universal hyper-parameters.
+Table 4. Optimal hyperparameters for each multivariate dataset
+Dataset
+Window size
+Rank
+Preprocessing
+Difference order
+MSL
+64
+16
+Min-Max
+1
+PSM
+128
+32
+Standard
+0
+SMAP
+32
+8
+Min-Max
+1
+SMD
+64
+16
+Standard
+0
+SWAT
+256
+32
+Min-Max
+1
+Figure 4. The average scores of F1, F1-5, and E-F-5 under different
+window lengths
+C. Hyperparameter Sensitivity
+To study the robustness of different methods to the choice of
+temporal window length, we vary the sliding window size
+p ∈{16, 32, 64, 96, 128} while keeping all other hyperpa-
+rameters fixed. Under the same data splits and evaluation
+protocol, we report the average anomaly detection scores
+(using our main metric) for OLS, KANAD, POLY, and FC-
+VAE. As shown in Fig. 4, OLS exhibits strong robustness to
+the window length. Across p ∈[16, 128], the performance
+of OLS remains in a very narrow band. This indicates that,
+for the OLS, the exact value of p has limited impact on
+the detection performance. In practice, a moderately sized
+window is therefore sufficient to obtain near-optimal results
+without extensive tuning.
+D. Case Study
+Figure 6 shows a representative periodic time series with
+a localized spike-like deviation. We compare the anomaly
+score traces produced by (i) Transformer based detectors
+(Anomaly Transformer, TranAD), (ii) foundation models
+(OFA, TimesNet), and (iii) a simple linear baseline (OLS).
+A practically useful detector should raise one clear alarm
+for the anomalous segment while remaining quiet elsewhere.
+In this case, OLS produces an almost-flat score over normal
+cycles and a single, sharp peak aligned with the anomaly
+window. This behavior is desirable for operators: it implies
+high precision and a clean temporal localization of the inci-
+dent. In contrast, Transformer-based detectors tend to yield
+spiky and fragmented score patterns, which often produce
+multiple local peaks outside the anomalous window and
+split the anomaly response into several smaller peaks. Such
+scattered alarms are operationally expensive: they can trig-
+ger repeated incident tickets for the same root cause, inflate
+alert fatigue, and blur the onset time estimation. Similarly,
+large forecasting models may generate a dense set of peaks
+across the entire horizon, indicating that their residuals are
+sensitive not only to true deviations but also to benign local
+variations under periodicity.
+E. Efficiency Analysis
+Figure 6 summarizes the system-level trade-off across meth-
+ods using three dimensions: average detection score, infer-
+ence time, and model size. Among all evaluated methods,
+OLS achieves the best average score (0.7273) while remain-
+ing near the fastest (3.3537s) and extremely small in foot-
+print (0.02MB). Notably, OLS also dominates strong neural
+baselines: for example, it outperforms KANAD while be-
+ing faster and smaller. Compared with large models, the
+efficiency gap becomes dramatic: Anomaly Transformer re-
+quires 73.65s per run, and FITS requires 31.46s, yet both fail
+to deliver superior accuracy on average. Some large mod-
+els have substantial computational and memory footprints,
+but their average scores remain moderate. This indicates
+that the practical bottleneck in TSAD is often benchmark
+structure and anomaly type rather than raw model capac-
+ity. When deviations are well-captured by local conditional
+expectation, closed-form predictors can be both strong and
+stable.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Strong Linear Baselines Strike Back: Closed-Form Linear Models as Gaussian Process Conditional Density Estimators for TSAD
+0
+10
+20
+30
+40
+50
+Rank
+0.84
+0.86
+0.88
+0.90
+F1 Score
+MSL
+0
+5
+10
+15
+20
+25
+Rank
+0.80
+0.85
+0.90
+0.95
+PSM
+0
+5
+10
+15
+20
+25
+Rank
+0.705
+0.710
+0.715
+SMAP
+0
+8
+16
+24
+32
+Rank
+0.70
+0.75
+0.80
+0.85
+0.90
+SMD
+0
+10
+20
+30
+40
+50
+Rank
+0.5
+0.6
+0.7
+0.8
+0.9
+SWAT
+0
+10
+20
+30
+40
+50
+Rank
+0.87
+0.88
+0.89
+0.90
+F1 Score
+0
+5
+10
+15
+20
+25
+Rank
+0.979
+0.980
+0.981
+0.982
+0.983
+0
+5
+10
+15
+20
+25
+Rank
+0.700
+0.702
+0.704
+0.706
+0.708
+0
+8
+16
+24
+32
+Rank
+0.80
+0.82
+0.84
+0.86
+0.88
+0
+10
+20
+30
+40
+50
+Rank
+0.945
+0.950
+0.955
+0.960
+0.965
+0.970
+Difference Order = 0
+Difference Order = 1
+Window size
+8
+16
+32
+64
+128
+256
+Figure 5. RRR performance across datasets for different window sizes and ranks with Min-Max scaling as a preprocessing step. Full rank
+(rightmost value) corresponds to OLS baseline
+.
+Time series
+Anomaly Transformer
+TimesNet
+OFA
+TranAD
+OLS
+Transformer based
+Foundation model based
+Figure 6. Anomaly detection case study in time series. The original time series is the first black curve, with pink-shaded regions indicating
+expert-labeled anomaly intervals. Red curves represent the anomaly scores generated by different detection methods using temporal
+modeling
+13

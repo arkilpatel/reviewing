@@ -1,0 +1,1209 @@
+       000
+       001
+       002                                       MoVE:MixtureofValueEmbeddings
+       003            ANewAxisforScalingParametricMemoryinAuto-RegressiveModels
+       004
+       005
+       006
+       007                                                                                 1
+       008                                                         AnonymousAuthors
+       009
+       010                               Abstract                                 1. Introduction
+       011
+       012                                                                        The Transformer architecture (Vaswani et al., 2017) and
+       013           Autoregressive sequence modeling stands as the               the autoregressive modeling paradigm have expanded be-
+       014           cornerstone of modern Generative AI, powering                yond their origins in Natural Language Processing (NLP) to
+       015           results across diverse modalities ranging from               becometheunified engine of Generative AI. Whether pre-
+       016           text generation to image generation. However,                dicting the next subword in a sentence or the next discrete
+       017           a fundamental limitation of this paradigm is the             visual code in an image (Sun et al., 2024), the underlying
+       018           rigid structural coupling of model capacity to               principle remains the same: modeling the joint probabil-
+       019           computationalcost: expandingamodel’sparamet-                 ity distribution of a sequence via conditional ªnext-token
+       020           ric memoryÐits repository of factual knowledge               prediction.º
+       021           or visual patternsÐtraditionally requires deep-              Acrossthesemodalities, performanceisgovernedbyscaling
+       022           ening or widening the network, which incurs a                laws (Kaplan et al., 2020; Hoffmann et al., 2022), which
+       023           proportional rise in active FLOPs. In this work,             traditionally imposearigidtradeoff: increasingamodel’sca-
+       024          weintroduce MoVE(MixtureofValueEmbed-                         pacity to store and utilize information (its parametric mem-
+       025           dings), a mechanismthatbreaksthiscouplingand                 ory) requires increasing the number of dense parameters by
+       026           establishes a new axis for scaling capacity. MoVE            deepening or widening the network. This creates a struc-
+       027           decouples memory from compute by introducing                 tural bottleneck where scaling memory capacity incurs a
+       028           a global bank of learnable value embeddings                  linear penalty in training and inference FLOPs. Breaking
+       029           shared across all attention layers. For every step           this coupling is a significant area of interest for advancing
+       030           in the sequence, the model employs a differen-               GenAI, as it would allow for ªmemory-denseº models that
+       031           tiable soft gating mechanism to dynamically mix              possess vast encyclopedic or visual knowledge without the
+       032           retrieved concepts from this bank into the stan-             prohibitive compute cost of massive dense networks.
+       033           dard value projection. This architecture allows
+       034           parametric memory to be scaled independently of              In this work, we introduce MoVE (Mixture of Value Em-
+       035           network depth by simply increasing the number                beddings), a modality-agnostic mechanism designed to ad-
+       036           of embedding slots. We validate MoVE through                 dress this efficiency challenge. MoVE adapts the spirit of
+       037           strictly controlled experiments on two represen-             memoryaugmentation (Sukhbaatar et al., 2019) into a fully
+       038           tative applications of autoregressive modeling:              differentiable, dense form compatible with standard Trans-
+       039          Text Generation and Image Generation. In both                 formers (see Figure 1). MoVE operates by augmenting
+       040           domains, MoVE yields consistent performance                  the Attention mechanism’s Value streamÐwhich mecha-
+       041           improvements over standard and layer-wise                    nistic interpretability research identifies as a key carrier of
+       042           memory baselines, enabling the construction                  semantic content (Geva et al., 2021)Ðwith a global bank
+       043           of ªmemory-denseº models that achieve lower                  of learnable ªconcept vectorsº shared across all attention
+       044           perplexity and higher fidelity than their dense              layers. For each step in the sequence, the model computes
+       045           counterparts at comparable compute budgets.                  a soft gating coefficient for every slot in this bank, dynam-
+       046                                                                        ically mixing these retrieved concepts with the standard
+       047                                                                        value projection. This allows the model to potentially of-
+       048                                                                        fload the storage of static information (e.g., definitions of
+       049        1AnonymousInstitution,AnonymousCity,AnonymousRegion,            words, textures of objects) to the embedding bank, freeing
+       050     Anonymous Country. Correspondence to: Anonymous Author             up the dense attention layers for complex reasoning and
+       051     <anon.email@domain.com>.                                           structure building.
+       052     Preliminary work. Under review by the International Conference     WevalidatetheefficacyofMoVEthroughstrictlycontrolled
+       053     onMachineLearning(ICML). Donotdistribute.
+       054
+                                                                               1
+                                                          MoVE:MixtureofValueEmbeddings
+       055     comparisons on the two most prominent pillars of autore-
+       056     gressive modeling:
+       057     TextGeneration. WetrainLargeLanguageModels(LLMs)
+       058     (Brown et al., 2020) using standard open-source datasets.
+       059     WecompareMoVEagainststandardandstrongbaselines,
+       060     maintaining identical hyperparameters to isolate the archi-
+       061     tectural differences.
+       062
+       063     Image Generation. We integrate MoVE into the Llama-
+       064     Genframework(Sunetal.,2024), a representative autore-
+       065     gressive image generator. We show that MoVE improves
+       066     the fidelity of generated images compared to the vanilla
+       067     LlamaGen baseline, demonstrating that the mechanism’s           Figure 1. Architectural Comparison. Left: Standard Attention,
+       068     benefits transfer effectively to visual memory.                 where the Value stream is a linear projection of the local hidden
+       069     Furthermore, we demonstrate the architectural versatility of    state X. Center: Layer-wise Value Embeddings (LaVE), a base-
+       070     MoVEbyextending it to Multi-Head Latent Attention               line that augments attention with a layer-specific memory vector
+       071     (MLA)(DeepSeek-AI,2024). MLAisanoptimizedarchi-                 gated by the input. Right: MoVE (Ours), which decouples mem-
+       072     tecture that compresses Key-Value heads into a low-rank         ory from depth by introducing a global bank of value embeddings.
+       073                                                                     Crucially, both layers fetch value embeddings from this central
+       074     latent vector for inference efficiency. We show that MoVE       shared bank, employing a differentiable router to dynamically mix
+       075     extends seamlessly to this setting by injecting memory di-      these global concepts into the value stream.
+       076     rectly into the compressed latent space, enhancing capacity
+       077     without disrupting the efficiency gains of MLA.
+       078     By decoupling parametric memory from computational
+       079     depth, MoVE establishes a distinct new axis for scaling.        FLOPs. To circumvent this, research has pivoted toward
+       080     It serves as a general-purpose booster for autoregressive       decoupled architectures. Universal Transformers (Dehghani
+       081     modeling, allowing practitioners to scale model capacity        et al., 2019) and ALBERT (Lan et al., 2020) attempted to de-
+       082     by simply increasing the number of mixture components.          couple size from compute via cross-layer parameter sharing.
+       083     Thisenablestheconstructionofªmemory-denseºgenerative            While parameter-efficient, they do not inherently increase
+       084     modelsthat are smarter and richer in knowledge without the      the model’s memory capacity relative to compute. MoVE
+       085     prohibitive cost of deepening the reasoning engine.             explores an alternative direction by introducing a dedicated,
+       086                                                                     scalable embedding bank that adds capacity without adding
+       087     2. Related Work                                                 depth. Specifically regarding attention efficiency, Multi-
+       088                                                                     HeadLatentAttention(MLA),introducedinDeepSeek-
+       089     Unified Autoregressive Modeling. The autoregressive             V2(DeepSeek-AI, 2024), addresses the memory bottleneck
+       090    ªnext-token predictionº paradigm has proven to be a              of the KV cache by projecting Keys and Values into a low-
+       091     universal framework for generative AI. In NLP, this             rank latent vector. Our work is complementary to MLA;
+       092     powers the dominant GPT series (Brown et al., 2020),            while MLA reduces the memory footprint of inference,
+       093     where performance scales predictably with compute.              MoVE increases the parametric memory capacity of the
+       094     This paradigm has successfully transferred to Computer          model. We show that these two goals can coexist by apply-
+       095     Vision, where works like ImageGPT (Chen et al., 2020),          ing MoVEdirectly to the compressed latent space.
+       096     VQGAN(Esser et al., 2021), and Parti (Yu et al., 2022)          Conditional Computation and Mixture-of-Experts. A
+       097     demonstrate that visual representations can be learned via      prominent success in decoupling parameters from compute
+       098     sequences of discrete tokens. Most recently, frameworks         is the Mixture-of-Experts (MoE) paradigm (Shazeer et al.,
+       099     like LlamaGen (Sun et al., 2024) show that standard             2017; Lepikhin et al., 2021; Jiang et al., 2024), which routes
+       100     TransformersÐwithout modality-specific biasesÐachieve           tokens to sparse subsets of FFN ªexperts.º While successful,
+       101     effective synthesis purely through autoregressive scaling.      standard MoE relies on hard routing (top-k), which often
+       102     This convergence implies that architectural innovations         introduces training instability. Recent work on Soft MoE
+       103     such as MoVE are inherently modality-agnostic.                  (Puigcerveretal., 2023) solves this by performing a differen-
+       104     Scaling Laws and Efficient Architectures. Model perfor-         tiable weighted average of experts. MoVE adopts a similar
+       105     manceisgovernedbyrigorous scaling laws (Kaplan et al.,          philosophy but applies it to the Parameter space rather than
+       106     2020; Hoffmann et al., 2022). However, traditional dense        the Token space. Unlike Soft MoE, which mixes tokens
+       107     scaling requires a linear increase in training and inference    into expert slots, MoVE mixes expert vectors (value embed-
+       108                                                                     dings) into the token’s representation. This allows MoVE to
+       109
+                                                                            2
+                                                             MoVE:MixtureofValueEmbeddings
+       110     retain the standard autoregressive formulation while distinc-      tention (MHA) module, which enables the model to capture
+       111     tively injecting the benefits of conditional computation.          complex dependencies across the sequence. Within each
+       112     Memory-Augmented Neural Networks (MANNs). A                        block, the input state X is projected into distinct subspaces
+       113     parallel lineage augments networks with explicit memory.           for each head h ∈ {1,...,H}:
+       114     MemoryNetworks(Westonetal.,2015;Sukhbaataretal.,
+       115                                                                          Q(h) = XW(h),        K(h) = XW(h),        V(h) = XW(h)
+       116     2015) introduced reading from external banks. Lample et al.                        Q                    K                    V (1)
+       117     (2019) scaled this with Product Key Memory (PKM) us-               Theself-attention mechanism then aggregates information
+       118     ing sparse retrieval. The closest precursor to our work is         globally by computing a weighted sum of values, where the
+       119     Persistent Memory (Sukhbaatar et al., 2019), which concate-        weightsaredeterminedbythecompatibilitybetweenqueries
+               nated static learnable vectors to the Key and Value matrices.                                    Q(h)(K(h))T
+       120     However, Persistent Memory vectors are staticÐthey are             and keys: Y (h) = Softmax(        √        )V(h). The outputs
+       121                                                                                                            dh
+       122     attended to via the standard mechanism, forcing them to            from all heads are concatenated and mixed via a final linear
+                                                                                  projection W . Since this mechanism drives the reasoning
+       123     compete with context tokens for attention mass. MoVE                             O
+       124     builds upon this by making the memory access dynamic and           capabilities of the model, architectural improvements to the
+               input-dependent via a dedicated routing head (xW ), decou-         attention block can directly benefit the entire family of tasks
+       125                                                          g             that rely on this modeling paradigm.
+       126     pling the ªretrievalº of global concepts from the ªattentionº
+       127     to local context. More recently, Behrouz et al. (2025) in-         The model is trained using the autoregressive objective,
+       128     troduced Titans, which learns a neural memory module at            which treats generation as a sequential decision process.
+               test-time. MoVE differs by focusing on scaling paramet-            Thegoalis to maximize the likelihood of the next token w
+       129     ric (training-time) memory, offering a distinct way to store                                                                     t
+       130     moreencyclopedic knowledge in the weights themselves.              given the preceding context w<t. The network parameters
+       131                                                                        θ are optimized by minimizing the negative log-likelihood
+                                                                                                                P
+                                                                                  over the dataset: L(θ) = −       T   logP(w | w ;θ).
+       132     Value Stream Optimization. Recent mechanistic inter-                                                t=1          t    <t
+       133     pretability work highlights the Value stream as the carrier
+       134     of semantic content (Geva et al., 2021; Meng et al., 2022).        3.2. MoVE: Mixture of Value Embeddings
+       135     Building on this, Zhou et al. (2024) proposed ResFormer            MoVE intervenes in the generation of the Value tensors
+       136     and SVFormer, demonstrating that Value embeddings can              V(h). Standard value projections must encode all potential
+       137     be shared across layers to reduce redundancy without hurt-         associations of a token into a single vector superposition.
+       138     ing performance. MoVE leverages this shared parameter              MoVEprovidesabankofdistinctembeddingsandallows
+       139     hypothesis. However, while SVFormer shares a single static         the model to dynamically select the relevant primitives for
+       140     projection to reduce parameters, MoVE shares a large, di-          each attention head. We visualize the specific architectural
+       141     verse bank of embeddings to increase capacity. MoVE can            differences between Standard Attention, LaVE (a strong
+       142     be viewed as a high-capacity, dynamic generalization of the        baseline), and our proposed MoVE mechanism in Figure 1.
+       143     SVFormerprinciple.
+       144                                                                        Value Embedding Bank. We define a learnable global
+                                                                                                 N     ×M×d
+       145     3. Methodology                                                     tensor E ∈ R vocab          , where M is the number of em-
+       146                                                                        bedding slots per token. Intuitively, this tensor represents a
+       147     Weintroduce MoVE(MixtureofValueEmbeddings)to                       shared repository of primitivesÐwhether they be linguistic
+       148     decouple parametric memory scaling from Transformer                definitions in text or visual attributes in image generation.
+       149     compute. By augmenting the attention Value stream with             For a sequence of token indices w, we retrieve the memory
+       150     a shared, differentiable embedding bank, MoVE enables              values and reshape them to align with the attention heads:
+       151     capacity scaling orthogonal to network depth and width.
+                                                                                                                      M×H×d
+       152                                                                                         M =E[w]∈R                   h              (2)
+                                                                                                      t        t
+       153     3.1. Preliminaries: Autoregressive Modeling
+       154                                                                        Here, M(h) represents the i-th latent attribute of token w
+               Weconsiderthestandard decoder-only Transformer archi-                        t,i                                                 t
+       155                                                                        specifically tailored for the subspace of head h.
+       156     tecture (Vaswani et al., 2017), which has become the de            Distinction from Input Embeddings. Crucially, the Value
+       157     facto backbone for generative modeling. In this paradigm, a        EmbeddingbankE isdistinct from the standard Input Em-
+       158     sequence of discrete tokens w = (w1,...,wT) where wt ∈             beddings WI defined in Sec. 3.1. In a standard Transformer,
+       159     {1,...,Nvocab}isfirst mappedtoasequenceofcontinuous                W mustserveadualpurpose: it acts as the source for gen-
+                                      T×d                                            I
+       160     hidden states X ∈ R        . This is achieved via a learnable      erating attention patterns (via Q and K) and as the carrier
+                                                    N     ×d
+       161     Input Embedding matrix WI ∈ R vocab            combined with
+       162     positional encodings to retain sequence order information.         of semantic content (via V ). MoVE decouples these roles.
+       163                                                                        TheInput Embeddings WI remain compact to facilitate ef-
+               ThecoreworkhorseofthisarchitectureistheMulti-HeadAt-               ficient routing, while the Value Embeddings E provide a
+       164
+                                                                               3
+                                                            MoVE:MixtureofValueEmbeddings
+       165     high-capacity, multi-slot repository of ªdefinitionsº strictly     via sparse indexing (loading only the relevant M vectors
+       166     for the Value stream. This allows the model to store vast          for the active tokens), bypassing the memory bandwidth
+       167     encyclopedic knowledge in E without expanding the dimen-           costs associated with dense FFN layers of equivalent size.
+       168     sion d used for reasoning.                                         Furthermore, because E is shared across all L attention
+       169     Routing and Gating. Different attention heads often spe-           layers, the amortized parameter cost per layer decreases as
+       170     cialize in different functions. Therefore, we employ a per-        the network deepens.
+       171                                             d×H(M+1)
+               head router. A projection W        ∈ R              computes       Minimal Compute Overhead. We quantify the compu-
+       172                                     G
+       173     logits Z ∈ RT×H×(M+1) from the hidden state X.                     tational cost by analyzing the floating-point operations
+       174     Weapply a scaled sigmoid activation to map the logits to           (FLOPs) required per token. A standard Transformer block
+                                                                                                                        2
+                                                                                  incurs a baseline cost of C    ≈24d +4Td,dominatedby
+       175     the range (0,2):                                                                              std
+       176                                                                        the dense attention and feed-forward projections. The over-
+                                    g(h) = 2 · σ(Z(h))                    (3)     head introduced by MoVE arises solely from the routing
+       177                            t,i           t,i                           projection W , consuming C            ≈2dH(M+1). The
+       178     where σ is the standard sigmoid function. The scalar factor                      G                 move
+       179                                                                        relative overhead ratio is:
+               of 2 initializes the gates (at z = 0) to 1.0, representing a                 C          2dH(M +1)          H(M+1)
+       180     neutral identity mixing, while allowing the model to amplify                   move ≈                   =                     (5)
+       181     a signal (up to 2.0) or suppress it (down to 0.0).                            Cstd       24d2 +4Td          12d+2T
+       182                                                                        For a large standard configuration (e.g., d = 2048,H = 16)
+       183     Value Mixing. The final value tensor for head h, V (h), is a
+                                                                     S            with a memory bank of M = 32 and context T = 2048,
+       184     weighted sum of the standard projection and the retrieved          this results in a negligible overhead of ≈ 1.8%. We refer the
+       185     global embeddings:                                                 reader to Appendix A for the detailed derivation of these
+       186                                        M                               computational bounds.
+       187               V(h) = g(h) ⊙V(h) +Xg(h) ⊙M(h)                   (4)
+       188                S        t,0                 t,i      t,i
+       189                                        i=1                             4. Experiments
+       190     Thefirstterm(index0),weightedbyg(h),correspondstothe               To validate the effectiveness of our proposed mechanism,
+       191                                            t,0                         we perform a comprehensive evaluation of MoVE across
+       192     standard dense projection V (h). Empirical results indicate
+               that this term is critical for model performance. It serves as     the two most prominent domains of autoregressive sequence
+       193     a base representation derived from the local context, which        modeling: Text Generation and Image Generation.
+       194     the retrieved memories then augment or refine. By learning         Experimental Philosophy. Given resource constraints,
+       195     to scale this term, the model can dynamically balance be-          our experiments operate at scales significantly smaller
+       196     tween contextual information (from V (h)) and global para-         than commercial foundation models. Consequently, our
+       197     metric knowledge (from M). Crucially, in the context of            goal is not to chase state-of-the-art benchmarks, but to
+       198     autoregressive inference, V (h) serves as the definitive Value     demonstrate robust relative performance gains through
+       199                                 S
+       200     tensor; it is computed once at the current step and subse-         strictly controlled comparisons. We treat MoVE as the sole
+       201     quently stored in the KV cache, ensuring that the overhead         independent variable within the nanochat (Karpathy,
+       202     of memory retrieval is incurred only at generation time and        2025) and LlamaGen (Sun et al., 2024) frameworks. To
+       203     not repeatedly during attention.                                   isolate architectural benefits, we adhere to their standard
+       204     BysharingtheembeddingbankE acrossallattentionlayers,               configurations, ensuring that any necessary modifications
+       205     MoVEtransformsthenetworkintoacollaborative system.                 (e.g., batch size adjustments for hardware utilization) are
+       206     Gradientsfromtheshallowestfeaturedetectorsandthedeep-              applied uniformly across all variants.
+       207     est reasoning heads flow back into the same shared tensor
+       208     E. This creates ªgradient highwaysº that allow concepts to         4.1. CommonBaselines and Scaling Settings
+       209     be learned rapidly and robustly, effectively densifying the        To validate MoVE, we compare it against two consistent
+       210     signal for parameters that would otherwise be sparse and           baseline architectures across modalities. Crucially, we de-
+       211     isolated in a layer-wise configuration.                            fine a unified scaling factor ª×º representing parametric
+       212                                                                        memorycapacity relative to network depth.
+       213     3.3. Analysis: The Cost of Intelligence vs. Memory
+       214                                                                        1. Standard Transformer. A dense, decoder-only Trans-
+       215     MoVEoffersanalternativescalingeconomywherememory                   former. This represents the default architecture for both
+       216     is cheap and intelligence (compute) remains fixed.                 nanochatandLlamaGen.
+       217     Parameter Efficiency via Indexing. MoVE introduces                 2. Layer-wise Value Embeddings (LaVE). A strong base-
+       218     N       · M · d parameters. However, these are accessed            line integrating layer-specific learnable memory. This archi-
+       219       vocab
+                                                                               4
+                                                                    MoVE:MixtureofValueEmbeddings
+                                                                                            Table 1. Text Generation Performance on FineWeb-Edu. Val BPB
+        220      tecture is adapted from the modded-nanoGPT repository                      corresponds to the final dataset shard (lower is better). The Scal-
+        221                               1
+                 (Jordan et al., 2024). In this setup, a distinct, independent              ing Gain column reports the absolute reduction in bpb compared
+                                          (l)     |V|×d
+        222      embedding matrix E          ∈R         kv is allocated to specific         to the Standard baseline of the same depth. MoVE demonstrates
+        223      layers. Crucially, these embeddings are layer-wise, non-                   consistent gains in all of the three model scales.
+        224      shared, and strictly ªlocalº to their associated layer. For
+        225      a token x at layer l, the retrieved memory M(l) = E(l)[x ]                  DEPTH     METHOD       M           PARAMS     VAL BPB↓      GAIN↑
+                            t                                          t             t
+        226      is gated via a layer-specific projection W(l). To maintain                            STANDARD     -              186M       0.838         -
+        227                                                        g
+                 consistency with the MoVE formulation, we denote the                                  + LAVE       ×1(L/2)      +302M        0.822      0.016
+        228      operation as:                                                               D12                    ×2(L)        +604M        0.818      0.020
+        229                                                                                                         ×1(L/2)      +302M        0.819      0.019
+        230                           (l)      (l)     (l)       (l)                                   + MOVE       ×2(L)        +605M        0.812      0.026
+                                    V     =V +gt ⊙Mt                               (6)                              ×4(2L)      +1209M        0.806      0.032
+        231                          S                                                                              ×8(4L)      +2419M        0.797      0.041
+        232      where V(l) is the standard projection, M(l) is the layer-                             STANDARD     -              561M       0.763         -
+        233                                                         t                                  + LAVE       ×1(L/2)      +839M        0.753      0.010
+        234      specific retrieved memory, and the gate is computed as                      D20                    ×2(L)       +1678M        0.748      0.015
+                 g(l) = 2·σ(x W(l)). NotethatunlikeMoVE(Eq. 6),LaVE                                                 ×1(L/2)      +842M        0.748      0.015
+        235       t              t  g                                                                  + MOVE       ×2(L)       +1683M        0.744      0.019
+                 does not gate the standard path V (l) and retrieves only a
+        236      single vector per layer rather than a mixture. We utilize two                                      ×4(2L)      +3366M        0.739      0.024
+        237      settings for LaVE: Default (×1) integrates LaVE into the                              STANDARD     -             1.88B       0.693         -
+        238                                                                                  D32       + LAVE       ×1(L/2)      +2.15B       0.683      0.010
+        239      attention mechanism of half the Transformer blocks (indices                                        ×2(L)         +4.3B       0.681      0.012
+        240      L−1,L−3,...). Dense (×2) integrates LaVE into the                                     + MOVE       ×1(L/2)      +2.16B       0.681      0.012
+        241      attention mechanism of all Transformer blocks. In both                                             ×2(L)        +4.33B       0.677      0.016
+        242      settings, memory capacity is strictly coupled to network
+        243      depth (M ∝ L).
+        244      MoVEScaling. For fair comparison, we align the config-                     Dataset and Tokenizer. Models are pretrained on the
+        245      urations of MoVE and LaVE. MoVE (×1) uses a global                         sample-100BT subset of FineWeb-Edu (Lozhkov et al.,
+        246      bank of M = L/2 slots. MoVE (×2) uses a global bank                        2024), a curated high-quality dataset containing approxi-
+        247      of M = Lslots. However, unlike LaVE, MoVE decouples                        mately 100 billion tokens processed into 1,823 shards, with
+        248      memorysizefromlayercount. This allows us to scale fur-                     the final shard reserved for evaluation. We utilize the frame-
+        249      ther to ×4 (M = 2L), ×8 (M = 4L), and beyond without                       work’s default BPE tokenizer with a vocabulary size of
+        250      deepening the network. This capability to scale to ªsuper-                 V =65,536,replicating the scheme used by GPT-4 (Ope-
+        251      denseº memory regimes (M > L) is unique to MoVE.                           nAI, 2023) to balance efficient encoding with a compact
+        252                                                                                 embedding table.
+        253      4.2. Application I: Text Generation                                        Training. We train the D12 and D20 models for 30,000
+        254      WeevaluateMoVEinthetextdomainusingthenanochat                              steps, and the D32 model for 60,000 steps, with a global
+        255      framework (Karpathy, 2025), adhering strictly to its default               batch size of 524,288 tokens. This regime ensures that all
+        256      configurations to ensure a fair comparison.                                model variants (Standard, LaVE, MoVE) are exposed to an
+        257                                                                                 identical volume of data, allowing for a rigorous comparison
+        258      Models. Weperformexperimentsacrossthreemodeldepths                         of their learning efficiency.3
+        259      defined by the framework. Note that nanochat scales
+        260      model width proportionally to depth (d                  = 64 × L).         Metric. Performanceisevaluatedonthereservedfinalshard
+        261                                                      model                      of the dataset using Bits Per Byte (BPB). Unlike perplexity,
+        262      Specifically, we train D12 (12 layers, 768 dim, ≈186M                      BPBnormalizesthelossbytherawUTF-8bytecountofthe
+                 params), D20 (20 layers, 1280 dim, ≈561M params), and
+        263                                                          2
+        264      D32(32layers, 2048 dim, ≈1.88B params).                                    adding MoVE/LaVE slots increases the total parameter count,
+                     1The specific implementation of layer-wise value embeddings            we maintain a fixed training duration for all variants to isolate
+        265                                                                                 architectural benefits.
+        266      originates from the modded-nanoGPT community (contributed                      3These step counts result in token-to-parameter ratios ranging
+        267      by @KoszarskyB) (Jordan et al., 2024). Note that while the public          from approx. 85:1 (D12) to 17:1 (D32). Hoffmann et al. (2022)
+        268      reference implementation in nanochat computes the gate using               establish a ratio of ≈ 20 : 1 as the compute-optimal stopping
+                 only the first 32 channels of the input for efficiency, our LaVE           point. Our setup trains the smaller models significantly beyond
+        269      baseline utilizes the full hidden dimension d as the input to the gat-     this frontier (into the regime of ªover-trainingº), while the larger
+        270      ing projection W(l). This modification ensures strictly comparable         models operate in its vicinity. However, our priority is not find-
+                                   g
+        271      expressivity between the LaVE and MoVE gating mechanisms in                ing the absolute optimal duration for each scale, but aligning the
+        272      our controlled experiments.                                                training volume across variants. This strictly isolates the relative
+        273          2Exact parameter counts for the standard baseline: D12:                architectural gains of MoVE against the baselines under identical
+        274      185,597,976; D20: 560,988,200; D32: 1,879,048,256. While                   data exposure.
+                                                                                         5
+                                                             MoVE:MixtureofValueEmbeddings
+                                                                                   Table 2.   Class-Conditional Image Generation on ImageNet
+       275     text. This provides a tokenizer-invariant measure of com-           (256x256). Following the protocol as described in LlamaGen,
+       276     pression efficiency: BPB = L          /(ln(2) · N      ) where
+                                                total            bytes             we prioritize FID as primary metric, while reporting IS, Preci-
+       277     L      is the total cross-entropy loss in nats and N      is the
+                 total                                             bytes           sion, and Recall as secondary metrics for completeness. MoVE
+       278     total number of UTF-8 bytes in the target sequence. Lower           consistently outperforms the baselines on the primary FID metric.
+       279     values indicate superior performance.
+       280     Results. Table 1 summarizes the results. Both LaVE and               SIZE     METHOD         PRIMARY       SECONDARY METRICS
+       281     MoVEprovidetangiblegainsovertheStandardTransformer.                                            FID↓      IS ↑   PREC↑   RECALL↑
+       282     However,theresultshighlighttwocritical distinctions. First,                   STANDARD         6.53     167.3    0.83      0.43
+       283     ParameterEfficiency: MoVE uses parameters more effec-                GPT-B    + LAVE (×1)      6.11     175.9    0.84      0.43
+       284     tively than LaVE. MoVE-×1 matches or exceeds the perfor-                      + MOVE(×1)       5.62     191.7    0.84      0.43
+       285                                                                                   STANDARD         3.47     291.2    0.85      0.51
+               manceofLaVE-×2indeepermodels(e.g.,0.681vs0.681                       GPT-L    + LAVE (×1)      3.77     283.9    0.86      0.50
+       286     at D32) and remains competitive at smaller scales (0.819 vs                   + MOVE(×1)       3.10     281.4    0.84      0.53
+       287     0.818atD12),despitehavingaccesstoonlyhalfthenumber
+       288     of memory slots. This suggests that the global shared mem-
+       289     ory mechanism allows for richer concept utilization than
+       290     fragmented, layer-local storage. Second, Scalability: While         a fair comparison.
+       291     LaVEisstructurally bound by network depth and saturates             Metrics. Adhering to the standard evaluation protocol of
+       292     quickly, MoVE demonstrates sustained scaling.                       LlamaGen (Sun et al., 2024) and the broader community,
+       293                                                                                           Â
+       294     To better understand the internal dynamics of the MoVE              weprioritize Frechet Inception Distance (FID) (Heusel
+       295     mechanism, we conducted a qualitative visualization study           et al., 2017) as the primary benchmark for overall generative
+       296     on the gating behaviors of specific polysemous words. Our           quality. To ensure strict comparability, we also report Incep-
+       297     analysis reveals that the global memory slots exhibit distinct      tion Score (IS) (Salimans et al., 2016) and Precision and
+                                                                                                  ÈÈ
+       298     routing patterns corresponding to semantic, syntactic, and          Recall (Kynkaanniemi et al., 2019) as secondary metrics.
+       299     metaphorical shifts. We refer the reader to Appendix B              Results. Table 2 summarizes the results. For GPT-B,
+       300     for a detailed discussion and visualization of these routing        MoVEsignificantly reduces the main metric FID by 0.91
+       301     manifolds across different context lengths.                         (from 6.53 to 5.62) compared to the Standard baseline. This
+       302                                                                         advantage is robust to scaling: at the GPT-L size, while the
+       303     4.3. Application II: Image Generation                               layer-wise LaVE baseline actually degrades performance
+       304     To validate the universality of MoVE, we integrate it into          relative to the standard model (FID 3.77 vs. 3.47), MoVE
+       305     the LlamaGen framework (Sun et al., 2024). We treat image           maintainsaclearlead, achievingthebestFIDof3.10. These
+       306     generation as analogous to language modeling, training              results confirm that the global value embedding bank is an
+       307     autoregressive transformers on discrete visual tokens.              effective primitive for visual modeling, allowing the model
+       308                                                                         to efficiently store and retrieve diverse visual patterns with-
+       309     Models. We evaluate performance across two model scales             out the instability observed in layer-wise memory at scale.
+       310     from the framework: GPT-B (111M) and GPT-L (343M).4
+       311     Dataset and Tokenizer. Models are trained on ImageNet-              4.4. Architectural Versatility: Extension to MLA
+       312     1K(class-conditional). We employ the tokenizer pre-trained
+       313                                                                         Finally, we demonstrate that MoVE is robust not only across
+       314     bythe LlamaGen authors (Sun et al., 2024).                          modalities but also across distinct attention mechanisms.
+       315     Training. To fully leverage the 140GB HBM capacity of               WeapplyMoVEtoMulti-HeadLatentAttention(MLA)
+       316     our training hardware, we increase the global batch size            (DeepSeek-AI, 2024), a state-of-the-art architecture that
+       317     to 524,288 tokens, aligning it with our text generation             optimizes inference through Key-Value compression.
+       318     experiments. All other hyperparametersÐincluding the                Preliminaries. MLA mitigates the memory bottleneck of
+       319     optimizer, learning rate schedule, and initializationÐremain        standard attention by compressing Keys and Values into a
+       320     identical to the default LlamaGen configuration to ensure           low-rank latent vector c      . Formally, the input X is first
+       321                                                                                                   KV
+       322         4Wealsoinitiated experiments with the 1.4B parameter GPT-       projected into the latent space via a down-projection matrix
+                                                                                                 d×d
+                                                                                   W        ∈ R      c such that c      = XW          . In princi-
+       323     XXLmodel. While preliminary logs indicated encouraging re-            DKV                           KV           DKV
+       324     ductions in training loss consistent with our other findings, we    ple, the full-rank Values (V ) could be reconstructed via an
+               unfortunately overlooked that the checkpoint size of GPT-XXL                                   dc×dhH
+       325     exceeded the maximumfile size limit of our configured checkpoint    up-projection WUV ∈ R               . However, to maximize
+       326     storage system. This resulted in a failure to save the final model  efficiency, MLA absorbs this up-projection into the final out-
+       327     weights, preventing us from running the generation benchmarks.      put projection matrix WO. The contribution of the values
+                                                                                   to the final output O is effectively O ∝ (c     W )W =
+       328     These results will be included in a future revision.                                                             KV UV        O
+                                                                                   c    (W W ). This formulation ensures that the high-
+       329                                                                          KV      UV    O
+                                                                                6
+                                                                MoVE:MixtureofValueEmbeddings
+                                                                                       Table 3. MoVE applied to Multi-Head Latent Attention (MLA).
+        330                                                                            Wecompare against a LaVE baseline and perform an extensive
+        331                                                                            sweeponD12andD20(upto×32). Notetheparameterefficiency:
+        332                                                                            due to the 1/32 compression ratio, the ×32 setting adds roughly
+        333                                                                            the same number of parameters as a standard ×1 bank.
+        334
+        335                                                                             DEPTH     METHOD         M      PARAMS     VAL BPB↓     GAIN↑
+        336                                                                                       MLA(BASE)      -         172M      0.8826        -
+        337                                                                                       + LAVE         ×1       +9.5M      0.8803     0.0023
+        338                                                                                                      ×2      +18.9M      0.8806     0.0020
+        339     Figure 2. Conceptual Illustration of Memory-Augmented Multi-            D12                      ×1       +9.8M      0.8822     0.0004
+        340                                                                                                      ×2      +19.6M      0.8805     0.0021
+                Head Latent Attention. Left: Standard MLA compresses Key-                         + MOVE         ×4      +39.1M      0.8782     0.0044
+        341     Value heads into a low-rank latent vector c    to minimize cache                                 ×8      +78.2M      0.8762     0.0064
+        342                                                KV                                                    ×16   +156.4M       0.8728     0.0098
+                footprint. Center: MLA + LaVE, which augments the latent space                                   ×32   +312.7M       0.8690     0.0136
+        343     with layer-specific parameters. Right: MLA + MoVE (Ours),                         MLA(BASE)      -         499M      0.7868        -
+        344     which injects a global shared memory into the latent space.
+        345                                                                                       + LAVE         ×1      +26.3M      0.7857     0.0011
+        346                                                                                                      ×2      +52.7M      0.7861     0.0007
+                                                                                        D20                      ×1       +29M       0.7861     0.0007
+        347     dimensional tensor V is never materialized, and only the                                         ×2       +58M       0.7853     0.0015
+        348                                                                                       + MOVE         ×4      +115M       0.7851     0.0017
+                compact cKV is stored in the cache.                                                              ×8      +230M       0.7826     0.0042
+        349                                                                                                      ×16     +461M       0.7808     0.0060
+        350     MemoryInjectioninMLA.Wevisualizetheintegrationof                                                 ×32     +921M       0.7785     0.0083
+        351     ourmethodintoMLAinFigure2. WeadaptMoVEtoinject
+        352     memorydirectly into this efficient latent space. Crucially,
+        353     to maintain the expressivity of head-specific gating found in
+        354     MHA,wepartitionthelatent vector c              into H     chunks
+                                                           KV          kv              memoryscaling in the compressed latent space. The LaVE
+        355     and apply MoVE head-wise:                                              baseline struggles in this efficient architecture; on both D12
+        356                                           M                                andD20,doublingthememorycapacity(×1 → ×2)results
+        357                (h)        (h)     (h)    X(h)            (h)               in slight performance degradation (e.g., 0.8803 → 0.8806
+                         c       =g ⊙c + g ⊙M                                  (7)
+        358                KV,S       t,0     KV           t,i       t,i               on D12). This suggests that strictly coupling memory to
+        359                                           i=1                              layers within a compressed bottleneck saturates quickly. In
+        360     wherec(h) representstheh-thsliceofthecompressedlatent                  contrast, MoVEdemonstratessustainedscalability. OnD12,
+                         KV
+        361                     (h)                                                    it improves monotonically up to the ×32 setting. Notably,
+                vector and M        corresponds to the retrieved memory for
+        362                     t,i                                                    due to the aggressive 1/32 compression ratio of MLA, the
+                that specific head chunk. The scaled latent vector c
+        363                                        (h)                      KV,S       MoVE-×32configuration adds roughly the same parameter
+                (formed by concatenating all c           ) is then used in place
+        364                                        KV,S                                count (+312.7M) as a standard uncompressed ×1 bank, yet
+        365     of the original cKV for the final projection. Consistent               achieves a substantial gain of 0.0136 BPB. On D20, the
+        366     with the standard MLA formulation, this augmented latent               trend persists: while LaVE saturates, MoVE continues to
+                vector c        is the specific tensor stored in the KV cache,
+        367              KV,S                                                          scale, reaching a BPB of 0.7785 at ×32. These findings
+        368     preserving the architecture’s memory compression benefits              indicate that MoVE and MLA are highly synergistic: MLA
+        369     while embedding the retrieved global knowledge.                        provides the inference efficiency (via KV compression),
+        370     Motivation. It is important to note why we operate on                  while MoVEexpandsthemodel’scapacity (via Parametric
+        371     c     rather than the conceptual V . If we were to apply
+                  KV                                                                   Memory)withoutbreaking the compute budget.
+        372     MoVEinthestandardmannerÐinjectingmemoryintothe
+        373     up-projected Value headsÐwe would be forced to materi-                 4.5. Ablation Study
+        374     alize the massive full-rank tensor V , effectively negating
+        375     the architectural efficiency of MLA. The core efficiency               MoVEintroducestwokeystructural differences compared
+        376     of MLA relies on absorbing the up-projection WUV into                  to the LaVE baseline: 1) a global, shared memory bank
+        377     the output projection W     (i.e., computing c      (W W )).           (E), and 2) a learnable gate on the standard value projection
+                                          O                     KV     UV     O        (g ). To understand the contribution of each component, we
+        378     Byrestricting the memory injection to the compressed la-                 0
+        379     tent space, we preserve this absorption, allowing us to scale          performtargetedablationsontheD12andD20architectures
+        380     parametric memory without ever paying the computational                in both the ×1 and ×2 settings:
+        381     or memory price of full-rank tensor materialization.                   1. MoVE-GatedStandardPath. Werestrict MoVE by
+        382                                                                            fixing the standard path gate to identity (g = 1), forcing it
+                Results. Table 3 details the performance comparisons. The                                                             0     P
+        383     results reveal a sharp distinction between local and global            to operate as a residual addition: V (h) = V (h)+       g ⊙M.
+        384                                                                                                                 S                    i      i
+                                                                                    7
+                                                              MoVE:MixtureofValueEmbeddings
+                Table 4. Ablation study on D12 and D20. We disentangle the
+        385     benefits of gating the standard path (g ) from the Global Shared     architectural ªsweet spotsº to future work.
+        386                                           0
+        387     Memoryarchitecture. Val BPB is reported (lower is better).           MoVEvs. MoE.It is instructive to contrast MoVE with
+        388                                                                          the Mixture-of-Experts paradigm. While both decouple
+        389      ARCH.   MEMORY    STD. PATH              VAL BPB↓                   capacity fromdensecompute,theyoperateondistinctlevels:
+        390                                     D12    D12-×2    D20    D20-×2       Standard MoE sparsifies computation at the block level via
+                 LAVE    LOCAL     UNGATED    0.8223   0.8182   0.7526  0.7479       hard routing, whereas MoVE densifies memory access at
+                         LOCAL     GATED (g ) 0.8229   0.8128   0.7514  0.7462
+        391                               0
+        392      MOVE GLOBAL       UNGATED    0.8229   0.8176   0.7484  0.7465       the parameter level via soft gating. These approaches offer
+                         GLOBAL    GATED (g ) 0.8189   0.8124   0.7478  0.7440
+        393                               0                                          complementary scaling benefitsÐMoE efficiently scales
+        394                                                                          reasoning depth, while MoVE scales semantic breadth. We
+        395                                                                          hypothesize that combining MoE for reasoning blocks with
+        396     2. LaVE+GatedStandardPath. WeenhanceLaVEby                           MoVEforattentionmemorycouldmaximizebothefficiency
+        397     applying a sigmoid gate to the standard projection: V (l) =          and capacity, though we leave the empirical validation of
+                        (l)                                               S          this hybrid architecture to future work.
+        398     g ⊙V       +.... This grants LaVE the same capability to
+                 0
+        399     suppress or amplify the input context as MoVE.                       Beyond finding the optimal balance between MoVE and
+        400     The results in Table 4 demonstrate that both components              other architectural components, the internal design of
+        401     contribute positively to model performance. The Global               MoVEitself is likely far from optimal. We acknowledge
+        402     Shared Memory architecture acts as the primary driver of             that the parameter efficiency of our current implementation
+        403     efficiency; MoVE consistently outperforms the enhanced               is noticeably lower than that of the standard model; while
+        404     LaVE baseline (e.g., 0.8124 vs 0.8128 on D12-×2),                    MoVEeffectively decouples capacity from compute, the
+        405     confirming that decoupling memory from depth provides                performance gain per additional parameter is significantly
+        406     a distinct advantage beyond simple parameter count.                  less than in standard dense scaling.             Consequently,
+        407     Simultaneously, gating the standard path (g ) proves                 improving the mechanism’s efficiency in this direction
+        408                                                          0               remains a compelling challenge. For instance, could value
+        409     particularly effective at higher memory densities, offering          storage be made more compact by allowing semantically
+        410     a substantial boost over the ungated configuration (0.8182           related tokens to share embedding banks? Furthermore,
+        411     →0.8128 on LaVE D12-×2). We conclude that while                      could the computational overhead be minimized by
+        412     the global bank provides the scalable capacity, the gating           employing a head-wise projection W           to further reduce
+                mechanism is essential for the model to effectively arbitrate                                                  G
+        413     between this retrieved knowledge and its local context.              routing FLOPs? Our work opens this new axis for scaling
+        414                                                                          parametric memory, and we leave the exploration of these
+        415     5. Limitations and Future Work                                       optimizations as fertile ground for future research.
+        416
+        417     TheCostofMemory: Bandwidthvs. FLOPs. Whilewe                         6. Conclusion
+        418     have established MoVE as a compute-efficient axis for scal-
+        419     ing, it introduces a distinct cost in the form of memory band-       In this work, we introduced MoVE (Mixture of Value Em-
+        420     width. The primary trade-off is Compute vs. Memory Ac-               beddings) to resolve the structural tension between para-
+        421     cess. Although retrieving and mixing embeddings requires             metric capacity and computational cost in autoregressive
+        422     negligible arithmetic overhead, it necessitates fetching pa-         models. By augmenting the attention mechanism with a
+        423     rameters from High Bandwidth Memory (HBM). While                     globally shared, differentiable memory bank, MoVE effec-
+        424     MoVEeffectively allows system designers to ªbuyº model               tively decouples the scaling of stored knowledge from the
+        425     quality using available memory bandwidth rather than com-            depthofreasoning. Unliketraditionallayer-wiseapproaches
+        426     pute cycles, determining the optimal trade-off between these         that saturate quickly, MoVE enables sustained performance
+        427     resources is highly hardware-dependent. For instance, given          improvements even in ªsuper-denseº regimes where mem-
+        428     that MoVE-D12significantlyoutperformstheStandard-D12                 ory capacity far exceeds layer-wise injection approaches.
+        429     baseline, it is intriguing to ask if a memory-augmented shal-        Our empirical results span Text Generation, Image Gen-
+        430     low model (e.g., D12+MoVE) could match or exceed the                 eration, and efficient architectures like MLA, demonstrat-
+        431     performance of a slightly deeper dense model (e.g., D13 or           ing consistent gains across diverse modalities. We believe
+        432     D14)whilemaintaining a significantly lower FLOP count.               these findings position MoVE as a promising architectural
+        433     Establishing this precise ªexchange rateº between memory             primitive for Generative AI, offering a scalable path toward
+        434     slots and transformer layers would be valuable for identi-           ªmemory-denseº systems that combine vast encyclopedic
+        435     fying optimal architectures. However, conducting the fine-           capacity with computational efficiency, effectively establish-
+        436     grained sweep of varying depths required to map this Pareto          ing a new scaling dimension orthogonal to network depth.
+        437     frontier is resource-intensive and lies outside the scope of
+        438     this initial study. We leave the search for these specific
+        439
+                                                                                  8
+                                                          MoVE:MixtureofValueEmbeddings
+       440     ImpactStatement                                                   update rule converge to a local nash equilibrium.
+       441    This paper presents work whose goal is to advance the field        In  Advances in Neural Information Processing
+       442     of Machine Learning. There are many potential societal            Systems, 2017.       URL https://proceedings.
+       443     consequences of our work, none which we feel must be              neurips.cc/paper/2017/hash/
+       444     specifically highlighted here.                                    8a1d694707eb0fefe65871369074926d-Abstract.
+       445                                                                       html.
+       446                                                                    Hoffmann, J., Borgeaud, S., Mensch, A., Buchatskaya, E.,
+       447     References                                                        Cai, T., Rutherford, E., de Las Casas, D., Hendricks,
+       448     Behrouz, A., Zhong, P., and Mirrokni, V.            Titans:       L. A., Welbl, J., Clark, A., Hennigan, T., Noland, E.,
+       449       Learning to memorize at test time.       arXiv preprint         Millican, K., van den Driessche, G., Damoc, B., Guy, A.,
+       450       arXiv:2501.00663, 2025.       URL https://arxiv.                Osindero, S., Simonyan, K., Elsen, E., Vinyals, O., Rae,
+       451       org/abs/2501.00663.                                             J. W., and Sifre, L. Training compute-optimal large lan-
+       452                                                                       guage models. In Proceedings of the 36th International
+       453     Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J. D.,       Conference on Neural Information Processing Systems,
+       454       Dhariwal, P., Neelakantan, A., Shyam, P., Sastry, G.,           NIPS’22, Red Hook, NY, USA, 2022. Curran Associates
+       455       Askell, A., et al. Language models are few-shot learners.       Inc. ISBN 9781713871088.
+       456       Advances in neural information processing systems, 33:
+       457       1877±1901, 2020. URL https://proceedings.                    Jiang, A. Q., Sablayrolles, A., Roux, A., Mensch, A.,
+       458       neurips.cc/paper/2020/hash/                                     Savary, B., Bamford, C., Chaplot, D. S., de Las Casas,
+       459       1457c0d6bfcb4967418bfb8ac142f64a-Abstract.D., Hanna, E. B., Bressand, F., Lengyel, G., Bour, G.,
+       460       html.                                                           Lample, G., Lavaud, L. R., Saulnier, L., Lachaux, M.,
+       461                                                                       Stock, P., Subramanian, S., Yang, S., Antoniak, S., Scao,
+       462     Chen, M., Radford, A., Child, R., Wu, J., Jun, H., Luan, D.,      T. L., Gervet, T., Lavril, T., Wang, T., Lacroix, T., and
+       463       and Sutskever, I. Generative pretraining from pixels. In        Sayed, W. E. Mixtral of experts. CoRR, abs/2401.04088,
+       464       International conference on machine learning, pp. 1691±         2024. doi: 10.48550/ARXIV.2401.04088. URL https:
+       465       1703. PMLR, 2020. URL https://proceedings.                      //doi.org/10.48550/arXiv.2401.04088.
+       466       mlr.press/v119/chen20s.html.
+       467     DeepSeek-AI. Deepseek-v2: A strong, economical, and            Jordan, K. et al.   modded-nanogpt: Nanogpt speedrun.
+       468       efficient mixture-of-experts language model.       arXiv        https://github.com/KellerJordan/
+       469       preprint arXiv:2405.04434, 2024.       URL https://             modded-nanogpt,2024. URLhttps://github.
+       470       arxiv.org/abs/2405.04434.                                       com/KellerJordan/modded-nanogpt.
+       471                                                                    Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B.,
+       472     Dehghani, M., Gouws, S., Vinyals, O., Uszkoreit, J., and          Chess, B., Child, R., Gray, S., Radford, A., Wu, J., and
+       473       Kaiser, è.   Universal transformers.    In International        Amodei, D. Scaling laws for neural language models.
+       474       Conference on Learning Representations, 2019. URL               CoRR,abs/2001.08361, 2020. URL https://arxiv.
+       475       https://arxiv.org/abs/1807.03819.                               org/abs/2001.08361.
+       476
+       477     Esser, P., Rombach, R., and Ommer, B. Taming trans-            Karpathy, A. nanochat: The best chatgpt that $100 can buy,
+       478       formers for high-resolution image synthesis.           In       2025.   URL https://github.com/karpathy/
+       479       Proceedings of the IEEE/CVF conference on computer              nanochat.
+       480       vision and pattern recognition, pp. 12873±12883, 2021.
+       481       URL         https://openaccess.thecvf.com/                         ÈÈ
+                                                                              Kynkaanniemi, T., Karras, T., Laine, S., Lehtinen, J., and
+       482       content/CVPR2021/html/Esser_Taming_                             Aila, T. Improved precision and recall metric for assess-
+       483       Transformers_for_High-Resolution_                               ing generative models. Curran Associates Inc., Red Hook,
+       484       Image_Synthesis_CVPR_2021_paper.html.                           NY,USA,2019.
+       485     Geva, M., Schuster, R., Berant, J., and Levy, O. Trans-        Lample, G., Sablayrolles, A., Ranzato, M., Denoyer, L., and
+       486       former feed-forward layers are key-value memories. In           Jegou, H. Large memorylayerswithproductkeys. Curran
+       487       Proceedings of the 2021 Conference on Empirical Meth-           Associates Inc., Red Hook, NY, USA, 2019.
+       488       ods in Natural Language Processing, pp. 5484±5495,
+       489       2021. URLhttps://aclanthology.org/2021.                      Lan, Z., Chen, M., Goodman, S., Gimpel, K., Sharma, P.,
+       490       emnlp-main.446/.                                                andSoricut,R. ALBERT:AliteBERTforself-supervised
+       491                                                                       learning of language representations. In 8th International
+       492     Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B.,           Conference on Learning Representations, ICLR 2020, Ad-
+       493       and Hochreiter, S. Gans trained by a two time-scale             dis Ababa, Ethiopia, April 26-30, 2020. OpenReview.net,
+       494
+                                                                           9
+                                                        MoVE:MixtureofValueEmbeddings
+       495       2020. URL https://openreview.net/forum?                    Sukhbaatar, S., Grave, E., Lample, G., Jegou, H., and Joulin,
+       496       id=H1eA7AEtvS.                                                A. Augmenting self-attention with persistent memory.
+       497                                                                     arXiv preprint arXiv:1907.01470, 2019. URL https:
+       498    Lepikhin, D., Lee, H., Xu, Y., Chen, D., Firat, O., Huang,       //arxiv.org/abs/1907.01470.
+       499      Y., Krikun, M., Shazeer, N., and Chen, Z. Gshard: Scal-     Sun, P., Jiang, Y., Chen, S., Zhang, S., Peng, B., Luo, P., and
+       500       ing giant models with conditional computation and auto-       Yuan,Z. Autoregressive model beats diffusion: Llama for
+       501       maticsharding. In9thInternationalConferenceonLearn-           scalable image generation. CoRR, abs/2406.06525, 2024.
+       502       ing Representations, ICLR 2021, Virtual Event, Austria,       URLhttps://arxiv.org/abs/2406.06525.
+       503       May 3-7, 2021. OpenReview.net, 2021. URL https:
+       504      //openreview.net/forum?id=qrwe7XHTmYb.                      Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J.,
+       505                                                                     Jones, L., Gomez, A. N., Kaiser, è., and Polo-
+       506    Lozhkov, A., Ben Allal, L., von Werra, L., and Wolf,             sukhin, I.  Attention is all you need.    In Advances
+       507       T.  Fineweb-edu: the finest collection of educational         in neural information processing systems, pp. 5998±
+       508       content, 2024. URL https://huggingface.co/                    6008,   2017.      URL https://proceedings.
+       509       datasets/HuggingFaceFW/fineweb-edu.                           neurips.cc/paper/2017/hash/
+       510                                                                     3f5ee243547dee91fbd053c1c4a845aa-Abstract.
+       511    Meng,K.,Bau,D.,Andonian,A.,andBelinkov,Y. Locating               html.
+       512       and editing factual associations in gpt. In Proceedings of
+       513       the 36th International Conference on Neural Information    Weston, J., Chopra, S., and Bordes, A. Memory networks.
+       514       Processing Systems, NIPS ’22, Red Hook, NY, USA,              In Bengio, Y. and LeCun, Y. (eds.), 3rd International
+       515       2022. Curran Associates Inc. ISBN 9781713871088.              Conference on Learning Representations, ICLR 2015,
+       516    OpenAI.      Gpt-4 technical report.       arXiv preprint        SanDiego, CA, USA, May 7-9, 2015, Conference Track
+       517       arXiv:2303.08774, 2023.      URL https://arxiv.               Proceedings, 2015. URL http://arxiv.org/abs/
+       518       org/abs/2303.08774.                                           1410.3916.
+       519                                                                  Yu, J., Xu, Y., Koh, J. Y., Luong, T., Baid, G., Wang,
+       520    Puigcerver, J., Riquelme, C., Mustafa, B., and Houlsby,          Z., Vasudevan, V., Ku, A., Yang, Y., Ayan, B. K.,
+       521       N. From sparse to soft mixtures of experts.      arXiv        Hutchinson, B., Han, W., Parekh, Z., Li, X., Zhang,
+       522       preprint arXiv:2308.00951, 2023.     URL https://             H., Baldridge, J., and Wu, Y. Scaling autoregressive
+       523       arxiv.org/abs/2308.00951.                                     models for content-rich text-to-image generation. Trans-
+       524                                                                     actions on Machine Learning Research, 2022. URL
+       525    Salimans, T., Goodfellow, I., Zaremba, W., Cheung, V.,           https://arxiv.org/abs/2206.10789.
+       526       Radford, A., and Chen, X. Improved techniques for train-
+       527       ing gans. In Advances in Neural Information Processing     Zhou, Z., Wu, T., Jiang, Z., and Lan, Z. Value residual
+       528       Systems, 2016.      URL https://proceedings.                  learning for alleviating attention concentration in trans-
+       529       neurips.cc/paper/2016/hash/                                   formers. arXiv preprint arXiv:2410.17897, 2024. URL
+       530       8a3363abe792db2d8761d6403605aeb7-Abstract.https://arxiv.org/abs/2410.17897.
+       531       html.
+       532
+       533    Shazeer, N., Mirhoseini, A., Maziarz, K., Davis, A., Le,
+       534       Q. V., Hinton, G. E., and Dean, J. Outrageously large
+       535       neural networks: The sparsely-gated mixture-of-experts
+       536       layer. In 5th International Conference on Learning Rep-
+       537       resentations, ICLR 2017, Toulon, France, April 24-26,
+       538       2017, Conference Track Proceedings. OpenReview.net,
+       539       2017. URL https://openreview.net/forum?
+       540       id=B1ckMDqlg.
+       541
+       542    Sukhbaatar, S., Weston, J., and Fergus, R.           End-
+       543       to-end memory networks.         In Advances in neu-
+       544       ral  information   processing   systems,   pp.   2440±
+       545       2448,   2015.      URL https://proceedings.
+       546       neurips.cc/paper/2015/hash/
+       547       8fb21ee7a2207526da55a679f0332de2-Abstract.
+       548       html.
+       549
+                                                                         10
+                                                                             MoVE:MixtureofValueEmbeddings
+         550       A. Computational Overhead Derivation
+         551       In this section, we provide the detailed breakdown of the floating-point operations (FLOPs) required to process a single
+         552       token within a sequence of length T.
+         553
+         554       Baseline Transformer Cost (Cstd). A standard Transformer layer comprises three primary computational components:
+         555
+         556          1. Dense Projections: The Query, Key, Value, and Output projections (W ,W ,W ,W ) operate on the model
+         557                                                                                                                    Q      K      V      O
+                                                                                           2        2
+         558              dimension d. Collectively, they consume 4 × 2d = 8d FLOPs per token.
+         559          2. Feed-Forward Network (FFN): With a standard expansion factor of 4, the FFN up- and down-projections consume
+         560              2×2d(4d)=16d2FLOPspertoken.
+         561
+         562          3. SDPACore: TheScaledDot-Product Attention mechanism scales quadratically with the sequence length. For a full
+         563              sequence, the operations QKT and Attention(Q,K)V require ≈ 4T2d FLOPs, translating to an amortized cost of
+         564              4TdFLOPspertoken.
+         565
+         566       Summingtheseyields a baseline budget of:
+         567                                                                                            2
+                                                                                        C ≈24d +4Td                                                                                 (8)
+         568                                                                              std
+         569       MoVE Overhead (C                     ).   The computational overhead from MoVE is restricted to the routing projection W                                          ∈
+         570                                      move                                                                                                                           G
+         571       Rd×H(M+1). This dense projection consumes:
+         572                                                                        C         ≈2d·H(M+1)                                                                            (9)
+         573                                                                           move
+         574       Relative Ratio. Dividing the overhead by the baseline yield the ratio presented in Equation 8:
+         575
+         576                                                                            2dH(M +1)               H(M+1)
+         577                                                                Ratio =           2             =                                                                     (10)
+         578                                                                             24d +4Td                12d+2T
+         579       Substituting the values from our D32 experiment (d = 2048,H = 16,M = 32,T = 2048):
+         580
+         581                                                 Ratio        =            16(33)              =          528           ≈1.8%                                         (11)
+         582                                                        D32       12(2048)+2(2048)                 24576+4096
+         583
+         584       This confirms that MoVE breaks the memory-compute coupling, effectively scaling capacity for free (< 2% cost) relative to
+         585       the dense backbone.
+         586
+         587       B. Visualization of MoVE Routing
+         588
+         589       To investigate whether the D32-MoVE-×1 model utilizes its global memory slots to encode specific semantic features
+         590       within these constraints, we perform a controlled qualitative study. We analyze the gating behavior of the model when
+         591       processing a target word in three distinct contexts:
+         592
+         593           • Meaning1(ControlPairA1&A2): Twosentenceswherethetargetwordsharesthesamemeaning.
+         594
+         595           • Meaning2(ContrastB1): Asentencewherethetarget word has a distinct meaning.
+         596
+         597       Werepeat this analysis across three context lengths (Short, Medium, Long) and organize our examples into three linguistic
+         598       categories.
+         599
+         600                                                                                                                                               L×M
+         601       Visualization Methodology                  For each target word, we extract the gating activation tensor G ∈ R                                 , where L is the
+         602       numberoflayers and M is the number of memory slots. The value at position (l,m) represents the average gating weight of
+         603       memoryslotminlayerl associated with the target token. To ensure a rigorous comparison, we visualize these activations in
+         604       two formats:
+                                                                                                    11
+                                 MoVE:MixtureofValueEmbeddings
+    605   1. RawGatingMagnitude(TopRows): Weplottherawgating vectors for the three sentence variants (A ,A ,B ).
+                                                                        1  2 1
+    606    Thecolor scale is fixed to the range [0,2.0] to reflect the absolute activation strength of the memory slots (where 1.0
+    607    represents the identity baseline).
+    608   2. Normalized Differential (Bottom Rows): To isolate the routing shifts triggered by semantic context, we compute the
+    609    element-wise absolute difference between the gating vectors.
+    610
+    611      • Control Diff: |A −A | represents the variation within the same semantic meaning (noise floor).
+                        1   2
+    612      • Semantic Diff: |A −B | represents the variation triggered by the change in meaning.
+                         1  1
+    613    Crucially, these differences are normalized by the Global Maximum Difference observed for that specific word across
+    614    all three context lengths (Short, Medium, Long). This ensures that the heatmaps are directly comparable across different
+    615    context depths; a value of 1.0 (Dark Red) represents the maximum routing shift observed for that word in the entire
+    616    experiment.
+    617
+    618 B.1. Experimental Observations
+    619
+    620 Disclaimer: We emphasize that while the routing dynamics presented here validate the functional efficacy of the MoVE
+    621 mechanismindistributing information across global memory slots, the specific linguistic interpretations are preliminary.
+    622 The analysis is conducted on the D32-MoVE-×1 architecture, which is significantly smaller in parameter count than
+    623 commercial foundation models and was trained on a subset of the FineWeb-Edu dataset. Consequently, while the distinct
+    624 routing patterns confirm that the mechanism successfully differentiates contexts, the depth and nuance of the semantic
+    625 associations observed are specific to this model’s scale and training distribution. Caution should be exercised when
+    626 generalizing these specific linguistic mappings to larger, state-of-the-art systems.
+    627 Thefigures below visualize the routing patterns of D32-MoVE-×1. The bottom rows of each block display the normalized
+    628 absolute difference between the gating vectors. Our analysis reveals the following behaviors:
+    629
+    630  B.1.1. GROUP 1: STANDARD POLYSEMY (NOUN VS. NOUN)
+    631
+    632 In this group (Figures 3±6), the target word refers to distinct entities.
+    633
+    634   • Observation: In Short contexts (< 10 words), the routing is often ambiguous, with control and semantic differences
+    635    showing similar magnitudes (e.g., Bat in Figure 5).
+    636   • Context Sensitivity: As context increases to Long (Full Paragraph), a clear signal emerges. The Control difference
+    637    drops (indicating stability), while the Semantic difference remains high. For Bank (Figure 3), the Long context reveals
+    638    distinct ªvertical bandº in the difference heatmap, suggesting that specific memory slots specialize in distinguishing
+    639    these concepts once sufficient context is available.
+    640
+    641  B.1.2. GROUP 2: SYNTACTIC SHIFT (NOUN VS. VERB)
+    642
+    643 In this group (Figures 7±8), the word changes grammatical role.
+    644   • Observation: Unlike polysemy, syntactic shifts trigger immediate and strong divergence in this model. For Watch
+    645    (Figure 7), the Short context alone yields a semantic difference (0.1617) nearly double the control difference (0.0739).
+    646
+    647   • Implication: ThissuggeststhattheMoVErouterishighlysensitivetosyntaxandPart-of-Speechinformation,encoding
+    648    it rapidly in the global memory slots even without long-range context.
+    649
+    650  B.1.3. GROUP 3: METAPHORICAL SHIFT (LITERAL VS. ABSTRACT)
+    651 In this group (Figures 9±10), the word shifts from physical sensation to abstract concept.
+    652
+    653   • Observation: This category exhibits the most subtle gradients. For Cold (Figure 10), the semantic difference is only
+    654    marginally higher than the control difference across all context lengths.
+    655
+    656   • Implication: This ªoverlapº supports the linguistic theory of conceptual metaphor, suggesting the model may not treat
+    657    abstract usages as entirely separate meanings, but rather as extensions grounded in the same semantic slots as their
+    658    literal roots.
+    659
+                                           12
+                                              MoVE:MixtureofValueEmbeddings
+      660   B.2. Category 1: Standard Polysemy
+      661
+      662
+      663
+      664
+      665
+      666
+      667
+      668
+      669
+      670
+      671
+      672
+      673
+      674
+      675
+      676
+      677
+      678
+      679
+      680
+      681
+      682
+      683
+      684
+      685
+      686
+      687
+      688
+      689
+      690
+      691
+      692
+      693
+      694
+      695
+      696
+      697
+      698
+      699
+      700
+      701
+      702
+      703
+      704
+      705
+      706
+      707
+      708
+      709
+      710
+      711   Figure 3. Routing visualization for the polysemous word ªbankº (Financial Institution vs. River Bank). In the Long context (bottom
+      712   row), the routing stabilizes: the intra-meaning variation (Control Diff) decreases to 0.0513, while the inter-meaning variation (Semantic
+      713   Diff) remains high at 0.1040, exhibited by distinct vertical banding.
+      714
+                                                           13
+                                              MoVE:MixtureofValueEmbeddings
+      715
+      716
+      717
+      718
+      719
+      720
+      721
+      722
+      723
+      724
+      725
+      726
+      727
+      728
+      729
+      730
+      731
+      732
+      733
+      734
+      735
+      736
+      737
+      738
+      739
+      740
+      741
+      742
+      743
+      744
+      745
+      746
+      747
+      748
+      749
+      750
+      751
+      752
+      753
+      754
+      755
+      756
+      757
+      758
+      759
+      760
+      761
+      762
+      763
+      764   Figure 4. Routing visualization for ªcraneº (Construction Machine vs. Bird). The model maintains a consistent routing separation
+      765   between the animate and inanimate senses across all context lengths.
+      766
+      767
+      768
+      769
+                                                           14
+                                              MoVE:MixtureofValueEmbeddings
+      770
+      771
+      772
+      773
+      774
+      775
+      776
+      777
+      778
+      779
+      780
+      781
+      782
+      783
+      784
+      785
+      786
+      787
+      788
+      789
+      790
+      791
+      792
+      793
+      794
+      795
+      796
+      797
+      798
+      799
+      800
+      801
+      802
+      803
+      804
+      805
+      806
+      807
+      808
+      809
+      810
+      811
+      812
+      813
+      814
+      815
+      816
+      817
+      818
+      819
+      820   Figure 5. Routing visualization for ªbatº (Sports Equipment vs. Animal). In the Short context, the routing is noisy: the variation between
+      821   sentences with the same meaning (Control) is actually higher than the variation between different meanings (Semantic). However, as
+      822   context increases (Medium/Long), the signal stabilizes and the Semantic difference correctly dominates.
+      823
+      824
+                                                           15
+                                              MoVE:MixtureofValueEmbeddings
+      825
+      826
+      827
+      828
+      829
+      830
+      831
+      832
+      833
+      834
+      835
+      836
+      837
+      838
+      839
+      840
+      841
+      842
+      843
+      844
+      845
+      846
+      847
+      848
+      849
+      850
+      851
+      852
+      853
+      854
+      855
+      856
+      857
+      858
+      859
+      860
+      861
+      862
+      863
+      864
+      865
+      866
+      867
+      868
+      869
+      870
+      871
+      872
+      873
+      874
+      875
+      876   Figure 6. Routing visualization for ªdateº (Calendar Time vs. Fruit). While ambiguous in short contexts, a strong differentiation between
+      877   the temporal and botanical senses emerges clearly in the Medium context.
+      878
+      879
+                                                           16
+                                              MoVE:MixtureofValueEmbeddings
+      880   B.3. Category 2: Syntactic Shift (Noun vs. Verb)
+      881
+      882
+      883
+      884
+      885
+      886
+      887
+      888
+      889
+      890
+      891
+      892
+      893
+      894
+      895
+      896
+      897
+      898
+      899
+      900
+      901
+      902
+      903
+      904
+      905
+      906
+      907
+      908
+      909
+      910
+      911
+      912
+      913
+      914
+      915
+      916
+      917
+      918
+      919
+      920
+      921
+      922
+      923
+      924
+      925
+      926
+      927
+      928
+      929
+      930
+      931   Figure 7. Routing visualization for ªwatchº (Wristwatch/Noun vs. To Look/Verb). This syntactic shift triggers an immediate and strong
+      932   divergence, even in the Short context. The Semantic difference (0.1617) is nearly double the Control difference (0.0739), suggesting the
+      933   modelrelies on local syntax to route verbs differently from nouns.
+      934
+                                                           17
+                                              MoVE:MixtureofValueEmbeddings
+      935
+      936
+      937
+      938
+      939
+      940
+      941
+      942
+      943
+      944
+      945
+      946
+      947
+      948
+      949
+      950
+      951
+      952
+      953
+      954
+      955
+      956
+      957
+      958
+      959
+      960
+      961
+      962
+      963
+      964
+      965
+      966
+      967
+      968
+      969
+      970
+      971
+      972
+      973
+      974
+      975
+      976
+      977
+      978
+      979
+      980
+      981
+      982
+      983
+      984
+      985
+      986   Figure 8. Routing visualization for ªblockº (Toy/Noun vs. Obstruction/Action). Similar to ªwatchº, the shift in Part-of-Speech drives a
+      987   strong routing difference even with minimal context, confirming the mechanism’s sensitivity to syntax.
+      988
+      989
+                                                           18
+                                              MoVE:MixtureofValueEmbeddings
+      990   B.4. Category 3: Metaphorical Shift
+      991
+      992
+      993
+      994
+      995
+      996
+      997
+      998
+      999
+      1000
+      1001
+      1002
+      1003
+      1004
+      1005
+      1006
+      1007
+      1008
+      1009
+      1010
+      1011
+      1012
+      1013
+      1014
+      1015
+      1016
+      1017
+      1018
+      1019
+      1020
+      1021
+      1022
+      1023
+      1024
+      1025
+      1026
+      1027
+      1028
+      1029
+      1030
+      1031
+      1032
+      1033
+      1034
+      1035
+      1036
+      1037
+      1038
+      1039
+      1040
+      1041 Figure9. Routing visualization for ªbrilliantº (Literal Light vs. Abstract Intelligence). The metaphorical shift is subtle; distinct routing
+      1042  patterns for the abstract sense become distinct only when sufficient context (Medium and Long) is available.
+      1043
+      1044
+                                                           19
+                                              MoVE:MixtureofValueEmbeddings
+      1045
+      1046
+      1047
+      1048
+      1049
+      1050
+      1051
+      1052
+      1053
+      1054
+      1055
+      1056
+      1057
+      1058
+      1059
+      1060
+      1061
+      1062
+      1063
+      1064
+      1065
+      1066
+      1067
+      1068
+      1069
+      1070
+      1071
+      1072
+      1073
+      1074
+      1075
+      1076
+      1077
+      1078
+      1079
+      1080
+      1081
+      1082
+      1083
+      1084
+      1085
+      1086
+      1087
+      1088
+      1089
+      1090
+      1091
+      1092
+      1093
+      1094
+      1095 Figure10. Routing visualization for ªcoldº (Low Temperature vs. Emotionally Distant). The low Semantic Difference (high overlap with
+      1096  Control) suggests the model grounds the abstract metaphorical usage closely to the literal physical sensation, using similar memory slots
+      1097  for both.
+      1098
+      1099
+                                                           20

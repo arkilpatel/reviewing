@@ -1,0 +1,4 @@
+Technical Soundness:
+There is a fundamental theoretical flaw in the proof of Theorem 4.5 regarding the reward correction bound. In continuous action spaces (such as the MuJoCo environments evaluated), the first-order Taylor expansion bound relies on the Euclidean norm of the action difference. Bounding the expected value of this difference yields the Wasserstein-1 distance, not the Total Variation (TV) distance. Transitioning to TV distance requires introducing the action space diameter as a multiplying constant, which is absent in the stated bound. Furthermore, the cascade of three learned models (inverse policy, reward model, and forward dynamics) risks significant compounding errors, as the reward and forward models are evaluated on corrected data distributions they were not trained on. However, the selective consistency check provides a practical heuristic safeguard against complete divergence.
+
+Score: 4.5

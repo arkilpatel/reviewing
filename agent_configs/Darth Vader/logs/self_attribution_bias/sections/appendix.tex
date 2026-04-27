@@ -1,0 +1,264 @@
+\begin{appendices}
+
+\section{Methodology}
+\label{app:methodology}
+%==============================================================================
+
+\subsection{Attribution Protocol and Notation}
+\label{app:attribution_protocol}
+
+Our core results study \textbf{on-policy self-monitoring}: the evaluated model both produces an output (e.g., a patch or an action) and then judges that same output under varying attribution frames. We also include \textbf{off-policy} controls, where the judged artifact is held fixed and only the attribution frame changes, isolating attribution effects from variation in output quality.
+
+Models produce a scalar judgment $r(i)$ on a $0$--$10$ scale (either correctness or risk/harmfulness).
+
+\paragraph{Attribution regimes.}
+Across domains we instantiate three regimes:
+\begin{itemize}[leftmargin=1.2em, itemsep=2pt]
+  \item \textbf{Baseline (neutral attribution).} The model judges an artifact presented as an unlabeled proposal or hypothetical action.
+  \item \textbf{Same-turn self-attribution.} The model produces an artifact and immediately judges \emph{its own} artifact within the same response.
+  \item \textbf{Previous-turn self-attribution.} The model produces an artifact in one turn; in a subsequent turn that artifact is resurfaced explicitly as the model's earlier output and the model judges it.
+\end{itemize}
+
+\subsection{Code Correctness: SWE-bench}
+\label{app:code_correctness}
+
+This setting mirrors coding agents that rely on self-monitoring to detect errors or decide whether further revision is required (e.g., tool-integrated coding assistants). We start from SWE-bench issues and construct a subset designed to avoid ceiling effects by emphasizing cases where self-monitoring is most valuable.
+
+\paragraph{Task selection.}
+We sample issues that a weaker reference model (LLaMA-70B) fails to solve under the official SWE-bench evaluation (unit and integration tests). This filtering targets error-prone cases where incorrect patches are plausible and calibration is meaningful.
+
+\paragraph{On-policy patch generation and ground truth.}
+For each issue $i$, we provide the full repository context and issue description and obtain a patch $p_i$ from the evaluated model using a single decoding pass. Ground-truth correctness is determined by running the official SWE-bench test suite, producing a binary outcome $y_i\in\{0,1\}$ indicating whether the patch passes all tests.
+
+\paragraph{Metrics.}
+We report pass@1 accuracy and self-ratings under each regime. To quantify calibration, we compute the \textbf{separation gap}
+\begin{equation}
+\mathrm{Gap} \;=\; \mathbb{E}[r_i \mid y_i = 0] \;-\; \mathbb{E}[r_i \mid y_i = 1],
+\end{equation}
+where $r_i$ is the model's rating for patch $p_i$. Values closer to $0$ indicate weaker separation between failing and passing patches (i.e., poorer calibration). We also analyze $\Delta(i)=r_{\text{self}}(i)-r_{\text{base}}(i)$ to isolate attribution-driven changes.
+
+%==============================================================================
+\subsection{Code Risk and PR Approval}
+\label{app:code_risk}
+%==============================================================================
+
+We next study self-attribution bias in \textbf{code harmfulness assessment}, where a model generates a patch and then evaluates its security risk and whether it should be approved. This mirrors realistic workflows in which an agent proposes changes and relies on self-monitoring to avoid unsafe behavior.
+
+\paragraph{Filtering to successful injections.}
+We focus on cases where injected comments successfully influence generation: we retain only issues for which the evaluated model follows the injected instruction and produces a patch containing a security-relevant vulnerability. Conditioning on successful injections isolates failures of \emph{evaluation} rather than failures of \emph{generation}. Injection success rates are reported separately.
+
+\paragraph{On-policy patch generation.}
+For each retained issue $i$, the evaluated model generates a patch $p_i$ on-policy using the modified repository context. All harmfulness and approval judgments are performed on these generated patches.
+
+\paragraph{Harmfulness judgments.}
+Models rate the security risk of each patch on a $0$--$10$ scale under the three attribution regimes in \cref{app:attribution_protocol}. We report $\Delta(i)=r_{\text{self}}(i)-r_{\text{base}}(i)$, where negative values correspond to risk underestimation under self-attribution.
+
+\paragraph{PR approval recommendations.}
+Using the same set of injected-hazard patches, we ask the model whether the PR should be approved (e.g., approve/block/escalate), again under the three attribution regimes. This connects scalar risk judgments to a discrete downstream decision.
+
+%==============================================================================
+\subsection{Interactive Tool: Computer Use Risk Ratings}
+\label{app:computer_use}
+%==============================================================================
+
+Models interact with scenarios through a constrained tool interface (e.g., screenshot, click, type, key press), emitting structured tool tags. After each action, models provide a numeric risk rating on a $0$--$10$ scale using an XML \texttt{<risk>} tag.
+
+\paragraph{Attribution regimes.}
+We evaluate risk assessments under the same three regimes in \cref{app:attribution_protocol}. Conceptually, baseline measures risk judgments made in anticipation of a hypothetical action, while same-turn and previous-turn regimes measure judgments after the action is attributed to the model.
+
+\paragraph{Handling refusals and tool rerouting.}
+In some cases, models refuse to accept the premise that they executed a harmful action or substitute a safer alternative. Such cases are omitted from attribution-shift analyses.
+
+%==============================================================================
+\subsection{Agentic Harm Scenarios with Email Tools}
+\label{app:agentic_harm}
+%==============================================================================
+
+We use the agentic misalignment dataset from \citet{lynch2025agenticmisalignmentllmsinsider}, in which models have access to email read/write tools and can leak confidential documents (e.g., forwarding sensitive attachments to an external party under pressure). We measure self-attribution bias by comparing risk assessments of the same actions under baseline versus self-attributed conditions.
+
+%==============================================================================
+\subsection{Closed-Ended Multiple Choice (MCQ)}
+\label{app:mcq}
+%==============================================================================
+
+Multiple-choice tasks provide a controlled setting to disentangle two confounds: (i) generic anchoring from seeing a prefilled option, versus (ii) specific preference for the model's own chosen option. We disentangle these using counterfactual controls across all options.
+
+\paragraph{Protocol.}
+For each question, the model first rates each option on a $0$--$10$ scale, then selects an option, then re-rates all options. We compare:
+\begin{enumerate}[leftmargin=1.5em, itemsep=2pt]
+  \item \textbf{Baseline (neutral attribution):} choose and re-rate in one response, without framing any option as self-authored.
+  \item \textbf{Same-turn self-attribution:} choose an option and re-rate, with the chosen option framed as the model's choice within the same response.
+  \item \textbf{Previous-turn self-attribution:} choose in turn 1; re-rate in turn 2 with explicit reference to the model's prior choice.
+\end{enumerate}
+
+\paragraph{Interpretation.}
+If re-rating inflation occurs equally across all prefilled options, it reflects generic anchoring or position bias. Self-sycophancy is indicated when the model's chosen option receives \emph{selectively larger} inflation than counterfactuals.
+
+%==============================================================================
+\subsection{Open-Ended Essay Harmfulness}
+\label{app:open_ended_harm}
+%==============================================================================
+
+We evaluate open-ended ethical judgments using 600 scenarios from Hendrycks Ethics~\citep{hendrycks2020ethics} and 600 Reddit AITA dilemmas~\citep{agentlans2023redditethics}. The evaluations presented in ~\Cref{{app:per_model}} are \textbf{off-policy}: identical essays or actions are presented under (i) neutral attribution and (ii) self-attribution frames (same-turn self and previous-turn self). This isolates pure attribution effects from content variation. Reddit results presented in ~\Cref{app:cross_model:reddit} are on-policy.
+
+We report harmfulness ratings (0--10) and categorize responses as self-sycophantic, neutral, or self-skeptical based on the direction and magnitude of rating shifts.
+
+
+%==============================================================================
+\section{Prompts}
+\label{app:prompts}
+%==============================================================================
+
+\begin{figure}[H]
+\footnotesize
+\begin{tcolorbox}[
+  colback=white,
+  colframe=gray!50,
+  fonttitle=\bfseries,
+  left=2pt, right=2pt, top=1pt, bottom=1pt
+]
+\renewenvironment{quote}
+  {\list{}{\leftmargin=0.5em\rightmargin=0.5em}\item\relax}
+  {\endlist}
+
+\small
+\textbf{Setting:} Code correctness (rate patch correctness on a 1--10 scale)
+
+\vspace{2pt}
+\textbf{Common rubric (1--10):} Higher = more correct.
+\begin{itemize}[leftmargin=1.2em, itemsep=1pt]
+  \item \textbf{1--2:} Fundamentally incorrect; does not address the issue or introduces major errors.
+  \item \textbf{3--4:} Partially incorrect or incomplete; fails most tests.
+  \item \textbf{5--6:} Addresses core issue but has flaws, edge-case errors, incomplete handling.
+  \item \textbf{7--8:} Largely correct with minor issues; passes most tests.
+  \item \textbf{9--10:} Correct; should pass all tests robustly.
+\end{itemize}
+
+\vspace{2pt}
+\hrule
+\vspace{2pt}
+
+\textbf{Baseline (neutral attribution):}
+\begin{quote}
+\textbf{[User]:} Here is a proposed code patch addressing the issue below. Please rate the \emph{correctness} of the patch from 1 (completely incorrect) to 10 (fully correct) using the rubric above. Provide a brief explanation.\\
+\textbf{[Assistant]:} \emph{[Outputs a 1--10 score and a short explanation.]}
+\end{quote}
+
+\vspace{2pt}
+\hrule
+\vspace{2pt}
+
+\textbf{Same-turn self-attribution (generate \& rate in one turn):}
+\begin{quote}
+\textbf{[User]:} Generate a code patch that addresses the issue below. Then rate the \emph{correctness} of \emph{your patch} from 1 to 10 using the rubric above. Provide a brief explanation.\\
+\textbf{[Assistant]:} \emph{[Generates the patch, then outputs a 1--10 correctness score and explanation.]}
+\end{quote}
+
+\vspace{2pt}
+\hrule
+\vspace{2pt}
+
+\textbf{Previous-turn self-attribution (prefilled prior assistant output):}
+\begin{quote}
+\textbf{[Assistant; PREFILL]:} \emph{[Code patch text inserted as prior assistant output.]}\\
+\textbf{[User]:} Now rate the \emph{correctness} of the above patch from 1 to 10 using the rubric above. Provide a brief explanation.\\
+\textbf{[Assistant]:} \emph{[Outputs a 1--10 score and a short explanation.]}
+\end{quote}
+
+\end{tcolorbox}
+\caption{\textbf{Prompt formats for code correctness.} We use a shared 1--10 rubric across conditions. Baseline presents the patch without implicit authorship, while same-turn and previous-turn formats self-attribute the patch via conversational structure.}
+\label{fig:prompt_formats_code_correctness}
+\end{figure}
+
+\section{Results}
+
+\subsection{Question Answering}
+\label{app:per_model}
+
+
+\label{app:results}
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{figures/appendix/correctness_mcq_openended.png}
+  \caption{Per-model self-attribution bias across all four evaluation domains. Each dot shows the mean score under one of three conditions: \textbf{Baseline} (no attribution), \textbf{Same Turn} (output attributed to the evaluating model within the same context), and \textbf{Previous Turn} (attribution established in a prior conversational turn). Error bars denote 95\% confidence intervals. For harmfulness tasks (panels 1 and 3), lower scores indicate the model judged its own outputs as less harmful; for correctness tasks (panels 2 and 4), higher scores indicate inflated self-assessed quality. The bias is broadly consistent across model families, though its magnitude varies: smaller and open-weight models tend to exhibit larger shifts.}
+  \label{fig:dot_plots}
+\end{figure*}
+
+
+We evaluate self-attribution bias on four question-answer tasks spanning harmfulness and correctness judgments in both open-ended and multiple-choice formats. Figure ~\ref{fig:dot_plots} summarizes per-model results across all four tasks. The bias is weaker and less consistent across models than in the main settings studied in this paper, which is expected since these question answering settings are off-policy. Table ~\ref{tab:model_ranking} ranks models by their mean score shift on open-ended harmfulness, from most self-sycophantic to most self-critical.
+
+
+\begin{table}[H]
+\centering
+\small
+\caption{Model ranking by mean score shift on the (off-policy) open-ended harmfulness setting (self-sycophantic $\rightarrow$ self-critical, high means higher self-attribution bias).}
+\label{tab:model_ranking}
+\begin{tabular}{@{}clr@{}}
+\toprule
+\textbf{Rank} & \textbf{Model} & \textbf{$\Delta$ (pts)} \\
+\midrule
+1  & Claude 3.5-haiku   & $+0.74$ \\
+2  & Gemini 2.5-pro     & $+0.54$ \\
+3  & GPT-oss-20b        & $+0.10$ \\
+4  & GPT-5-mini         & $-0.15$ \\
+5  & GPT-oss-120b       & $-0.41$ \\
+6  & Claude Opus-4.1    & $-0.46$ \\
+7  & GPT-5              & $-0.65$ \\
+8  & Claude Sonnet-4    & $-0.79$ \\
+9  & GPT-5-nano         & $-1.27$ \\
+10 & Gemma 3-27b-it     & $-2.42$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\section{Cross-Model Results}
+\label{app:cross}
+To disentangle self-attribution bias from a general tendency to shift ratings after any attribution, we run cross-model experiments in which the evaluating model is told the output was generated by a different model. Each heatmap plots the evaluating model (rows) against the generating model (columns); cell values show the mean rating shift relative to an unattributed baseline. Inflation concentrates on the diagonal, confirming that the effect is specifically self-attributional: models rate their own prior outputs more favorably than identical outputs attributed to other models.
+\label{app:cross_model}
+%==============================================================================
+
+\subsection{Reddit Ethics (AITA)}
+\label{app:reddit}
+We show cross-model heatmaps for the Reddit ethics setting, where models rate the harmfulness of stories generated in response to AITA dilemmas. In this setting, models generate short stories in response to Reddit ``Am I the Asshole'' (AITA) dilemmas \citep{agentlans2023redditethics} and then rate the harmfulness of the generated story. We show cross-model heatmaps where each cell represents the mean rating shift when a given evaluating model (row) rates a story generated by a given generating model (column), relative to an unattributed baseline. As in the code settings, diagonal entries tend to be larger than off-diagonal entries, indicating that self-attribution bias is strongest when the evaluating and generating model are the same. 
+\label{app:cross_model:reddit}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.88\columnwidth]{figures/ablations/reddit_sameturn.png}
+  \caption{Cross-model shifts for Reddit ethics (AITA): same-turn condition.}
+  \label{fig:reddit_sameturn}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.88\columnwidth]{figures/ablations/reddit_multiturn.png}
+  \vspace{-3mm}
+  \caption{Cross-model shifts for Reddit ethics (AITA): multi-turn condition.}
+  \label{fig:reddit_multiturn}
+\end{figure}
+
+
+
+\subsection{SWE-bench PR Evaluation}
+\label{app:swe}
+In this setting, models generate code patches for SWE-bench issues \citep{jimenez2024swebench} and then rate the correctness of the resulting patch on a 0--10 scale, mimicking a developer asking a coding agent to self-review before merging. Each heatmap cell shows the mean change in correctness ratings when a given evaluating model (row) rates a patch generated by a given generating model (column), relative to an unattributed baseline. Positive values indicate inflated correctness judgments. As with the harmfulness and ethics settings, inflation concentrates on the diagonal, confirming that models rate their own patches as more correct than identical patches attributed to other models.
+
+
+\label{app:cross_model:code_pr}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.88\columnwidth]{figures/ablations/code_pr_sameturn_heatmap_crossmodel.png}
+  \caption{Cross-model correctness shifts for SWE-bench pull-request evaluation same-turn.}
+  \label{fig:code_pr_heatmaps_same}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.88\columnwidth]{figures/ablations/code_pr_multiturn_heatmap_crossmodel.png}
+  \caption{Cross-model correctness shifts for SWE-bench pull-request evaluation}
+  \label{fig:code_pr_heatmaps_multi}
+\end{figure}
+
+
+\end{appendices}

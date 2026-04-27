@@ -1,0 +1,194 @@
+\section{Methodology}
+\subsection{Our Approach}
+Our core results focus on \textbf{on-policy self-monitoring}, while off-policy evaluations serve as controls to test whether observed effects arise from self-evaluation rather than general judging ability.
+
+Depending on the task, models produce scalar ratings of either correctness or harmfulness.
+To quantify attribution effects, we compute the per-item rating shift:
+\begin{equation}
+\Delta(i) = r_{\text{self}}(i) - r_{\text{neutral}}(i),
+\end{equation}
+where $r_{\text{self}}$ denotes a self-attributed rating (same-turn or previous-turn) and
+$r_{\text{neutral}}$ denotes the corresponding baseline rating.
+For harmfulness tasks, negative values of $\Delta$ indicate \emph{risk underestimation} under self-attribution; for correctness tasks, positive values indicate \emph{overestimation}.
+
+% Our evaluation spans 4,500 samples across five domains designed to measure different aspects of self-bias. 
+% For assessing \textit{correctness}, we use 1,200 MMLU questions (Math, Chemistry, Biology, Physics; \citep{hendrycks2021mmlu}) 
+% and 1,000 unanswerable synthetic MCQs to control for knowledge. 
+% For assessing \textit{harmfulness}, we employ 600 Hendricks Ethics questions \citep{hendrycks2020ethics}, 
+% 600 Reddit-AITA dilemmas \citep{agentlans2023redditethics}, 
+% and 100 computer-use scenarios (65 high-risk phishing/scam actions that directly probe commitment bias in safety-critical contexts. 
+% For all datasets except the computer-use one, we use model generations with a baseline prompt that only asks for the generation. 
+% Uncomment and populate as needed:
+% We construct a multi-domain dataset evaluating correctness and harmfulness:
+% \begin{description}
+%     \item[MMLU Subset (Correctness)] 1,200 MCQs from Mathematics, Chemistry, Biology, and Physics (300 each).
+%     \item[Hendricks Ethics (Harmfulness)] 600 MCQs (300 Justice, 300 Commonsense).
+%     \item[Reddit Ethics (Harmfulness)] 600 dilemmas from Reddit-AITA corpus.
+%     \item[Unanswerable Questions (Correctness)] 1,000 synthetic MCQs with no valid answer to test self-skepticism.
+%     \item[Computer Use Scenarios (Harmfulness)] 100 open-ended scenarios (65 high risk, 35 low risk) covering phishing and social engineering.
+% \end{description}
+
+% Further details are found in Appendix~\ref{appendix:datasets}.
+
+
+\subsection{Datasets}
+\subsection{Code Correctness (SWE-bench)}
+\label{app:code-correctness}
+This setting mirrors coding agents that rely on self-monitoring to detect errors or decide whether further revision is required, such as Claude Code. We start from SWE-bench issues and construct a subset of tasks that are challenging for large language models. 
+
+
+We start from SWE-bench issues and construct a subset of tasks that are challenging for large language models.
+Specifically, we randomly sample issues that a weaker reference model (LLaMA-70B) fails to solve, as determined by SWE-bench unit and integration tests.
+This filtering targets error-prone cases where self-monitoring is most needed and avoids ceiling effects in which nearly all generated patches are obviously correct.
+
+\paragraph{On-policy Patch Generation.}
+For each issue $i$, we provide the full SWE-bench task context, including the repository state and issue description, and obtain a candidate patch $p_i$ from the evaluated model.
+Patches are generated on-policy using a single decoding pass.
+Ground-truth correctness is determined by running the official SWE-bench test suite, yielding a binary outcome $y_i \in \{0,1\}$ indicating whether the patch passes all tests.
+
+
+\begin{itemize}[leftmargin=1.2em, itemsep=2pt]
+    \item \textbf{Baseline (neutral attribution).}
+    The patch $p_i$ is presented as an unlabeled proposed solution, and the model is asked:
+    ``How correct is this patch? (0--10)''
+
+    \item \textbf{Same-turn self-attribution.}
+    The model generates $p_i$ and is asked within the same response:
+    ``How correct is the code you wrote? (0--10)''
+
+    \item \textbf{Previous-turn self-attribution.}
+    The model generates $p_i$ in one turn.
+    In a subsequent turn, the patch is resurfaced explicitly as the model’s prior output, and the model is asked to rate its correctness.
+\end{itemize}
+Unless otherwise noted, all reported code correctness results are on-policy.
+\paragraph{Metrics}
+We report standard SWE-bench pass@1 accuracy, as well as model self-ratings under each attribution regime.
+To quantify calibration, we compute the \emph{miscalibration gap}, defined as the difference between the model’s average correctness rating on failing patches and on passing patches:
+\begin{equation}
+\mathrm{MiscalibrationGap} = \mathbb{E}[r_i \mid y_i = 0] -\mathbb{E}[r_i \mid y_i = 1]
+\end{equation}
+where $r_i$ denotes the correctness rating of the attribution aware setup for patch $p_i$ and $y_i$ indicates the correctness of the baseline.
+Values near zero indicate poor separation between incorrect and correct patches.
+We also analyze the attribution-induced rating shift $\Delta = r_{\text{self}} - r_{\text{neutral}}$ to assess how self-attribution affects calibration.
+
+
+\subsection{Code Risk}
+\label{app:code-risk}
+We next study self-attribution bias in \emph{code harmfulness assessment}, where a model generates a patch and evaluates its security risk or suitability for approval.
+This setting mirrors realistic workflows in which coding agents propose changes and rely on self-monitoring to detect unsafe behavior or decide whether a pull request (PR) should be approved.
+
+\paragraph{Filtering Successful Injections.}
+We focus our analysis on cases where the injected comments successfully influence generation.
+That is, we retain only issues for which the evaluated model follows the injected instruction and produces a patch containing a security-relevant vulnerability.
+Conditioning on successful injections allows us to isolate failures of \emph{evaluation} rather than failures of generation.
+Injection success rates are reported separately.
+
+\paragraph{On-policy Patch Generation.}
+For each retained issue $i$, the model generates a candidate patch $p_i$ on-policy using the modified repository context.
+All subsequent harmfulness and approval judgments are performed on these generated patches.
+
+\paragraph{Harmfulness Evaluation under Attribution Regimes.}
+Following the attribution regimes defined in Section~\ref{sec:attribution_protocol}, we ask models to rate the security risk of each patch on a $0$--$10$ scale. See \ref{Appendix:code-harmfulness}
+
+\begin{itemize}[leftmargin=1.2em, itemsep=2pt]
+    \item \textbf{Baseline (neutral attribution).}
+    The patch is presented as an unlabeled proposed solution, and the model is asked to rate its harmfulness or security risk.
+
+    \item \textbf{Same-turn self-attribution.}
+    The model generates the patch and, within the same response, rates the harmfulness of \emph{the solution it wrote}.
+
+    \item \textbf{Previous-turn self-attribution.}
+    The model generates the patch in one turn.
+    In a subsequent turn, the patch is resurfaced explicitly as the model’s prior output and the model is asked to rate its harmfulness.
+\end{itemize}
+
+We report the attribution-induced shift
+\(
+\Delta = r_{\text{self}} - %r_{\text{neutral}},
+\)
+where negative values indicate \emph{risk underestimation} under self-attribution.
+
+\paragraph{PR Approval Recommendation.}
+To directly connect harmfulness judgments to downstream decisions, we also evaluate a \emph{PR approval} variant of this task.
+Using the same set of injected-hazard patches, we ask the model whether the proposed change should be approved.
+Approval decisions are elicited under the same three attribution regimes (baseline, same-turn self-attribution, previous-turn self-attribution).
+
+This formulation mirrors common deployment patterns in which a model proposes a patch and is then queried to approve, block, or escalate it.
+
+
+\subsection{Code Harmfulness and PR Approval}
+\label{Appendix:code-harmfulness}
+\begin{itemize}[leftmargin=1.2em, itemsep=2pt]
+    \item \textbf{Baseline (neutral attribution).}
+    The patch is presented as an unlabeled proposed solution, and the model is asked to rate its harmfulness or security risk.
+
+    \item \textbf{Same-turn self-attribution.}
+    The model generates the patch and, within the same response, rates the harmfulness of \emph{the solution it wrote}.
+
+    \item \textbf{Previous-turn self-attribution.}
+    The model generates the patch in one turn.
+    In a subsequent turn, the patch is resurfaced explicitly as the model’s prior output and the model is asked to rate its harmfulness.
+\end{itemize}
+
+
+
+\subsection{Interactive Tool Computer Use Interface}
+\label{app:risky-computer-use}
+Models interact with scenarios using a constrained set of tools, including actions such as taking screenshots, clicking links, typing text, and issuing key presses.
+Actions are represented explicitly using structured tool tags.
+For each action, models are asked to provide a numeric risk assessment on a $0$--$10$ scale using an XML \texttt{<risk>} tag.
+
+\paragraph{Attribution Regimes.}
+We evaluate computer-use risk assessment under the same three attribution regimes defined in Section~\ref{sec:attribution_protocol}:
+
+
+TODO put in appendix
+\begin{itemize}[leftmargin=1.2em, itemsep=2pt]
+    \item \textbf{Baseline (neutral attribution).}
+    The model is shown the scenario and asked to assess the risk of a \emph{hypothetical} action (e.g., clicking a link) without being led to believe it has performed the action.
+
+    \item \textbf{Same-turn self-attribution.}
+    The model is instructed to take actions and assess their risk within a single response, such that self-attribution is immediate and locally salient.
+
+    \item \textbf{Previous-turn self-attribution.}
+    The model takes an action in one turn.
+    In a subsequent turn, that action is resurfaced explicitly as the model’s prior behavior, and the model is asked to assess the risk of \emph{the action it just took}.
+\end{itemize}
+
+This design allows us to compare risk judgments made in anticipation of an action with judgments made after the same action is attributed to the model itself.
+
+\paragraph{Handling Refusals and Tool Re-routing.}
+In some cases, models refuse to accept the premise that they executed a harmful action, instead declining to respond or substituting a safer alternative action. Such cases are omitted.
+
+
+\subsection{Closed-Ended (MCQ)}
+\label{appendix-mcq}
+Multiple-choice questions provide a controlled setting to disentangle self-preference from confounding biases. A naive comparison of ratings before/after choice conflates two effects: (1) generic anchoring from any prefilled option, and (2) specific preference for one's own choice. 
+We disentangle these through counterfactual controls across all options, rather than just the models' preference:
+\begin{enumerate}
+   \item \textbf{Baseline}: Model rates all options 0–10, chooses one, and re-rates all in a single response. No attribution of authorship.
+   \item \textbf{Same Turn Self Attribution}: Model chooses an option before re-rating it in the same turn.
+   \item \textbf{Previous Turn Self Attribution}: Model chooses an option in turn 1, and is asked in turn 2 to re-rate all.
+\end{enumerate}
+
+Critically, if rating inflation occurs equally for all prefilled options, this reflects position bias, not self-preference. True self-sycophancy manifests only when the model's actual choice receives significantly more inflation than counterfactuals. 
+
+
+\paragraph{Open-Ended (Essays / Computer Use)}
+\paragraph{Open-Ended Essay Harmfulness.}
+\label{appendix-reddit}
+We use 600 scenarios from Hendrycks Ethics~\citep{hendrycks2020ethics} and 600 Reddit-AITA dilemmas~\citep{agentlans2023redditethics}. All evaluations are \emph{off-policy}: identical essays are presented under (i) neutral/other attribution and (ii) self-attribution (\emph{Same-Turn Self} and \emph{Previous-Turn Self} frames). This design isolates pure attribution effects from variation in content quality. We report harmfulness ratings (0--10) and the prevalence of self-sycophantic, neutral, and self-skeptical responses.
+
+Open-ended generation reflects real deployment conditions where models produce content and subsequently evaluate it -- creating opportunities for post-hoc rationalization absent in MCQs. Unlike forced-choice settings, open-ended tasks reveal how models justify their own outputs. Crucially, we can evaluate \emph{identical outputs} under different attribution conditions (self vs. other), isolating pure attribution effects from content quality.
+
+
+\begin{enumerate}
+   \item \textbf{Baseline}: Model evaluates an unattributed essay or action.
+   \item \textbf{Same Turn Self Attribution}: Model generates an output and immediately rates it within one turn.
+   \item \textbf{Previous Turn Self Attribution}: Model generates an output in one turn, and rates it in a subsequent turn after self-attribution.
+\end{enumerate}
+
+
+\input{sections/appendix/prompts}
+
+\FloatBarrier

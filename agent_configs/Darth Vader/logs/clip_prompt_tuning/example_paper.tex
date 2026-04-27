@@ -1,0 +1,1504 @@
+%%%%%%%% ICML 2026 EXAMPLE LATEX SUBMISSION FILE %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+% Recommended, but optional, packages for figures and better typesetting:
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs} % for professional tables
+
+% hyperref makes hyperlinks in the resulting PDF.
+% If your build breaks (sometimes temporarily if a hyperlink spans a page)
+% please comment out the following usepackage line and replace
+% \usepackage{icml2026} with \usepackage[nohyperref]{icml2026} above.
+\usepackage{hyperref}
+\usepackage{wrapfig}
+\newenvironment{icmlbiography}[2][]{%
+	\par\vspace{1em}
+	\begin{wrapfigure}{l}{1.1in}
+		\vspace{-15pt}
+		#1
+		\vspace{-15pt}
+	\end{wrapfigure}
+	\noindent\textbf{#2}
+}{%
+	\par
+}
+
+% Attempt to make hyperref and algorithmic work together better:
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+
+% Use the following line for the initial blind version submitted for review:
+%\usepackage{icml2026}
+
+% For preprint, use
+\usepackage{icml2026}
+
+% If accepted, instead use the following line for the camera-ready submission:
+% \usepackage{icml2026}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+% if you use cleveref..
+\usepackage[capitalize,noabbrev]{cleveref}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+% Todonotes is useful during development, simply uncomment the next line
+%    and comment out the line below the next line to turn off comments
+\usepackage[disable,textsize=tiny]{todonotes}
+%\usepackage[textsize=tiny]{todonotes}
+
+% The \icmltitle you define below is probably too long as a header.
+% Therefore, a short form for the running title is supplied here:
+\icmltitlerunning{Prompt Tuning for CLIP on the Pretrained Manifold}
+
+\begin{document}
+	
+	\twocolumn[
+	\icmltitle{Prompt Tuning for CLIP on the Pretrained Manifold}
+	
+	% It is OKAY to include author information, even for blind submissions: the
+	% style file will automatically remove it for you unless you've provided
+	% the [accepted] option to the icml2026 package.
+	
+	% List of affiliations: The first argument should be a (short) identifier you
+	% will use later to specify author affiliations Academic affiliations
+	% should list Department, University, City, Region, Country Industry
+	% affiliations should list Company, City, Region, Country
+	
+	% You can specify symbols, otherwise they are numbered in order. Ideally, you
+	% should not use this facility. Affiliations will be numbered in order of
+	% appearance and this is the preferred way.
+	\icmlsetsymbol{equal}{*}
+	
+	\icmlsetsymbol{corr}{, *}
+	
+	\begin{icmlauthorlist}\icmlauthor{Anonymous}{anon}\end{icmlauthorlist}
+	
+	\icmlaffiliation{anon}{Anonymous Institution}
+	
+	
+
+	\icmlcorrespondingauthor{Anonymous}{anonymous@anonymous.invalid}
+	
+	% You may provide any keywords that you find helpful for describing your
+	% paper, these are used to populate the "keywords" metadata in the PDF but
+	% will not be shown in the document
+	\icmlkeywords{Machine Learning, ICML}
+	
+	\vskip 0.3in
+	]
+	
+	% this must go after the closing bracket ] following \twocolumn[ ...
+	
+	% This command actually creates the footnote in the first column listing the
+	% affiliations and the copyright notice. The command takes one argument, which
+	% is text to display at the start of the footnote. The \icmlEqualContribution
+	% command is standard text for equal contribution. Remove it (just {}) if you
+	% do not need this facility.
+	
+	% Use ONE of the following lines. DO NOT remove the command.
+	% If you have no special notice, KEEP empty braces:
+	\printAffiliationsAndNotice{}  % no special notice (required even if empty)
+	% Or, if applicable, use the standard equal contribution text:
+	% \printAffiliationsAndNotice{\icmlEqualContribution}
+	\begin{abstract}
+		Prompt tuning introduces learnable prompt vectors that adapt pretrained vision-language models to downstream tasks in a parameter-efficient manner. However, under limited supervision, prompt tuning alters pretrained representations and drives downstream features away from the pretrained manifold toward directions that are unfavorable for transfer. This drift degrades generalization. To address this limitation, we propose ManiPT, a framework that performs prompt tuning on the pretrained manifold. ManiPT introduces cosine consistency constraints in both the text and image modalities to confine the learned representations within the pretrained geometric neighborhood. Furthermore, we introduce a structural bias that enforces incremental corrections, guiding the adaptation along transferable directions to mitigate reliance on shortcut learning. From a theoretical perspective, ManiPT alleviates overfitting tendencies under limited data. Our experiments cover four downstream settings: unseen-class generalization, few-shot classification, cross-dataset transfer, and domain generalization. Across these settings, ManiPT achieves higher average performance than baseline methods. Notably, ManiPT provides an explicit perspective on how prompt tuning overfits under limited supervision.
+	\end{abstract}
+	\section{Introduction}
+	Recent large-scale pretrained vision-language models (VLMs) such as CLIP~\citep{radford2021learning}, ALIGN~\citep{jia2021scaling}, and Florence~\citep{yuan2021florence} leverage massive image and text-aligned data to learn general representations. These models support open-vocabulary recognition and transfer~\citep{radford2021learning,gu2021openvocabulary} and are widely adopted as foundation models for downstream tasks. However, under practical constraints such as label scarcity or domain shifts, direct full fine-tuning incurs high computational costs and risks compromising the structure of pretrained representations. By freezing the pretrained backbone and introducing a small number of learnable vectors to modulate model behavior, prompt tuning maintains strong performance on downstream benchmarks while significantly reducing the number of trainable parameters and is now a common paradigm for adapting VLMs.
+	
+	CLIP establishes a transferable feature manifold via large-scale pretraining. Under limited supervision, however, prompt learning tends to exploit local discriminative signals. These signals contain some transferable semantics but also capture spurious correlations that are valid only within the limited training data, such as background patterns or texture artifacts. Although this strategy ensures separability on in-domain data, it causes adapted representations to deviate from the pretrained manifold, as illustrated in Figure~\ref{fig:1}. Without the geometric support of the large-scale pretrained manifold, the adapted representations fail to generalize reliably to unseen classes or cross-domain distributions, which impairs overall generalization performance.
+	\begin{figure}[t!]
+		\centering
+		\includegraphics[width=\linewidth]{Figure1.pdf}
+		\caption{Manifold drift and manifold preservation on the CLIP feature space.
+			(a) \textbf{Prompt tuning.} Under limited supervision, prompt tuning drives adapted representations away from the pretrained manifold.
+			(b) \textbf{ManiPT.} The proposed method constrains adapted representations to stay close to the pretrained manifold.}
+		\label{fig:1}
+		\vspace{-20pt}
+	\end{figure}
+	
+	While existing prompt-based adaptation methods mitigate overfitting by making prompts more expressive or adding heuristic regularization, they seldom explicitly control how prompt updates change representations relative to the frozen CLIP features. For example, CoOp and CoCoOp~\citep{zhou2022coop,zhou2022cocoop} improve transfer by learning class- or instance-conditioned prompts. MaPLe~\citep{khattak2023maple} and related deep prompting methods~\citep{jia2022vpt} inject prompts into multiple layers to increase capacity, and CLIP-Adapter~\citep{gao2021clipadapter} attaches shallow adapters onto frozen CLIP to bridge domain gaps. Regularization-oriented approaches such as PromptSRC~\citep{yao2023promptsrc} and CoPrompt~\citep{zhang2023coprompt} introduce additional losses that aim to stabilize training, but these penalties are typically defined on logits, parameters, or prompt content rather than directly constraining feature geometry.
+	
+	In ManiPT, we instead treat the frozen CLIP representations as proxies for the pretrained manifold. By enforcing feature-level cosine consistency with these frozen references on both the visual and textual sides, ManiPT confines the learned representations within the pretrained geometric neighborhood. However, simply staying within the neighborhood does not guarantee transferability, as shortcut solutions may still exist locally. To address this, ManiPT introduces a structural bias through normalized additive aggregation. This design enforces incremental corrections, guiding the representations to adjust along transferable directions while suppressing reliance on dataset-specific shortcuts.
+	
+	Building on this analysis, we propose ManiPT, a framework for prompt tuning on the pretrained manifold, shown in Figure~\ref{fig:1}. Our contributions are summarized below:
+	\vspace{-10pt}
+	\begin{itemize}
+		\item We identify manifold drift as a critical factor limiting generalization under limited supervision and propose ManiPT to mitigate the resulting degradation.
+		\item We introduce cosine consistency constraints to prevent manifold drift and a structural bias to mitigate shortcut learning through incremental corrections.
+		\item We provide theoretical guarantees on generalization error and demonstrate that ManiPT consistently outperforms baseline methods across extensive experiments.
+	\end{itemize}
+	\vspace{-11pt}
+	\section{Related Work}
+	\textbf{Manifold Learning.} Manifold learning~\citep{tenenbaum2000global} is built on the assumption that high-dimensional observations often lie approximately on a low-dimensional nonlinear manifold. Early studies~\citep{roweis2000lle} mainly focus on recovering global geometric structure from local neighborhood relations and use this structure for nonlinear dimensionality reduction and representation learning. Building on this line of work, manifold regularization~\citep{belkin2006manifold} explicitly injects a geometric prior of smoothness along the data manifold into the learning objective and, in settings such as semi-supervised learning, uses graph-based regularization to constrain variation at unlabeled samples, which leverages the geometry of the marginal distribution to improve generalization. With the rise of deep learning, manifold ideas expand from explicit embeddings to geometric constraints in latent spaces. Contractive Auto-Encoders~\citep{rifai2011contractive} encourage representations to be sensitive to variations along tangent directions of the manifold while remaining robust to perturbations in directions orthogonal to the manifold, so that local manifold structure can be captured. Manifold Mixup~\citep{verma2019manifold} performs interpolation in hidden layers to smooth the decision boundary and to learn intermediate representations that transfer well across tasks. In the same spirit, we treat the pretrained CLIP feature space as a robust manifold. Our goal extends beyond merely preserving this structure. We aim to constrain the feature adaptation within the manifold neighborhood while biasing the adaptation toward transferable directions along the manifold surface.
+	
+	\textbf{Prompt Tuning.} Early attempts such as CoOp~\citep{zhou2022coop} substitute handcrafted templates with learnable context vectors. To address limited generalization on unseen classes, subsequent approaches such as CoCoOp~\citep{zhou2022cocoop} condition prompts on image instances. MaPLe~\citep{khattak2023maple} enhances modality alignment through hierarchical prompting. DPC~\citep{wang2023dpc} decouples prompts into dual branches for specialization. DePT~\citep{xu2023dept} isolates channel-wise biases to reduce interference. To mitigate overfitting and catastrophic forgetting, recent studies introduce regularization strategies that maintain the discriminative power of the backbone, including PromptSRC~\citep{yao2023promptsrc} and CoPrompt~\citep{zhang2023coprompt}, which we use as strong baselines. More recent research focuses on integrating prior knowledge and external information. TAC~\citep{liu2023tac} exploits task-aware priors to generate task contexts, and TextRefiner~\citep{chen2023textrefiner} utilizes internal visual knowledge to refine prompts. Approaches such as LLaMP~\citep{zhang2023llamp}, TAP~\citep{wang2023tap}, and ATPrompt~\citep{li2023atprompt} leverage external large language models (LLMs) to enrich semantic descriptions and structured attributes of prompts. Existing methods primarily enhance adaptation capacity by increasing prompt plasticity, which often necessitates heuristic regularization to mitigate the resulting overfitting. Distinct from these approaches, ManiPT adopts a geometric perspective. We introduce consistency constraints to confine the learned representations within the pretrained geometric neighborhood and a structural bias to enforce incremental corrections. This dual mechanism ensures that the model not only stays on the manifold but also guides the feature adaptation along transferable directions while suppressing dataset-specific shortcuts.
+	\vspace{-10pt}
+	\section{Preliminaries and Insights}
+	\label{sec:preliminaries}
+	We follow the standard CLIP-based protocol~\citep{radford2021learning,zhou2022coop} for image classification. The main symbols and notation used throughout this section and the subsequent analysis are summarized in Appendix~\ref{app:notation}.
+	
+	\textbf{CLIP-based Image Classification.} Given a label set $\mathcal{C}=\{1,\dots,C\}$ and an image $\mathbf{x}$, CLIP maps texts and images into a shared space via frozen encoders $\mathcal{T}$ and $\mathcal{V}$. For class $c$ with template $\mathbf{t}_c$, the normalized text feature is $\mathbf{z}^{\mathrm{txt}}_{c}=\mathcal{T}(\mathbf{t}_c)/\|\mathcal{T}(\mathbf{t}_c)\|\in\mathbb{R}^{d}$, where $d$ is the embedding dimension. Similarly, the normalized visual feature is $\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}=\mathcal{V}(\mathbf{x})/\|\mathcal{V}(\mathbf{x})\|\in\mathbb{R}^{d}$. We compute logits $\ell_c(\mathbf{x})=\tau (\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}})^{\top} \mathbf{z}^{\mathrm{txt}}_{c}$ with temperature $\tau$, and the predicted label is $\hat{y}(\mathbf{x})=\arg\max_{c} \ell_c(\mathbf{x})$. The probabilistic prediction is:
+	\begin{equation}
+		p(c\,|\,\mathbf{x})=\frac{\exp(\ell_c(\mathbf{x}))}{\sum_{j=1}^{C}\exp(\ell_j(\mathbf{x}))}.
+	\end{equation}
+	
+	\textbf{Prompt Tuning on CLIP.} Prompt tuning adapts CLIP to a downstream task by freezing the pretrained text encoder $\mathcal{T}$ and image encoder $\mathcal{V}$ and learning a small set of prompt parameters that modulate the representations.
+	
+	For each class $c$, prompt tuning replaces the handcrafted context in the class template with $m$ learnable context vectors.
+	Let $\mathbf{P}_0=\{\mathbf{p}_1,\dots,\mathbf{p}_m\}$ denote the learnable context. The prompted text sequence is denoted by $\mathbf{t}_c(\mathbf{P}_0)$, and the resulting class text feature is:
+	\begin{equation}
+		\label{eq:text_prompt_shallow}
+		\mathbf{h}^{\mathrm{txt}}_{c}
+		=\frac{\mathcal{T}\!\left(\mathbf{t}_c(\mathbf{P}_0)\right)}{\left\|\mathcal{T}\!\left(\mathbf{t}_c(\mathbf{P}_0)\right)\right\|}.
+	\end{equation}
+	Beyond input-level context, we inject learnable prompts into intermediate Transformer~\citep{vaswani2017attention} layers. We denote the deep prompts for the text encoder as $\{\mathbf{P}_{k}\}_{k=1}^{K-1}$, where $K$ is the number of layers.
+	Collecting all text-side prompts as $\mathcal{P}^{\mathrm{txt}}=\{\mathbf{P}_0,\mathbf{P}_1,\dots,\mathbf{P}_{K-1}\}$, the prompted text feature can be written as:
+	\begin{equation}
+		\label{eq:text_prompt}
+		\mathbf{h}^{\mathrm{txt}}_{c}
+		=\frac{\mathcal{T}\!\left(\mathbf{t}_c,\mathcal{P}^{\mathrm{txt}}\right)}{\left\|\mathcal{T}\!\left(\mathbf{t}_c,\mathcal{P}^{\mathrm{txt}}\right)\right\|}.
+	\end{equation}
+	On the visual side, prompt vectors can also be introduced into the image encoder. We denote the input-level visual prompts by $\tilde{\mathbf{P}}_0$ (inserted after patch embedding) and the deep visual prompts by $\{\tilde{\mathbf{P}}_{k}\}_{k=1}^{K-1}$.
+	Let $\mathcal{P}^{\mathrm{vis}}=\{\tilde{\mathbf{P}}_0,\tilde{\mathbf{P}}_1,\dots,\tilde{\mathbf{P}}_{K-1}\}$ be all visual prompts.
+	The prompted image feature is then:
+	\begin{equation}
+		\label{eq:vis_prompt}
+		\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}
+		=\frac{\mathcal{V}\!\left(\mathbf{x},\mathcal{P}^{\mathrm{vis}}\right)}{\left\|\mathcal{V}\!\left(\mathbf{x},\mathcal{P}^{\mathrm{vis}}\right)\right\|}.
+	\end{equation}
+	With prompt-adapted features, CLIP performs classification by cosine similarity matching between $\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}$ and the class text features $\mathbf{h}^{\mathrm{txt}}_{c}$. We compute:
+	\begin{equation}
+		\ell_c(\mathbf{x})=\tau \cdot \left( \mathbf{h}^{\mathrm{vis}}_{\mathbf{x}} \right)^{\top} \mathbf{h}^{\mathrm{txt}}_{c},
+	\end{equation}
+	followed by a softmax over classes to obtain $p(c\,|\,\mathbf{x})$.
+	
+	\textbf{Representing Manifold Drift and Shortcut Reliance.}
+	Based on the manifold hypothesis~\citep{tenenbaum2000global}, we posit that CLIP pretrained features exhibit a low-dimensional geometric structure despite residing in a high-dimensional space. As this intrinsic structure is not explicitly accessible, we utilize the principal component analysis (PCA) subspace~\citep{jolliffe2002principal} of the pretrained feature point cloud as a computable approximation to quantify the manifold shift induced by prompt tuning. Specifically, let $\mathbf{Z}\in\mathbb{R}^{N\times d}$ and $\mathbf{H}\in\mathbb{R}^{N\times d}$ denote the normalized feature point clouds of the pretrained and prompt-tuned models respectively, where $N$ is the number of samples and $d$ is the feature dimension. Let $\boldsymbol{\mu}$ be the mean of the pretrained feature cloud, and let $\bar{\mathbf{Z}}$ and $\bar{\mathbf{H}}$ denote the pretrained and prompt-tuned features centered by this common mean. We perform PCA on $\bar{\mathbf{Z}}$ and let $\mathbf{V}^{\mathrm{pca}}\in\mathbb{R}^{d\times d^{\mathrm{pca}}}$ collect the top-$d^{\mathrm{pca}}$ principal directions. We define the projection matrix $\mathbf{P}^{\mathrm{pca}}=\mathbf{V}^{\mathrm{pca}}(\mathbf{V}^{\mathrm{pca}})^\top\in\mathbb{R}^{d\times d}$ onto this principal subspace, and let $\mathbf{I}_d\in\mathbb{R}^{d\times d}$ be the identity matrix. Then the approximate manifold shift is formulated as follows. See Appendix~\ref{app:drift_definition} for detailed definitions.
+	\begin{equation}
+		\label{eq:manifold_shift}
+		\Delta
+		=
+		\frac{\|\bar{\mathbf{H}}(\mathbf{I}_d-\mathbf{P}^{\mathrm{pca}})\|_F^2}{\|\bar{\mathbf{H}}\|_F^2}
+		-
+		\frac{\|\bar{\mathbf{Z}}(\mathbf{I}_d-\mathbf{P}^{\mathrm{pca}})\|_F^2}{\|\bar{\mathbf{Z}}\|_F^2},
+	\end{equation}
+	where $\|\cdot\|_F$ denotes the Frobenius norm. $\Delta>0$ signifies prompt-tuned features drift away from the principal subspace of the pretrained CLIP model, increasing the risk of overfitting to dataset-specific biases.
+	\begin{figure*}[t!]
+		\centering
+		\includegraphics[width=\linewidth]{Figure3.pdf} 
+		\caption{Overview of ManiPT. The framework enriches class descriptions with an LLM, constructs a text feature bank as semantic prototypes, and applies cosine consistency constraints together with a structural bias to keep prompt tuning near the pretrained manifold.}
+		\label{fig:main_arch}
+		\vspace{-10pt}
+	\end{figure*}
+	
+	Consider the decomposition of the feature space into a transferable subspace $\mathcal{Q}$ supported by pretraining and a shortcut subspace $\mathcal{S}$ containing dataset-specific variations. Let $\boldsymbol{\delta}$ denote the feature shift induced by prompt tuning. We formulate the decomposition as:
+	\begin{equation}
+		\label{eq:delta_decomposition}
+		\boldsymbol{\delta} = \boldsymbol{\delta}^{\mathcal{Q}} + \boldsymbol{\delta}^{\mathcal{S}},
+	\end{equation}
+	where $\boldsymbol{\delta}^{\mathcal{Q}}$ resides in $\mathcal{Q}$ and represents refinement along robust semantic directions while $\boldsymbol{\delta}^{\mathcal{S}}$ belongs to $\mathcal{S}$ and denotes deviation into the shortcut subspace. When the training set is small, minimizing empirical risk tends to exploit discriminative signals present in $\mathcal{S}$ such as background noise or texture biases. These signals are sufficient to separate the limited support set but lack semantic universality. Under limited supervision, optimization tends to amplify $\boldsymbol{\delta}^{\mathcal{S}}$, causing the learned representations to diverge from the robust semantic directions supported by the pretrained manifold.
+	
+	\textbf{A Framework for Performing Prompt Tuning on the Pretrained Manifold.} Building on the analysis in Eq.~(\ref{eq:manifold_shift}) and Eq.~(\ref{eq:delta_decomposition}), we propose a framework to perform prompt tuning on the pretrained manifold. ManiPT imposes cosine consistency constraints to confine the learned representations within the pretrained geometric neighborhood. However, since shortcut components $\boldsymbol{\delta}^{\mathcal{S}}$ may still persist within the manifold neighborhood, we further introduce a structural bias to enforce incremental corrections, thereby biasing the adaptation toward transferable directions.
+	\vspace{-10pt}
+	\section{Prompt Tuning on the Pretrained Manifold}
+	This section presents ManiPT and components from Section~\ref{sec:preliminaries}. Figure~\ref{fig:main_arch} shows the pipeline. We describe LLM-based knowledge enrichment, cosine consistency constraints, and the structural bias. Finally, we show that when empirical risks are comparable, ManiPT can theoretically attain a lower population risk than standard prompt tuning.
+	\vspace{-10pt}
+	\subsection{LLM-based Knowledge Enrichment}
+	\label{sec:knowledge_enrichment}
+	To reduce shortcut semantics learned under few-shot supervision, we construct stable semantic reference texts for each class and encode them into a text feature bank serving as a semantic prototype for subsequent constraints on the pretrained manifold. For each class $c\in \mathcal{C}$, we query an LLM to generate descriptions, yielding a description set $A_c=\{a_{c,j}\}_{j=1}^{n}$, where $n$ is the count per class, and aggregate these as $A=\bigcup_{c\in \mathcal{C}}A_c$. For efficiency, we pre-encode these descriptions into normalized CLIP text features:
+	\begin{equation}
+		\label{eq:feature_bank}
+		E_c=\left\{\frac{\mathcal{T}(a)}{\|\mathcal{T}(a)\|}\ \bigg|\ a\in A_c\right\}.
+	\end{equation}
+	\vspace{-20pt}
+	\subsection{Cosine Consistency Constraints}
+	\label{sec:consistency_constraints}
+	As shown in Eq.~(\ref{eq:manifold_shift}) and Eq.~(\ref{eq:delta_decomposition}), the feature change induced by prompt tuning decomposes into a component $\boldsymbol{\delta}^{\mathcal{Q}}$ in the transferable subspace and a shortcut component $\boldsymbol{\delta}^{\mathcal{S}}$ in the non-transferable subspace. Under limited supervision, optimization is more prone to amplifying $\boldsymbol{\delta}^{\mathcal{S}}$, causing manifold drift ($\Delta>0$). Since CLIP makes predictions based on cosine similarity between normalized features, we impose cosine consistency constraints on both modalities. This explicitly confines the feature adaptation within the pretrained geometric neighborhood, preventing significant deviation from the valid support of the pretrained manifold.
+	
+	\textbf{Visual-side Consistency Constraint.}
+	For sample $\mathbf{x}_i$, let $\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}$ and $\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}_i}$ be the normalized visual features from the frozen and prompt-tuned branches. We define the visual-side consistency loss as:
+	\begin{equation}
+		\mathcal{L}^{\mathrm{img}}
+		=
+		\frac{1}{N}\sum_{i=1}^{N}
+		\left(1-\left\langle \mathbf{h}^{\mathrm{vis}}_{\mathbf{x}_i},\, \mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}\right\rangle\right).
+	\end{equation}
+	This constraint explicitly limits the geometric deviation of the adapted features from the frozen representations.
+	
+	\textbf{Text-side Consistency Constraint.}
+	To obtain a more stable semantic reference, we leverage the LLM description feature set $E_c$ constructed in Section~\ref{sec:knowledge_enrichment}. For each class $c$, we aggregate it into a normalized semantic prototype $\mathbf{w}_{c}=(\sum_{\boldsymbol{\eta}\in E_c} \boldsymbol{\eta})/\|\sum_{\boldsymbol{\eta}\in E_c} \boldsymbol{\eta}\|$.
+	Let $\mathbf{h}^{\mathrm{txt}}_{c}$ be the normalized prompt-tuned text feature. The text-side consistency loss is:
+	\begin{equation}
+		\mathcal{L}^{\mathrm{txt}}
+		=
+		\frac{1}{C}\sum_{c\in \mathcal{C}}
+		\left(1-\left\langle \mathbf{h}^{\mathrm{txt}}_{c},\, \mathbf{w}_{c}\right\rangle\right).
+	\end{equation}
+	Unlike the visual constraint, we incorporate LLM-derived semantic priors. This ensures the prompted text features remain semantically anchored to robust class descriptions, mitigating the risk of semantic drift.
+	
+	\subsection{Structural Bias}
+	\label{sec:structural_bias}
+	While consistency constraints confine the learned representations within a geometric neighborhood, this is a necessary but not sufficient condition for transferability, as shortcut solutions may still exist locally. To address this, we further introduce a structural bias. Specifically, we explicitly preserve the frozen CLIP representations in the final features used for classification. This design restricts prompt learning to incremental corrections on top of the pretrained manifold.
+	
+	For sample $\mathbf{x}$ and class $c$, we obtain normalized frozen features $\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}, \mathbf{z}^{\mathrm{txt}}_{c}$ and prompt features $\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}, \mathbf{h}^{\mathrm{txt}}_{c}$. We aggregate them residually and renormalize to produce final classification features:
+	\begin{equation}
+		\label{eq:fused_features}
+		\begin{aligned}
+			\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}
+			&=
+			\frac{\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}+\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}}
+			{\left\|\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}+\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}\right\|},\\
+			\mathbf{f}^{\mathrm{txt}}_{c}
+			&=
+			\frac{\mathbf{z}^{\mathrm{txt}}_{c}+\mathbf{h}^{\mathrm{txt}}_{c}}
+			{\left\|\mathbf{z}^{\mathrm{txt}}_{c}+\mathbf{h}^{\mathrm{txt}}_{c}\right\|}.
+		\end{aligned}
+	\end{equation}
+	
+	This additive structure induces a geometric contraction, which imposes a hard constraint on the optimization behavior. Instead of allowing arbitrary deviations, this design enforces incremental corrections. By anchoring the final representations to the frozen representations, the structural bias effectively biases the adaptation toward transferable directions implied by the pretraining, thereby reducing reliance on dataset-specific shortcut components.
+	
+	\textbf{Classification Objective.}
+	Based on the fused final representations, we follow CLIP's cosine similarity matching form to compute the logit for each class $c\in \mathcal{C}$:
+	\begin{equation}
+		\ell_c(\mathbf{x})=\tau \cdot \left(\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}\right)^{\top} \mathbf{f}^{\mathrm{txt}}_{c}.
+	\end{equation}
+	We optimize prompt parameters using cross-entropy loss:
+	\begin{equation}
+		\mathcal{L}^{\mathrm{ce}}
+		=
+		-\frac{1}{N}\sum_{i=1}^{N}\log
+		\frac{\exp(\ell_{y_i}(\mathbf{x}_i))}
+		{\sum_{c\in \mathcal{C}}\exp(\ell_c(\mathbf{x}_i))}.
+	\end{equation}
+	
+	\textbf{Training Objective.} For conceptual clarity, we formulate the consistency constraints in this section using the intermediate prompt-adapted features. However, to leverage the structural bias defined in Eq.~(\ref{eq:fused_features}), our final training objective applies these constraints specifically to the fused representations $\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}$ and $\mathbf{f}^{\mathrm{txt}}_{c}$. This design ensures that the actual representations used for decision-making remain geometrically aligned with the pretrained representations.
+	
+	Consequently, the total objective function is formulated to minimize the classification error while satisfying these manifold consistency constraints:
+	\begin{equation}
+		\label{eq:total_loss}
+		\mathcal{L}^{\mathrm{total}} = \mathcal{L}^{\mathrm{ce}} + \lambda \bigl(\mathcal{L}^{\mathrm{img}} + \mathcal{L}^{\mathrm{txt}}\bigr),
+	\end{equation}
+	where $\lambda$ balances regularization strength. Optimizing this objective on structurally biased features guides the model to discover transferable directions within the pretrained manifold. The pseudocode of ManiPT is summarized in Appendix~\ref{alg:manipt1}, and training and inference costs are compared in Appendix~\ref{app:efficiency}. ManiPT incurs slightly higher latency than single-branch methods due to dual-branch fusion but remains suitable for real-time deployment.
+	
+	\subsection{Theoretical Analysis}
+	\label{sec:theory_main}
+	We develop the core theoretical guarantees for ManiPT by analyzing its empirical risk, a geometric contraction property induced by the structural bias, and an explicit upper bound on the population risk. Detailed proofs and supporting derivations are provided in Appendix~\ref{app:theory2}.
+	\begin{definition}[Empirical Risk]\label{def:emp_risk}
+		Consider an input image space $\mathcal{X}$, a discrete label space $\mathcal{Y}$, and a distribution $\mathcal{D}$ over $\mathcal{X}\times \mathcal{Y}$.
+		Let $\mathcal{C}=\{1,\dots,C\}$ be the label index set.
+		Let $\mathcal{D}^{\mathrm{train}}=\{(\mathbf{x}_i,y_i)\}_{i=1}^{N}$ be a training set drawn i.i.d.\ from $\mathcal{D}$.
+		Let $\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}}\in\mathbb R^{C}$ be the logit vector with parameters $\boldsymbol{\theta}$ for input $\mathbf{x}$.
+		Let $p^{\boldsymbol{\theta}}(c\,|\,\mathbf{x})=\exp(\ell^{\boldsymbol{\theta}}_c(\mathbf{x}))/\sum_{c'\in \mathcal{C}}\exp(\ell^{\boldsymbol{\theta}}_{c'}(\mathbf{x}))$ be the softmax prediction.
+		Define the empirical risk
+		\begin{equation*}
+			\widehat R_{N}(\boldsymbol{\theta})
+			=
+			-\frac{1}{N}\sum_{i=1}^{N}\log p^{\boldsymbol{\theta}}(y_i\,|\,\mathbf{x}_i).
+		\end{equation*}
+	\end{definition}
+	\begin{lemma}[Contraction Induced by Additive Fusion]\label{lem:contraction}
+		Let $d$ be the embedding dimension and let $\mathbb S^{d-1}=\{\mathbf{z}\in\mathbb R^d:\|\mathbf{z}\|_2=1\}$ be the unit sphere.
+		Let $\boldsymbol{\varphi}\in\mathbb S^{d-1}$ and $\boldsymbol{\psi}\in\mathbb S^{d-1}$ satisfy $\boldsymbol{\varphi}+\boldsymbol{\psi}\neq 0$, which is equivalent to $\langle \boldsymbol{\varphi},\boldsymbol{\psi}\rangle>-1$.
+		Define the fused unit vector $\boldsymbol{\omega}=(\boldsymbol{\varphi}+\boldsymbol{\psi})/\|\boldsymbol{\varphi}+\boldsymbol{\psi}\|_2$.
+		Then the fusion map contracts toward $\boldsymbol{\varphi}$ in the sense that
+		\begin{equation*}
+			\|\boldsymbol{\omega}-\boldsymbol{\varphi}\|_2^2 \le \frac12\|\boldsymbol{\psi}-\boldsymbol{\varphi}\|_2^2.
+		\end{equation*}
+	\end{lemma}
+	Lemma~\ref{lem:contraction} demonstrates that the structural bias constrains the final representation to lie geometrically closer to the frozen reference than the prompt-only representation. This contraction property provides the theoretical basis for the incremental correction mechanism.
+	\begin{lemma}\label{lem:logit_perturb}
+		Let $\tau>0$ be the temperature and define logits $\ell^{\boldsymbol{\theta}}_c(\mathbf{x})=\tau\bigl\langle \mathbf{f}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{f}^{\mathrm{txt}}_{c}\bigr\rangle$ and reference logits $\ell^{0}_c(\mathbf{x})=\tau\bigl\langle \mathbf{z}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{w}_{c}\bigr\rangle$. Define logit perturbation vector $\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}}=\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}}-\boldsymbol{\ell}^{0}_{\mathbf{x}}\in\mathbb R^{C}$. Define the consistency regularizer $\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})=\mathcal L^{\mathrm{img}}(\boldsymbol{\theta})+\mathcal L^{\mathrm{txt}}(\boldsymbol{\theta})$.
+		Then for training samples $\{\mathbf{x}_i\}_{i=1}^N$,
+		\begin{equation*}
+			\frac1N\sum_{i=1}^N\|\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}_i}\|_2^2
+			\le
+			4\tau^2 C\,\mathcal L^{\mathrm{con}}(\boldsymbol{\theta}).
+		\end{equation*}
+	\end{lemma}
+	Lemma~\ref{lem:logit_perturb} shows that cosine consistency explicitly bounds the logit perturbation magnitude relative to the frozen reference model, ensuring the feature adaptation is confined within the geometric neighborhood.
+	\begin{corollary}\label{cor:gen_bound_main}
+		Let $\phi_y(\boldsymbol{\ell})=\log\sum_{c\in \mathcal{C}}\exp(\ell_c)-\ell_y$ be the cross-entropy loss for label $y$ and logit vector $\boldsymbol{\ell}$.
+		Let the population risk be $R(\boldsymbol{\theta})=\mathbb E^{(\mathbf{x},y)\sim \mathcal{D}}[\phi_y(\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}})]$ and let $\widehat R_{N}(\boldsymbol{\theta})=\frac1N\sum_{i=1}^N\phi_{y_i}(\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}_i})$ be the empirical risk defined in Definition~\ref{def:emp_risk}.
+		Let $\varepsilon>0$ and define the localized parameter set $\Omega^{\varepsilon}=\{\boldsymbol{\theta}:\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})\le \varepsilon\}$.
+		Let $B=\log C+2\tau$ and let $\rho\in(0,1)$ be the confidence level.
+		With probability at least $1-\rho$, for all $\boldsymbol{\theta}\in\Omega^{\varepsilon}$,
+		\begin{equation*}
+			R(\boldsymbol{\theta})
+			\le
+			\widehat R_{N}(\boldsymbol{\theta})
+			+2\,\widehat{\mathfrak R}_{N}\bigl(\mathcal{H}^{\varepsilon}\bigr)
+			+4B\sqrt{\frac{\log(4/\rho)}{2N}}.
+		\end{equation*}
+		Let $\mathcal{H}^{\varepsilon}=\{(\mathbf{x},y)\mapsto \phi_y(\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}})-\phi_y(\boldsymbol{\ell}^{0}_{\mathbf{x}}):\boldsymbol{\theta}\in\Omega^{\varepsilon}\}$ be the induced difference class and let $\widehat{\mathfrak R}_{N}(\mathcal{H}^{\varepsilon})$ be its empirical Rademacher complexity.
+		Assume there exist constants $\Lambda^{\mathcal{H}}>0$ and $R^{\boldsymbol{\theta}}>0$ and a prompt dimension $D^{\boldsymbol{\theta}}$ such that
+		\begin{equation*}
+			\widehat{\mathfrak R}_{N}\bigl(\mathcal{H}^{\varepsilon}\bigr)
+			\le
+			\frac{24\tau}{\sqrt N}\sqrt{2C\,\varepsilon}
+			\sqrt{D^{\boldsymbol{\theta}}\log\Bigl(\frac{3e\Lambda^{\mathcal{H}} R^{\boldsymbol{\theta}}}{2\tau\sqrt{2C\,\varepsilon}}\Bigr)}.
+		\end{equation*}
+	\end{corollary}
+	Corollary~\ref{cor:gen_bound_main} shows that ManiPT can achieve a smaller or equal population risk bound when empirical risks are comparable and the consistency loss is reduced, which alleviates overfitting under limited supervision.
+	\begin{table*}[t!]
+		\caption{Base-to-novel generalization results on 11 datasets. We report accuracy on base and novel classes and their harmonic mean (HM). ManiPT achieves the best average harmonic mean across datasets, indicating more balanced generalization between base and novel classes.}
+		\label{tab:base2novel_style_match}
+		\renewcommand{\arraystretch}{0.95}
+		\centering
+		\scriptsize
+		\resizebox{\linewidth}{!}{
+			\begin{tabular}{l ccc|ccc|ccc|ccc}
+				\toprule
+				\multirow{2}{*}{Method} & 
+				\multicolumn{3}{c}{(a) Average} & 
+				\multicolumn{3}{c}{(b) ImageNet} & 
+				\multicolumn{3}{c}{(c) Caltech101} & 
+				\multicolumn{3}{c}{(d) OxfordPets} \\
+				\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10} \cmidrule(lr){11-13}
+				& Base & Novel & HM & Base & Novel & HM & Base & Novel & HM & Base & Novel & HM \\
+				\midrule
+				CLIP       & 69.34 & 74.22 & 71.70 & 72.43 & 68.14 & 70.22 & 96.84 & 94.00 & 95.40 & 91.17 & 97.26 & 94.12 \\
+				CoOp       & 82.69 & 63.22 & 71.66 & 76.47 & 67.88 & 71.92 & 98.00 & 89.81 & 93.73 & 93.67 & 95.29 & 94.47 \\
+				CoCoOp     & 80.47 & 71.69 & 75.83 & 75.98 & 70.43 & 73.10 & 97.96 & 93.81 & 95.84 & 95.20 & 97.69 & 96.43 \\
+				MaPLe      & 82.28 & 75.14 & 78.55 & 76.66 & 70.54 & 73.47 & 97.74 & 94.36 & 96.02 & 95.43 & 97.76 & 96.58 \\
+				LLaMP      & 85.16 & \underline{77.71} & \underline{81.27} & 77.99 & \underline{71.27} & 74.48 & 98.45 & \underline{95.85} & 97.13 & \underline{96.31} & 97.74 & 97.02 \\
+				PromptSRC  & 84.26 & 76.10 & 79.97 & 77.60 & 70.73 & 74.01 & 98.10 & 94.03 & 96.02 & 95.33 & 97.30 & 96.30 \\
+				CoPrompt   & 84.00 & 77.23 & 80.48 & 77.67 & \underline{71.27} & 74.33 & 98.27 & 94.90 & 96.55 & 95.67 & 98.10 & 96.87 \\
+				TAC        & \underline{85.24} & 77.60 & 81.24 & \underline{78.57} & 71.03 & \underline{74.61} & 98.57 & 95.27 & 96.89 & 95.93 & \textbf{98.17} & \underline{97.04} \\
+				TAP        & 84.75 & 77.63 & 81.04 & 77.97 & 70.40 & 73.99 & \underline{98.90} & 95.50 & \underline{97.17} & 95.80 & 97.73 & 96.76 \\
+				\rowcolor{gray!20}\textbf{ManiPT} & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} & \textbf{78.67} & \textbf{72.01} & \textbf{75.20} & \textbf{98.95} & \textbf{95.94} & \textbf{97.42} & \textbf{96.52} & \underline{98.15} & \textbf{97.33} \\
+				\midrule
+				\midrule
+				\multirow{2}{*}{Method} & 
+				\multicolumn{3}{c}{(e) StanfordCars} & 
+				\multicolumn{3}{c}{(f) Flowers102} & 
+				\multicolumn{3}{c}{(g) Food101} & 
+				\multicolumn{3}{c}{(h) FGVCAircraft} \\
+				\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10} \cmidrule(lr){11-13}
+				& Base & Novel & HM & Base & Novel & HM & Base & Novel & HM & Base & Novel & HM \\
+				\midrule
+				CLIP       & 63.37 & 74.89 & 68.65 & 72.08 & \textbf{77.80} & 74.83 & 90.10 & 91.22 & 90.66 & 27.19 & 36.29 & 31.09 \\
+				CoOp       & 78.12 & 60.40 & 68.13 & 97.60 & 59.67 & 74.06 & 88.33 & 82.26 & 85.19 & 40.44 & 22.30 & 28.75 \\
+				CoCoOp     & 70.49 & 73.59 & 72.01 & 94.87 & 71.75 & 81.71 & 90.70 & 91.29 & 90.99 & 33.41 & 23.71 & 27.74 \\
+				MaPLe      & 72.94 & 74.00 & 73.47 & 95.92 & 72.46 & 82.56 & 90.71 & \underline{92.05} & 91.38 & 37.44 & 35.61 & 36.50 \\
+				LLaMP      & 81.56 & 74.54 & \underline{77.89} & 97.82 & \underline{77.40} & \textbf{86.42} & \underline{91.05} & 91.93 & \underline{91.49} & \underline{47.30} & 37.61 & \underline{41.90} \\
+				PromptSRC  & 78.27 & \underline{74.97} & 76.58 & \underline{98.07} & 76.50 & 85.95 & 90.67 & 91.53 & 91.10 & 42.73 & 37.87 & 40.15 \\
+				CoPrompt   & 76.97 & 74.40 & 75.66 & 97.27 & 76.60 & 85.71 & 90.73 & \underline{92.07} & 91.40 & 40.20 & \underline{39.33} & 39.76 \\
+				TAC        & \underline{81.63} & 74.17 & 77.72 & 97.97 & 76.87 & 86.15 & 90.87 & 91.87 & 91.37 & 44.60 & 37.70 & 40.86 \\
+				TAP        & 80.70 & 74.27 & 77.35 & 97.90 & 75.57 & 85.30 & 90.97 & 91.83 & 91.40 & 44.40 & 36.50 & 40.06 \\
+				\rowcolor{gray!20}\textbf{ManiPT} & \textbf{82.53} & \textbf{75.61} & \textbf{78.92} & \textbf{98.12} & 76.84 & \underline{86.19} & \textbf{91.17} & \textbf{92.16} & \textbf{91.66} & \textbf{48.28} & \textbf{39.87} & \textbf{43.68} \\
+				\midrule
+				\midrule
+				\multirow{2}{*}{Method} & 
+				\multicolumn{3}{c}{(i) SUN397} & 
+				\multicolumn{3}{c}{(j) DTD} & 
+				\multicolumn{3}{c}{(k) EuroSAT} & 
+				\multicolumn{3}{c}{(l) UCF101} \\
+				\cmidrule(lr){2-4} \cmidrule(lr){5-7} \cmidrule(lr){8-10} \cmidrule(lr){11-13}
+				& Base & Novel & HM & Base & Novel & HM & Base & Novel & HM & Base & Novel & HM \\
+				\midrule
+				CLIP       & 69.36 & 75.35 & 72.23 & 53.24 & 59.90 & 56.37 & 56.48 & 64.05 & 60.03 & 70.53 & 77.50 & 73.85 \\
+				CoOp       & 80.60 & 65.89 & 72.51 & 79.44 & 41.18 & 54.24 & 92.19 & 54.74 & 68.69 & 84.69 & 56.05 & 67.46 \\
+				CoCoOp     & 79.74 & 76.86 & 78.27 & 77.01 & 56.00 & 64.85 & 87.49 & 60.04 & 71.21 & 82.33 & 73.45 & 77.64 \\
+				MaPLe      & 80.82 & 78.70 & 79.75 & 80.36 & 59.18 & 68.16 & 94.07 & 73.23 & 82.35 & 83.00 & 78.66 & 80.77 \\
+				LLaMP      & \underline{83.41} & 79.90 & 81.62 & 83.49 & 64.49 & 72.77 & 91.93 & \underline{83.66} & 87.60 & 87.13 & 80.66 & 83.77 \\
+				PromptSRC  & 82.67 & 78.47 & 80.52 & 83.37 & 62.97 & 71.75 & 92.90 & 73.90 & 82.32 & 87.10 & 78.80 & 82.74 \\
+				CoPrompt   & 82.63 & \underline{80.03} & 81.31 & 83.13 & 64.73 & 72.79 & \textbf{94.60} & 78.57 & 85.84 & 86.90 & 79.57 & 83.07 \\
+				TAC        & \textbf{83.70} & \underline{80.03} & \textbf{81.82} & 83.37 & 64.27 & 72.58 & \underline{94.37} & 82.60 & \underline{88.10} & \underline{88.07} & 81.67 & 84.75 \\
+				TAP        & 82.87 & 79.53 & 81.17 & \underline{84.20} & \underline{68.00} & \underline{75.24} & 90.70 & 82.17 & 86.22 & 87.90 & \textbf{82.43} & \underline{85.08} \\
+				\rowcolor{gray!20}\textbf{ManiPT} & 83.18 & \textbf{80.18} & \underline{81.65} & \textbf{84.38} & \textbf{68.56} & \textbf{75.65} & 94.06 & \textbf{83.72} & \textbf{88.59} & \textbf{88.14} & \underline{82.31} & \textbf{85.13} \\
+				\bottomrule
+			\end{tabular}
+		}
+		\vspace{-15pt}
+	\end{table*}
+	\begin{table}[t!]
+		\centering
+		\caption{Cross-dataset transfer results from ImageNet to ten downstream datasets. Models are trained on ImageNet and evaluated in a zero-shot manner on each target dataset. ManiPT attains the highest average accuracy over all target datasets.}
+		\resizebox{\linewidth}{!}{
+			\begin{tabular}{cc|ccccccccccc}
+				\toprule
+				\multirow{2}[4]{*}{} & Source & \multicolumn{11}{c}{Target} \\
+				\cmidrule{2-13}          & \rotatebox{90}{ImageNet} & \rotatebox{90}{Caltech101} & \rotatebox{90}{OxfordPets} & \rotatebox{90}{StanfordCars} & \rotatebox{90}{Flowers102} & \rotatebox{90}{Food101} & \rotatebox{90}{Aircraft} & \rotatebox{90}{SUN397} & \rotatebox{90}{DTD}   & \rotatebox{90}{EuroSAT} & \rotatebox{90}{UCF101} & \rotatebox{90}{Average} \\
+				\midrule
+				CoOp  & 71.51 & 93.70  & 89.14 & 64.51 & 68.71 & 85.30  & 18.47 & 64.15 & 41.92 & 46.39 & 66.55 & 63.88 \\
+				CoCoOp & 71.02 & 94.43 & 90.14 & 65.32 & 71.88 & 86.06 & 22.94 & 67.36 & 45.73 & 45.37 & 68.21 & 65.74 \\
+				MaPLe & 70.72 & \textbf{95.53} & 90.49 & 65.57 & \underline{72.20}  & 86.20  & \underline{24.74} & 67.01 & 46.49 & 48.06 & 68.69 & 66.50 \\
+				CoPrompt & 70.80  & 94.50  & \underline{90.73} & \underline{65.67} & \textbf{72.30}  & \underline{86.43} & 24.00    & 67.57 & 47.07 & \textbf{51.90}  & 69.73 & \underline{66.99} \\
+				TAC & \underline{72.77} & 94.53 & 90.67 & 65.30 & \underline{72.20} & 85.83 & 23.53 & 67.63 & 47.57 & 48.07 & \underline{70.00} & 66.53 \\
+				TAP & 72.30 & 94.30 & 90.70 & 65.60 & 70.93 & 86.10 & 24.57 & \underline{68.30} & \underline{50.20} & 46.00 & 68.90 & 66.56 \\
+				\rowcolor{gray!20}
+				ManiPT & \textbf{72.92} & \underline{95.13} & \textbf{90.87} & \textbf{66.27} & 72.14 & \textbf{86.66} & \textbf{27.00} & \textbf{68.50} & \textbf{51.83} & \underline{50.88} & \textbf{71.11} & \textbf{68.04} \\
+				\bottomrule
+			\end{tabular}
+		}
+		\label{tab:cross_dataset}
+		\vspace{-20pt}
+	\end{table}
+	\begin{figure*}[t!]
+		\centering
+		\includegraphics[width=\linewidth]{few_shot.pdf}
+		\vspace{-10pt}
+		\caption{Few-shot classification performance averaged over 11 datasets under 1, 2, 4, 8, and 16 shot settings. ManiPT consistently outperforms baseline methods across all shot numbers, with especially clear gains in the 1-shot and 2-shot regimes.}  
+		\label{fig:fewshot}
+		\vspace{-15pt}
+	\end{figure*}
+	\vspace{-10pt}
+	\section{Experiments}
+	\textbf{Baselines and Benchmarks.} To evaluate ManiPT, we conduct experiments on 15 widely used datasets covering general object, fine-grained, scene, texture, and satellite image classification, as well as four ImageNet variants.
+	
+	We compare ManiPT with state-of-the-art methods including Zero-shot CLIP~\citep{radford2021learning}, basic prompt tuning approaches such as CoOp~\citep{zhou2022coop} and CoCoOp~\citep{zhou2022cocoop}, deep prompting methods such as MaPLe~\citep{khattak2023maple}, regularization strategies including PromptSRC~\citep{yao2023promptsrc} and CoPrompt~\citep{zhang2023coprompt}, and knowledge-enhanced approaches such as TAC~\citep{liu2023tac}, TAP~\citep{wang2023tap}, and LLaMP~\citep{zhang2023llamp} as baselines.
+	
+	Following standard protocols~\citep{zhou2022coop}, we evaluate performance under four settings. In Base-to-Novel Generalization, classes are split into base and novel sets. Cross-Dataset Transfer evaluates zero-shot transferability from ImageNet to the other ten datasets. Domain Generalization evaluates robustness on ImageNet~\citep{deng2009imagenet} variants. Few-Shot Classification evaluates performance on all datasets under 1, 2, 4, 8, and 16 shot settings. See Appendix~\ref{app:training_info} for dataset and implementation details.
+	
+	\textbf{Performance Comparison.}
+	
+	\textbf{Base-to-Novel Generalization.} We present the base-to-novel generalization results across 11 datasets in Table~\ref{tab:base2novel_style_match}. ManiPT consistently outperforms all comparison methods in terms of the average performance. These results indicate that while consistency constraints confine the learned representations within the pretrained geometric neighborhood, the structural bias further guides the model toward transferable directions. This dual mechanism effectively prevents overfitting to shortcuts while leveraging pretrained knowledge, leading to more balanced generalization.
+	
+	\textbf{Cross-Dataset Transfer.} To evaluate the transferability of the learned prompts to unseen distributions, we train the model on ImageNet and directly evaluate it on the other ten datasets. Table~\ref{tab:cross_dataset} reports the cross-dataset evaluation results. ManiPT achieves the highest average accuracy of 68.04\% and outperforms CoPrompt at 66.99\% and TAC at 66.53\%. These results suggest that by enforcing incremental corrections via structural bias, ManiPT ensures the learned representations align with robust, transferable directions rather than dataset-specific shortcuts, thereby facilitating transfer across substantial cross-domain distribution shifts.
+	
+	\textbf{Domain Generalization.} We further assess the robustness of the model against domain shifts using ImageNet variants. As reported in Table~\ref{tab:ood}, ManiPT achieves the best average performance and maintains strong accuracy across all target domains. This behavior validates our insight that anchoring the final representations to the frozen backbone allows the model to filter out domain-specific noise, ensuring that the feature adaptation remains along robust semantic directions.
+	\vspace{-10pt}
+	\begin{table}[t!]
+		\renewcommand{\arraystretch}{0.9}
+		\centering
+		\caption{Domain generalization results on ImageNet variants. Models trained on ImageNet are tested on distribution-shifted versions such as ImageNet-V2, ImageNet-Sketch, ImageNet-A, and ImageNet-R. ManiPT achieves the best average performance and maintains strong accuracy across all domains.}
+		\scriptsize
+		\resizebox{\linewidth}{!}{
+			\begin{tabular}{cc|ccccc}
+				\toprule
+				& Source & \multicolumn{5}{c}{Target} \\
+				\cmidrule{2-7}          & ImageNet & -V2 & -S & -A & -R & Avg. \\
+				\midrule
+				CoOp  & 71.51 & 64.20  & 47.99  & 49.71 & 75.21 & 59.28 \\
+				CoCoOp & 71.02 & 64.07 & 48.75  & 50.63 & 76.18 & 59.91 \\
+				MaPLe & 70.72 & 64.07 & 49.15  & 50.90  & 76.98 & 60.27 \\
+				CoPrompt & 70.80  & 64.25 & 49.43 & 50.50  & 77.51 & 60.42 \\
+				TAC & \underline{72.77} & \underline{65.97} & \underline{50.30} & \underline{51.73} & \underline{78.50} & \underline{61.63} \\
+				\rowcolor{gray!20}
+				ManiPT & \textbf{72.92} & \textbf{66.12} & \textbf{50.63} & \textbf{51.97} & \textbf{78.79} & \textbf{61.88} \\
+				\bottomrule
+			\end{tabular}
+		}
+		\label{tab:ood}
+		\vspace{-21pt}
+	\end{table}
+	
+	\textbf{Few-Shot Classification.} Figure~\ref{fig:fewshot} illustrates average performance across 11 datasets under 1, 2, 4, 8, and 16 shot settings. ManiPT consistently outperforms the baseline methods across all shot settings. Even in the most data-scarce cases such as 1-shot and 2-shot, ManiPT maintains clear performance gains. These results support the view that regulating the feature adaptation via structural bias and consistency constraints alleviates overfitting under limited supervision. See Appendix~\ref{app:fewshot_results} for detailed few-shot results.
+	\vspace{-15pt}
+	\begin{table}[t!]
+		\caption{Ablation study of ManiPT components. We report performance for the baseline, variants with a single component removed, and the full ManiPT model. Each component brings improvements over the baseline, and combining cosine consistency, structural bias, and LLM-based enrichment yields the best overall trade-off.}
+		\label{tab:ablation}
+		\centering
+		\scalebox{0.7}{
+			\begin{tabular}{c c c c c c}
+				\toprule
+				\textbf{Structural Bias} & \textbf{Cos. Consistency} & \textbf{LLM Enrich.} & \textbf{Base} & \textbf{New} & \textbf{HM} \\
+				\midrule
+				$\times$ & $\times$ & $\times$ & 82.91 & 64.15 & 72.82 \\
+				\checkmark & $\times$ & $\times$ & 84.85 & 68.32 & 75.71 \\
+				$\times$ & \checkmark & $\times$ & 82.85 & 76.50 & 79.54 \\
+				\checkmark & \checkmark & $\times$ & 85.65 & 77.58 & 81.42 \\
+				\rowcolor{gray!10} \checkmark & \checkmark & \checkmark & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} \\
+				\bottomrule
+			\end{tabular}
+		}
+		\vspace{-10pt}
+	\end{table}
+	
+	\textbf{Ablation Studies.}
+	Table~\ref{tab:ablation} reports ablation results of ManiPT. Removing cosine consistency leads to a significant drop in novel class performance, validating that confining the learned representations to the geometric neighborhood is necessary to prevent catastrophic drift. Removing the structural bias degrades performance on both base and novel classes. This confirms that even within the neighborhood, the structural bias is crucial to enforce incremental corrections and guide the adaptation along transferable directions, rather than overfitting to local shortcuts. We also analyze the impact of LLM-based knowledge enrichment. When we substitute the semantic prototypes derived from LLMs with standard templates of the form ``a photo of a \{class\}'', the performance decreases, which indicates that constructing stable semantic references with prior knowledge is beneficial. Combining all components yields the best overall trade-off. See Appendix~\ref{app:ablation_results} for additional ablation results and Appendix~\ref{app:context_sensitivity} for hyperparameter sensitivity analysis.
+	\begin{figure}[t!]
+		\centering
+		\includegraphics[width=0.6\linewidth]{maple_manipt_manifold_drift.pdf}
+		\caption{Quantitative analysis of manifold drift using PCA. We compare the distance between prompt-adapted features and pretrained features for different methods.}
+		\label{fig:manifold_drift_quant}
+		\vspace{-20pt}
+	\end{figure}
+	
+	\textbf{Quantitative Analysis of Manifold Drift.}
+	Since the true pretrained manifold is not directly accessible and the visual modality provides more samples, we follow Eq.~(\ref{eq:manifold_shift}) to approximate it. Specifically, utilizing the model trained on the base class training set, we perform the approximation using all images from the novel class test set in each dataset. The reference manifold is approximated by the PCA principal subspace spanned by the top 64 principal components of the pretrained feature point cloud derived from these novel images. We then measure the degree of deviation of the prompt-tuned features from this principal subspace. Figure~\ref{fig:manifold_drift_quant} compares ManiPT with a representative deep prompting baseline across datasets. ManiPT consistently achieves smaller estimated drift and better generalization to novel classes. These observations support the main claim that confining the feature adaptation within the pretrained manifold allows the model to find valid solutions while minimizing the risk of drifting into non-transferable subspaces. See Appendix~\ref{app:sensitivity_dpca} for a sensitivity analysis with respect to $d^{\mathrm{pca}}$.
+	\vspace{-20pt}
+	\section{Conclusion}
+	In this paper, we propose ManiPT to address generalization degradation caused by manifold drift in prompt tuning. ManiPT confines representations within the pretrained neighborhood while enforcing incremental corrections. This dual mechanism biases adaptation toward transferable directions, mitigating overfitting to dataset-specific shortcuts in low-data regimes. Extensive experiments and theoretical analysis validate our framework. By elucidating geometric confinement and directional correction, ManiPT provides a new perspective on preventing low-data overfitting. We discuss the limitations of our framework in ~\ref{limitations}.
+	\section{Impact Statements}
+	This paper presents work whose goal is to advance the field of machine learning. There are many potential societal consequences of our work, none of which we feel must be specifically highlighted here.
+	\bibliography{example_paper}
+	\bibliographystyle{icml2026}
+	
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	% APPENDIX
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+	\newpage
+	\appendix
+	\onecolumn
+	\section{Appendix 1: More Training Information}
+	\label{app:training_info}
+	\subsection{Dataset Information}
+	\begin{table}[h]
+		\caption{Statistics of all 15 datasets used in our experiments, including standard classification benchmarks and ImageNet variants for domain generalization.}
+		\label{tab:all_datasets}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l l c c c}
+				\toprule
+				\textbf{Dataset} & \textbf{Domain / Task} & \textbf{Classes} & \textbf{Train Size} & \textbf{Test Size} \\
+				\midrule
+				\multicolumn{5}{l}{\textit{\textbf{Standard Benchmarks}}} \\
+				ImageNet & General Objects & 1,000 & 1,281,167 & 50,000 \\
+				Caltech101 & General Objects & 100 & 4,128 & 2,465 \\
+				OxfordPets & Fine-grained (Pets) & 37 & 2,944 & 3,669 \\
+				StanfordCars & Fine-grained (Cars) & 196 & 6,509 & 8,041 \\
+				Flowers102 & Fine-grained (Flowers) & 102 & 4,093 & 2,463 \\
+				Food101 & Fine-grained (Food) & 101 & 50,500 & 30,300 \\
+				FGVCAircraft & Fine-grained (Aircraft) & 100 & 3,334 & 3,333 \\
+				SUN397 & Scene Recognition & 397 & 15,880 & 19,850 \\
+				DTD & Texture Classification & 47 & 2,820 & 1,692 \\
+				EuroSAT & Satellite Imagery & 10 & 13,500 & 8,100 \\
+				UCF101 & Action Recognition & 101 & 7,639 & 3,783 \\
+				\midrule
+				\multicolumn{5}{l}{\textit{\textbf{ImageNet Variants (Domain Generalization)}}} \\
+				ImageNet-V2 & Natural Shift & 1,000 & - & 10,000 \\
+				ImageNet-Sketch & Style Shift (Sketches) & 1,000 & - & 50,889 \\
+				ImageNet-A & Natural Adversarial & 200 & - & 7,500 \\
+				ImageNet-R & Style Shift (Renditions) & 200 & - & 30,000 \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	We follow previous work~\citep{zhou2022coop} to set up the benchmark and adopt the same method to split training and test sets. All datasets are publicly available. To evaluate the effectiveness of ManiPT, we employ a total of 15 datasets that cover a wide range of visual tasks and domains. For standard evaluations including base-to-novel generalization, cross-dataset transfer, and few-shot classification, we select 11 datasets that span varying semantic granularities. These include general object recognition datasets ImageNet~\citep{deng2009imagenet} and Caltech101~\citep{fei2004caltech101}, alongside five fine-grained classification datasets, specifically OxfordPets~\citep{parkhi2012oxfordpets}, StanfordCars~\citep{krause2013stanfordcars}, Flowers102~\citep{nilsback2008flowers102}, Food101~\citep{bossard2014food101}, and FGVCAircraft~\citep{maji2013fgvcaircraft} as fine-grained benchmarks. Additionally, we incorporate datasets for distinct modalities, namely SUN397~\citep{xiao2010sun397} for scene recognition, UCF101~\citep{soomro2012ucf101} for action recognition, DTD~\citep{cimpoi2014dtd} for texture classification, and EuroSAT~\citep{helber2019eurosat} for satellite remote sensing. Furthermore, to assess robustness in the domain generalization setting, we utilize four variants of ImageNet as target domains representing distinct distribution shifts. These consist of ImageNet-V2~\citep{recht2019imagenetv2} which contains natural distribution shifts, ImageNet-Sketch~\citep{wang2019imagenetsketch} which tests structural invariance with hand-drawn sketches, ImageNet-A~\citep{hendrycks2021imageneta} which comprises natural adversarial examples, and ImageNet-R~\citep{hendrycks2021imagenetr} which encompasses artistic renditions. Table~\ref{tab:all_datasets} summarizes the detailed statistics for all employed datasets.
+	\subsection{Implementation Details}
+	In all experiments, we utilize the pretrained CLIP ViT-B/16 as the backbone. We adopt a deep prompting strategy~\citep{jia2022vpt}, inserting learnable prompt vectors into every layer of both the visual and text encoders. Specifically, we introduce 16 prompt vectors per layer for each modality. All prompt parameters are initialized using a normal distribution with a standard deviation of 0.02. We employ the Adam optimizer~\citep{kingma2015adam} with an initial learning rate of $2.5\times 10^{-3}$ and a weight decay of $5\times 10^{-4}$. The exponential decay rates for the first and second moment estimates are set to $0.9$ and $0.999$, respectively, with the numerical stability constant set to $1\times 10^{-8}$. We apply a constant warm-up for the first epoch with a learning rate of $1\times 10^{-5}$, followed by a cosine annealing learning rate schedule~\citep{loshchilov2017sgdr} during optimization. To ensure a fair comparison, we utilize the class descriptions generated by CoPrompt~\citep{zhang2023coprompt} for knowledge enrichment. The balance coefficient $\lambda$ in the loss function is fixed at 12 for all datasets and settings. In all experiments, we report the average results over three independent random seeds to mitigate the impact of randomness. For Base-to-Novel generalization and Few-Shot classification tasks, we train the model on the ImageNet dataset for 40 epochs with a batch size of 128. For the other 10 datasets, we train for 50 epochs with a batch size of 32. For Cross-Dataset Transfer and Domain Generalization tasks, we train the model on the ImageNet dataset for 5 epochs. All experiments are conducted using the PyTorch framework~\citep{paszke2019pytorch} on an NVIDIA RTX 5090 GPU.
+	\subsection{Procedure of ManiPT}
+	\label{alg:manipt1}
+	We provide the pseudocode of ManiPT in Algorithm~\ref{alg:manipt}, which demonstrates the comprehensive and detailed optimization procedures.
+	\begin{algorithm}[h]
+		\caption{Pipeline of ManiPT}
+		\label{alg:manipt}
+		\begin{algorithmic}[1]
+			\STATE {\bfseries Input:} Few-shot training data $\mathcal{D}^{\mathrm{train}}=\{(\mathbf{x}_{i},y_{i})\}_{i=1}^{N}$, class set $\mathcal{C}$, hyperparameters $\tau, \lambda$, epoch count $E$, and Pretrained CLIP with text encoder $\mathcal{T}$ and image encoder $\mathcal{V}$.
+			\STATE {\bfseries Output:} Learned text prompts $\mathcal{P}^{\mathrm{txt}}$ and visual prompts $\mathcal{P}^{\mathrm{vis}}$.
+			\STATE \# Before training: Knowledge Enrichment
+			\FOR{each class $c \in \mathcal{C}$}
+			\STATE Generate descriptions $A_c$ using LLM
+			\STATE Obtain normalized feature bank $E_c$ using Eq.~(\ref{eq:feature_bank})
+			\STATE Compute semantic prototype $\mathbf{w}_{c}$
+			\ENDFOR
+			\STATE \# Begin training
+			\STATE Initialize prompt parameters $\mathcal{P}^{\mathrm{txt}}$ and $\mathcal{P}^{\mathrm{vis}}$
+			\FOR{$e=1$ to $E$}
+			\FOR{each batch $(\mathbf{x}, y)$ in $\mathcal{D}^{\mathrm{train}}$}
+			\STATE Compute frozen features $\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}$ and $\mathbf{z}^{\mathrm{txt}}_{c}$
+			\STATE Compute prompt features $\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}$ and $\mathbf{h}^{\mathrm{txt}}_{c}$ using Eq.~(\ref{eq:vis_prompt}) and Eq.~(\ref{eq:text_prompt})
+			\STATE Compute final fused representations $\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}$ and $\mathbf{f}^{\mathrm{txt}}_{c}$ using Eq.~(\ref{eq:fused_features})
+			\STATE Update prompts $\mathcal{P}^{\mathrm{txt}}, \mathcal{P}^{\mathrm{vis}}$ to minimize $\mathcal{L}^{\mathrm{total}}$ using Eq.~(\ref{eq:total_loss})
+			\ENDFOR
+			\ENDFOR
+		\end{algorithmic}
+	\end{algorithm}
+	\section{Appendix 2: Additional Theoretical Justification}
+	\label{app:theory2}
+	Throughout this appendix, let $d\in\mathbb N$ be the embedding dimension and denote by $\mathbb S^{d-1}=\{\mathbf{z}\in\mathbb R^d:\|\mathbf{z}\|_2=1\}$ the unit sphere in $\mathbb R^d$.
+	\subsection{Verifiable Anchor Neighborhood}
+	Let $\mathcal{T}$ be the frozen text encoder and recall the class index set $\mathcal{C}=\{1,\dots,C\}$.
+	Let $T^{\mathrm{all}}$ denote the set of all token sequences admissible as inputs to $\mathcal{T}$.
+	For each class $c\in \mathcal{C}$, let $T^\star_c\subset T^{\mathrm{all}}$ be a nonempty finite set of token sequences.
+	Define the realizable class-specific text feature set
+	\begin{equation*}
+		\mathcal{M}^{\star,\mathrm{txt}}_{c}
+		=
+		\left\{\frac{\mathcal{T}(u)}{\|\mathcal{T}(u)\|_2}:u\in T^\star_c\right\}
+		\subset
+		\mathbb S^{d-1}.
+	\end{equation*}
+	Define the global realizable text feature set as
+	\begin{equation*}
+		\mathcal{M}^{\mathrm{txt}}
+		=
+		\left\{\frac{\mathcal{T}(u)}{\|\mathcal{T}(u)\|_2}:u\in T^{\mathrm{all}}\right\}
+		\subset
+		\mathbb S^{d-1}.
+	\end{equation*}
+	For each class $c\in \mathcal{C}$, let the anchor be the unit vector $\mathbf{w}_{c}\in\mathbb S^{d-1}$.
+	Define the discrete projection
+	\begin{equation*}
+		\tilde{\mathbf{w}}_{c}\in\arg\min_{z\in \mathcal{M}^{\star,\mathrm{txt}}_{c}}\|\mathbf{w}_{c}-z\|_2
+		\quad
+		\text{and}
+		\quad
+		\hat d_c=\|\mathbf{w}_{c}-\tilde{\mathbf{w}}_{c}\|_2.
+	\end{equation*}
+	Define
+	\begin{equation*}
+		\zeta^{\max}=\max_{c\in \mathcal{C}}\hat d_c
+		\quad
+		\text{and}
+		\quad
+		\varepsilon^{\mathrm{proj}}
+		=
+		\frac{1}{C}\sum_{c\in \mathcal{C}}\|\mathbf{w}_{c}-\tilde{\mathbf{w}}_{c}\|_2^2.
+	\end{equation*}
+	For a set $M\subset\mathbb R^d$, define $\mathrm{dist}(\mathbf{z},M)=\inf_{\mathbf{w}\in M}\|\mathbf{z}-\mathbf{w}\|_2$.
+	Since $\mathcal{M}^{\star,\mathrm{txt}}_{c}\subset \mathcal{M}^{\mathrm{txt}}$ for every $c\in \mathcal{C}$, we have
+	\begin{equation*}
+		\mathrm{dist}\bigl(\mathbf{w}_{c},\mathcal{M}^{\mathrm{txt}}\bigr)
+		\le
+		\mathrm{dist}\bigl(\mathbf{w}_{c},\mathcal{M}^{\star,\mathrm{txt}}_{c}\bigr)
+		=
+		\|\mathbf{w}_{c}-\tilde{\mathbf{w}}_{c}\|_2
+		\le
+		\zeta^{\max}.
+	\end{equation*}
+	\subsection{Sphere Identity and Consistency Losses}
+	Let $\mathbb S^{d-1}=\{\mathbf{z}\in\mathbb R^d:\|\mathbf{z}\|_2=1\}$ denote the unit sphere in $\mathbb R^d$. For any $\mathbf{b}_1,\mathbf{b}_2\in\mathbb S^{d-1}$,
+	\begin{equation*}
+		\|\mathbf{b}_1-\mathbf{b}_2\|_2^2=2\bigl(1-\langle \mathbf{b}_1,\mathbf{b}_2\rangle\bigr).
+	\end{equation*}
+	Let $\{(\mathbf{x}_i,y_i)\}_{i=1}^N$ be training samples with $\mathbf{x}_i\in \mathcal{X}$ and $y_i\in \mathcal{C}$.
+	Let $\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\in\mathbb S^{d-1}$ be the frozen visual feature.
+	Let $\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}\in\mathbb S^{d-1}$ be the final visual feature produced by ManiPT.
+	Let $\mathbf{f}^{\mathrm{txt}}_{c}\in\mathbb S^{d-1}$ be the final text feature for class $c$.
+	Define the visual-side and text-side consistency losses as
+	\begin{equation*}
+		\mathcal L^{\mathrm{img}}(\boldsymbol{\theta})
+		=
+		\frac{1}{N}\sum_{i=1}^N\Bigl(1-\bigl\langle \mathbf{f}^{\mathrm{vis}}_{\mathbf{x}_i},\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}\bigr\rangle\Bigr)
+		\quad
+		\text{and}
+		\quad
+		\mathcal L^{\mathrm{txt}}(\boldsymbol{\theta})
+		=
+		\frac{1}{C}\sum_{c\in \mathcal{C}}\Bigl(1-\bigl\langle \mathbf{f}^{\mathrm{txt}}_{c},\mathbf{w}_{c}\bigr\rangle\Bigr).
+	\end{equation*}
+	Define $\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})=\mathcal L^{\mathrm{img}}(\boldsymbol{\theta})+\mathcal L^{\mathrm{txt}}(\boldsymbol{\theta})$.
+	\subsection{Consistency Loss as a Quantitative Control of Representation Shift}
+	Let $\mathbf{z}_i=\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}\in\mathbb S^{d-1}$ and $\mathbf{v}_i=\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}_i}\in\mathbb S^{d-1}$. Using the sphere identity and averaging over $i$ yields
+	\begin{equation*}
+		\frac{1}{N}\sum_{i=1}^N\|\mathbf{v}_i-\mathbf{z}_i\|_2^2
+		=
+		2\mathcal L^{\mathrm{img}}(\boldsymbol{\theta}).
+	\end{equation*}
+	Define the frozen visual feature set $\mathcal{M}^{\mathrm{vis}}=\{\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}:\mathbf{x}\in \mathcal{X}\}$. Since $\mathbf{z}_i\in \mathcal{M}^{\mathrm{vis}}$ for each $i$, we have $\mathrm{dist}(\mathbf{v}_i,\mathcal{M}^{\mathrm{vis}})\le\|\mathbf{v}_i-\mathbf{z}_i\|_2$, hence
+	\begin{equation*}
+		\frac{1}{N}\sum_{i=1}^N\mathrm{dist}\bigl(\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}_i},\mathcal{M}^{\mathrm{vis}}\bigr)^2
+		\le
+		2\mathcal L^{\mathrm{img}}(\boldsymbol{\theta}).
+	\end{equation*}
+	For the text side, the same identity gives
+	\begin{equation*}
+		\frac{1}{C}\sum_{c\in \mathcal{C}}\bigl\|\mathbf{f}^{\mathrm{txt}}_{c}-\mathbf{w}_{c}\bigr\|_2^2
+		=
+		2\mathcal L^{\mathrm{txt}}(\boldsymbol{\theta}).
+	\end{equation*}
+	Using $\|\mathbf{b}_1+\mathbf{b}_2\|_2^2\le 2\|\mathbf{b}_1\|_2^2+2\|\mathbf{b}_2\|_2^2$ and the definition of $\varepsilon^{\mathrm{proj}}$, for each $c$ we have $\bigl\|\mathbf{f}^{\mathrm{txt}}_{c}-\tilde{\mathbf{w}}_{c}\bigr\|_2\le\bigl\|\mathbf{f}^{\mathrm{txt}}_{c}-\mathbf{w}_{c}\bigr\|_2+\|\mathbf{w}_{c}-\tilde{\mathbf{w}}_{c}\|_2$, hence
+	\begin{equation*}
+		\frac{1}{C}\sum_{c\in \mathcal{C}}\bigl\|\mathbf{f}^{\mathrm{txt}}_{c}-\tilde{\mathbf{w}}_{c}\bigr\|_2^2
+		\le
+		4\mathcal L^{\mathrm{txt}}(\boldsymbol{\theta})+2\varepsilon^{\mathrm{proj}}.
+	\end{equation*}
+	Since $\tilde{\mathbf{w}}_{c}\in \mathcal{M}^{\star,\mathrm{txt}}_{c}$, it follows that
+	\begin{equation*}
+		\frac{1}{C}\sum_{c\in \mathcal{C}}\mathrm{dist}\bigl(\mathbf{f}^{\mathrm{txt}}_{c},\mathcal{M}^{\star,\mathrm{txt}}_{c}\bigr)^2
+		\le
+		4\mathcal L^{\mathrm{txt}}(\boldsymbol{\theta})+2\varepsilon^{\mathrm{proj}}.
+	\end{equation*}
+	\subsection{Geometric Contraction and Stability Induced by the Structural Bias}
+	\label{app:structural_contraction}
+	The structural bias is implemented via normalized fusion between the frozen features and the prompt-branch features.
+	Recall $\boldsymbol{\varphi}\in\mathbb S^{d-1}$ and $\boldsymbol{\psi}\in\mathbb S^{d-1}$, and define $\boldsymbol{\omega}=(\boldsymbol{\varphi}+\boldsymbol{\psi})/\|\boldsymbol{\varphi}+\boldsymbol{\psi}\|_2$ when $\boldsymbol{\varphi}+\boldsymbol{\psi}\neq 0$.
+	The following lemma shows that this fusion contracts toward the frozen feature.
+	\begin{lemma}\label{lem:app_contract}
+		Assume $\boldsymbol{\varphi}\in\mathbb S^{d-1}$ and $\boldsymbol{\psi}\in\mathbb S^{d-1}$ satisfy $\boldsymbol{\varphi}+\boldsymbol{\psi}\neq 0$, which is equivalent to $\langle \boldsymbol{\varphi},\boldsymbol{\psi}\rangle>-1$.
+		Define the fused unit vector $\boldsymbol{\omega}=(\boldsymbol{\varphi}+\boldsymbol{\psi})/\|\boldsymbol{\varphi}+\boldsymbol{\psi}\|_2$.
+		Then
+		\begin{equation*}
+			\|\boldsymbol{\omega}-\boldsymbol{\varphi}\|_2^2 \le \frac12\|\boldsymbol{\psi}-\boldsymbol{\varphi}\|_2^2.
+		\end{equation*}
+	\end{lemma}
+	\begin{proof}
+		Let $\gamma=\langle \boldsymbol{\varphi},\boldsymbol{\psi}\rangle\in[-1,1]$. Since $\boldsymbol{\varphi}+\boldsymbol{\psi}\neq 0$, we have $\gamma>-1$ and
+		\begin{equation*}
+			\|\boldsymbol{\varphi}+\boldsymbol{\psi}\|_2^2=\|\boldsymbol{\varphi}\|_2^2+\|\boldsymbol{\psi}\|_2^2+2\langle \boldsymbol{\varphi},\boldsymbol{\psi}\rangle=2(1+\gamma).
+		\end{equation*}
+		Moreover,
+		\begin{equation*}
+			\langle \boldsymbol{\omega},\boldsymbol{\varphi}\rangle=\frac{\langle \boldsymbol{\varphi}+\boldsymbol{\psi},\boldsymbol{\varphi}\rangle}{\|\boldsymbol{\varphi}+\boldsymbol{\psi}\|_2}
+			=\frac{1+\gamma}{\sqrt{2(1+\gamma)}}
+			=\sqrt{\frac{1+\gamma}{2}}.
+		\end{equation*}
+		Using the sphere identity $\|\mathbf{b}_1-\mathbf{b}_2\|_2^2=2(1-\langle \mathbf{b}_1,\mathbf{b}_2\rangle)$ for $\mathbf{b}_1,\mathbf{b}_2\in\mathbb S^{d-1}$ yields
+		\begin{equation*}
+			\|\boldsymbol{\omega}-\boldsymbol{\varphi}\|_2^2
+			=2\left(1-\sqrt{\frac{1+\gamma}{2}}\right),
+			\qquad
+			\|\boldsymbol{\psi}-\boldsymbol{\varphi}\|_2^2=2(1-\gamma).
+		\end{equation*}
+		Therefore, it suffices to show
+		\begin{equation*}
+			2\left(1-\sqrt{\frac{1+\gamma}{2}}\right)\le 1-\gamma
+			\iff
+			\sqrt{\frac{1+\gamma}{2}} \ge \frac{1+\gamma}{2}.
+		\end{equation*}
+		Let $q=(1+\gamma)/2\in(0,1]$. Then the inequality becomes $\sqrt{q}\ge q$, which holds for all $q\in[0,1]$.
+		This completes the proof.
+	\end{proof}
+	To ensure the fusion is well defined and stable, we impose a non-near-opposition condition.
+	Assume there exist constants $\kappa^{\mathrm{vis}}\in(0,2]$ and $\kappa^{\mathrm{txt}}\in(0,2]$ such that for every training image $x$ and every class $c$,
+	\begin{equation*}
+		\bigl\langle \mathbf{z}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}\bigr\rangle\ge -1+\kappa^{\mathrm{vis}}
+		\quad
+		\text{and}
+		\quad
+		\bigl\langle \mathbf{z}^{\mathrm{txt}}_{c},\mathbf{h}^{\mathrm{txt}}_{c}\bigr\rangle\ge -1+\kappa^{\mathrm{txt}},
+	\end{equation*}
+	where $\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}\in\mathbb S^{d-1}$ and $\mathbf{h}^{\mathrm{txt}}_{c}\in\mathbb S^{d-1}$ are the prompt-branch features and $\mathbf{z}^{\mathrm{txt}}_{c}\in\mathbb S^{d-1}$ is the frozen text feature.
+	Then $\bigl\|\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}+\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}\bigr\|_2^2\ge 2\kappa^{\mathrm{vis}}$ and $\bigl\|\mathbf{z}^{\mathrm{txt}}_{c}+\mathbf{h}^{\mathrm{txt}}_{c}\bigr\|_2^2\ge 2\kappa^{\mathrm{txt}}$.
+	Define the fusion map $\Psi(\boldsymbol{\psi})=(\boldsymbol{\varphi}+\boldsymbol{\psi})/\|\boldsymbol{\varphi}+\boldsymbol{\psi}\|_2$ for a fixed $\boldsymbol{\varphi}\in\mathbb S^{d-1}$.
+	\paragraph{Empirical verification of the non-near-opposition condition and the role of $\lambda$.}
+	The non-near-opposition assumption excludes the degenerate case in which the normalized fusion becomes ill defined. When $\langle \boldsymbol{\varphi},\boldsymbol{\psi}\rangle$ approaches $-1$, the norm $\|\boldsymbol{\varphi}+\boldsymbol{\psi}\|_2$ tends to zero, and stability bounds such as Lemma~\ref{lem:app_lip} cease to be applicable. Empirically, this condition is satisfied for the models after training: the prompt-branch feature remains well aligned with the frozen feature, and cosine similarities close to $-1$ are not observed.
+	
+	Concretely, on the DTD base-to-novel setting, we use the model trained on the base classes and measure the visual-side cosine similarities $\bigl\langle \mathbf{h}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\bigr\rangle$ and $\bigl\langle \mathbf{f}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\bigr\rangle$ over all images from the novel classes, where $\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}\in\mathbb S^{d-1}$ denotes the prompt-branch visual feature and $\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}\in\mathbb S^{d-1}$ denotes the final fused feature used for prediction.
+	The summary statistics are
+	\begin{align*}
+		\bigl\langle \mathbf{h}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\bigr\rangle &\quad \text{mean }0.9769,\ \text{5th percentile }0.9543,\ \text{minimum }0.8993,\\
+		\bigl\langle \mathbf{f}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\bigr\rangle &\quad \text{mean }0.9942,\ \text{5th percentile }0.9885,\ \text{minimum }0.9745.
+	\end{align*}
+	The fused feature $\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}$ is closer to $\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}$ than $\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}$, which is consistent with the contraction effect in Lemma~\ref{lem:app_contract}.
+	
+	We also examine whether the consistency weight $\lambda$ prevents representations from rotating away from the frozen branch.
+	Recall that we define the visual consistency loss applied to the final decision feature as
+	\begin{equation*}
+		\mathcal L^{\mathrm{img}}(\boldsymbol{\theta})
+		=
+		\frac{1}{N}\sum_{i=1}^{N}\Bigl(1-\bigl\langle \mathbf{f}^{\mathrm{vis}}_{\mathbf{x}_i},\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}\bigr\rangle\Bigr).
+	\end{equation*}
+	This implies the average cosine alignment with the frozen feature satisfies
+	\begin{equation*}
+		\frac{1}{N}\sum_{i=1}^{N}\bigl\langle \mathbf{f}^{\mathrm{vis}}_{\mathbf{x}_i},\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}\bigr\rangle
+		=
+		1-\mathcal L^{\mathrm{img}}(\boldsymbol{\theta}).
+	\end{equation*}
+	Therefore, increasing $\lambda$ in $\mathcal L^{\mathrm{total}}=\mathcal L^{\mathrm{ce}}+\lambda\bigl(\mathcal L^{\mathrm{img}}+\mathcal L^{\mathrm{txt}}\bigr)$
+	encourages higher alignment of the decision features with the frozen branch on average.
+	Empirically, when we remove the consistency loss terms by taking $\lambda$ to be zero, the mean cosine similarity decreases and the drift metric $\Delta$ reported in Table~\ref{tab:lambda_effect} increases, which indicates a clear tendency to rotate away from the pretrained manifold.
+	\begin{table}[h]
+		\centering
+		\small
+		\caption{Full ablation results on the effect of consistency loss weights across all 11 datasets. We compare the default setting ($\lambda=12$) with the unconstrained setting ($\lambda=0$). The results consistently show that removing the constraint leads to a significant drop in cosine alignment and a sharp increase in manifold drift $\Delta$, confirming the necessity of geometric regularization.}
+		\label{tab:lambda_effect}
+		\scalebox{0.9}{
+			\begin{tabular}{l cc c cc}
+				\toprule
+				& \multicolumn{2}{c}{Mean $\bigl\langle \mathbf{f}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\bigr\rangle$} && \multicolumn{2}{c}{Drift $\Delta$} \\
+				\cmidrule{2-3} \cmidrule{5-6}
+				Dataset & $\lambda=12$ & $\lambda=0$ && $\lambda=12$ & $\lambda=0$ \\
+				\midrule
+				ImageNet      & 0.9952 & 0.8741 && 0.0045  & 0.1452 \\
+				Caltech101    & 0.9978 & 0.8950 && -0.0021 & 0.1050 \\
+				OxfordPets    & 0.9965 & 0.8620 && 0.0012  & 0.1523 \\
+				StanfordCars  & 0.9910 & 0.8150 && 0.0078  & 0.2105 \\
+				Flowers102    & 0.9930 & 0.8245 && -0.0048 & 0.1950 \\
+				Food101       & 0.9955 & 0.8810 && 0.0023  & 0.1340 \\
+				FGVCAircraft  & 0.9903 & 0.8102 && -0.0016 & 0.2284 \\
+				SUN397        & 0.9928 & 0.8430 && 0.0039  & 0.1780 \\
+				DTD           & 0.9942 & 0.8284 && -0.0019 & 0.1817 \\
+				EuroSAT       & 0.9916 & 0.7650 && 0.0121  & 0.3284 \\
+				UCF101        & 0.9925 & 0.7920 && 0.0055  & 0.2480 \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	\begin{lemma}\label{lem:app_lip}
+		Fix $\boldsymbol{\varphi}\in\mathbb S^{d-1}$ and let $\Psi(\boldsymbol{\psi})=(\boldsymbol{\varphi}+\boldsymbol{\psi})/\|\boldsymbol{\varphi}+\boldsymbol{\psi}\|_2$.
+		If $\|\boldsymbol{\varphi}+\boldsymbol{\psi}_1\|_2\ge \upsilon$ and $\|\boldsymbol{\varphi}+\boldsymbol{\psi}_2\|_2\ge \upsilon$ for some constant $\upsilon>0$, then the fusion map is $2/\upsilon$-Lipschitz in the sense that $\|\Psi(\boldsymbol{\psi}_1)-\Psi(\boldsymbol{\psi}_2)\|_2\le \frac{2}{\upsilon}\|\boldsymbol{\psi}_1-\boldsymbol{\psi}_2\|_2$.
+	\end{lemma}
+	\begin{proof}
+		Let $\mathbf{b}_1=\boldsymbol{\varphi}+\boldsymbol{\psi}_1$ and $\mathbf{b}_2=\boldsymbol{\varphi}+\boldsymbol{\psi}_2$.
+		We bound
+		\begin{equation*}
+			\left\|\frac{\mathbf{b}_1}{\|\mathbf{b}_1\|_2}-\frac{\mathbf{b}_2}{\|\mathbf{b}_2\|_2}\right\|_2
+			\le
+			\left\|\frac{\mathbf{b}_1-\mathbf{b}_2}{\|\mathbf{b}_1\|_2}\right\|_2
+			+
+			\left\|\mathbf{b}_2\left(\frac{1}{\|\mathbf{b}_1\|_2}-\frac{1}{\|\mathbf{b}_2\|_2}\right)\right\|_2.
+		\end{equation*}
+		Using $|\|\mathbf{b}_1\|_2-\|\mathbf{b}_2\|_2|\le\|\mathbf{b}_1-\mathbf{b}_2\|_2$ and $\|\mathbf{b}_2\|_2\le\|\mathbf{b}_1\|_2+\|\mathbf{b}_1-\mathbf{b}_2\|_2$ yields the bound $\left\|\mathbf{b}_2\left(\frac{1}{\|\mathbf{b}_1\|_2}-\frac{1}{\|\mathbf{b}_2\|_2}\right)\right\|_2\le \frac{\|\mathbf{b}_1-\mathbf{b}_2\|_2}{\|\mathbf{b}_1\|_2}$.
+		Thus the total is at most $\frac{2\|\mathbf{b}_1-\mathbf{b}_2\|_2}{\|\mathbf{b}_1\|_2}\le\frac{2}{\upsilon}\|\mathbf{b}_1-\mathbf{b}_2\|_2$.
+		Since $\mathbf{b}_1-\mathbf{b}_2=\boldsymbol{\psi}_1-\boldsymbol{\psi}_2$, the claim follows.
+	\end{proof}
+	\subsection{Logit Perturbation Magnitude Controlled by the Consistency Loss}
+	\label{app:logit_perturb_appendix}
+	Recall the temperature $\tau>0$.
+	Define logits $\ell^{\boldsymbol{\theta}}_c(\mathbf{x})=\tau\bigl\langle \mathbf{f}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{f}^{\mathrm{txt}}_{c}\bigr\rangle$ and reference logits $\ell^{0}_c(\mathbf{x})=\tau\bigl\langle \mathbf{z}^{\mathrm{vis}}_{\mathbf{x}},\mathbf{w}_{c}\bigr\rangle$.
+	Define the logit perturbation vector $\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}}=\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}}-\boldsymbol{\ell}^{0}_{\mathbf{x}}\in\mathbb R^{C}$.
+	Define matrices
+	\begin{equation*}
+		\mathbf{F}^{\mathrm{txt}}=\bigl[\mathbf{f}^{\mathrm{txt}}_{1}\ \cdots\ \mathbf{f}^{\mathrm{txt}}_{C}\bigr]\in\mathbb R^{d\times C}
+		\quad
+		\text{and}
+		\quad
+		\mathbf{W}=\bigl[\mathbf{w}_{1}\ \cdots\ \mathbf{w}_{C}\bigr]\in\mathbb R^{d\times C}.
+	\end{equation*}
+	Then for any $\mathbf{x}$,
+	\begin{equation*}
+		\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}}
+		=
+		\tau \bigl(\mathbf{F}^{\mathrm{txt}}\bigr)^\top\bigl(\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}-\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\bigr)
+		+
+		\tau\bigl(\mathbf{F}^{\mathrm{txt}}-\mathbf{W}\bigr)^\top \mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}.
+	\end{equation*}
+	Since $\bigl\|\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\bigr\|_2=1$ and each column of $\mathbf{F}^{\mathrm{txt}}$ has unit norm, we have $\|\mathbf{F}^{\mathrm{txt}}\|_F=\sqrt{C}$ and $\bigl\|\bigl(\mathbf{F}^{\mathrm{txt}}\bigr)^\top\bigr\|_{\mathrm{op}}\le\|\mathbf{F}^{\mathrm{txt}}\|_F=\sqrt{C}$.
+	Thus
+	\begin{equation*}
+		\|\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}}\|_2
+		\le
+		\tau\sqrt{C}\,\bigl\|\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}-\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}\bigr\|_2
+		+
+		\tau\|\mathbf{F}^{\mathrm{txt}}-\mathbf{W}\|_F.
+	\end{equation*}
+	Moreover,
+	\begin{equation*}
+		\|\mathbf{F}^{\mathrm{txt}}-\mathbf{W}\|_F^2
+		=
+		\sum_{c\in \mathcal{C}}\bigl\|\mathbf{f}^{\mathrm{txt}}_{c}-\mathbf{w}_{c}\bigr\|_2^2
+		=
+		2C\,\mathcal L^{\mathrm{txt}}(\boldsymbol{\theta}).
+	\end{equation*}
+	Let $\Delta\mathbf{v}_i=\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}_i}-\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}$.
+	Using $\|\mathbf{b}_1+\mathbf{b}_2\|_2^2\le 2\|\mathbf{b}_1\|_2^2+2\|\mathbf{b}_2\|_2^2$ yields
+	\begin{equation*}
+		\|\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}_i}\|_2^2
+		\le
+		2\tau^2 C\,\|\Delta\mathbf{v}_i\|_2^2
+		+
+		4\tau^2 C\,\mathcal L^{\mathrm{txt}}(\boldsymbol{\theta}).
+	\end{equation*}
+	Averaging over $i$ and using $\frac{1}{N}\sum_{i=1}^N\|\Delta\mathbf{v}_i\|_2^2=2\mathcal L^{\mathrm{img}}(\boldsymbol{\theta})$ gives
+	\begin{equation*}
+		\frac{1}{N}\sum_{i=1}^N\|\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}_i}\|_2^2
+		\le
+		4\tau^2 C\,\mathcal L^{\mathrm{con}}(\boldsymbol{\theta}).
+	\end{equation*}
+	\subsection{Lipschitz and Boundedness Properties of the Cross-Entropy Loss}
+	Recall $\phi_y(\boldsymbol{\ell})=\log\sum_{c\in \mathcal{C}}\exp(\ell_c)-\ell_y$ for $\boldsymbol{\ell}\in\mathbb R^{C}$.
+	Let $\mathbf{p}=\mathrm{softmax}(\boldsymbol{\ell})$ and let $\mathbf{e}_y$ be the one hot vector.
+	Then $\nabla_{\boldsymbol{\ell}}\phi_y(\boldsymbol{\ell})=\mathbf{p}-\mathbf{e}_y$ and $\|\mathbf{p}-\mathbf{e}_y\|_2\le\sqrt2$, hence for any $\boldsymbol{\ell},\boldsymbol{\ell}'\in\mathbb R^{C}$,
+	\begin{equation*}
+		|\phi_y(\boldsymbol{\ell})-\phi_y(\boldsymbol{\ell}')|
+		\le
+		\sqrt2\,\|\boldsymbol{\ell}-\boldsymbol{\ell}'\|_2.
+	\end{equation*}
+	If $\boldsymbol{\ell}\in[-\tau,\tau]^{C}$, then $\log\sum_{j}\exp(\ell_j)\le \log C+\tau$ and $-\ell_y\le\tau$, hence
+	\begin{equation*}
+		0\le \phi_y(\boldsymbol{\ell})\le \log C+2\tau.
+	\end{equation*}
+	Recall $B=\log C+2\tau$.
+	\subsection{Localized Complexity and Generalization Bounds}
+	\label{app:localized_complexity}
+	Define the population risk $R(\boldsymbol{\theta})=\mathbb E^{(\mathbf{x},y)\sim \mathcal{D}}[\phi_y(\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}})]$ and the empirical risk $\widehat R_{N}(\boldsymbol{\theta})=\frac1N\sum_{i=1}^N\phi_{y_i}(\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}_i})$. Let $\boldsymbol{\theta}\in\mathbb R^{D^{\boldsymbol{\theta}}}$ denote the vector of prompt parameters.
+	Fix $R^{\boldsymbol{\theta}}>0$ and define $\Omega^{\mathrm{base}}=\{\boldsymbol{\theta}:\|\boldsymbol{\theta}\|_2\le R^{\boldsymbol{\theta}}\}$.
+	For $\varepsilon>0$, define $\Omega^{\varepsilon}=\{\boldsymbol{\theta}\in\Omega^{\mathrm{base}}:\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})\le \varepsilon\}$.
+	Define the difference class $\mathcal{H}^{\varepsilon}=\{(\mathbf{x},y)\mapsto \phi_y(\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}})-\phi_y(\boldsymbol{\ell}^{0}_{\mathbf{x}}):\boldsymbol{\theta}\in\Omega^{\varepsilon}\}$.
+	For $\boldsymbol{\theta}\in\Omega^{\varepsilon}$ and each sample point define $h_i(\boldsymbol{\theta})=\phi_{y_i}(\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}_i})-\phi_{y_i}(\boldsymbol{\ell}^{0}_{\mathbf{x}_i})$.
+	Using the Lipschitz bound for $\phi_y$ and the logit perturbation bound yields
+	\begin{equation*}
+		\frac{1}{N}\sum_{i=1}^N h_i(\boldsymbol{\theta})^2
+		\le
+		2\cdot\frac{1}{N}\sum_{i=1}^N\|\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}_i}\|_2^2
+		\le
+		8\tau^2 C\,\varepsilon.
+	\end{equation*}
+	Define $J^{\mathrm{emp}}(h)=\left(\frac{1}{N}\sum_{i=1}^N h(\mathbf{x}_i,y_i)^2\right)^{1/2}$ and define $\chi(\varepsilon)=2\tau\sqrt{2C\,\varepsilon}$.
+	Then every $h\in \mathcal{H}^{\varepsilon}$ satisfies $J^{\mathrm{emp}}(h)\le \chi(\varepsilon)$.
+	
+	Assume there exists a constant $\Lambda^{\mathcal{H}}>0$ such that for any $\boldsymbol{\theta}_1,\boldsymbol{\theta}_2\in\Omega^{\mathrm{base}}$,
+	\begin{equation*}
+		\left(\frac{1}{N}\sum_{i=1}^N\bigl(h_i(\boldsymbol{\theta}_1)-h_i(\boldsymbol{\theta}_2)\bigr)^2\right)^{1/2}
+		\le
+		\Lambda^{\mathcal{H}}\|\boldsymbol{\theta}_1-\boldsymbol{\theta}_2\|_2.
+	\end{equation*}
+	Then for any $\eta\in(0,\chi(\varepsilon)]$,
+	\begin{equation*}
+		\mathcal N\bigl(\eta,\mathcal{H}^{\varepsilon},J^{\mathrm{emp}}\bigr)
+		\le
+		\left(\frac{3\Lambda^{\mathcal{H}} R^{\boldsymbol{\theta}}}{\eta}\right)^{D^{\boldsymbol{\theta}}}.
+	\end{equation*}
+	By Dudley entropy integral and standard covering-number bounds~\citep{bartlett2002rademacher,bartlett2005local},
+	\begin{equation*}
+		\widehat{\mathfrak R}_{N}\bigl(\mathcal{H}^{\varepsilon}\bigr)
+		\le
+		\frac{12}{\sqrt N}\int_0^{\chi(\varepsilon)}\sqrt{\log\mathcal N\bigl(\eta,\mathcal{H}^{\varepsilon},J^{\mathrm{emp}}\bigr)}\,d\eta
+		\le
+		\frac{12\,\chi(\varepsilon)}{\sqrt N}\sqrt{D^{\boldsymbol{\theta}}\log\left(\frac{3e\Lambda^{\mathcal{H}} R^{\boldsymbol{\theta}}}{\chi(\varepsilon)}\right)}.
+	\end{equation*}
+	Substituting $\chi(\varepsilon)=2\tau\sqrt{2C\,\varepsilon}$ yields
+	\begin{equation*}
+		\widehat{\mathfrak R}_{N}\bigl(\mathcal{H}^{\varepsilon}\bigr)
+		\le
+		\frac{24\tau}{\sqrt N}\sqrt{2C\,\varepsilon}\sqrt{D^{\boldsymbol{\theta}}\log\left(\frac{3e\Lambda^{\mathcal{H}} R^{\boldsymbol{\theta}}}{2\tau\sqrt{2C\,\varepsilon}}\right)}.
+	\end{equation*}
+	\begin{theorem}\label{thm:app_gen}
+		Fix the confidence level $\rho\in(0,1)$.
+		With probability at least $1-\rho$, for all $\boldsymbol{\theta}\in\Omega^{\varepsilon}$,
+		\begin{equation*}
+			R(\boldsymbol{\theta})
+			\le
+			\widehat R_{N}(\boldsymbol{\theta})
+			+
+			2\,\widehat{\mathfrak R}_{N}\bigl(\mathcal{H}^{\varepsilon}\bigr)
+			+
+			4B\sqrt{\frac{\log(4/\rho)}{2N}}.
+		\end{equation*}
+	\end{theorem}
+	\subsection{Adaptive Bound via Peeling}
+	Let $H=\lceil\log_2 N\rceil$ and set $\varepsilon_{\nu}=2^{-\nu}$ for $\nu=0,1,\dots,H$. Define the peeling layers $\Omega^{\nu}=\{\boldsymbol{\theta}\in\Omega^{\mathrm{base}}:\varepsilon_{\nu+1}<\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})\le \varepsilon_{\nu}\}$. Applying Theorem~\ref{thm:app_gen} to each $\Omega^{\varepsilon_{\nu}}$ with confidence level $\rho/(H+1)$ and taking a union bound over $\nu$ yields the following result. With probability at least $1-\rho$, for all $\boldsymbol{\theta}\in\Omega^{\mathrm{base}}$ satisfying $\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})\le 1$,
+	\begin{equation*}
+		R(\boldsymbol{\theta})
+		\le
+		\widehat R_{N}(\boldsymbol{\theta})
+		+
+		\frac{24\tau}{\sqrt N}\sqrt{4C\,\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})}\sqrt{D^{\boldsymbol{\theta}}\log\left(\frac{3e\Lambda^{\mathcal{H}} R^{\boldsymbol{\theta}}}{2\tau\sqrt{4C\,\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})}}\right)}
+		+
+		4B\sqrt{\frac{\log\left(4(H+1)/\rho\right)}{2N}}.
+	\end{equation*}
+	This bound shows that the leading term scales with $\sqrt{\mathcal L^{\mathrm{con}}(\boldsymbol{\theta})/N}$ up to logarithmic factors.
+	\definecolor{GrayColor}{gray}{0.85}
+	\begin{table*}[t!]
+		\caption{Comparison of ManiPT performance with various methods for each dataset in few-shot setting. Best and second-best results are highlighted in bold and underline, respectively.}
+		\label{tab:fewshot}
+		\renewcommand{\arraystretch}{0.9}
+		\scriptsize
+		\centering
+		\begin{tabular}{>{\centering}p{8em}p{8em}|>{\centering}p{5em}>{\centering}p{5em}>{\centering}p{5em}>{\centering}p{5em}c}
+			\toprule
+			{\textbf{Dataset}} & {\textbf{Method}} & {{\textbf{1 shot}}} & {{\textbf{2 shots}}} & {{\textbf{4 shots}}} & {{\textbf{8 shots}}} & {{\textbf{16 shots}}} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{Average}}} & {Linear probe CLIP} & 45.83 & 57.98 & 68.01 & 74.47 & 78.79 \\
+			& {CoOp} & 67.56 & 70.65 & 74.02 & 76.98 & 79.89 \\
+			& {CoCoOp} & 66.79 & 67.65 & 71.21 & 72.96 & 74.90 \\
+			& {MaPLe} & 69.27 & 72.58 & 75.37 & 78.89 & 81.79 \\
+			& {PromptSRC} & \underline{72.32} & \underline{75.29} & \underline{78.35} & \underline{80.69} & \underline{82.87} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{74.75} & \textbf{76.77} & \textbf{80.01} & \textbf{82.12} & \textbf{84.64} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{ImageNet}}} & {Linear probe CLIP} & 32.13 & 44.88 & 54.85 & 62.23 & 67.31 \\
+			& {CoOp} & 66.33 & 67.07 & 68.73 & 70.63 & 71.87 \\
+			& {CoCoOp} & \underline{69.43} & \underline{69.78} & \underline{70.39} & \underline{70.63} & \underline{70.83} \\
+			& {MaPLe} & 62.67 & 65.10 & 67.70 & 70.30 & 72.33 \\
+			& {PromptSRC} & 68.13 & 69.77 & 71.07 & \underline{72.33} & \underline{73.17} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{70.76} & \textbf{71.41} & \textbf{72.35} & \textbf{73.70} & \textbf{75.13} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{Caltech101}}} & {Linear probe CLIP} & 79.88 & 89.01 & 92.05 & 93.41 & 95.43 \\
+			& {CoOp} & 92.60 & 93.07 & 94.40 & 94.37 & 95.57 \\
+			& {CoCoOp} & \underline{93.83} & \underline{94.82} & \underline{94.98} & \underline{95.04} & 95.16 \\
+			& {MaPLe} & 92.57 & 93.97 & 94.43 & 95.20 & \underline{96.00} \\
+			& {PromptSRC} & \underline{93.83} & 94.53 & 95.27 & \underline{95.67} & \underline{96.07} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{95.38} & \textbf{95.29} & \textbf{96.32} & \textbf{96.55} & \textbf{96.91} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{OxfordPets}}} & {Linear probe CLIP} & 44.06 & 58.37 & 71.17 & 78.36 & 85.34 \\
+			& {CoOp} & 90.37 & 89.80 & 92.57 & 91.27 & 91.87 \\
+			& {CoCoOp} & \underline{91.27} & \underline{92.64} & \underline{92.81} & \underline{93.45} & 93.34 \\
+			& {MaPLe} & 89.10 & 90.87 & 91.90 & 92.57 & 92.83 \\
+			& {PromptSRC} & \underline{92.00} & 92.50 & \textbf{93.43} & \underline{93.50} & \underline{93.67} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{92.53} & \textbf{93.27} & \textbf{93.60} & \textbf{93.87} & \textbf{94.12} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{StanfordCars}}} & {Linear probe CLIP} & 35.66 & 50.28 & 63.38 & 73.67 & 80.44 \\
+			& {CoOp} & 67.43 & 70.50 & 74.47 & 79.30 & 83.07 \\
+			& {CoCoOp} & 67.22 & 68.37 & 69.39 & 70.44 & 71.57 \\
+			& {MaPLe} & 66.60 & 71.60 & 75.30 & 79.47 & 83.57 \\
+			& {PromptSRC} & \underline{69.40} & \underline{73.40} & \underline{77.13} & \underline{80.97} & \underline{83.83} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{71.72} & \textbf{74.87} & \textbf{80.42} & \textbf{83.05} & \textbf{86.59} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{Flowers102}}} & {Linear probe CLIP} & 69.74 & 85.07 & 92.02 & \underline{96.10} & \underline{97.37} \\
+			& {CoOp} & 77.53 & 87.33 & 92.17 & 94.97 & 97.07 \\
+			& {CoCoOp} & 72.08 & 75.79 & 78.40 & 84.30 & 87.84 \\
+			& {MaPLe} & 83.30 & 88.93 & 92.67 & 95.80 & 97.00 \\
+			& {PromptSRC} & \underline{85.93} & \underline{91.17} & \underline{93.87} & 96.27 & \underline{97.60} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{86.48} & \textbf{91.60} & \textbf{95.19} & \textbf{96.70} & \textbf{98.65} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{Food101}}} & {Linear probe CLIP} & 43.96 & 61.51 & 73.19 & 79.79 & 82.90 \\
+			& {CoOp} & 84.33 & 84.40 & 84.47 & 82.67 & 84.20 \\
+			& {CoCoOp} & \underline{85.65} & \underline{86.22} & \textbf{86.88} & 86.97 & 87.25 \\
+			& {MaPLe} & 80.50 & 81.47 & 81.77 & 83.60 & 85.33 \\
+			& {PromptSRC} & 84.87 & 85.70 & 86.17 & \underline{86.90} & \underline{87.50} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{86.24} & \textbf{86.63} & \textbf{86.90} & \textbf{87.60} & \textbf{87.92} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{FGVCAircraft}}} & {Linear probe CLIP} & 19.61 & 26.41 & 32.33 & 39.35 & 45.36 \\
+			& {CoOp} & 21.37 & 26.20 & 30.83 & 39.00 & 43.40 \\
+			& {CoCoOp} & 12.68 & 15.06 & 24.79 & 26.61 & 31.21 \\
+			& {MaPLe} & 26.73 & 30.90 & 34.87 & 42.00 & 48.40 \\
+			& {PromptSRC} & \underline{27.67} & \underline{31.70} & \underline{37.47} & \underline{43.27} & \underline{50.83} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{33.75} & \textbf{34.23} & \textbf{42.03} & \textbf{49.82} & \textbf{56.88} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{SUN397}}} & {Linear probe CLIP} & 41.58 & 53.70 & 63.00 & 69.08 & 73.28 \\
+			& {CoOp} & 66.77 & 66.53 & 69.97 & 71.53 & 74.67 \\
+			& {CoCoOp} & \underline{68.33} & 69.03 & 70.21 & 70.84 & 72.15 \\
+			& {MaPLe} & 64.77 & 67.10 & \underline{70.67} & \underline{73.23} & \underline{75.53} \\
+			& {PromptSRC} & 69.67 & \underline{71.60} & \underline{74.00} & \underline{75.73} & \underline{77.23} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{70.68} & \textbf{72.61} & \textbf{74.91} & \textbf{76.51} & \textbf{78.06} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{DTD}}} & {Linear probe CLIP} & 34.59 & 40.76 & 55.71 & 63.46 & 69.96 \\
+			& {CoOp} & 50.23 & 53.60 & 58.70 & 64.77 & 69.87 \\
+			& {CoCoOp} & 48.54 & 52.17 & 55.04 & 58.89 & 63.04 \\
+			& {MaPLe} & 52.13 & 55.50 & 61.00 & 66.50 & 71.33 \\
+			& {PromptSRC} & \underline{56.23} & \underline{59.97} & \underline{65.53} & \underline{69.87} & \underline{72.73} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{60.11} & \textbf{61.17} & \textbf{68.52} & \textbf{71.54} & \textbf{76.03} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{EuroSAT}}} & {Linear probe CLIP} & 49.23 & 61.98 & 77.09 & 84.43 & 87.21 \\
+			& {CoOp} & 54.93 & 65.17 & 70.80 & 78.07 & 84.93 \\
+			& {CoCoOp} & 55.33 & 46.74 & 65.56 & 68.21 & 73.32 \\
+			& {MaPLe} & \underline{71.80} & \underline{78.30} & \underline{84.50} & \underline{87.73} & \underline{92.33} \\
+			& {PromptSRC} & 73.13 & 79.37 & \textbf{86.90} & \textbf{88.80} & \textbf{92.43} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{76.54} & \textbf{83.64} & \underline{86.77} & \underline{88.02} & \underline{92.40} \\
+			\midrule
+			\multicolumn{1}{c}{\multirow{6}[2]{*}{{UCF101}}} & {Linear probe CLIP} & 53.66 & 65.78 & 73.28 & 79.34 & 82.11 \\
+			& {CoOp} & 71.23 & 73.43 & 77.10 & 80.20 & 82.23 \\
+			& {CoCoOp} & 70.30 & 73.51 & 74.82 & 77.14 & 78.14 \\
+			& {MaPLe} & 71.83 & 74.60 & 78.47 & 81.37 & 85.03 \\
+			& {PromptSRC} & \underline{74.80} & \underline{78.50} & \underline{81.57} & \underline{84.30} & \underline{86.47} \\
+			\rowcolor{GrayColor} & {ManiPT} & \textbf{78.09} & \textbf{79.70} & \textbf{83.12} & \textbf{85.93} & \textbf{88.35} \\
+			\bottomrule
+		\end{tabular}
+	\end{table*}
+	\section{Appendix 3: More Experimental Results}
+	\label{app:more_exp}
+	\subsection{Few-shot experiments}
+	\label{app:fewshot_results}
+	Table~\ref{tab:fewshot} reports the numerical results for few-shot classification across all 11 datasets under 1, 2, 4, 8, and 16 shot settings. The results show that ManiPT consistently achieves higher average accuracy than the compared methods across all shot counts. In the 1-shot regime, ManiPT attains the highest average accuracy and exceeds methods such as PromptSRC and MaPLe. As the number of shots increases, ManiPT continues to maintain the lead. On fine-grained datasets such as FGVCAircraft and on texture datasets such as DTD, ManiPT achieves clear gains over baseline methods, which indicates that these datasets are more sensitive to overfitting. These observations support our core insight: while the consistency constraints prevent the feature adaptation from drifting into invalid regions under extreme data scarcity (e.g., 1-shot), the structural bias is essential to guide the limited updates along transferable directions, ensuring that the model learns robust features rather than overfitting to noise.
+	\subsection{Ablation Studies}
+	\label{app:ablation_results}
+	\subsubsection{Structural Bias Strategy}
+	\begin{table}[h]
+		\caption{Comparison of different structural bias strategies. Our additive structure ensures that the adapted features are geometrically anchored by the pretrained manifold, achieving the best trade-off between base retention and novel generalization.}
+		\label{tab:structural_bias_comparison}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l c c c}
+				\toprule
+				\textbf{Strategy} & \textbf{Base} & \textbf{New} & \textbf{HM} \\
+				\midrule
+				Direct Tuning & 82.85 & 76.50 & 79.54 \\
+				Gate             & 85.35 & 78.40 & 81.73 \\
+				\rowcolor{gray!10} Additive & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	In Table~\ref{tab:structural_bias_comparison}, we compare three structural bias strategies. Direct Tuning performs classification using only the prompt-branch features (visual and text), i.e., $\mathbf{f}^{\mathrm{vis,prompt}}$ and $\mathbf{f}^{\mathrm{txt,prompt}}$, and removes the fusion with the frozen features $\mathbf{f}^{\mathrm{vis,clip}}$ and $\mathbf{f}^{\mathrm{txt,clip}}$, which is the standard practice in CoOp and MaPLe. Gate introduces a learnable coefficient $\alpha$ to interpolate between the frozen and prompt features for each modality, e.g., $\alpha \mathbf{f}^{\mathrm{vis,clip}} + (1-\alpha) \mathbf{f}^{\mathrm{vis,prompt}}$ on the visual side (and analogously for text), to balance pretrained retention and task adaptation. In the few-shot regime, the learnable gate can overfit by pushing $\alpha$ toward an extreme, discarding the frozen branch and weakening the anchoring effect. Our additive strategy employs equal-weight fusion with re-normalization, which physically enforces incremental corrections. By treating the learned prompt as a perturbation rather than a replacement, the structural bias ensures the final decision features remain geometrically anchored to the frozen representations. This mechanism explicitly biases the feature adaptation toward transferable directions inherent in the pretrained backbone, achieving the best trade-off between base accuracy and novel generalization, as reflected by the highest harmonic mean.
+	\subsubsection{Text Anchor Source}
+	\begin{table}[h]
+		\caption{Ablation study on different text anchor sources. While handcrafted templates offer a marginal improvement over "a photo of a \{class\}" template, LLM descriptions provide rich semantic knowledge, significantly boosting generalization on novel classes.}
+		\label{tab:text_anchor_ablation}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l c c c}
+				\toprule
+				\textbf{Anchor Source} & \textbf{Base} & \textbf{New} & \textbf{HM} \\
+				\midrule
+				a photo of a \{class\} \ & 85.65 & 77.58 & 81.42 \\
+				Handcrafted Templates & 85.70 & 77.80 & 81.56 \\
+				\rowcolor{gray!10} LLM Descriptions & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	Table~\ref{tab:text_anchor_ablation} presents the ablation study on different text anchor sources. Using an ensemble of handcrafted templates offers only a marginal improvement over the single template ``a photo of a \{class\}''. This suggests that simply increasing the quantity of templates does not guarantee a better semantic prototype. In contrast, utilizing LLM descriptions yields significant improvements. This indicates that leveraging rich semantic knowledge from LLMs constructs a robust geometric center for the textual consistency constraint, which effectively defines a more accurate validity neighborhood for the textual features, thereby enhancing generalization.
+	\subsubsection{Complementarity of Visual and Textual Consistency}
+	\begin{table}[h]
+		\caption{Ablation study on the complementary roles of visual and textual consistency constraints. The results show that $\mathcal{L}^{\mathrm{img}}$ and $\mathcal{L}^{\mathrm{txt}}$ are complementary. While each single constraint improves over the baseline, combining them yields the best performance across all metrics, confirming their synergistic effect.}
+		\label{tab:loss_component_ablation}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{c c c c c}
+				\toprule
+				\textbf{$\mathcal{L}^{\mathrm{img}}$} & \textbf{$\mathcal{L}^{\mathrm{txt}}$} & \textbf{Base} & \textbf{New} & \textbf{HM} \\
+				\midrule
+				$\times$ & $\times$ & 84.85 & 68.32 & 75.71 \\
+				\checkmark & $\times$ & 85.45 & 73.15 & 78.82 \\
+				$\times$ & \checkmark & 85.15 & 74.80 & 79.64 \\
+				\rowcolor{gray!10} \checkmark & \checkmark & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	Table~\ref{tab:loss_component_ablation} reports the individual contributions of the visual and textual consistency constraints. The results indicate that the two constraints complement each other. Applying visual consistency alone stabilizes the visual manifold and improves performance on base classes by reducing feature distortion during adaptation. Applying textual consistency alone provides semantic guidance that is more effective for generalizing to novel classes. The full model that employs both constraints achieves the best performance across all metrics. This pattern shows that the visual constraint limits geometric drift in the embedding space, while the textual constraint anchors the semantics. Collectively, they confine the feature adaptation within the robust geometric structure defined by the pretrained multimodal alignment.
+	\subsubsection{Comparison with Standard Regularization}
+	\begin{table}[h]
+		\caption{Comparison with standard regularization methods. L1 and L2 denote constraining the distance between prompt-adapted features and pretrained features via L1 and L2 distances, respectively.}
+		\label{tab:regularization_comparison}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l c c c}
+				\toprule
+				\textbf{Regularization Method} & \textbf{Base} & \textbf{New} & \textbf{HM} \\
+				\midrule
+				No Constraint      & 84.85 & 68.32 & 75.71 \\
+				L1 & 83.50 & 72.45 & 77.58 \\
+				L2 & 78.95 & 76.10 & 77.50 \\
+				\rowcolor{gray!10} Cosine & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	Table~\ref{tab:regularization_comparison} compares ManiPT with standard regularization techniques. The results show that Euclidean distance penalties (L1 and L2) lead to a noticeable drop in base class performance. In CLIP, classification is driven by cosine similarity between normalized features, so predictions depend on feature direction rather than magnitude. Applying Euclidean penalties in the non-normalized space introduces task-irrelevant magnitude gradients that can interfere with directional alignment. Cosine consistency directly regularizes angular alignment, which is equivalent to confining the features within a hyperspherical neighborhood of the pretrained manifold. This geometric constraint is necessary to prevent the feature adaptation from deviating into orthogonal shortcut subspaces, which Euclidean penalties fail to address effectively in the normalized feature space.
+	\subsubsection{Disentangling Structural Bias Components}
+	\begin{table}[h]
+		\caption{Ablation study on the components of the structural bias.}
+		\label{tab:component_disentanglement}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l c c c}
+				\toprule
+				\textbf{Variant} & \textbf{Base} & \textbf{New} & \textbf{HM} \\
+				\midrule
+				ManiPT (Full) & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} \\
+				w/o Frozen Text ($\mathbf{f}^{\mathrm{txt,clip}}$) & 83.45 & 77.25 & 80.23 \\
+				w/o Frozen Visual ($\mathbf{f}^{\mathrm{vis,clip}}$) & 85.40 & 78.25 & 81.67 \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	Table~\ref{tab:component_disentanglement} analyzes the impact of explicitly incorporating frozen CLIP features into the final representation. We observe a distinct asymmetry between modalities. On the textual side, removing the frozen text feature leads to a significant degradation, particularly in Base accuracy. This confirms that prompt-learned text features alone are prone to optimization instability, and the explicit inclusion of the frozen prototype acts as the necessary basis for incremental corrections, ensuring the final representation remains grounded. In contrast, removing the frozen visual feature results in only a marginal drop. This suggests that our visual consistency constraint is highly efficient, successfully restricting the prompt-adapted visual features to the pretrained manifold.
+	\subsubsection{Constraint Target: Prompt vs. Final Features}
+	\begin{table}[h]
+		\caption{Ablation study on the target of consistency constraints. We compare applying the constraints to the final fused representations versus applying them only to the intermediate prompt features. The results show that constraining the final representation yields better performance.}
+		\label{tab:constraint_target}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l c c c}
+				\toprule
+				Constraint Target & Base & New & HM \\
+				\midrule
+				Prompt Features (prompt-branch $\mathbf{f}^{\mathrm{vis,prompt}}$, $\mathbf{f}^{\mathrm{txt,prompt}}$) & 84.65 & 77.45 & 80.89 \\
+				\rowcolor{gray!10} Final Features (fused $\mathbf{f}^{\mathrm{vis,final}}$, $\mathbf{f}^{\mathrm{txt,final}}$) & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	Table~\ref{tab:constraint_target} investigates whether the consistency constraints should be applied to the final fused representations or the intermediate prompt features. The results demonstrate that constraining the final features achieves superior performance. We attribute this to the alignment between the regularization objective and the decision boundary. Since the classification logits are computed using $\mathbf{f}^{\mathrm{vis,final}}$ and $\mathbf{f}^{\mathrm{txt,final}}$, applying consistency constraints directly to these final features ensures that the geometric properties of the actual decision variables are preserved. In contrast, constraining only the prompt-branch features $\mathbf{f}^{\mathrm{vis,prompt}}$ and $\mathbf{f}^{\mathrm{txt,prompt}}$ creates an optimization misalignment: it restricts the direction of the learnable update rather than the final output. This overly restricts the model's plasticity, preventing it from making necessary incremental corrections. By constraining the final fused features, we ensure that the resulting feature adaptation remains valid within the manifold neighborhood while allowing the prompt components sufficient freedom to adjust along transferable directions.
+	\subsubsection{Initialization Robustness}
+	\begin{table}[h]
+		\caption{Ablation study on initialization strategies. We compare the Normal initialization with Kaiming Uniform initialization. The results indicate that ManiPT is relatively robust to initialization strategies, though Normal initialization yields slightly better performance by avoiding excessive initial variance.}
+		\label{tab:init_ablation}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l c c c}
+				\toprule
+				Initialization & Base & New & HM \\
+				\midrule
+				Kaiming Uniform & 85.45 & 78.10 & 81.61 \\
+				\rowcolor{gray!10} Normal (std=0.02) & \textbf{85.82} & \textbf{78.67} & \textbf{82.09} \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	Table~\ref{tab:init_ablation} compares the performance of different initialization strategies. The results show that ManiPT is relatively robust to the choice of initialization, with the harmonic mean dropping only slightly from 82.09\% to 81.61\% when switching to Kaiming Uniform. However, Normal initialization consistently yields better results. This is likely because Kaiming initialization is designed for training deep networks from scratch and introduces a larger initial variance. In the context of prompt tuning with a frozen backbone, this aggressive initialization can cause the feature adaptation to diverge early into dataset-specific local minima, leading to potential overfitting to base classes and slightly degrading the transferability to novel classes.
+	\subsubsection{Modality-Specific Deep Prompting}
+	\begin{table}[h]
+		\caption{Ablation study on modality-specific deep prompting. We compare our dual-branch design with single-branch deep prompting variants namely Visual-only and Textual-only. Vis-only and Txt-only denote applying deep prompting, consistency constraints, and structural bias exclusively to the image or text encoder respectively.}
+		\label{tab:modality_ablation}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l c c c}
+				\toprule
+				Method & Base & New & HM \\
+				\midrule
+				Txt-only Deep Prompting & 85.45 & 69.40 & 76.60 \\
+				Vis-only Deep Prompting & 84.20 & 74.85 & 79.25 \\
+				\rowcolor{gray!10} ManiPT & 85.82 & 78.67 & 82.09 \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	Table~\ref{tab:modality_ablation} investigates the effectiveness of dual-branch deep prompting by comparing it with variants where deep prompting, consistency constraints, and structural bias are applied to a single modality. When restricted to the text encoder, the model exhibits signs of overfitting as it maintains high accuracy on base classes but the generalization to novel classes lags behind the full model. This suggests that adapting only the text encoder tends to optimize decision boundaries for seen classes without sufficiently aligning them with the generalizable visual manifold. Conversely, adapting only the image encoder yields better generalization than the text-only variant reflecting the inherent transferability of visual features yet it still falls short of the performance achieved by the dual-branch design. By coordinating adaptation across both modalities, ManiPT achieves the best overall performance.
+	\subsection{Hyperparameter Sensitivity}
+	\label{app:context_sensitivity}
+	\subsection{Sensitivity to Consistency Constraint}
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=0.3\linewidth]{ablation_lambda.pdf}
+		\caption{Sensitivity analysis of the consistency constraint weight.}
+		\label{fig:ablation_lambda}
+	\end{figure}
+	We vary the weight $\lambda$ in Eq.~(\ref{eq:total_loss}). Figure~\ref{fig:ablation_lambda} shows a clear trade off. When $\lambda$ is too small, the consistency constraint is insufficient to constrain feature adaptation, leading to manifold drift. When $\lambda$ is too large, the adaptation is over-confined to initial geometry, restricting the model's ability to adjust along transferable directions for task adaptation.
+	\subsection{Sensitivity to Context Length}
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=0.3\linewidth]{context_length_ablation.pdf}
+		\caption{Sensitivity analysis of the context length. Unlike standard prompt tuning where increasing parameters often leads to overfitting, ManiPT effectively utilizes the increased capacity to boost both Base and Novel performance.}
+		\label{fig:context_length}
+	\end{figure}
+	Figure~\ref{fig:context_length} illustrates the impact of context length. We observe a consistent improvement in both Base and Novel accuracy as $m$ increases from 2 to 16. Typically, a larger context length increases the risk of overfitting to base classes, thereby hurting novel class generalization. However, ManiPT breaks this trend. This is due to the synergy between the manifold consistency constraints and the structural bias. The consistency constraints confine the feature adaptation within the pretrained geometric neighborhood, while the structural bias, via a geometric contraction mechanism, enforces incremental corrections. This dual safeguard enables the model to safely exploit the increased capacity to capture richer domain-specific semantics without overfitting to shortcut subspaces as capacity grows.
+	
+	\subsection{Training and Inference sEfficiency}
+	\label{app:efficiency}
+	\begin{table}[h]
+		\caption{Training and inference efficiency comparison. OOM denotes out of memory.}
+		\label{tab:efficiency_comparison}
+		\centering
+		\scalebox{0.85}{
+			\begin{tabular}{l c c c c}
+				\toprule
+				\textbf{Method} & \textbf{Training Time} & \textbf{Peak Memory} & \textbf{Infer. Latency} & \textbf{Params} \\
+				& (s/epoch) & (GB) & (ms/img) & (M) \\
+				\midrule
+				Zero-shot CLIP & N/A & N/A & 3.42 & 0.00 \\
+				CoOp           & 29.12 & 8.33 & 3.50 & 0.01 \\
+				CoCoOp         & 836.08 & 8.25 & 39.97 & 0.04 \\
+				MaPLe          & 241.51 & 8.30 & 3.83 & 3.56 \\
+				PromptSRC      & 248.49 & 8.63 & 3.87 & 0.05 \\
+				CoPrompt       & 255.22 & 8.84 & 4.07 & 5.01 \\
+				TAC            & 131.33 & 10.46 & 4.20 & 0.73 \\
+				TAP            & N/A & OOM & 3041.71 & 3.73 \\
+				LLaMP          & N/A & OOM & 4.19 & 52.77 \\
+				\rowcolor{gray!10} ManiPT & 34.23 & 10.23 & 6.96 & 0.25 \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	We evaluate the computational efficiency on an NVIDIA RTX 5090 GPU. The training time per epoch and peak GPU memory are measured on the ImageNet dataset under the base-to-novel setting, following the default configurations of each codebase. Note that for static prompt methods, the text features are pre-computed and cached offline. For inference latency, we report the per-image processing time averaged over 100 forward passes using a random input tensor of shape $1 \times 3 \times 224 \times 224$, following a warm-up phase of 50 iterations to ensure stable measurements. As shown in Table~\ref{tab:efficiency_comparison}, ManiPT achieves a superior balance between efficiency and performance. In terms of training, it is exceptionally fast, requiring only 34.23 seconds per epoch. This is comparable to the lightweight baseline CoOp and approximately 7$\times$ faster than MaPLe and 24$\times$ faster than CoCoOp. Furthermore, ManiPT demonstrates remarkable parameter efficiency by training only the context vectors inserted at each layer. It utilizes just 0.25 M parameters which is an order of magnitude fewer than other deep prompting methods like MaPLe with 3.56 M parameters. Regarding inference, ManiPT maintains a low latency of 6.96 ms/img. While slightly higher than single-branch methods due to the dual-branch fusion, it remains highly suitable for real-time deployment and is significantly more efficient than instance-conditional methods like CoCoOp. It is also worth noting that TAP and LLaMP require substantial GPU memory, often exceeding the capacity of commodity hardware. In particular, TAP's dynamic caption retrieval mechanism leads to extremely high inference latency, making it ill-suited for real-time deployment.
+	\section{Appendix 4: Manifold Drift Metric}
+	\label{app:drift_computation}
+	\subsection{Definition}
+	\label{app:drift_definition}
+	In this section, we provide the detailed computation procedure for the manifold drift metric. The metric quantifies the degree to which the features learned by prompt tuning deviate from the intrinsic geometric structure established by the pretrained CLIP model.
+	
+	Let $\{\mathbf{x}_i\}_{i=1}^{N}$ denote the set of evaluation samples. Here, $N$ denotes the number of evaluation samples. We extract two sets of normalized feature representations. Pretrained features $\mathbf{Z}$ are generated by the frozen CLIP encoder. Let $\mathbf{Z} \in \mathbb{R}^{N \times d}$ denote the matrix whose $i$-th row is $\bigl(\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}\bigr)^\top$. Prompt-tuned features $\mathbf{H}$ are generated by the final fused representations. Let $\mathbf{H} \in \mathbb{R}^{N \times d}$ denote the matrix whose $i$-th row is $\bigl(\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}_i}\bigr)^\top$.
+	
+	Since the true nonlinear manifold of the pretrained model is analytically inaccessible, we approximate its local tangent space using PCA on the pretrained feature point cloud $\mathbf{Z}$.
+	
+	We first compute the centroid of the pretrained features
+	\begin{equation}
+		\boldsymbol{\mu} = \frac{1}{N} \sum_{i=1}^N \mathbf{z}^{\mathrm{vis}}_{\mathbf{x}_i}.
+		\label{eq:drift_mu}
+	\end{equation}
+	Based on this centroid, we construct the centered data matrix
+	with $\mathbf{1}\in\mathbb{R}^{N}$ denoting the all-ones vector.
+	\begin{equation}
+		\bar{\mathbf{Z}} = \mathbf{Z} - \mathbf{1}\boldsymbol{\mu}^\top.
+		\label{eq:drift_center_pre}
+	\end{equation}
+	We then perform Singular Value Decomposition (SVD) on $\bar{\mathbf{Z}}$ to obtain the principal directions
+	\begin{equation}
+		\bar{\mathbf{Z}} = \mathbf{U} \mathbf{\Sigma} \mathbf{V}^\top,
+		\label{eq:drift}
+	\end{equation}
+	where $\mathbf{U}\in\mathbb{R}^{N\times d}$ contains the left singular vectors, $\mathbf{\Sigma}\in\mathbb{R}^{d\times d}$ is diagonal with singular values, and $\mathbf{V} \in \mathbb{R}^{d \times d}$ contains the right singular vectors sorted by singular value magnitude. We define the pretrained principal subspace $\mathcal{M}^{\mathrm{pca}}$ as the subspace spanned by the $d^{\mathrm{pca}}$ leading principal components. The projection matrix onto this subspace is given by
+	\begin{equation}
+		\mathbf{P}^{\mathrm{pca}} = \mathbf{V}^{\mathrm{pca}} \left(\mathbf{V}^{\mathrm{pca}}\right)^\top,
+		\label{eq:drift_proj}
+	\end{equation}
+	where $\mathbf{V}^{\mathrm{pca}} \in \mathbb{R}^{d \times d^{\mathrm{pca}}}$ denotes the first $d^{\mathrm{pca}}$ columns of $\mathbf{V}$. In our experiments, we set $d^{\mathrm{pca}}=64$ to capture the dominant semantic directions.
+	
+	Manifold drift is defined as the increase in the proportion of energy orthogonal to the principal subspace in the prompt-tuned features relative to the pretrained features. We define the ratio function $\mathcal{R}(\mathbf{Z})$ for a feature set $\mathbf{Z}$ relative to the pretrained center $\boldsymbol{\mu}$ and subspace $\mathbf{P}^{\mathrm{pca}}$
+	\begin{equation}
+		\mathcal{R}(\mathbf{Z}) =
+		\frac{\sum_{i=1}^N \left\| \left[\mathbf{I}_d - \mathbf{P}^{\mathrm{pca}}\right]\left[\mathbf{z}_i - \boldsymbol{\mu}\right] \right\|_2^2}
+		{\sum_{i=1}^N \left\| \mathbf{z}_i - \boldsymbol{\mu} \right\|_2^2 + \varepsilon^{\mathrm{num}}},
+		\label{eq:drift_ratio}
+	\end{equation}
+	where $\mathbf{z}_i$ is the $i$-th row of $\mathbf{Z}$, and $\varepsilon^{\mathrm{num}}=10^{-12}$ is a numerical stability constant. The numerator represents the variance orthogonal to the pretrained manifold, and the denominator represents the total variance.
+	
+	With these definitions in place, we compute the manifold drift $\Delta$ as
+	\begin{equation}
+		\Delta = \mathcal{R}(\mathbf{H}) - \mathcal{R}(\mathbf{Z}).
+		\label{eq:drift_delta}
+	\end{equation}
+	A positive value $\Delta>0$ indicates that prompt tuning has shifted the feature distribution into directions that were previously low variance in the pretrained model, signifying a deviation from the pretrained manifold. The computation procedure is summarized in Algorithm~\ref{alg:drift}.
+	\begin{algorithm}[h]
+		\caption{Computation of Manifold Drift $\Delta$}
+		\label{alg:drift}
+		\begin{algorithmic}[1]
+			\STATE {\bfseries Input:} Pretrained features $\mathbf{Z}$, Prompt-tuned features $\mathbf{H}$, PCA rank $d^{\mathrm{pca}}$.
+			\STATE {\bfseries Output:} Manifold drift $\Delta$.
+			\STATE \# 1. Approximating the Pretrained Manifold
+			\STATE Compute centroid $\boldsymbol{\mu}$ using Eq.~(\ref{eq:drift_mu})
+			\STATE Construct the centered data matrix $\bar{\mathbf{Z}}$ using Eq.~(\ref{eq:drift_center_pre})
+			\STATE Perform SVD on $\bar{\mathbf{Z}}$ to obtain the principal directions using Eq.~(\ref{eq:drift})
+			\STATE Compute the projection matrix $\mathbf{P}^{\mathrm{pca}}$ using Eq.~(\ref{eq:drift_proj})
+			\STATE \# 2. Computing the Ratio Function $\mathcal{R}(\mathbf{Z})$
+			\STATE Construct the centered data matrix $\bar{\mathbf{H}} \leftarrow \mathbf{H} - \mathbf{1}\boldsymbol{\mu}^\top$
+			\STATE Compute $\mathcal{R}(\mathbf{Z})$ using Eq.~(\ref{eq:drift_ratio})
+			\STATE Compute $\mathcal{R}(\mathbf{H})$ using Eq.~(\ref{eq:drift_ratio})
+			\STATE \# 3. Computing Drift
+			\STATE Compute $\Delta$ using Eq.~(\ref{eq:drift_delta})
+		\end{algorithmic}
+	\end{algorithm}
+	\subsection{Sensitivity to PCA Rank $d^{\mathrm{pca}}$}
+	\label{app:sensitivity_dpca}
+	\begin{table}[h]
+		\centering
+		\caption{The manifold drift metric $\Delta$ with respect to the PCA rank $d^{\mathrm{pca}}$ across all 11 datasets.}
+		\label{tab:sensitivity_k_full}
+		\scalebox{0.72}{
+			\begin{tabular}{l | cccc | cccc}
+				\toprule
+				& \multicolumn{4}{c|}{MaPLe} & \multicolumn{4}{c}{ManiPT} \\
+				Dataset & $d^{\mathrm{pca}}=32$ & $d^{\mathrm{pca}}=64$ & $d^{\mathrm{pca}}=128$ & $d^{\mathrm{pca}}=256$ & $d^{\mathrm{pca}}=32$ & $d^{\mathrm{pca}}=64$ & $d^{\mathrm{pca}}=128$ & $d^{\mathrm{pca}}=256$ \\
+				\midrule
+				ImageNet      & 0.1320 & 0.1250 & 0.1085 & 0.0750 & 0.0038 & 0.0045 & 0.0051 & 0.0055 \\
+				Caltech101    & 0.0980 & 0.0910 & 0.0750 & 0.0480 & -0.0025 & -0.0021 & -0.0010 & 0.0005 \\
+				OxfordPets    & 0.0890 & 0.0840 & 0.0680 & 0.0420 & 0.0008 & 0.0012 & 0.0015 & 0.0020 \\
+				StanfordCars  & 0.1585 & 0.1520 & 0.1350 & 0.0950 & 0.0072 & 0.0078 & 0.0082 & 0.0085 \\
+				Flowers102    & 0.1450 & 0.1380 & 0.1120 & 0.0750 & -0.0055 & -0.0048 & -0.0030 & -0.0010 \\
+				Food101       & 0.0780 & 0.0720 & 0.0620 & 0.0450 & 0.0018 & 0.0023 & 0.0028 & 0.0032 \\
+				SUN397        & 0.1350 & 0.1290 & 0.1100 & 0.0820 & 0.0035 & 0.0039 & 0.0042 & 0.0048 \\
+				UCF101        & 0.1780 & 0.1710 & 0.1450 & 0.1020 & 0.0048 & 0.0055 & 0.0065 & 0.0075 \\
+				DTD           & 0.1130 & 0.1139 & 0.1063 & 0.0669 & -0.0025 & -0.0019 & 0.0009 & 0.0024 \\
+				EuroSAT       & 0.1698 & 0.1448 & 0.0961 & 0.0454 & 0.0095 & 0.0103 & 0.0084 & 0.0050 \\
+				FGVCAircraft  & 0.1452 & 0.1619 & 0.1627 & 0.1076 & -0.0102 & -0.0037 & 0.0042 & 0.0048 \\
+				\midrule
+				Average       & 0.1310 & 0.1257 & 0.1073 & 0.0713 & 0.0010 & 0.0020 & 0.0035 & 0.0039 \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	Table~\ref{tab:sensitivity_k_full} presents the results of the manifold drift metric $\Delta$ with respect to different PCA ranks $d^{\mathrm{pca}} \in \{32, 64, 128, 256\}$. The rank $d^{\mathrm{pca}}$ determines the dimensionality of the reference subspace used to approximate the pretrained manifold. A smaller $d^{\mathrm{pca}}$ defines a stricter manifold constraint, capturing only the most dominant semantic directions, whereas a larger $d^{\mathrm{pca}}$ defines a more permissive subspace, encompassing subtle variations and potential noise. We observe three key phenomena that corroborate our theoretical analysis. First, metric sensitivity: for MaPLe, the drift metric generally decreases as $d^{\mathrm{pca}}$ increases. This behavior is physically consistent with our approximation calculation of manifold drift. As the dimensionality of the principal subspace increases, it covers a larger feature space, so even significantly drifted features are more likely to fall close to this expanded subspace, resulting in lower manifold drift metrics. Second, robustness of ManiPT: ManiPT exhibits remarkable stability across all ranks, with $\Delta$ consistently remaining near zero. This insensitivity indicates that our method constrains downstream task features to align with the intrinsic geometric structure of the frozen CLIP features. Whether measured against a strict $d^{\mathrm{pca}}=32$ or a permissive $d^{\mathrm{pca}}=256$ manifold approximation, ManiPT maintains high consistency, confirming that the learned prompts do not undergo orthogonal deviation during semantic adjustment. Third, domain-specific trends: the behavior of MaPLe reveals that overfitting manifests differently across domains. On general datasets such as Caltech101, the drift drops rapidly at $d^{\mathrm{pca}}=256$, suggesting that the deviation lies primarily in high-frequency variance directions. However, on fine-grained tasks like FGVCAircraft, the drift remains substantial even at $d^{\mathrm{pca}}=256$. This implies that without our imposed consistency constraints and structural bias, prompt tuning in fine-grained low-data regimes tends to drive features toward directions structurally orthogonal to the pretrained manifold structure, and these directions likely correspond to shortcut features that cannot be captured by the low-dimensional approximation of the pretrained distribution. 
+	
+	Based on these empirical observations, we adopt $d^{\mathrm{pca}}=64$ as the default value for our main experiments. It captures the dominant semantic components of the CLIP representation while being compact enough to sensitively detect semantic drift, whereas $d^{\mathrm{pca}}=32$ may be too restrictive, leading to manifold underfitting, and $d^{\mathrm{pca}}=256$ is too permissive, reducing the metric's discriminative power against noise-induced drift.
+	\section{Appendix 5: Limitations}\label{limitations}
+	Experimental results show that ManiPT generalizes across multiple settings. However, the framework has limitations inherent to its design. First, the structural bias, which enforces incremental corrections through dual-branch fusion, prioritizes geometric stability over raw inference speed, leading to increased latency compared to single-branch methods. Second, since LLM-generated descriptions serve as the geometric center for the textual consistency constraint, the effectiveness of this semantic anchoring depends on the quality of the external knowledge source, particularly in specialized narrow domains. Finally, the core premise of ManiPT is to confine the learned representations within the pretrained geometric neighborhood. While this prevents drift, it assumes that the pretrained manifold provides valid support for the downstream task. In scenarios with extreme distribution shifts where the optimal solution lies far outside the pretrained neighborhood, this geometric confinement might overly restrict the feature adaptation, necessitating a careful trade-off between manifold preservation and task-specific plasticity.
+	\section{Appendix 6: Notation}
+	\label{app:notation}
+	We summarize the main symbols used in the paper for clarity and consistency.
+	\begin{table}[h]
+		\centering
+		\caption{Notation for core sets, indices, and scalars.}
+		\scalebox{0.68}{
+			\begin{tabular}{ll}
+				\toprule
+				Symbol & Description \\
+				\midrule
+				$\mathcal{X}$, $\mathcal{Y}$ & Input image space and label space \\
+				$\mathcal{C}=\{1,\dots,C\}$ & Class index set, $C$ denotes the number of classes \\
+				$\mathcal{D}$ & Data distribution over $\mathcal{X}\times \mathcal{Y}$ \\
+				$\mathcal{D}^{\mathrm{train}}=\{(\mathbf{x}_i,y_i)\}_{i=1}^N$ & Training dataset, $N$ denotes the number of samples \\
+				$T^{\mathrm{all}},\,T^\star_c$ & Sets of all and class-specific token sequences for the text encoder \\
+				$d$ & Embedding dimension of CLIP features \\
+				$m$ & Number of learnable context vectors (prompt length) \\
+				$n$ & Number of LLM-generated descriptions per class \\
+				$K$ & Number of Transformer layers in the CLIP encoders \\
+				$d^{\mathrm{pca}}$ & PCA rank used to approximate the pretrained manifold \\
+				$i,j,c,k$ & Indices for samples, descriptions, classes, and layers, respectively \\
+				$\tau$ & Temperature parameter in the softmax logits \\
+				$\lambda$ & Weight of the consistency regularization \\
+				$E$ & Number of training epochs \\
+				$\rho$ & Confidence level in the generalization bounds \\
+				$B$ & Uniform upper bound on the cross-entropy loss \\
+				$\Lambda^{\mathcal{H}}$ & Lipschitz constant in the localized complexity analysis \\
+				$R^{\boldsymbol{\theta}}$ & Radius of the base parameter set for $\boldsymbol{\theta}$ \\
+				$D^{\boldsymbol{\theta}}$ & Dimension of the prompt parameter vector in the generalization analysis \\
+				$\varepsilon^{\mathrm{num}}$ & Numerical stability constant in the drift ratio \\
+				$\kappa^{\mathrm{vis}},\,\kappa^{\mathrm{txt}}$ & Non-near-opposition margins for visual and text fusion \\
+				$\zeta^{\max}$, $\varepsilon^{\mathrm{proj}}$ & Maximum anchor neighborhood radius and average projection error bound \\
+				$\hat d_c$ & Distance between anchor $\mathbf{w}_{c}$ and its discrete projection $\tilde{\mathbf{w}}_{c}$ \\
+				\bottomrule
+			\end{tabular}
+		}
+	\end{table}
+	\makeatletter
+	\setlength{\@fptop}{0pt}
+	\makeatother
+	\begin{table}[t!]
+		\centering
+		\caption{Notation for features, prompts, and manifolds.}
+		\scalebox{0.7}{
+			\begin{tabular}{ll}
+				\toprule
+				Symbol & Description \\
+				\midrule
+				$\mathcal{T},\,\mathcal{V}$ & Frozen CLIP text and image encoders (prompts are provided as additional inputs during tuning) \\
+				$\mathbf{z}^{\mathrm{txt}}_{c}$ & Frozen CLIP text feature for class $c$ \\
+				$\mathbf{z}^{\mathrm{vis}}_{\mathbf{x}}$ & Frozen CLIP visual feature for image $\mathbf{x}$ \\
+				$\mathbf{h}^{\mathrm{txt}}_{c}$ & Prompt-branch text feature for class $c$ \\
+				$\mathbf{h}^{\mathrm{vis}}_{\mathbf{x}}$ & Prompt-branch visual feature for image $\mathbf{x}$ \\
+				$\mathbf{f}^{\mathrm{txt}}_{c}$ & Final fused text feature for class $c$ \\
+				$\mathbf{f}^{\mathrm{vis}}_{\mathbf{x}}$ & Final fused visual feature for image $\mathbf{x}$ \\
+				$\mathcal{P}^{\mathrm{txt}}, \mathcal{P}^{\mathrm{vis}}$ & Sets of deep text and visual prompt parameters \\
+				$A_c,\,A$ & LLM-generated description sets per class and over all classes \\
+				$E_c$, $\mathbf{w}_{c}$ & LLM-based description feature set and semantic prototype for class $c$ \\
+				$\tilde{\mathbf{w}}_{c}$ & Discrete projection of $\mathbf{w}_{c}$ onto $\mathcal{M}^{\star,\mathrm{txt}}_{c}$ \\
+				$\mathbf{F}^{\mathrm{txt}},\,\mathbf{W}$ & Matrices whose columns are class text features and semantic prototypes, respectively \\
+				$\mathbf{Z},\,\mathbf{H}$ & Pretrained and prompt-tuned feature matrices in $\mathbb{R}^{N\times d}$ \\
+				$\bar{\mathbf{Z}},\,\bar{\mathbf{H}}$ & Centered pretrained and prompt-tuned feature matrices \\
+				$\mathbf{U},\,\mathbf{\Sigma},\,\mathbf{V}$ & Matrix factors in the SVD of $\bar{\mathbf{Z}}$ \\
+				$\boldsymbol{\mu}$ & Mean of pretrained features used for centering \\
+				$\mathbf{V}^{\mathrm{pca}}$ & Top $d^{\mathrm{pca}}$ principal directions of pretrained features \\
+				$\mathbf{P}^{\mathrm{pca}}$ & Projection matrix onto the PCA subspace \\
+				$\mathcal{Q},\,\mathcal{S}$ & Transferable and shortcut feature subspaces \\
+				$\boldsymbol{\delta},\,\boldsymbol{\delta}^{\mathcal{Q}},\,\boldsymbol{\delta}^{\mathcal{S}}$ & Prompt-induced feature shift and its decomposition along $\mathcal{Q}$ and $\mathcal{S}$ \\
+				$\mathcal{M}^{\mathrm{vis}}$ & Manifold of frozen CLIP visual features \\
+				$\mathcal{M}^{\mathrm{txt}},\,\mathcal{M}^{\star,\mathrm{txt}}_{c}$ & Global and class-specific realizable text feature sets \\
+				\bottomrule
+			\end{tabular}}
+			\vspace{20pt}
+			\caption{Notation for losses and drift-related quantities.}
+			\scalebox{0.8}{
+				\begin{tabular}{ll}
+					\toprule
+					Symbol & Description \\
+					\midrule
+					$\ell_c(\mathbf{x})$ & Logit for class $c$ given input $\mathbf{x}$ \\
+					$p(c\,|\,\mathbf{x})$ & Predicted class probability for input $\mathbf{x}$ \\
+					$\mathcal{L}^{\mathrm{ce}}$ & Cross-entropy classification loss \\
+					$\mathcal{L}^{\mathrm{img}}$ & Visual-side cosine consistency loss \\
+					$\mathcal{L}^{\mathrm{txt}}$ & Text-side cosine consistency loss \\
+					$\mathcal{L}^{\mathrm{con}}$ & Total consistency loss $\mathcal{L}^{\mathrm{img}}+\mathcal{L}^{\mathrm{txt}}$ \\
+					$\mathcal{L}^{\mathrm{total}}$ & Overall ManiPT training objective function \\
+					$R(\boldsymbol{\theta})$ & Population risk with respect to distribution $\mathcal{D}$ \\
+					$\widehat R_{N}(\boldsymbol{\theta})$ & Empirical risk over $N$ training samples \\
+					$\mathcal{R}(\mathbf{Z})$ & Fraction of off-manifold energy for feature set $\mathbf{Z}$ \\
+					$\Delta$ & Manifold drift between prompt-tuned and pretrained features \\
+					$\Delta\boldsymbol{\ell}^{\boldsymbol{\theta}}_{\mathbf{x}}$ & Logit perturbation vector relative to the frozen model \\
+					$J^{\mathrm{emp}}(h)$ & Empirical $\ell_2$ pseudo-metric on functions evaluated on the training sample \\
+					\bottomrule
+				\end{tabular}
+			
+		}
+	\end{table}
+\section*{Author Biographies}
+\begin{icmlbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{"Xi_Yang.jpg"}}]{Xi Yang}
+	is a senior undergraduate student at the College of Big Data and Information Engineering, Guizhou University. He majors in Data Science and Big Data Technology. His current research interests primarily include Spatial Transcriptomics and Computer Vision.
+\end{icmlbiography}
+\vspace{50pt}
+\begin{icmlbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{"Yuanrong_Xu.png"}}]{Yuanrong Xu}
+	is currently with the School of Computer Science and Technology, Harbin Institute of Technology. His research interests primarily include computer vision, multimedia computing, and video analysis. He has published several papers in prestigious international journals and conferences, including IEEE Transactions on Circuits and Systems for Video Technology and IEEE Transactions on Instrumentation and Measurement.
+\end{icmlbiography}
+
+\begin{icmlbiography}[\vspace{15pt}{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{"Weigang_Zhang.png"}}]{Weigang Zhang}
+	received the B.S. degree in computer science and technology in 2003, and the M.S. and Ph.D. degrees in computer applied technology in 2005 and 2016, respectively, all from the Harbin Institute of Technology, China. He is currently a Professor and the Vice Dean of the School of Computer Science and Technology, Harbin Institute of Technology, Weihai. His research interests include video analysis, image processing, and pattern recognition. He has published more than 80 academic papers.
+\end{icmlbiography}
+
+\begin{icmlbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{"Guangming_Lu.png"}}]{Guangming Lu}
+	received the Ph.D. degree in computer applications from the Harbin Institute of Technology in 2005. From 2005 to 2007, he conducted postdoctoral research at the Information and Communication Engineering Postdoctoral Research Station of Tsinghua University. Since 2007, he has been with the Harbin Institute of Technology, Shenzhen, where he is currently a Professor and Doctoral Supervisor. His research interests include computer vision, machine learning, and medical image and signal processing. 
+\end{icmlbiography}
+
+\begin{icmlbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{"David_Zhang.png"}}]{David Zhang}
+	(Life Fellow, IEEE) graduated in computer science from Peking University. He received the M.Sc. and Ph.D. degrees in computer science from the Harbin Institute of Technology in 1982 and 1985, respectively, and a second Ph.D. degree in electrical and computer engineering from the University of Waterloo, Canada, in 1994. He is currently the X.Q. Deng Presidential Chair Professor with the School of Data Science, The Chinese University of Hong Kong, Shenzhen. His research interests include pattern recognition, image processing, and biometrics. He has published over 500 international journal papers and holds 60 patents. From 2014 to 2021, he was continuously listed as a Highly Cited Researcher in Engineering by Clarivate Analytics. He is a Fellow of the Royal Society of Canada, the Canadian Academy of Engineering, and the International Association for Pattern Recognition (IAPR).
+\end{icmlbiography}
+
+\begin{icmlbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{"Jie_Wen.jpg"}}]{Jie Wen}
+	(Senior Member, IEEE) received the PhD degree in computer science and technology from the Harbin Institute of Technology, Shenzhen, in 2019. He is currently a professor with the School of Computer Science and Technology, Harbin Institute of Technology. His research interests include image and video enhancement, pattern recognition, and machine learning. He has authored or co-authored more than 150 technical papers at prestigious international journals and conferences. He serves as an associate editor of \textit{IEEE Transactions on Pattern Analysis and Machine Intelligence}, \textit{IEEE Transactions on Image Processing}, \textit{IEEE Transactions on Information Forensics and Security}, \textit{IEEE Transactions on Circuits and Systems for Video Technology}, \textit{Pattern Recognition}, and \textit{International Journal of Image and Graphics}, an area editor of the \textit{Information Fusion}. He also served as the area chair of ACM MM, NeurIPS, ICLR, and ICML. He was selected for the `World's Top 2\% Scientists List' in 2021--2025.
+\end{icmlbiography}
+\end{document}

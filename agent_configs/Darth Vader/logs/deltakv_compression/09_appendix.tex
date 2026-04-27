@@ -1,0 +1,308 @@
+\section{Training Procedure of DeltaKV}
+\label{app:training}
+
+Algorithm \ref{alg:DeltaKV} details the training workflow of the DeltaKV framework, which optimizes the compression and decompression modules alongside the frozen LLM backbone. The procedure consists of three steps:
+
+\begin{itemize}[nolistsep, left=0pt]
+  \item \textbf{Ground Truth Forward:} 
+  The model first performs a standard forward pass using the original uncompressed KV cache to generate the target KV representations and logits.
+  
+  \item \textbf{DeltaKV Forward \& Reconstruction:} 
+  In this step, the algorithm iterates through each layer and token sequence. For every current token, it retrieves the top-$k$ most similar historical tokens from a strided reference set $\mathcal{T}_{ref}$ based on the $L_2$ distance. The mean of these references, $\overline{KV}_R$, is subtracted from the current token's representation to form a residual. This residual is compressed into a low-dimensional latent vector $z_{\Delta}$ via the compressor $f_c$ and subsequently reconstructed by the decompressor $f_d$. The final approximated KV state, $\hat{kv}_i$, is obtained by adding the reconstructed residual back to the mean reference.
+  
+  \item \textbf{End-to-End Loss Calculation:} 
+  The training objective combines two loss functions: a reconstruction loss ($\mathcal{L}_{rec}$), which minimizes the Mean Squared Error (MSE) between the original and reconstructed KV states, and a Next Token Prediction loss ($\mathcal{L}_{ntp}$), which ensures the compressed cache maintains the model's generative capabilities. The total loss is computed as $\mathcal{L} = \mathcal{L}_{rec} + \mathcal{L}_{ntp}$.
+\end{itemize}
+
+\input{algos/main_algo}
+
+
+
+\section{Implementation Details of Sparse-vLLM}
+\label{app:sparse_vllm}
+
+This appendix provides the technical specifications of the Sparse-vLLM architecture, focusing on the data structures and algorithmic workflows that enable the modularity described in the main text.
+
+
+\subsection{CacheManager Data Structures}
+\label{app:sparse_vllm:structures}
+
+The \texttt{CacheManager} features an extensible architecture where internal data layouts can be customized to match the memory access patterns of emerging algorithms. To demonstrate this flexibility, we currently provide implementations for three representative storage backends catering to physical eviction, logical masking, and hybrid compression paradigms:
+
+\paragraph{Per-Layer Independent Mapping (for Physical Eviction)} 
+Algorithms like SnapKV and PyramidKV diverge in their token retention across layers. To support this without approximation errors, the \texttt{CacheManager} instantiates $L$ independent page tables (where $L$ is the number of layers). Each table is a tensor \texttt{buffer\_req\_to\_token\_slots[layer\_idx]}, mapping logical positions to physical slots. While this increases metadata memory usage by a factor of $L$, it is strictly necessary for algorithms where the "KV view" is physically discontinuous and unique per layer.
+
+\paragraph{Global Shared Mapping (for Logical Masking)} 
+For Full Attention and OmniKV, where tokens are retained globally but masked logically, we maintain a unified \texttt{req\_to\_token\_slots} table shared across all layers. This minimizes metadata overhead and maximizes cache locality for the mapping tables during kernel execution.
+
+\paragraph{Heterogeneous DeltaKV Storage} 
+For DeltaKV, the \texttt{CacheManager} introduces a tiered storage system to handle the duality of raw and compressed data:
+\begin{itemize}[nolistsep, left=0pt]
+  \item \textbf{Dual Physical Pools}: It manages a \texttt{Full Pool} for high-precision tokens (Sink/Recent) and a separate \texttt{Latent Pool} for compressed vectors. The system dynamically allocates slots from these pools based on the token's lifecycle state.
+  
+  \item \textbf{Intra-Group Slot Sharing}: To optimize the Observation-Sparse layer groups, the manager implements a ``Copy-on-Write'' style mechanism for reconstruction. When an Observation Layer identifies Top-K tokens, the subsequent sparse layers share the underlying temporary slots allocated for reconstruction. This prevents redundant decompression operations within the same group, significantly reducing the memory bandwidth pressure during the pre-forward phase.
+\end{itemize}
+
+
+
+\subsection{Sparse Controller Workflows}
+\label{app:sparse_vllm:workflows}
+
+The Sparse Controller orchestrates the interaction between the model and the CacheManager. 
+Below, we detail the specific workflow implemented for the DeltaKV mechanism:
+
+\paragraph{DeltaKV View Construction (Pre-Forward)}
+Unlike standard retrieval, DeltaKV requires on-the-fly reconstruction. The Controller executes the following pipeline before the attention operation:
+\begin{enumerate}[nolistsep,label*=(\arabic*)]
+  \item \textbf{Index Resolution}: Based on the reference tokens, the Controller identifies the logical indices of tokens requiring decompression.
+  
+  \item \textbf{Batch Reconstruction}: It instructs the \texttt{CacheManager} to fetch compressed vectors from the \texttt{Latent Pool} and their corresponding references.
+  
+  \item \textbf{Slot Virtualization}: The reconstructed KV pairs are written to a temporary physical buffer. The Controller then constructs a virtual \texttt{slot\_mapping} that stitches together the static slots (Sink/Recent) and these temporary dynamic slots, presenting a contiguous logical view to the attention kernel.
+\end{enumerate}
+
+\paragraph{DeltaKV Lifecycle Management (Post-Forward)}
+To handle the transition from high-precision to compressed storage, the Controller monitors the \texttt{Recent Buffer} boundary. Upon buffer overflow, it triggers a specialized fused kernel that:
+\begin{enumerate}[nolistsep,label*=(\arabic*)]
+  \item Computes the residual between the overflowed token and its assigned reference tokens.
+  
+  \item Compresses the residual via the down-projection encoder.
+  
+  \item Writes the result to the \texttt{Latent Pool} and frees the original \texttt{Full Pool} slots immediately, ensuring constant memory complexity relative to sequence length.
+\end{enumerate}
+
+
+
+\subsection{Kernel Optimizations}
+\label{app:sparse_vllm:optimizations}
+
+While we leverage standard high-performance operators (e.g., FlashAttention with indirect addressing), DeltaKV necessitates specific kernel optimizations to minimize overhead:
+
+\begin{itemize}[nolistsep, left=0pt]
+  \item \textbf{Indirect Addressing via Slot Mapping}: We modified the Flash-Decoding kernels to accept a token-level \texttt{req\_to\_token\_slots} index array. This allows the attention mechanism to read directly from non-contiguous physical memory locations without intermediate copy operations or block-table lookups.
+  
+  \item \textbf{Fused DeltaKV Kernels}: We implemented custom Triton kernels to accelerate the compression/decompression loop. This includes a \textbf{Batch L2 Distance} kernel for rapid reference searching and a \textbf{Fused Reconstruction} kernel that combines the gathering of reference tokens, mean calculation, and residual addition into a single kernel launch to minimize GPU memory bandwidth consumption. In the main text, except for the configurations used in ablation studies, the reference stride is generally set to $s=10$. This implies that even for a sequence of 1M tokens, there are only approximately 100k references, and performing efficient matrix multiplication on the GPU remains remarkably fast. Consequently, we did not consider employing approximate algorithms such as Approximate Nearest Neighbors (ANN).
+\end{itemize}
+
+
+\subsection{Potential Memory Efficiency}
+\label{app:sect:mem_eff}
+
+Although DeltaKV already achieves significant memory reduction ($\approx 29\%$), there remains substantial headroom for further optimization. Currently, to guarantee near-lossless performance and simplify engineering implementation, we strictly limit quantization to the compressed residuals $z_{\Delta}$, while keeping both the reference tokens and the full attention layers in high precision (e.g., BF16). 
+
+\paragraph{Full-Pipeline Quantization.}
+Integrating DeltaKV with advanced quantization techniques for the uncompressed components could yield extreme compression rates. If we were to apply 4-bit quantization uniformly across the full attention layers and the reference tokens in the sparse layers—complementing the already quantized residuals—the theoretical memory footprint could plummet to approximately \textbf{7.2\%} of the original size. This calculation assumes a global 4-bit representation reduces the storage requirement by $4\times$ relative to BF16, superimposed on DeltaKV's structural sparsity. While this poses challenges in maintaining accuracy and necessitates complex kernel fusion, it represents a promising frontier for deploying massive-context models on consumer-grade hardware.
+
+\paragraph{Synergy with Offloading and Caching.}
+DeltaKV is inherently compatible with system-level optimizations like memory offloading.
+\begin{itemize}[nolistsep, left=0pt]
+  \item \textbf{Reduced Bandwidth Overhead:} By compressing token-specific information into low-magnitude residuals, DeltaKV effectively reduces the "unit volume" of the KV cache. When combined with quantization, the data transfer requirement drops to nearly $1/16$ of the standard breakdown, significantly alleviating the PCIe bandwidth bottleneck that plagues traditional offloading schemes.
+  
+  \item \textbf{Fine-Grained Cache Management:} Furthermore, our proposed Sparse-vLLM framework manages memory at the token level rather than the page level. This granularity naturally aligns with sophisticated cache eviction policies (e.g., LRU or LFU). By keeping only the most frequently accessed compressed residuals and references in GPU memory while offloading the rest to host memory, DeltaKV could enable virtually infinite context lengths with minimal latency penalties.
+\end{itemize}
+
+\subsection{Detailed Latency Profiling and Future Optimization}
+
+\begin{figure*}[hbt]
+  \centering 
+  \includegraphics[width=0.7\textwidth]{figures/rekv_latency_comparison_bs1_vs_bs16.pdf} 
+  % \vspace{-0.75em}
+  \caption{Detailed latency breakdown and estimated speedup of Sparse-vLLM following kernel fusion, evaluated at a 128k context length with batch sizes of 1 and 16. \textbf{CUDA synchronization} was enabled at  points during testing for the purpose of latency analysis, which \textbf{incurs some performance overhead}.}
+  \label{fig:latency_breakdown}
+  % \vspace{-0.75em}
+\end{figure*}
+
+As illustrated in Figure~\ref{fig:latency_breakdown}, DeltaKV enables long-context inference under a tight memory budget, but the current prototype still incurs substantial \textit{runtime} overhead. At $BS=16$, the measured step latency is $91.0$\,ms, of which $37.3$\,ms is attributed to KV reconstruction and $24.7$\,ms to view/slot bookkeeping, leaving the remainder for model computation. To obtain stable and attributable timings, we insert CUDA synchronizations around key regions; this forces the host to wait for GPU completion and reduces overlap between kernel launches and other asynchronous work. As a result, the reported latencies should be interpreted as conservative (upper-bound) measurements of the current software stack, and can be higher than end-to-end throughput observed under fully asynchronous execution.
+
+The bottleneck mainly stems from two factors: (1) \textit{Python-level control overhead}: sequence-wise logic, slot mapping, and dynamic view construction are executed serially in Python, triggering many small kernel launches and occasional host-device synchronization, with the impact growing with batch size. (2) \textit{Fragmented memory traffic}: reconstruction and bookkeeping are decomposed into multiple operators that materialize intermediate tensors in HBM; although some kernels are already fused, redundant global-memory reads/writes and launch overhead remain significant.
+
+These costs indicate clear optimization opportunities via deeper operator fusion. A more integrated Triton/CUDA implementation could consolidate reconstruction (e.g., gather/de-RoPE, delta application, re-RoPE, and writeback) into fewer passes and move view/slot management onto GPU kernels, reducing both launch overhead and global-memory traffic by keeping temporaries in on-chip storage (registers/shared memory) when feasible. While the exact gain depends on hardware and workload, we expect that eliminating most Python-driven bookkeeping and further fusing reconstruction could reduce the $BS=16$ step latency to the $\sim55$--$60$\,ms range (about $1.5\times$--$1.7\times$ higher throughput), making the system more practical for large-scale long-context deployment.
+
+
+
+% \subsection{Prefill Acceleration and Performance}
+% \label{appendix:prefill_acc}
+
+% DeltaKV is designed to be fully compatible with the prefill acceleration mechanism of OmniKV described in Appendix~\ref{app:sect:omnikv_method}.
+% In our Sparse-vLLM implementation, we integrate the mean-aggregation selection policy directly into the \textit{Sparse Controller}.
+% During the prefill phase of the filter layers, the controller computes the importance scores by averaging the attention weights along the query dimension.
+
+% \paragraph{Impact on Accuracy}
+% We evaluate the impact of this aggressive prefill pruning strategy on downstream tasks.
+% As shown in Table~\ref{tab:longbench_prefill}, applying the prefill acceleration with DeltaKV results in negligible performance degradation on the LongBench benchmark compared to the full-cache baseline.
+% This demonstrates that the mean-aggregation strategy effectively captures the essential information required for long-context understanding, while DeltaKV's residual compression ensures that the representation quality of these selected tokens remains high.
+
+% % [PLACEHOLDER: Insert your LongBench Data Table here]
+% % \begin{table}[h]
+% %     \caption{LongBench Performance with Prefill Acceleration...}
+% %     ...
+% % \end{table}
+
+% \paragraph{Prefill TTFT Analysis}
+% By pruning the KV cache early in the prefill stage, DeltaKV avoids the overhead of storing and managing the full sequence history, leading to substantial improvements in processing speed.
+% Table~\ref{tab:prefill_throughput} illustrates the prefill Time to First Token (TTFT) across different context lengths.
+% Our method achieves a significant speedup compared to standard vLLM, particularly in ultra-long context scenarios where memory bandwidth is the primary bottleneck.
+
+% % [PLACEHOLDER: Insert your Prefill Performance Table here]
+% % \begin{table}[h]
+% %     \caption{Prefill Throughput Comparison...}
+% %     ...
+% % \end{table}
+
+
+
+\section{Brief Introduction to OmniKV}
+\label{app:sect:omnikv_method}
+
+OmniKV~\citep{hao2025omnikv} is a training-free framework designed to optimize KV cache memory usage and inference latency for long-context LLMs.
+It operates on the core insight of \textit{Inter-Layer Attention Similarity}, which posits that the set of important tokens identified in a specific layer remains significant for subsequent layers.
+Specifically, OmniKV designates a small subset of layers as ``filter layers'', denoted as $\mathbb{L}_{filter}$.
+During the decoding phase, for any layer $l \in \mathbb{L}_{filter}$, the model computes the full attention scores using the current query and the entire historical KV cache.
+Based on these scores, a Context Selector identifies the indices of the top-$k$ most relevant tokens, denoted as $\mathcal{I}_{topk}$.
+For the subsequent layers that are not in $\mathbb{L}_{filter}$, OmniKV avoids full attention computation; instead, it selectively retrieves only the subset of keys and values corresponding to $\mathcal{I}_{topk}$ (i.e., $K_{\mathcal{I}_{topk}}$ and $V_{\mathcal{I}_{topk}}$) from the CPU-offloaded Context Bank to the GPU.
+This dynamic context selection mechanism significantly reduces the GPU memory footprint and PCIe bandwidth overhead while maintaining model performance.
+
+\paragraph{Prefill Acceleration via Chunking.}
+Processing long prompts (e.g., >100k tokens) in a single forward pass often exceeds GPU memory limits.
+To address this, OmniKV employs \textit{Chunk Prefill}, where the long input sequence is split into smaller segments (chunks) of length $L_q$ that are processed sequentially.
+Consequently, during the prefill phase, the length of the queries ($L_q$) corresponds to the current chunk size, while the length of the Key/Value cache ($L_{kv}$) represents the accumulated history plus the current chunk, implying $L_q \le L_{kv}$.
+
+To accelerate this phase without retaining the full history, OmniKV identifies important tokens by aggregating attention scores.
+Formally, let $H$ denote the number of attention heads.
+Given the attention score matrix $\mathbf{A} \in \mathbb{R}^{H \times L_q \times L_{kv}}$ computed in the filter layers for the current chunk, the importance score $s_{j}$ for the $j$-th KV token is derived by first averaging over the query length $L_q$ to capture temporal relevance, and then taking the maximum across the head dimension $H$ to retain the strongest signal:
+
+\begin{equation}
+    s_j = \max_{1 \le h \le H} \left( \frac{1}{L_q} \sum_{i=1}^{L_q} \mathbf{A}_{h, i, j} \right)
+\end{equation}
+
+By utilizing this score, OmniKV identifies the top-$k$ globally significant tokens from the current $L_{kv}$ candidates.
+This strategy allows the model to discard less relevant tokens on-the-fly after processing each chunk, preventing memory explosion while preserving critical long-range context.
+
+
+\section{Detailed Configurations}
+
+
+\subsection{Benchmarks and Task Selection}
+\label{app:sect:eval_details}
+
+\paragraph{LongBench} Following the setting of AdaKV~\cite{feng2025adakv}, we utilize 16 datasets from LongBench covering Single/Multiple Document QA, Summarization, Few-Shot learning, Synthetic tasks, and Code generation. This benchmark primarily assesses single-turn dialogue capabilities.
+
+\paragraph{SCBench} To evaluate the model's performance sustainability in realistic multi-turn dialogues, we employ SCBench. Due to computational resource constraints, we selected four representative tasks covering distinct categories: Retr.KV (String Retrieval), En.QA (Semantic Retrieval), ICL.ManyShot (Global Information), and Mix.Sum+NIAH (Multi-tasking).
+
+\paragraph{AIME} We further verify the effectiveness of DeltaKV on complex reasoning tasks using the AIME benchmark, with a maximum output length set to 32,768 tokens.
+
+\paragraph{Budget Ratio Setting} To ensure a fair comparison across methods, we enforce a budget ratio rather than a fixed token number. Consequently, the actual number of retained tokens is dynamically determined based on the prompt context length (Appendix~\ref{app:sect:kr_cr}).
+
+\subsection{Efficiency Metrics}
+\label{app:sect:kr_cr_def}
+To quantify the trade-offs between memory saving and computational acceleration, we utilize two perspectives:
+\begin{itemize}[nolistsep, left=0pt]
+  \item \textbf{KV Cache Keep Ratio (KR):} Represents the percentage of KV cache stored in GPU memory relative to the full cache.
+  
+  \item \textbf{KV Cache Compute Ratio (CR):} Represents the percentage of tokens involved in the actual attention computation.
+\end{itemize}
+For specific calculation formulas regarding different baselines and DeltaKV, please refer to Appendix~\ref{app:sect:kr_cr}.
+
+\subsection{Model Checkpoints}
+
+We provide the specific Hugging Face model identifiers for all models evaluated in this work in Table~\ref{tab:model_ckpts}. The experiments were conducted using the official Instruct versions of Llama-3.1, the Qwen2.5 series (including the 1M context variant), and the DeepSeek-R1 distilled model.
+
+\input{tables/model_ckpts}
+
+
+\subsection{Detailed Setting of DeltaKV}
+\label{subsec:detailed_settings}
+
+\paragraph{Training Configuration.}
+We train the DeltaKV modules using the AdamW optimizer with a learning rate of $2\text{e-}4$, a batch size of 1, and 1 gradient accumulation step. The learning rate schedule includes a linear warmup for the first 2\% of the training steps, followed by a linear decay to zero. 
+
+\textit{Environment and Efficiency:} All experiments are implemented with \texttt{PyTorch} and \texttt{transformers}~\cite{wolf2020transformers} on a single NVIDIA RTX PRO 6000 (Blackwell). For Qwen2.5-32B-Instruct, we utilized \texttt{bitsandbytes} and gradient checkpointing~\cite{gradient_ckpt} to reduce memory consumption.
+Training is efficient: for standard models (Llama-3.1-8B and Qwen2.5-7B), we trained on packed sequences of length 8,192 (160M tokens total) from \textbf{Fineweb-Edu}, completing in just \textbf{8 GPU hours}. The 32B model required 14 GPU hours. For the reasoning model (DeepSeek-R1-Distill), we sampled 8,000 sequences from \textbf{AM-DeepSeek-R1-Distilled-1.4M}, taking only 3.5 GPU hours.
+
+\paragraph{Architecture and Hyperparameters.}
+For the compression architecture, we set the compressed residual dimension $d_c$ to 25\% of the original KV dimension (i.e., $d_c = 0.25 \times 2d_k$). The compressor utilizes a hidden dimension of $d_h = 4096$ for the standard version. For the latency-optimized ``Light'' variant, we reduce the hidden dimension to $d_h = 3072$ and employ a SwiGLU-based encoder paired with a bias-free linear decoder. During retrieval, we select the top-$k=4$ nearest reference tokens from the history. The reference tokens are maintained with a stride of $s=10$, corresponding to a reference keep ratio of approximately 10\%.
+
+\paragraph{Layer-wise Configuration.}
+To maximize performance under strict memory budgets, we employ a hybrid strategy where a small subset of ``Full Attention Layers'' retain their complete KV cache, while the remaining layers are compressed using DeltaKV. The specific layer indices for full attention are manually selected based on importance profiling and are listed in Table \ref{tab:full_attn_layers_config}.
+
+\begin{table}[t]
+    \centering
+    \caption{Configuration of Full Attention Layers for different models and budgets. Layers not listed are compressed.}
+    \label{tab:full_attn_layers_config}
+    % \resizebox{\columnwidth}{!}{%
+    \begin{tabular}{ll}
+        \toprule
+        \rowcolor[HTML]{FFF2CC}
+        \textbf{Model \& Setting} & \textbf{Full Attention Layer Indices} \\
+        \midrule
+        Llama-3.1-8B (30\% Budget) & 0, 1, 2, 8, 18 \\
+        Llama-3.1-8B (20\% Budget) & 0, 1, 10, 18 \\
+        Qwen2.5-7B (30\% Budget) & 0, 1, 2, 4, 7, 14 \\
+        Qwen2.5-32B (20\% Budget) & 0, 1, 2, 3, 4, 5, 17, 29, 40 \\
+        \bottomrule
+    \end{tabular}%
+    % }
+\end{table}
+
+
+\subsection{KR and CR Calculation}
+\label{app:sect:kr_cr}
+
+To comprehensively evaluate the efficiency of DeltaKV against existing approaches, we utilize two key metrics: KV Cache Keep Ratio (\textbf{KR}) and KV Cache Compute Ratio (\textbf{CR}). Let $r$ denote the target budget ratio (e.g., the percentage of tokens retained or selected for attention). The calculation methods for different categories of baselines and our proposed DeltaKV are formulated as follows:
+
+\paragraph{Baselines}
+Existing methods exhibit distinct trade-offs between memory footprint and computational overhead:
+\begin{itemize}[nolistsep, left=0pt]
+  \item \textbf{Static Eviction Methods (e.g., SnapKV, PyramidKV, AdaKV):} These methods permanently evict tokens to meet the budget constraint. Consequently, both the storage and the computation are reduced proportionally. Here, $r$ represents the sparsity ratio, indicating the proportion of the KV Cache that participates in each attention computation.
+  \begin{equation}
+    \text{KR} = r, \quad \text{CR} = r
+  \end{equation}
+    
+  \item \textbf{Dynamic Selection Methods (e.g., OmniKV, Quest):} These approaches retain the full KV cache in GPU memory to preserve history but dynamically select only the top-$k$ important tokens for attention computation at each step.
+  \begin{equation}
+    \text{KR} = 100\%, \quad \text{CR} = r
+  \end{equation}
+    
+  \item \textbf{Low-Rank Compression (e.g., Palu):} This method compresses the KV cache along the hidden dimension but typically requires reconstructing the full cache for attention computation, offering memory savings without computational acceleration.
+  \begin{equation}
+    \text{KR} = \frac{d_{\text{low}}}{d_{\text{orig}}}, \quad \text{CR} = 100\%
+  \end{equation}
+  where $d_{\text{low}}$ and $d_{\text{orig}}$ represent the compressed low-rank dimension and the original hidden dimension, respectively.
+\end{itemize}
+
+\paragraph{DeltaKV}
+Our method employs a hybrid layer strategy, where $L_{\text{full}}$ layers perform standard full attention and $L_{\text{sparse}}$ layers utilize our residual compression with sparse attention.
+\begin{itemize}[nolistsep, left=0pt]
+  \item \textbf{KV Cache Keep Ratio (KR):} The memory footprint consists of the full cache for standard layers, and for sparse layers, the strided reference tokens (stride $s$) plus the compressed residuals (dimension $d_c$).
+  \begin{equation}
+    \text{KR}_{\text{DeltaKV}} = \frac{L_{\text{full}}}{L_{\text{sparse}}+L_{\text{full}}} + \frac{L_{\text{sparse}}}{L_{\text{sparse}}+L_{\text{full}}} \left( \frac{1}{s} + \frac{d_c}{2d_k} \right)
+  \end{equation}
+  where $L_{\text{sparse}}+L_{\text{full}}$ is the total number of layers and $2d_k$ is the dimension of the original KV Cache.
+
+  \item \textbf{KV Cache Compute Ratio (CR):} DeltaKV adopts the same sparse attention mechanism as OmniKV for the compressed layers. Therefore, the computational cost is determined by the budget ratio $r$ applied in the sparse layers.
+  \begin{equation}
+    \text{CR}_{\text{DeltaKV}} = \frac{L_{\text{full}}}{L_{\text{sparse}}+L_{\text{full}}} \times 100\% + \frac{L_{\text{sparse}}}{L_{\text{sparse}}+L_{\text{full}}} \times r
+  \end{equation}
+\end{itemize}
+
+\input{tables/krcr_detail}
+
+\paragraph{Settings}
+Table \ref{tab:deltakv_metrics_calc} details the calculation of KV Cache Keep Ratio (KR) and Compute Ratio (CR) for Llama-3.1-8B ($L_{\text{sparse}}+L_{\text{full}}=32$) under 30\% and 20\% computation budgets. We compare DeltaKV against static eviction (e.g., SnapKV) and dynamic selection (e.g., OmniKV) baselines. For DeltaKV, we adopt a hybrid layer strategy where specific layers retain full attention based on importance profiling. In the 30\% budget setting, 5 layers (indices 0, 1, 2, 8, 18) are kept full ($L_{\text{full}}=5$), while the remaining 27 layers are compressed. In the 20\% budget setting, 4 layers (indices 0, 1, 8, 10) are kept full ($L_{\text{full}}=4$). The compressed layers utilize a residual compression rate of 25\% ($d_c/2d_k = 0.25$) and a reference token stride of $s=10$ ($1/s=0.10$). The analysis shows that DeltaKV achieves a significantly reduced memory footprint ($\text{KR} \approx 43\text{--}45\%$) compared to dynamic selection methods (100\% KR), while matching the efficient Compute Ratio (CR) of static baselines.
+
+
+\section{Detailed and Other Experiments}
+
+\subsection{LongBench}
+
+In this section, we present the detailed experimental results on the LongBench benchmark. Tables~\ref{tab:longbench_detail_part1} and~\ref{tab:longbench_detail_part2} provide a comprehensive performance breakdown across all 16 datasets, covering Single-Document QA, Multi-Document QA, Summarization, Few-Shot Learning, Synthetic tasks, and Code generation. These results cover varying model scales, including Llama-3.1-8B-Instruct, Qwen2.5-7B-Instruct-1M, and Qwen2.5-32B-Instruct, offering a granular view of the aggregated metrics reported in the main text.
+
+\input{tables/longbench_detail}
+
+
+\subsection{SCBench}
+
+We report the detailed subtask results for SCBench in Tables \ref{tab:scbench_detail_part1} and \ref{tab:scbench_detail_part2}. These tables illustrate the performance stability of DeltaKV across complex multi-turn scenarios, including Retrieval KV (R-1 to R-5), English QA (E-1 to E-7), Mixture of Summarization and NIAH (S-1 to S-10), and Many-Shot In-Context Learning (M-1 to M-5). The breakdown highlights the method's robustness in retaining critical information over long contexts compared to static eviction baselines.
+
+\input{tables/scbench_detail}
+
