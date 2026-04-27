@@ -1,0 +1,3263 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Soft Forward-Backward Representations for
+Zero-shot Reinforcement Learning with General Utilities
+Anonymous Authors1
+Abstract
+Recent advancements in zero-shot reinforcement
+learning (RL) have facilitated the extraction of
+diverse behaviors from unlabeled, offline data
+sources. In particular, forward-backward algo-
+rithms (FB) can retrieve a family of policies that
+can approximately solve any standard RL problem
+(with additive rewards, linear in the occupancy
+measure), given sufficient capacity. While retain-
+ing zero-shot properties, we tackle the greater
+problem class of RL with general utilities, in
+which the objective is an arbitrary differentiable
+function of the occupancy measure. This setting
+is strictly more expressive, capturing tasks such as
+distribution matching or pure exploration, which
+may not be reduced to additive rewards. We show
+that this additional complexity can be captured
+by a novel, maximum entropy (soft) variant of
+the forward-backward algorithm, which recov-
+ers a family of stochastic policies from offline
+data. When coupled with zero-order search over
+compact policy embeddings, this algorithm can
+sidestep iterative optimization schemes, and opti-
+mizes general utilities directly at test-time. Across
+both didactic and high-dimensional experiments,
+we demonstrate that our method retains favorable
+properties of FB algorithms, while also extending
+their range to more general RL problems.
+1. Introduction
+Departing from the strict necessity of an explicit reward
+signal at training time, zero-shot RL has recently received
+increasing attention. Although several definitions have been
+brought forward, they largely agree: zero-shot methods may
+use significant amounts of compute in an initial, unsuper-
+vised pretraining phase, but should be capable of producing
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Figure 1. We propose Soft FB, a soft version of the Forward-
+Backward algorithm which solves maximum entropy RL instances
+to retrieve a richer set of stochastic policies, and searches them to
+optimize general utilities at test-time.
+near-optimal behavior with minimal computation for any
+reward specified at test-time (Touati et al., 2023). According
+to this criterion, goal-reaching RL (Andrychowicz et al.,
+2017; Eysenbach et al., 2022) may be seen as a practical
+instance of zero-shot RL, which is, however, limited to
+indicator reward functions. Recent works further expand the
+goal-reaching setting to allow for the specification of more
+complex behavior (Frans et al., 2024; Sikchi et al., 2024;
+Agarwal et al., 2024). Among them, forward-backward
+representations (Touati & Ollivier, 2021) have been pro-
+posed as a zero-shot method capable of solving for arbitrary
+(Markov) reward functions at test-time. Although some
+have speculated that this family of reward functions is suffi-
+cient to extract any behavior of interest (Silver et al., 2021),
+its expressiveness remains limited (Kumar et al., 2022).
+In this work, we turn towards a broader class of RL prob-
+lems: while Markov rewards lead to a linear objective in
+the policy’s occupancy, we aim to optimize arbitrary dif-
+ferentiable functions of the policy’s occupancy, known as
+General Utilities (GU, Zhang et al., 2020; 2021; Kumar
+et al., 2022; Barakat et al., 2023). This increased scope
+includes interesting problem instances, such as pure explo-
+ration (Hazan et al., 2019), active learning (Mutny et al.,
+2023) and learning from observations (Torabi et al., 2019),
+which are generally beyond the reach of linear RL algo-
+rithms. A large body of work has explored similar set-
+tings, with particular focus on convex (Zahavy et al., 2021;
+Mutti et al., 2022) or submodular objectives (De Santi et al.,
+2024). Generally, the resulting practical algorithms rely
+on online learning through semi-gradient methods (Zahavy
+et al., 2021; De Santi et al., 2024). Ad-hoc algorithms have
+been proposed for specific instances of General Utilities
+(e.g., Ho & Ermon (2016); Hazan et al. (2019); Ma et al.
+(2022); Bolland et al. (2024)), but they are not designed to
+generalize beyond their respective domain.
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Soft Forward-Backward Representations
+In this work, we introduce Soft FB (SFB), a practical zero-
+shot algorithm for RL with GUs. Building upon the forward-
+backward framework (Touati & Ollivier, 2021), we intro-
+duce a soft variant (Ziebart et al., 2008; Haarnoja et al., 2018;
+Hunt et al., 2019) which retrieves a family of stochastic
+policies, approximating all solutions to maximum entropy
+RL problems. Interestingly, given sufficient capacity and
+exact training, the set of policies retrieved through entropy-
+regularized linear RL can be shown to contain a near-optimal
+Markov policy for each differentiable GU. Thus, one may
+optimize GUs zero-shot by simply (i) learning maximum
+entropy policies and (ii) searching among them. The first
+step bypasses the challenge of parameterizing GU instances;
+while the second step remains generally intractable, we find
+that it can be solved approximately and efficiently through
+zero-order search over low-dimensional policy representa-
+tions. Rather than running a dedicated per-objective op-
+timization loop, we therefore amortize computation in an
+unsupervised pre-training phase, and optimize GUs through
+test-time search. Furthermore, unlike existing Frank-Wolfe
+schemes (Hazan et al., 2019), the solution retrieved is not a
+mixture of policies, but a single, Markov policy. As a result,
+our method can be seen both as a generalization of existing
+zero-shot frameworks, or as a practical offline algorithm for
+optimizing GUs.
+We demonstrate the flexibility of the method in illustra-
+tive continuous environments, in which Soft FB can solve
+several zero-shot RL problems that are out-of-reach for ex-
+isting, linear methods. We then extend this evaluation to
+established, complex zero-shot benchmarks, demonstrating
+scalability and studying the impact of entropy regulariza-
+tion for standard, linear tasks. Our contributions can be
+summarized as follows:
+• We propose Soft FB, a soft forward-backward algo-
+rithm, capable of retrieving stochastic policies and op-
+timizing GUs zero-shot.
+• We provide formal guarantees for the expressiveness
+of our method.
+• We present a thorough empirical evaluation of our
+method, demonstrating its ability to capture a richer
+class of policies while retaining the desirable properties
+of forward-backward algorithms.
+After establishing essential notation and motivations in Sec-
+tions 2 and 3, we present and analyze our algorithm in Sec-
+tion 4. Experiments, related works and a broad discussion
+follow in Section 5, 6 and 7, respectively.
+2. Background
+In the context of sequential decision making, a general way
+to describe an environment is through a reward-free MDP
+M = (S, A, P, µ0, γ), where S and A are potentially con-
+tinuous state and actions spaces, P : S × A →∆(S)
+is a stochastic transition kernel1, µ0 ∈∆(S) is an ini-
+tial state distribution, and γ ∈(0, 1) is a discount factor.
+Additionally, the agent’s behavior may be described by a
+Markov policy, that is a state-conditional action distribution
+π : S →∆(A). These simple entities induce a discounted
+occupancy measure over states-action pairs, also known as
+the successor measure of policy π:
+M π(s, a, X)=(1 −γ)
+X
+t≥0
+γtPr((st, at)∈X|s0=s, a0=a)
+where X ⊆S × A and Pr(·) is the visitation likelihood un-
+der policy π and dynamics P. If S and A are both discrete,
+M π may be directly represented as a (|S||A| × |S||A|)
+stochastic matrix. Intuitively, each element of the matrix
+would track the discounted cumulative likelihood of visiting
+a given state-action pair, starting from another state-action
+pair. While our algorithm generalizes to continuous spaces,
+we will consider the discrete case in our formal derivations.
+We further note that the successor measure might instead
+track state-only visitations. By overloading X ∈S,
+M π
+S (s, a, X)=(1 −γ)
+X
+t≥0
+γtPr(st∈X|s0=s, a0=a)
+=M π(s, a, X × A).
+Due to a particular choice of parameterization, our practi-
+cal algorithm will estimate this object directly. However,
+samples (s, a) ∼M π can be easily obtained by sampling
+s ∼M π
+S and a ∼π(·|s), as we describe in Section 4.4. We
+will finally use Mπ and Mπ
+S to denote successor measures
+when marginalized over the initial state distribution µ0, e.g.
+Mπ(X) = Es0∼µ0,a0∼π(s0) M π(s0, a0, X).
+Many interesting RL problem instances can be directly de-
+fined as a function of the successor measure M π, and classi-
+fied according to the properties of the function. Standard RL
+problems can be expressed as a discounted sum of Markov
+rewards: if the rewards are expressed as a vector R the ob-
+jective can be simply computed as Jπ
+lin = ⟨Mπ, R⟩, and this
+instance is thus referred to as Linear RL. Another instance
+that has received significant attention in recent years is that
+of Maximum Entropy RL (Ziebart et al., 2008; Haarnoja
+et al., 2018), which adds an entropy term to the linear ob-
+jective: Jπ
+H = ⟨Mπ, R + Hπ⟩, where Hπ is a vector which
+contains the entropy of the policy Hπ(s, a) = H(π(·|s))
+for each state-action pair (s, a) ∈S × A. Because of this
+policy-dependent entropy term, maximum entropy RL is
+not a linear problem in the occupancy, but rather an instance
+of Convex RL (Mutti et al., 2022). In general, Convex RL
+problems can be expressed as Jπ
+con = f(Mπ), where f(·) is
+an arbitrary convex function. Finally, all these instances are
+1∆(·) denotes the space of distributions over ·
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Soft Forward-Backward Representations
+encompassed by General Utility RL (Zhang et al., 2020),
+which aims at optimizing a general differentiable scalar
+objective Jπ
+GU = f(Mπ).
+3. Forward-Backward Representations and
+General Utilities
+Having established common terminology, we will now an-
+alyze the forward-backward algorithm for zero-shot rein-
+forcement learning (Touati & Ollivier, 2021; Blier et al.,
+2021) and pinpoint its limitations motivating this work. At
+its core, the FB framework introduces a family of param-
+eterized policies {πz}z∈Rd, each inducing an occupancy
+M z := M πz. Crucially, each occupancy undergoes a spe-
+cific low-rank decomposition
+M z = F ⊤
+z B,
+(1)
+where both Fz and B are (d × |S||A|) matrices, and may
+be called the forward and backward representation matrices.
+If the decomposition holds, then for a |S||A|-dimensional
+reward vector R, the Q-function for a policy πz can be
+simply expressed as
+Qz = M zR = F ⊤
+z BR
+BR=z′
+:=
+F ⊤
+z z′,
+(2)
+where B can be reinterpreted as a projection from the space
+of reward vectors to a d-dimensional reward embedding
+z′ := BR. Finally, the policy πz is enforced to be optimal
+with respect to the discounted sum of rewards encoded by
+its own reward embedding, that is
+πz ∈argmax
+A
+F ⊤
+z z,
+(3)
+leading to the following formal result:
+Theorem 3.1. Touati & Ollivier (2021) For an arbitrary
+bounded reward vector R ∈R|S||A|, if both Equations 1
+and 3 hold for all z ∈Z, πBR is optimal with respect to R:
+M πBRR = maxπ M πR.
+While this theorem guarantees the retrieval of a solution for
+each linear RL problem, the policy extraction objective in
+Equation 3 (or its empirical counterparts, as we demonstrate
+in Appendix D.3) may simply produce deterministic policies.
+This is sufficient for any linear RL instance, as they each
+admit an optimal deterministic policy (Sutton et al., 1998),
+but remains generally suboptimal for GUs. This is the main
+insight motivating this work: the set of policies retrieved by
+FB may not contain the solution to non-linear RL problems.
+Remark 3.2. Let Π = {π : S →∆(A)} be the set of
+all Markov policies. There exist an MDP M and a scalar
+function f of occupancy measures and a set of policies Πz =
+{πz}z∈Z such that (i) πz satisfies Equations 1 and 3 for all
+z ∈Z, and (ii) maxπ∈Π f(Mπ) > maxπ∈Πz f(Mπ).
+Counterexample As a straightforward counter-example,
+it suffices to consider an MDP with a single state S = {s0}
+and two actions A = {a0, a1}, and a convex RL objective
+such as pure exploration over states and actions, i.e. Jπ =
+f(Mπ) = H(Mπ), where H(·) denotes entropy over state-
+action pairs. For each reward function in R2, forward and
+backward representations satisfying both Equations 1 and
+3 exist, but may not retrieve the (optimal) uniform policy
+(see Appendix A.2). Following this motivation, we propose
+a variant of the FB algorithm which recovers a richer class
+of policies, and may provably optimize all general utilities.
+4. Soft Forward-Backward Representations
+4.1. Core algorithm
+As for the linear case, we start by introducing a family of pa-
+rameterized policies {πz}z∈Rd, and decompose their occu-
+pancy as M z = F ⊤
+z B, thus enforcing Equation 1 again. We
+however introduce an entropy regularization term to encour-
+age stochastic behavior (Haarnoja et al., 2018). The action-
+state value function for a policy πz is then expressed as
+Qz
+soft = M z(R + Hπz)
+= F ⊤
+z BR + M zHπz
+z′=BR
+=
+F ⊤
+z z′ + M zHπz,
+(4)
+where Hπz ∈R|S||A|
++
+contains the policy’s entropy at
+each state, and is a convex term in the occupancy measure.
+Conforming to soft policy improvement (Haarnoja et al.,
+2018), each policy πz is then defined with respect to its
+regularized action-value function:
+πz ∝exp(F ⊤
+z z + M zHπz),
+(5)
+Equation 1, which remains unchanged, and Equation 5
+are the core of the Soft FB algorithm. The introduction
+of entropy regularization alters the set of policies that are
+retrieved during training to include all policies with full
+support. Crucially, as we will show formally in Section 4.2,
+training on maximum entropy RL instances is sufficient to
+capture ϵ-optimal solutions to general utilities. We will later
+describe a practical algorithm for estimating soft forward
+and backward representations from continuous data, in
+combination with sample-based objectives and function
+approximation (see Section 4.3).
+4.2. Guarantees
+Due to the introduction of entropy regularization, we can
+show that Soft FB retrieves the optimal policy among all
+Markov policies Π for each maximum entropy RL instance.
+Theorem 4.1. For an arbitrary bounded reward vector
+R ∈R|S||A| , if both Equations 1 and 5 hold for all z ∈Z,
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Soft Forward-Backward Representations
+πBR is the optimal maximum entropy policy with respect
+to R: M πBR(R + HπBR) = maxπ∈Π M π(R + Hπ).
+Moreover, while only trained for solving maximum entropy
+instances, we can show that the set of policies retrieved by
+Soft FB includes arbitrarily good solutions to a greater class
+of problems: namely, it optimizes any general utility.
+Theorem 4.2. Let f be an arbitrary differentiable function
+of occupancy measures, and ˜Πz be the set of policies re-
+trieved by Soft FB. If both Equations 1 and 5 hold for all
+z ∈Z, for any ϵ > 0 there exists a reward embedding z′ ∈
+Z such that πz′ ∈˜Πz and maxπ∈Π f(Mπ) −f(Mπz′) < ϵ.
+We remark that this is an existence result; a good policy is in
+practice recovered via search and successor-measure estima-
+tion, as described in Section 4.4. We refer to Appendix A for
+proofs of these two statements and further formal remarks.
+The latter has important practical consequences: while pa-
+rameterizing general utilities is far from straightforward,
+maximum entropy instances can be easily parameterized,
+as we discuss in Section 4.3. As a result, we can directly
+optimize general utilities at test-time, while only dealing
+with tractable maximum entropy objectives at training time.
+4.3. Practical algorithm
+An algorithmic instantiation of Soft FB in potentially contin-
+uous spaces needs to address two points. First, the embed-
+ding z ∈Z solving each General RL problem as described
+so far would lie in Rd, which is arbitrarily large and im-
+practical to search. We will show that this can be easily
+addressed through a simple reparameterization. Second, we
+will introduce sample-based objectives that may be used
+to train function approximators over continuous state and
+action spaces, and approximately enforce Equations 1 and 5.
+Reparameterization Soft FB reduces policy optimization
+to search over stochastic policies parameterized by vectors
+in Z = Rd. In principle, every stochastic policy may be
+retrieved for some z ∈Z; however, this embedding could
+lie anywhere in Rd. In fact, deterministic policies are only
+retrieved by embeddings whose norm approaches infinity
+(such that F ⊤
+z z completely outweighs the entropy regu-
+larization term in Equation 5). Fortunately, recalling that
+optimal policies are invariant to linear transformations of
+Q-functions, we can find an alternative parameterization for
+which z may be sampled from a bounded space. Starting
+from z ∈Z, we observe that
+Qz = F ⊤
+z z + M zHπz
+∝
+1
+∥z∥+ 1(F ⊤
+z z + M zHπz)
+z′:=
+z
+∥z∥+1
+=
+F ⊤
+z z′ + (1 −∥z′∥)M zHπz.
+(6)
+Therefore, as 0 ≤∥z′∥< 1, we can now map all maximum
+Figure 2. Geometric interpretation of z after reparameterization:
+the stochasticity of πz grows with ∥z∥.
+entropy RL instances to embeddings z ∈Z sampled from
+the volume of a d-dimensional hypersphere 2. This allows an
+intuitive geometric interpretation: the origin of Rd is associ-
+ated with a uniform policy (as z is the null vector, and the Q-
+function equates the entropy bonus alone), and embeddings
+on the surface parameterize the family of deterministic poli-
+cies that standard FB algorithms would return (see Figure 2).
+Training objectives A practical instantiation of Soft FB
+for continuous spaces can leverage the framework proposed
+by Touati & Ollivier (2021): we can approximate each
+entry of M z by the dot product between a forward and
+backward embedding, produced by function approximators
+Fθ : S × A × Z →Z and Bϕ : S →Z 3. The decomposi-
+tion from Equation 1 is thus generalized as an equality over
+measures: M z(s, a, ds′) ≈Fθ(s, a, z)Bϕ(s′)ρ(s′), where
+ρ(·) represents the data distribution. We can then adopt a
+standard objective for training forward and backwards repre-
+sentations, minimizing Bellman residuals by sampling from
+the data distribution ρ (i.e., an offline dataset of transitions)
+(Blier et al., 2021):
+LFB(θ, ϕ) =
+E
+z∼U(Z), (st,at,st+1)∼ρ
+s′∼ρ, at+1∼πz(st+1)
+h Fθ(st, at, z)⊤Bϕ(s′)
+−γ ¯F(st+1, at+1), z)⊤¯B(s′)
+2
+−2Fθ(st, at, z)⊤Bϕ(st+1)
+i
+,
+(7)
+where ¯F and ¯B may be target networks (Fujimoto et al.,
+2018), and forward representations are averaged over twin
+networks.
+As in Touati & Ollivier (2021), we employ
+an auxiliary orthonormalization loss over Bϕ. In contin-
+uous spaces, the policy πz is also represented through func-
+tion approximation, and may be expressed as πψ(·|s, z) 4.
+However, the policy’s learning rule needs to be altered
+significantly, in order to account for entropy regulariza-
+tion. First, we’ll split the maximum entropy action-state
+value function from Equation 6 in a reward-based com-
+ponent, and an entropy-based component: Qz(s, a) =
+2Touati & Ollivier (2021) operate over normalized embeddings
+z, thus sampling them from the surface of the hypersphere.
+3Following prior work (Touati & Ollivier, 2021), our practical
+instantiation models the successor measure M π
+S over states only.
+4While Soft FB is compatible with expressive policies with
+explicit likelihoods (e.g., normalizing flows), in our evaluation πψ
+will be parameterized as a diagonal Gaussian.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Soft Forward-Backward Representations
+0.5
+0.5
+a0
+0
+1
+a1
+z = 0.0
+0.5
+0.5
+a0
+0
+1
+a1
+z = 0.25
+0.5
+0.5
+a0
+0
+1
+a1
+z = 0.5
+0.5
+0.5
+a0
+0
+1
+a1
+z = 0.75
+0.5
+0.5
+a0
+0
+1
+a1
+z = 1.0
+Figure 3. Qualitative evaluation of Soft FB in a didactic environment. White dots are samples from policies πz over a 2D actions space,
+and the color map represents learned unregularized Q-values Qz
+R for each action (Fθ(s0, a, z)⊤z). From left to right, we infer task
+embeddings z for a goal-reaching task, and scale them linearly. The policies conditioned on z become more deterministic as its norm
+increases. The same visualization for FB can be found in Appendix D.3.
+Qz
+R(s, a) + (1 −∥z∥)Qz
+H(s, a). The former is easily com-
+puted as Qz
+R(s, a) ∝Fθ(s, a, z)⊤z, while the latter can be
+estimated by training a parameterized critic QH,η(s, a, z)
+through the TD objective
+LH(η) =
+E
+z∼U(Z), (st,at,st+1)∼ρ
+at+1∼πz(st+1)
+h
+QH,η(st, at, z)
+−γ
+  ¯QH,η(st+1, at+1, z) −log πψ(at+1|st+1, z)
+2i
+.
+(8)
+In any case, recalling Equations 5 and 6, we update the
+policy parameters ψ by minimizing the KL divergence to the
+soft policy implicitly defined by the regularized Q-function
+(Haarnoja et al., 2018):
+Lπ(ψ) =
+E
+z∼U(Z)
+s∼ρ
+DKL
+ 
+πψ(·|s, z), e
+Qz(s,·)
+1−∥z∥
+Z(s)
+!
+,
+(9)
+with Z(s) =
+R
+A exp
+ (1 −∥z∥)−1Qz(s, a)
+
+da. As Z(s) is
+independent of πψ, we can redefine an equivalent loss up to
+policy-independent factors as
+Lπ(ψ) =
+E
+z∼U(Z), s∼ρ
+a∼πψ(·|s,z)
+(1 −∥z∥)[log πψ(a|s, z)
+−QH,η(s, a, z)] −Fθ(s, a, z)⊤z,
+(10)
+which is optimized with a standard reparameterization trick.
+4.4. Inference
+Soft FB returns a set of parameterized policies, {πz}z∈Z; as
+shown in Corollary 4.2, this family is rich enough to include
+a solution for a large class of problems. However, solving
+a specific downstream task requires searching the policy
+class {πz}z∈Z. Fortunately, policies are parameterized by a
+low-dimensional embedding z ∈Z, and the search process
+remains arguably efficient. In practice, paralleling Gener-
+alized Policy Improvement techniques in Farebrother et al.
+(2025), we resort to zero-order optimization. Given an ob-
+jective Jπ = f(Mπ) in its analytical form at inference time,
+a good policy πz⋆≈argmaxπf(Mπ) may be found through
+offline evaluation:
+z⋆≈argmax
+z∈Z
+f( ˆMz),
+(11)
+where ˆMz is a sample-based estimate of the measure in-
+duced by policy πz. As Z is relatively low-dimensional,
+zero-order, sampling-based optimization methods such as
+random shooting or CEM (Rubinstein, 1999) can be lever-
+aged to find z⋆. Due to its simplicity, this is the solution
+we adopt in our empirical evaluation. We will consider
+two ways to recover sample-based estimates ˆMz of policy
+dependent measures: implicit and explicit.
+Implicit measure model Approximately recovering sam-
+ples from the measure is possible by sampling states
+from the pre-training buffer distribution ρ with importance
+weights F ⊤
+z B: s ∼ˆMπz
+S where
+ˆMπz
+S (s) ∝
+E
+s0∼µ0
+a0∼πψ(s0,z)
+Fθ(s0, a0, z)⊤Bϕ(s)ρ(s),
+(12)
+and then drawing actions a ∼πψ(·|s, z), thus only leverag-
+ing networks we previously trained.
+Explicit measure model As the importance weights are
+often poorly approximated, we can alternatively leverage
+recent work (Farebrother et al., 2025) and train a flow-based
+generative model of the successor measure, completely of-
+fline. In practice, this may produce more accurate samples,
+at the cost of increased compute during pre-training. We
+detail training objectives in Appendix C. The variant of al-
+gorithms relying on generative models for inference will be
+marked by a subscript (e.g., SFBflow).
+Beside zero-order optimization, for some specific objectives
+soft FB retains the closed-form solutions that characterize
+the FB framework. Linear RL problems can be solved by
+computing z⋆=
+BR
+∥BR∥(Touati & Ollivier, 2021). Moreover,
+a closed-form solution is also possible in the case of maxi-
+mum entropy RL by computing the optimal embedding z⋆
+for the corresponding linear RL instance, and rescaling it
+by
+F ⊤
+z z
+F ⊤
+z z+1. Furthermore, all imitation learning approaches
+described in (Pirotta et al., 2024) remain possible.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Soft Forward-Backward Representations
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+FBflow
+Real Return
+Linear RL
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+Stochastic IL
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+Pure Exploration
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+SFBflow
+Real Return
+Linear RL
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+Stochastic IL
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+Pure Exploration
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+FB
+Real Return
+Linear RL
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+Stochastic IL
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+Pure Exploration
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+SFB
+Real Return
+Linear RL
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+Stochastic IL
+0.0
+0.5
+1.0
+Predicted Return
+0.0
+0.5
+1.0
+Pure Exploration
+Figure 4. Quantitative results over several General RL objectives in a didactic environment. The x-axis and y-axis represent, respectively,
+offline performance estimates, and ground-truth performance in the environment. Each dot represents a policy sampled from each method
+across 3 seeds; for each seed, a darker dot marks the best policy according to offline evaluation. Horizontal lines represent the mean
+performance over points with the respective color. The policies captured by Soft FB (right) are more expressive, and the top policies
+affording to offline evaluation outperform, on average, those trained by FB (left). Explicit measure models (top) are more accurate.
+5. Experiments
+We now complement the formal analysis of Soft FB with
+a detailed empirical evaluation. We will first present qual-
+itative results in an easily interpretable setting, and then
+evaluate how Soft FB performs across zero-shot, general
+utility objectives, including imitation learning, pure explo-
+ration and constrained reinforcement learning. Finally, we
+include an evaluation on standard, high dimensional deep
+reinforcement learning benchmarks (Yarats et al., 2022).
+5.1. Qualitative evaluation
+Let us consider a simple, continuous environments, with
+S = A = [−1, 1] × [−1, 1], µ0 = Dirac(0, 0) and
+(13)
+P(s′|s, a) =
+(
+Dirac(a)
+if s = (0, 0)
+Dirac(s)
+otherwise.
+(14)
+This didactic environment mimics a bandit-like MDP: the
+agent stays indefinitely in a state dictated by the action
+chosen in the initial state. We collect a dataset by executing
+actions uniformly at random, and train Soft FB over this
+data. We start by defining a simple goal-reaching task as
+R(s|g) = 1∥s−g∥<0.2 and computing the corresponding
+reward embedding z⋆=
+BR
+∥BR∥; for instance, we may
+fix g = (0.0, 0.5). We may then introduce a controlled
+amount of entropy regularization through a scaled reward
+embedding z = αz⋆with α ∈[0, 1], and retrieve an
+optimal policy for all corresponding maximum entropy RL
+objectives in a zero-shot fashion. If the norm of z is set to 1,
+the optimal deterministic policy should be retrieved, while
+very low norms should return near-uniform policies.
+We observe this exact behavior in Figure 3. From left to
+right, we increase the norm of the task embedding, thus de-
+creasing the degree of entropy regularization, and plot sam-
+ples from πψ(·|s0, z), as well as the entropy-unregularized
+action-value function QR(s0, ·, z) = Fθ(s0, ·, z)⊤z as a
+function of 2D actions. As expected, we observe that poli-
+cies become more deterministic as the entropy regularization
+decreases, while still optimizing for the goal-reaching objec-
+tive. The state-action value function is highest around the
+goal, and scales linearly in the norm of z by construction.
+Table 1. Zero-shot performance over several General Utilities in
+the didactic environment. For each inference technique, the best
+policy retrieved by SFB constitutes, on average, a better solution.
+Results are averaged across 3 seeds, and bold when their 95%
+confidence intervals intersects with that of the best score.
+FB
+FBflow
+SFB
+SFBflow
+Linear RL
+0.96 ±.01 0.99 ±.01 0.95 ±.01 0.99 ±.01
+Goal-reaching RL 1.00 ±.01 1.00 ±.01 1.00 ±.01 1.00 ±.01
+Deterministic IL
+0.78 ±.06 0.86 ±.01 0.78 ±.01 0.90 ±.01
+Stochastic IL
+0.67 ±.01 0.77 ±.03 0.79 ±.02 0.83 ±.01
+Pure Exploration
+0.37 ±.01 0.37 ±.01 0.49 ±.13 0.90 ±.01
+Constrained RL
+0.00 ±.01 0.00 ±.01 0.00 ±.01 0.65 ±.52
+Robust RL
+0.01 ±.01 0.79 ±.09 0.39 ±.26 0.96 ±.02
+Average
+0.54
+0.68
+0.63
+0.89
+5.2. Quantitative evaluation
+Within the environment outlined in the previous section,
+we now evaluate the performance of policies retrieved by
+Soft FB and FB, respectively. We thus consider a set of
+different General RL objectives: (i) standard linear RL,
+(ii) goal-reaching RL, imitation of a (iii) deterministic or
+(iv) stochastic agent, (v) pure exploration, (vi) constrained
+RL and (vii) robust RL. Both IL objectives are formulated
+through minimization of forward KL divergences between
+successor measures; specifics of each objective can be found
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Soft Forward-Backward Representations
+walker
+cheetah
+quadruped
+maze
+Figure 5. Zero-shot cumulative returns (in blue) and step-wise policy entropy (in orange) of Soft FB for different levels of entropy
+regularization in DMC, averaged over linear tasks. As entropy regularization decreases, returns generally improve, eventually matching
+the performance of FB (in grey), or surprisingly exceeding it in quadruped. Shaded areas represent 95% CIs over 5 seeds.
+in Appendix E. For each objective and algorithm, we search
+for the optimal policy according to the inference procedures
+outlined in Section 4.4: we sample 1024 task embeddings
+z, select the best one according to the measure model (im-
+plicit or explicit) and evaluate it in the environment. Table
+1 compares the performance of Soft FB and FB, optionally
+relying on an explicit model for inference. As expected,
+the performance gap between FB and Soft FB on objec-
+tives admitting a deterministic solution is minimal (the first
+three); however, when deterministic policies are not suffi-
+cient, Soft FB achieves better performance. Furthermore,
+we observe that relying on an explicit measure models for
+policy evaluation increases performance, confirming the ef-
+fectiveness of flow modeling (Farebrother et al., 2025) in
+stochastic settings. This is further confirmed in Figure 4,
+which relates offline performance estimates to ground-truth
+performance in the environment in three representative tasks.
+These two are more strongly correlated5 when the former
+is estimated through an explicit measure model (SFBflow,
+FBflow); SFBflow performs the best as it also retrieves a
+richer class of policies (wider spread on the y-axis).
+5.3. High-dimensional evaluation
+So far, evaluation has largely focused on a continuous, yet
+low-dimensional setting, in which we demonstrated the ex-
+pressiveness of policies retrieved by Soft FB. We now extend
+our evaluation to standard, high-dimensional continuous
+control benchmarks, in order to demonstrate scalability. We
+consider the Deepmind Control Suite (DMC, Tassa et al.,
+2018), which includes tasks across four embodiments, and
+follow the established evaluation protocol in (Touati et al.,
+2023) relying on exploratory data (Yarats et al., 2022). We
+first consider classic linear objectives: Figure 5 tracks the re-
+turn of policies trained with Soft FB and their entropy when
+conditioned on scaled task embedding z obtained by linear
+regression (i.e., the standard task inference procedure for
+Forward-Backward algorithms). As expected, decreasing
+5We report rank-based correlation coefficients and numerical
+results in Appendix D.1.
+the vector norm induces more stochastic behavior, which re-
+sults in performance degradation. However, we notice that,
+for low entropy regularization, performance matches or ex-
+ceeds that of policies trained by FB, confirming that the rich-
+ness of policies does not come at the cost of performance.
+Table 2. Zero-shot performance on general utilities in DMC. We
+consider entropy maximization and KL minimization with respect
+to a deterministic or stochastic expert (i.e. an optimal policy for a
+linear task, e.g. walker-walk, with injected Gaussian noise in
+the stochastic case). Scores are averages over 5 seeds, with 95%
+confidence intervals and bold numbers signaling overlaps.
+FBflow
+Soft FBflow
+walker
+H(Mπ
+S)
+12.56 ±.91
+13.97 ±.25
+H(Mπ)
+9.86 ±.10
+18.01 ±.03
+−KL(Mπ
+S; Mπstoch
+S
+)
+-5.35 ±.24
+-5.25 ±.14
+−KL(Mπ; Mπstoch)
+−9.40 ±.17
+-1.48 ±.11
+−KL(Mπ
+S; Mπdet
+S
+)
+-5.69 ±.27
+-5.69 ±.02
+−KL(Mπ; Mπdet)
+−9.43 ±.18
+-1.53 ±.09
+cheetah
+H(Mπ
+S)
+11.74 ±.43
+13.63 ±.10
+H(Mπ)
+11.68 ±.89
+17.83 ±.07
+−KL(Mπ
+S; Mπstoch
+S
+)
+−5.56 ±.31
+-4.56 ±.31
+−KL(Mπ; Mπstoch)
+−7.25 ±.76
+-1.02 ±.08
+−KL(Mπ
+S; Mπdet
+S
+)
+−5.45 ±.65
+-4.38 ±.18
+−KL(Mπ; Mπdet)
+−7.55 ±.79
+-1.23 ±.08
+quadruped
+H(Mπ
+S)
+13.37 ±.43
+14.43 ±.24
+H(Mπ)
+10.11 ±.08
+19.10 ±.01
+−KL(Mπ
+S; Mπstoch
+S
+)
+−5.44 ±.28
+-4.64 ±.20
+−KL(Mπ; Mπstoch)
+−9.92 ±.16
+-0.76 ±.04
+−KL(Mπ
+S; Mπdet
+S
+)
+−5.61 ±.30
+-4.52 ±.16
+−KL(Mπ; Mπdet)
+−9.94 ±.20
+-0.79 ±.02
+maze
+H(Mπ
+S)
+10.83 ±.56
+11.22 ±.70
+H(Mπ)
+10.52 ±.66
+15.54 ±.16
+−KL(Mπ
+S; Mπstoch
+S
+)
+-6.49 ±.36
+-5.25 ±.90
+−KL(Mπ; Mπstoch)
+−6.45 ±.61
+-1.39 ±.31
+−KL(Mπ
+S; Mπdet
+S
+)
+−6.57 ±.61
+-5.07 ±.69
+−KL(Mπ; Mπdet)
+−7.27 ±.58
+-2.51 ±.35
+As standard objectives in DMC are exclusively linear, we
+additionally define several general utilities: pure exploration
+(i.e. entropy maximization) and imitation of a deterministic
+or stochastic expert (i.e. KL minimization) over state and
+state-action measures. Appendix D.4 reports an in-depth
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Soft Forward-Backward Representations
+description of these objectives, and a nuanced discussion of
+results, including additional baselines. For brevity, we also
+compare the performance of Soft FB and FB with explicit
+measure models in Table 2. While performance is explain-
+ably similar for linear tasks, we find that a significant gap
+appears as soon as a deterministic optimal policy does not
+exist, confirming the effectiveness of Soft FB in producing
+a richer class of policies, with strong performance beyond
+linear rewards.
+6. Related Works
+Zero-shot Reinforcement Learning In its purest instan-
+tiation, reinforcement learning is centered on optimizing a
+single, scalar reward function (Sutton et al., 1998). Despite
+its flexibility (Silver et al., 2021), this formulation does
+not adapt to changes in the objective without re-training.
+One possible solution to this issue has risen to prominence
+in deep reinforcement learning, and revolves around goal-
+conditioned policies (Andrychowicz et al., 2017; Eysenbach
+et al., 2022) and universal value functions approximators
+(Schaul et al., 2015). Such methods normally specialize
+to specific, parameterized reward classes (e.g., Dirac (Tian
+et al., 2021)), or combinations thereof (Frans et al., 2024),
+and can train conditional policies through self-supervision
+(Ghosh et al., 2023), with impressive empirical results
+(Akkaya et al., 2019).
+A parallel line of work is instead aimed at solving more
+general tasks, specifically by learning policy representations
+that enable efficient evaluations for any reward function.
+Fundamental works in this direction revolve around the
+design and estimation of successor features and representa-
+tions (Dayan, 1993; Barreto et al., 2017); interestingly, in
+this context, Hunt et al. (2019) formulate a related entropy-
+regularized variant, but remain focused on linear rewards.
+Forward-backward methods (Blier et al., 2021; Touati &
+Ollivier, 2021; Touati et al., 2023) leverage a low-rank de-
+composition of occupancy measures to extract task embed-
+dings in a successor feature framework. These algorithms’
+flexibility allows direct application to imitation learning
+(Pirotta et al., 2024), self-supervised exploration (Urp´ı et al.,
+2025), while also achieving competitive performance on
+high-dimensional simulated environments (Tirinzoni et al.,
+2024). Recent works have further explored alternative pa-
+rameterizations (Cetin et al., 2024; Bagatella et al., 2025),
+more capable generative models for occupancies (Fare-
+brother et al., 2025), fast online exploration or adaptation
+(Sikchi et al., 2025; Urp´ı et al., 2025; Rupf et al., 2025).
+However, forward-backward algorithms remain constrained
+to linear RL problems and, practically, deterministic poli-
+cies, which becomes a limitation on more complex objec-
+tives, involving multimodal data distributions or exploration
+objectives. Our work directly addresses this limitation.
+Non-linear Reinforcement Learning Much of the existing
+RL machinery builds upon the assumption that the objective
+may be broken down in additive terms, each of whom may
+be traced back to a single state-action pair (Sutton et al.,
+1998). This is referred to as RL with additive rewards, or
+Linear RL. Convex RL (Zahavy et al., 2021; Geist et al.,
+2021; Mutti et al., 2022) encompasses a richer class of ob-
+jective, such as pure exploration (Hazan et al., 2019), active
+learning in MDPs (Mutny et al., 2023) and distribution
+matching (Kostrikov et al., 2020; Rupf et al., 2024). A
+further generalization leads to RL with General Utilities
+(Zhang et al., 2020), for which we provide more related
+works in Appendix B due to space constraints. Solutions
+to Convex or General Utilities may be found by iterative
+procedures (Geist et al., 2021), which involve a low-level
+MDP-solving routine, or adversarial optimization schemes
+(Zahavy et al., 2021). This generally produces mixture, non-
+Markovian policies, while Soft FB returns a single, Markov
+policy. Zero-shot methods have been applied to non-linear
+problems before (Pirotta et al., 2024), but are restricted to
+imitation learning and only take non-additivity into account
+during inference. To the best of our knowledge, our work is
+the first in exploring zero-shot solutions to arbitrary General
+RL problems in a principled and scalable way.
+7. Conclusion
+At its core, this work proposes a novel extension of zero-shot
+reinforcement learning beyond linear rewards. We introduce
+a soft forward-backward algorithm, which leverages a sim-
+ple entropy regularization mechanism to capture stochastic
+behaviors in a dynamical system. At inference, the space of
+behaviors can be searched efficiently to retrieve an approx-
+imately optimal policy for an arbitrary general utility.
+Limitations and Future Work While Soft FB may prov-
+ably retrieve all stochastic policies, this requires infinite-
+dimensional task representations and expressive actors: in
+practical settings, a narrower set of policies will be re-
+trieved. Formally studying the properties of this set rep-
+resents an important direction for future work. Accurate
+search over policies relies on precise modeling of successor
+measures: while a dedicated generative model suffices, it
+also increases the computational costs during training. Fur-
+thermore, while we found simple zero-order optimization
+to be sufficient for search among policies, more involved
+optimization techniques may further scale this approach to
+higher-dimensional representation spaces. A further interest-
+ing extension would generalize our framework to arbitrary
+successor-feature-based algorithms.
+Soft FB introduces a first-of-its-kind extension of zero-shot
+RL beyond linear rewards. We hope that this work rep-
+resents a step forward in bringing fundamental works on
+general utilities closer to application in practical settings.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Soft Forward-Backward Representations
+Impact Statement
+This paper presents an algorithm for zero-shot optimization
+of general objectives in MDPs. As such, its potential impact
+falls within the societal consequences of machine learning
+and robotics at large.
+References
+Agarwal, S., Sikchi, H., Stone, P., and Zhang, A. Proto
+successor measure: Representing the space of all possi-
+ble solutions of reinforcement learning. arXiv preprint
+arXiv:2411.19418, 2024.
+Akkaya, I., Andrychowicz, M., Chociej, M., Litwin, M.,
+McGrew, B., Petron, A., Paino, A., Plappert, M., Powell,
+G., Ribas, R., et al. Solving rubik’s cube with a robot
+hand. arXiv preprint arXiv:1910.07113, 2019.
+Andrychowicz, M., Crow, D., Ray, A., Schneider, J., Fong,
+R., Welinder, P., McGrew, B., Tobin, J., Abbeel, P., and
+Zaremba, W. Hindsight experience replay. In NeurIPS
+2017, 2017.
+Bagatella, M., Pirotta, M., Touati, A., Lazaric, A., and Tir-
+inzoni, A. Td-jepa: Latent-predictive representations
+for zero-shot reinforcement learning.
+arXiv preprint
+arXiv:2510.00739, 2025.
+Barakat, A., Fatkhullin, I., and He, N. Reinforcement learn-
+ing with general utilities: Simpler variance reduction and
+large state-action space. In ICML, 2023.
+Barakat, A., Chakraborty, S., Yu, P., Tokekar, P., and Bedi,
+A. S. On the global optimality of policy gradient methods
+in general utility reinforcement learning. In NeurIPS,
+2025.
+Barreto, A., Dabney, W., Munos, R., Hunt, J. J., Schaul, T.,
+van Hasselt, H. P., and Silver, D. Successor features for
+transfer in reinforcement learning. NeurIPS 2017, 2017.
+Blier, L., Tallec, C., and Ollivier, Y. Learning successor
+states and goal-dependent values: A mathematical view-
+point. arXiv preprint arXiv:2101.07123, 2021.
+Bolland, A., Lambrechts, G., and Ernst, D.
+Off-policy
+maximum entropy rl with future state and action visitation
+measures. arXiv preprint arXiv:2412.06655, 2024.
+Cetin, E., Touati, A., and Ollivier, Y. Finer behavioral foun-
+dation models via auto-regressive features and advantage
+weighting. arXiv preprint arXiv:2412.04368, 2024.
+Dayan, P. Improving generalization for temporal difference
+learning: The successor representation. Neural computa-
+tion, 1993.
+De Santi, R., Prajapat, M., and Krause, A. Global rein-
+forcement learning: Beyond linear and convex rewards
+via submodular semi-gradient methods. In ICML 2024,
+2024.
+Eysenbach, B., Zhang, T., Levine, S., and Salakhutdinov,
+R. R. Contrastive learning as goal-conditioned reinforce-
+ment learning. NeurIPS 2022, 2022.
+Farebrother, J., Pirotta, M., Tirinzoni, A., Munos, R.,
+Lazaric, A., and Touati, A. Temporal difference flows.
+arXiv preprint arXiv:2503.09817, 2025.
+Frans, K., Park, S., Abbeel, P., and Levine, S. Unsupervised
+zero-shot reinforcement learning via functional reward
+encodings. In ICML 2024, 2024.
+Fujimoto, S., Hoof, H., and Meger, D. Addressing function
+approximation error in actor-critic methods. In ICML
+2018, 2018.
+Geist, M., Scherrer, B., and Pietquin, O. A theory of regu-
+larized markov decision processes. In ICML, 2019.
+Geist, M., P´erolat, J., Lauri`ere, M., Elie, R., Perrin, S.,
+Bachem, O., Munos, R., and Pietquin, O. Concave utility
+reinforcement learning: The mean-field game viewpoint.
+arXiv preprint arXiv:2106.03787, 2021.
+Ghosh, D., Bhateja, C. A., and Levine, S. Reinforcement
+learning from passive data via latent intentions. In ICML
+2023, 2023.
+Haarnoja, T., Tang, H., Abbeel, P., and Levine, S. Rein-
+forcement learning with deep energy-based policies. In
+ICML 2017, 2017.
+Haarnoja, T., Zhou, A., Abbeel, P., and Levine, S. Soft actor-
+critic: Off-policy maximum entropy deep reinforcement
+learning with a stochastic actor. In ICML 2018, 2018.
+Hazan, E., Kakade, S., Singh, K., and Van Soest, A. Prov-
+ably efficient maximum entropy exploration. In ICML
+2019, 2019.
+Ho, J. and Ermon, S. Generative adversarial imitation learn-
+ing. NeurIPS 2016, 2016.
+Huang, A. and Jiang, N. Occupancy-based policy gradient:
+Estimation, convergence, and optimality. NeurIPS, 2024.
+Hunt, J., Barreto, A., Lillicrap, T., and Heess, N. Composing
+entropic policies using divergence correction. In ICML,
+2019.
+Husain, H., Ciosek, K., and Tomioka, R. Regularized poli-
+cies are reward robust. In AISTATS, 2021.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Soft Forward-Backward Representations
+Jain, A. K., Lehnert, L., Rish, I., and Berseth, G. Maximum
+state entropy exploration using predecessor and successor
+representations. NeurIPS, 2023.
+Kearns, M. and Singh, S. Near-optimal reinforcement learn-
+ing in polynomial time. Machine learning, 2002.
+Kingma, D. P. and Ba, J. Adam: A method for stochastic
+optimization. In ICLR 2015, 2015.
+Kostrikov, I., Nachum, O., and Tompson, J. Imitation learn-
+ing via off-policy distribution matching. In ICLR 2020,
+2020.
+Kumar, N., Wang, K., Levy, K., and Mannor, S. Policy
+gradient for reinforcement learning with general utilities.
+arXiv preprint arXiv:2210.00991, 2022.
+Ma, J. Y., Yan, J., Jayaraman, D., and Bastani, O. Offline
+goal-conditioned reinforcement learning via f-advantage
+regression. NeurIPS, 2022.
+Mutny, M., Janik, T., and Krause, A. Active exploration via
+experiment design in markov chains. In AISTATS, 2023.
+Mutti, M., De Santi, R., De Bartolomeis, P., and Restelli, M.
+Challenging common assumptions in convex reinforce-
+ment learning. In NeurIPS 2022, 2022.
+Mutti, M., De Santi, R., De Bartolomeis, P., and Restelli,
+M. Convex reinforcement learning in finite trials. JMLR,
+2023.
+Pirotta, M., Tirinzoni, A., Touati, A., Lazaric, A., and Ol-
+livier, Y. Fast imitation via behavior foundation models.
+In ICLR 2024, 2024.
+Rubinstein, R. The cross-entropy method for combinatorial
+and continuous optimization. Methodology and comput-
+ing in applied probability, 1999.
+Rupf, T., Bagatella, M., Guertler, N., Frey, J., and Mar-
+tius, G. Zero-shot offline imitation learning via optimal
+transport. arXiv preprint arXiv:2410.08751, 2024.
+Rupf, T., Bagatella, M., Vlastelica, M., and Krause, A.
+Optimistic task inference for behavior foundation models.
+arXiv preprint arXiv:2510.20264, 2025.
+Schaul, T., Horgan, D., Gregor, K., and Silver, D. Universal
+value function approximators. In ICML 2015, 2015.
+Sikchi, H., Zhang, A., and Niekum, S. Imitation from arbi-
+trary experience: A dual unification of reinforcement and
+imitation learning methods. In Workshop on Reincarnat-
+ing Reinforcement Learning at ICLR 2023, 2023.
+Sikchi, H., Agarwal, S., Jajoo, P., Parajuli, S., Chuck, C.,
+Rudolph, M., Stone, P., Zhang, A., and Niekum, S. Rl
+zero: Zero-shot language to behaviors without any super-
+vision. arXiv preprint arXiv:2412.05718, 2024.
+Sikchi, H., Tirinzoni, A., Touati, A., Xu, Y., Kanervisto,
+A., Niekum, S., Zhang, A., Lazaric, A., and Pirotta, M.
+Fast adaptation with behavioral foundation models. arXiv
+preprint arXiv:2504.07896, 2025.
+Silver, D., Singh, S., Precup, D., and Sutton, R. S. Reward
+is enough. Artificial intelligence, 2021.
+Sutton, R. S., Barto, A. G., et al. Reinforcement learning:
+An introduction. MIT Press, 1998.
+Tassa, Y., Doron, Y., Muldal, A., Erez, T., Li, Y., Casas, D.
+d. L., Budden, D., Abdolmaleki, A., Merel, J., Lefrancq,
+A., et al.
+Deepmind control suite.
+arXiv preprint
+arXiv:1801.00690, 2018.
+Tian, S., Nair, S., Ebert, F., Dasari, S., Eysenbach, B., Finn,
+C., and Levine, S. Model-based visual planning with self-
+supervised functional distances. In ICLR 2021, 2021.
+Tirinzoni, A., Touati, A., Farebrother, J., Guzek, M., Kan-
+ervisto, A., Xu, Y., Lazaric, A., and Pirotta, M. Zero-shot
+whole-body humanoid control via behavioral foundation
+models. NeurIPS 2024 Workshop on Open-World Agents,
+2024.
+Torabi, F., Warnell, G., and Stone, P. Recent advances
+in imitation learning from observation. arXiv preprint
+arXiv:1905.13566, 2019.
+Touati, A. and Ollivier, Y. Learning one representation to
+optimize all rewards. In NeurIPS 2021, 2021.
+Touati, A., Rapin, J., and Ollivier, Y. Does zero-shot rein-
+forcement learning exist? In ICLR 2023, 2023.
+Urp´ı, N. A., Vlastelica, M., Martius, G., and Coros,
+S. Epistemically-guided forward-backward exploration.
+arXiv preprint arXiv:2507.05477, 2025.
+Wang, Q., Kulkarni, S. R., and Verd´u, S. Divergence es-
+timation for multidimensional densities via k-nearest-
+neighbor distances. IEEE Transactions on Information
+Theory, 2009.
+Yarats, D., Brandfonbrener, D., Liu, H., Laskin, M., Abbeel,
+P., Lazaric, A., and Pinto, L. Don’t change the algorithm,
+change the data: Exploratory data for offline reinforce-
+ment learning. arXiv preprint arXiv:2201.13425, 2022.
+Zahavy, T., O’Donoghue, B., Desjardins, G., and Singh, S.
+Reward is enough for convex mdps. NeurIPS 2021, 2021.
+Zhang, J., Koppel, A., Bedi, A. S., Szepesvari, C., and Wang,
+M. Variational policy gradient method for reinforcement
+learning with general utilities. In NeurIPS, 2020.
+Zhang, J., Ni, C., Szepesvari, C., and Wang, M. On the
+convergence and sample efficiency of variance-reduced
+policy gradient method. In NeurIPS, 2021.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Soft Forward-Backward Representations
+Zheng, C., Park, S., Levine, S., and Eysenbach, B. Intention-
+conditioned flow occupancy models.
+arXiv preprint
+arXiv:2506.08902, 2025.
+Ziebart, B. D., Maas, A. L., Bagnell, J. A., and Dey, A. K.
+Maximum entropy inverse reinforcement learning. In
+Proceedings of the Twenty-Third AAAI Conference on
+Artificial Intelligence (AAAI-08), pp. 1433–1438. AAAI
+Press, 2008.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Soft Forward-Backward Representations
+A. Theoretical results and proofs
+This section starts by reporting proofs for the main formal results. We later present some additional insights in smoothness
+and interpolation properties that arise with Soft FB’s entropy regularization.
+A.1. Proofs
+This section contains proofs for Theorems 4.1 and 4.2; the latter is preceded by a useful intermediate Lemma.
+Theorem 4.1. For an arbitrary bounded reward vector R ∈R|S||A| , if both Equations 1 and 5 hold for all z ∈Z, πBR
+is the optimal maximum entropy policy with respect to R: M πBR(R + HπBR) = maxπ∈Π M π(R + Hπ).
+Proof. This result can be proven through a direct generalization of the results in Haarnoja et al. (2018) and Touati & Ollivier
+(2021). Starting from Equation 5, setting z = BR, we can observe that
+πz ∝exp(F ⊤
+z z + M zHπz)
+(15)
+z=BR
+=
+exp(F ⊤
+z BR + M zHπz)
+(16)
+Eq.1
+= exp
+ M z(R + Hπz)
+
+(17)
+= exp(Qz
+soft).
+(18)
+Up to normalization constants, the policy satisfies the optimality criterion from Theorem 1 in Haarnoja et al. (2017), and is
+thus the optimal maximum entropy policy, i.e. πz = argmaxπ M π(R + Hπz).
+Lemma A.1. Let ˜Πz be the set of policies retrieved by Soft FB and π ∈Π be an arbitrary Markov policy. If π(a|s) > 0 for
+every (s, a) ∈S × A (i.e., π has complete support), then π ∈˜Πz.
+Proof. We will show that a maximum entropy problem admitting π as its optimal policy can be constructed, which will
+imply that π is part of the set of solutions to entropy-regularized instances retrieved by Soft FB by Theorem 4.1. Let
+R(s, a) = log π(a|s): since π has complete support, R(s, a) is bounded. Let us now consider its corresponding maximum
+entropy objective:
+Jπ′
+H (R) =
+E
+µ0,P,π′
+∞
+X
+t=0
+γt
+R(st, at) + H
+ π′(·|s)
+
+(19)
+=
+E
+µ0,P,π′
+∞
+X
+t=0
+γt
+E
+at∼π′(·|st)
+
+log π(at|st) −log π′(at|st)
+
+(20)
+=
+E
+µ0,P,π′
+∞
+X
+t=0
+γt
+−DKL
+ π′(·|st)||π(·|st
+
+≤0.
+(21)
+This objective is an expected, discounted sum of negative KL distances, and therefore non-positive. As DKL(p||p) = 0,
+Jπ
+H(R⋆) = 0, and π is the optimal policy for the maximum entropy objective with reward R. Theorem 4.1 guarantees that
+there exist a reward embedding z ∈Z recovering a solution πz for each maximum entropy problem; therefore, there exist a
+reward embedding z ∈Z such that πz = argmaxπ′∈Π Jπ′
+H (R) = π, and π ∈˜Πz.
+Theorem 4.2. Let f be an arbitrary differentiable function of occupancy measures, and ˜Πz be the set of policies retrieved
+by Soft FB. If both Equations 1 and 5 hold for all z ∈Z, for any ϵ > 0 there exists a reward embedding z′ ∈Z such that
+πz′ ∈˜Πz and maxπ∈Π f(Mπ) −f(Mπz′) < ϵ.
+Proof. This proof will rely on the construction of a sequence of policies. We will first show that each policy is retrieved by
+Soft FB, and then that this sequence gets arbitrarily close to the optimum.
+Let us consider an arbitrary differentiable objective f and its optimal policy π⋆= argmaxπ∈Π f(Mπ). Let ¯π = U(A)
+denote the uniform policy (i.e., the policy choosing each action with equal probability). We can construct a sequence of
+increasingly stochastic policies as a linear interpolation of the two through a parameter α ∈(0, 1]:
+πα(a|s) := (1 −α)π⋆(a|s) + α¯π(a|s).
+(22)
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Soft Forward-Backward Representations
+For all α > 0 and (s, a) ∈S × A, πα(a|s) > α¯π(a|s) > 0. Thus, each policy πα has full support. Through Lemma A.1
+we can conclude that πα ∈˜Πz, that is the set of policies retrieved by Soft FB. We will now show that, as α →0, πα is
+approximately close to the optimum for f.
+We can first bound the distance in action space to the optimal policy π⋆for each s ∈S, that is
+∥π⋆(·|s) −πα(·|s)∥1 =
+X
+a ∈A
+|π⋆(a|s) −(1 −α)π⋆(a|s) −α¯π(a|s)|
+(23)
+=
+X
+a ∈A
+α|π⋆(a|s) −¯π(a|s)|
+(24)
+≤2α,
+(25)
+where the last inequality follows from the fact that π⋆and ¯π are probability distributions, and thus bounded in [0, 1]. We can
+now apply the Simulation Lemma (Kearns & Singh, 2002) to bound the distance between marginalized successor measures
+of the two policies:
+∥Mπ⋆−Mπα∥1 ≤
+1
+1 −γ max
+s∈S ∥π⋆(·|s) −πα(·|s)∥1 ≤
+2α
+1 −γ
+(26)
+The last step requires bounding the difference f(Mπ) −f(Mπα), which is possible through uniform continuity. Let us
+consider the set of all valid occupancy measures K = {M π}π∈Π ⊂R|S||A|. Each element of K must respect the following
+linear constraints: M(s, a) ≥0 for all (s, a) ∈S × A (i.e., probabilities must be non-negative), (ii) P
+s,a∈S×A M(s, a) = 1
+(i.e., M is a valid probability distribution), and (iii) P
+a M(s, a) = (1−γ)µ0(s)+γ P
+s′,a′ P(s|s′, a′)M(s′, a′) (i.e., Bellman
+flow constraints respecting the dynamics of the MDP). K is thus closed and bounded, and by consequence a compact set.
+Furthermore, differentiability of f implies continuity of f: by the Heine Cantor Theorem, a continuous function on a compact
+set is uniformly continuous. This is equivalent to the existence of a continuous, monotonic function ωf : [0, ∞) →[0, ∞)
+with limδ→0 ωf(δ) = 0 (i.e., a modulus of continuity) such that
+|f(M) −f(M′)| ≤ωf(∥M −M′∥1)
+(27)
+Combining the uniform continuity property in Equation 27 with the bound on measures in Equation 26, we finally have
+|f(Mπ⋆) −f(Mπα)| ≤ωf(∥Mπ⋆−Mπα∥1) ≤ωf
+ 2α
+1 −γ
+
+(28)
+Since ωf(x) →0 as x →0, for any precision ϵ, one can find a sufficiently small α such that ωf(2α(1 −γ)−1) < ϵ, and
+thus πα achieves an arbitrarily close objective value to the optimum of f. As πα ∈˜Πz, we can conclude that there exist a
+policy among those retrieved by Soft FB that optimizes f arbitrarily well.
+A.2. Extended counterexample
+Figure 6. The simple MDP referred to for the coun-
+terexample (left); we consider a 2-dimensional repre-
+sentation space Z (right), and policies πz that output
+the first or second action depending on the semi-plane
+their parameter z belongs to (right).
+Section 3 anticipates a counterexample to clarify why policies retrieves
+by FB may fail to optimize a given GU. We will now formalize this
+counterexample in detail, while providing a visual description in
+Figure 6.
+Let us consider an MDP M with a single state S = {s0} and two
+actions A = {a0, a1}. Let us also consider representations of size d =
+2 (i.e., Z = R2). Let us now set the backward representation matrix
+as the identity matrix (i.e., B = I). By doing so, we can take (the
+transposes of) policy-conditional successor measure matrices Mz as
+forward representation matrices (i.e., F ⊤
+z = Mz), and trivially satisfy
+Equation 1 as F ⊤
+z B = MzI = Mz for any policy πz. Furthermore,
+setting B to the identity matrix projects all rewards functions R ∈R2
+to identical reward embeddings z = BR = R.
+It remains to show that there is a family of policies that satisfies
+Equation 3 as well. We thus choose the family of z-parameterized
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Soft Forward-Backward Representations
+policies Πz = {πz}z∈Z, where the policy parameterized by z picks the action indexed by the largest of the two elements of z:
+πz(·) = a0 if z0 > z1, else a1. Intuitively, as z = R, these policies are simply choosing the action associated with the largest
+reward. In order to check whether these policies satisfy Equation 3, we need to calculate its right hand-side; as F ⊤
+z = Mz,
+it suffices to compute the successor measure for all policies. Let us start by considering z0 > z1: in this case πz(·) = a0.
+When starting from (s, a0), the other state-action pair is never visited: Mz(s, a0, s, a0) = 1. When starting from (s, a1),
+this state-action pair is only visited at the beginning of the trajectory, and never again: Mz(s, a1, s, a1) = (1 −γ)γ := C
+with 0 ≤C < 1. By considering that Mz is a stochastic matrix, and similarly working through the case in which z0 ≤z1,
+we have
+F ⊤
+z = Mz =
+
+1
+0
+1 −C
+C
+
+if z0 > z1, else
+C
+1 −C
+0
+1
+
+.
+(29)
+We can now verify directly that Equation 3 holds. In the case in which z0 > z1, we have
+F ⊤
+z z =
+
+1
+0
+1 −C
+C
+ z0
+z1
+
+=
+
+z0
+(1 −C)z0 + Cz1
+
+.
+(30)
+Since (1 −C)z0 + Cz1
+z1<z0
+≤
+(1 −C)z0 + Cz0 = z0, then the policy optimizes its own Q-function: πz(·) = a0 =
+argmaxA F ⊤
+z z. Similarly, in the case in which z0 ≤z1, we have
+F ⊤
+z z =
+C
+1 −C
+0
+1
+ z0
+z1
+
+=
+Cz0 + (1 −C)z1
+z1
+
+.
+(31)
+This time, Cz0 + (1 −C)z1
+z1≥z0
+≥
+C(z1) + (1 −C)z1 = z1, and the policy still optimizes its own Q-function: πz(·) =
+a1 = argmaxA F ⊤
+z z. Since these two cases (z0 > z1 and z0 ≤z1) cover all policies πz ∈Πz, Equation 3 holds.
+All policies πz are strictly deterministic. We can now consider a convex RL objective such as pure exploration over states
+and actions, i.e. Jπ = f(Mπ) = H(Mπ), where H(·) denotes Shannon entropy over state-action pairs. For this objective,
+all policies in Πz are actually minimizers: Jπz = 0 for all z ∈Z. The optimal policy is uniform over the two actions (i.e.,
+π⋆(·) = U(A)), achieves Jπ⋆= log 2 and does not belong to Πz. This thus represents an instance in which the set of
+policies retrieved by FB may not include the optimal policy for some GU.
+A.3. Additional remarks
+One well-known property of entropy regularization in RL is that of inducing smoothness in the mapping from rewards to
+optimal behaviors (Geist et al., 2019; Husain et al., 2021). This property is reflected in Soft FB, as we discuss in this section.
+Remark A.2. Let us assume that Equations 1 and 5 hold, and that backward representations B are full-rank. Let us now
+consider the map g : Z →M from the reward representation space Z to the space of feasible occupancy measures M,
+such that g(z) = M πz. The map g is C∞(smooth).
+Proof. The map g is a composition of several functions: we will show that each of these functions is, in turn, smooth.
+• As established in Theorem 4.1, each policy πz ∈˜Πz is the regularized optimal policy for reward R if z = BR. We can
+thus project the reward representation z to its reward as R = (B⊤B)−1B⊤z, where B⊤B is invertible as B is full
+rank. This map z 7→R is linear and thus also smooth in z.
+• Let us define the optimal entropy-regularized state-action value function for reward R: Q⋆= maxπ∈Π M π(R + Hπ).
+This is the unique fixed point of the Soft Bellmann optimality operator Tr. We may then define its root finding function
+as G(Q, z) = Q −Tr(Q) = 0. Component-wise for each state-action pair (s, a) it takes the form
+G(s,a)(Q, r) = Q(s, a) −
+ 
+r(s, a) + γ
+X
+s′
+P(s′|s, a) log
+X
+a′
+exp Q(s′, a′)
+!
+(32)
+which, as a composition of linear function and the LogSumExp function, is itself smooth. In order to apply the Implicit
+Function Theorem, we examine the Jacobian of G w.r.t. Q. The partial derivative takes the form
+∂G(s,a)
+∂Q(s′,a′)
+= δ(s,a)=(s′,a′) −γP(s′|s, a)πsoft(a′|s′)
+where
+πsoft(a′|s′) =
+exp Q(s′, a′)
+P
+b exp Q(s′, b).
+(33)
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Soft Forward-Backward Representations
+In matrix form, this is JQ = I −γP πsoft, which has eigenvalues with norm of at most γ < 1, making it non-singular.
+We can thus apply the Implicit Function Theorem, and confirm that the map R 7→Q⋆is unique and smooth.
+• By Theorem 4.1 πz = softmax(Q⋆): this map is smooth in Q⋆because of the smoothness of the softmax operator.
+• Finally we have M z = (I −γP πz)−1. First, we notice that I −γP πz is smooth as a composition of smooth functions,
+and second, that it is non-singular, as we showed for JQ above. As such, the matrix inverse is also smooth, making
+πz 7→M z a smooth function.
+As g is a composition of smooth functions (z 7→R 7→Q⋆7→πz 7→M z), we can conclude that it is also smooth.
+This property allows smooth interpolation of behaviors; however we note that the solutions of linearly interpolated task
+vectors do not necessarily lie on a line in the space of successor measures. In contrast, the remark above does not hold for
+FB in general: repurposing the counterexample in Section A.2, and in particular Figure 6, we can see that changes in z
+results in a sharp change in πz and M z when z1 = z2.
+B. Further Related Work
+Non-linear Reinforcement Learning RL with General Utilities (Zhang et al., 2020) may not be directly solved through
+standard dynamic programming or actor-critic approaches, as the key assumption behind TD learning is violated. On the
+other hand, policy gradient theorems may still be derived (Zhang et al., 2020; 2021; Kumar et al., 2022; Barakat et al.,
+2023). Specific algorithms for subclasses of convex RL problems (such as maximum entropy RL (Haarnoja et al., 2018) or
+imitation learning (Kostrikov et al., 2020)) can be derived, for instance by building upon duality (Sikchi et al., 2023), but do
+not generalize to arbitrary objectives. Recent works have also focused on non-linear objectives displaying set properties
+(De Santi et al., 2024), while a parallel line of work has departed from optimizing for expected occupancy to consider finite
+trial objectives (Mutti et al., 2023; Jain et al., 2023). While theoretical analysis of algorithms for non-linear RL has received
+significant attention (Huang & Jiang, 2024; Barakat et al., 2025), their scalability to high-dimensional problem has not been
+extensively tested. Similarly, most algorithms deal with the standard online setting, and solve for one objective at a time.
+C. Explicit Measure Models
+The inference procedure of Soft FB requires accurate measure estimates. As we mention in Section 4.4, while a rough
+estimate can be extracted from an implicit measure model (i.e., relying on forward and backward representations directly for
+importance sampling), we find that training an explicit measure model results in much more reliable estimates. Following
+recent work on geometric horizon models (Farebrother et al., 2025; Zheng et al., 2025), we train a generative model of
+z-conditional successor measures M z through a temporal-difference, conditional flow-matching objective; we briefly report
+the core idea as follows.
+Let us consider a time-dependent probability path mt : S × A →S for t ∈[0, 1] describing a process transporting samples
+from an initial distribution m0 = to m1 = M z. This process is described by a vector field vt : S × S × A →S, which
+may be integrated to produce the flow ψt : S × S × A →S governing the probability path:
+d
+dtψt(x | s, a) = vt(ψt(x | s, a) | s, a),
+ψ0(x | s, a) = x ⇐⇒ψt(x | s, a) = x +
+Z t
+0
+vτ(ψτ(x | s, a) | s, a) dτ.
+If Xt := ψt(X0 | S, A) ∼mt(· | S, A) for X0 ∼m0, vt is said to generate mt; estimation of vt is facilitated by introducing
+a conditioning (e.g., Z = X1) and choosing a Gaussian conditional probability path pt,Z := N(·|tX1, (1 −t2)I), which
+grants a closed form for a conditional vector field ut,X1(x) := (X1 −x)/(1 −t). Furthermore, off-policy learning is
+possible by bootstrapping (i.e., using the estimated vector field to sample from measures conditional on the next state), and
+variance reduction can be carried out by directly matching the the estimated vector field. This results in the TD2-CFM
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Soft Forward-Backward Representations
+objective for training a parameterized estimator of the vector field ˜vt,θ : S × S × A →S, which we report:
+⃗L(θ) = Eρ,t,Z, ⃗
+Xt
+˜vt( ⃗Xt | S, A; θ) −⃗ut|Z( ⃗Xt | Z)
+
+2
+,
+where Z = X1 ∼P(· | S, A), ⃗Xt ∼pt|Z(· | Z),
+eL(θ) = Eρ,t, e
+Xt
+˜vt( e
+Xt | S, A; θ) −¯˜vt( e
+Xt | S′, πz(S′))
+
+2
+,
+where X0 ∼p0, S′ ∼P(· | S, A), e
+Xt = eψt(X0 | S′, πz(S′)),
+LTD2-CFM(θ) = (1 −γ) ⃗L(θ) + γ eL(θ),
+where ρ represents the empirical distribution of states in the same dataset used for training Soft FB. We refer to Farebrother
+et al. (2025) for a detailed discussion, and for implementation details, which we closely follow.
+D. Additional Experimental Results
+D.1. Correlation
+The policy search procedure outlined in Section 4.4 relies on offline performance estimates, which are only effective if they
+correlate with ground truth performance in the environment. We find that the degree of correlation depends on the objective
+and on the technique used for sampling from the measure: explicit models (denoted with, e.g., SFBflow) generally result
+in more reliable policy evaluation. For completeness, we compute Pearson correlation coefficients across the results from
+Table 1 in Table 3.
+Table 3. Spearman’s rank correlation coefficients between offline policy estimates and ground-truth performance in the didactic
+environment.
+FB
+FBflow
+SFB
+SFBflow
+Linear RL
+0.98 ±.01
+1.00 ±.01
+0.83 ±.02
+1.00 ±.01
+Goal-reaching RL
+0.90 ±.01
+1.00 ±.01
+0.86 ±.03
+1.00 ±.01
+Deterministic IL
+0.91 ±.02
+0.97 ±.02
+0.41 ±.03
+1.00 ±.01
+Stochastic IL
+0.90 ±.04
+0.94 ±.03
+0.34 ±.05
+1.00 ±.01
+Pure Exploration
+0.09 ±.14
+0.53 ±.15
+0.01 ±.04
+1.00 ±.01
+Constrained RL
+0.13 ±.03
+0.76 ±.15
+0.40 ±.03
+0.96 ±.03
+Robust RL
+0.19 ±.03
+0.96 ±.02
+0.47 ±.02
+1.00 ±.01
+Average
+0.58
+0.88
+0.48
+0.99
+D.2. Linear RL on DMC
+We report numerical results from Figure 5 (i.e., the evaluation of linear objectives in DMC) in Table 4.
+Table 4. Episodic returns and step-wise action entropy across different environments as a function of ∥z∥, averaged over tasks and reported
+from Figure 5.
+∥z∥
+walker
+cheetah
+quadruped
+maze
+Return
+Entropy
+Return
+Entropy
+Return
+Entropy
+Return
+Entropy
+0.00
+123 ±24
+3.5 ±0.5
+77 ±5
+14.5 ±0.2
+171 ±10
+29.8 ±0.2
+0 ±0
+4.6 ±0.1
+0.25
+622 ±16
+0.3 ±0.1
+313 ±24
+13.1 ±0.1
+681 ±2
+24.8 ±0.3
+224 ±11
+3.8 ±0.2
+0.50
+688 ±13
+−2.3 ±0.2
+399 ±23
+11.2 ±0.2
+696 ±7
+20.3 ±0.4
+350 ±62
+2.6 ±0.2
+0.75
+698 ±12
+−8.2 ±0.7
+440 ±12
+7.0 ±0.5
+687 ±4
+16.1 ±0.3
+472 ±52
+−0.0 ±0.2
+1.00
+702 ±8
+−12.4 ±0.7
+446 ±19
+−3.2 ±0.9
+668 ±6
+7.1 ±1.0
+522 ±18
+−2.9 ±0.2
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Soft Forward-Backward Representations
+0.5
+0.5
+a0
+0
+1
+a1
+z = 0.0
+0.5
+0.5
+a0
+0
+1
+a1
+z = 0.25
+0.5
+0.5
+a0
+0
+1
+a1
+z = 0.5
+0.5
+0.5
+a0
+0
+1
+a1
+z = 0.75
+0.5
+0.5
+a0
+0
+1
+a1
+z = 1.0
+Figure 7. Qualitative evaluation of FB in a didactic environment. White dots are samples from policies πz over a 2D actions space, and the
+color map represents learned unregularized Q-values Qz
+R for each action (Fθ(s0, a, z)⊤z). From left to right, we infer task embeddings z
+solving a goal-reaching task, and scale them linearly. In this case, all retrieved policies are near-deterministic; interestingly, FB often
+outputs optimal actions for embeddings of norm ∥z∥< 1, despite not being explicitly trained on them.
+D.3. Visualization of Action Samples
+While Soft FB retrieves stochastic policies, the standard forward-backward objectives do not explicitly prevent policies to
+collapse towards determinism. While set of policies retrieved by FB may, in principle, also include stochastic policies, we
+find that this is, in practice, not the case. As a didactic example, we repeat the visualization in Figure 3, this time sampling
+actions from policies trained with FB. These samples are displayed in Figure 7, which confirms that retrieved policies are
+deterministic.
+D.4. Extended results on DMC
+This Section extends the experimental results summarized in Table 2 in several ways.
+First, we include two additional objective (Jrobust and Jconstrained, thus evaluating the same family of non-linear objectives
+considered in Table 1. When interpreting results, we remark that the domains considered are not generally designed for
+non-linear objectives; as dynamics are unknown, it is not clear whether some of these objectives may still admit deterministic
+optimal policies: for instance, high state entropy may be achievable in maze by a deterministic policy which covers the
+room in a non-overlapping zig-zag pattern. We find that Soft FB is consistently the strongest method for the two objectives
+that do not admit an optimal deterministic policy, namely maximum entropy over states and actions (H(Mπ)) and imitation
+of a stochastic policy (−KL(Mπ; Mπstoch)). Perhaps surprisingly, Soft FB also performs well in imitating a deterministic
+policy: while KL divergence to the expert is minimized by a deterministic policy, we hypothesize that finding a stochastic
+policy with a low divergence is generally easier. For other objectives (e.g., state-only entropy maximization, constrained or
+robust objectives), we find that the best policy captured by FB may perform as well, confirming that deterministic policies
+may be sufficient for nonlinear objectives in specific MDPs.
+Second, Table 5 includes the performance of FB and Soft FB with implicit measure models (2nd and 4th columns,
+respectively). We find that implicit measure models also perform relatively well, and not significantly worse than explicit
+measure models in most tasks when combined with Soft FB. We believe that with further compute allocation, explicit
+measure models can be further improved, as discussed in Appendix E.
+Finally, we also report the performance of a random policy sampled from those trained by FB for each objective and domain
+(first column of Table 5. While this simple baseline is surpassed by Soft FBflow in each instance, the performance difference
+is not significant in a few cases. This suggests that, for specific objectives, Soft FB may in practice not recover a rich enough
+class of policies, such that the best of its policies may not be much better than the average FB policy (we remark that
+the guarantees in Section 4.2 only hold with exact minimization of the objectives, and for sufficiently high-dimensional
+representations). Furthermore, the accuracy of the inference procedure remains limited by the quality of measure models,
+which are also learned, and therefore imperfect. This is in particular the case for higher-dimensional domains such as
+quadruped.
+E. Implementation Details
+Our practical implementation of Soft FB builds upon the vanilla FB algorithm introduced in Touati & Ollivier (2021) and
+open-sourced in Tirinzoni et al. (2024). Architecturally, the sole modification lies in changing the policy’s parameterization:
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Soft Forward-Backward Representations
+Table 5. Zero-shot performance on general utilities in DMC. We extend Table 2 by including three additional methods and two objectives.
+Scores are averages over 5 seeds, with 95% confidence intervals and bold numbers signaling overlaps.
+FBrand
+FB
+FBflow
+Soft FB
+Soft FBflow
+walker
+H(Mπ
+S)
+12.99 ±.94
+12.82 ±.04
+12.56 ±.91
+13.91 ±.20
+13.97 ±.25
+H(Mπ)
+9.90 ±.11
+9.77 ±.09
+9.86 ±.10
+18.00 ±.02
+18.01 ±.03
+−KL(Mπ
+S; M πstoch
+S
+)
+-6.08 ±.89
+−6.91 ±.03
+-5.35 ±.24
+-5.11 ±.27
+-5.25 ±.14
+−KL(Mπ; M πstoch)
+−9.64 ±.20
+−9.56 ±.23
+−9.40 ±.17
+-1.39 ±.05
+-1.48 ±.11
+−KL(Mπ
+S; M πdet
+S
+)
+-6.18 ±.05
+−6.87 ±.97
+−5.69 ±.27
+-5.02 ±.16
+-5.69 ±.02
+−KL(Mπ; M πdet)
+−9.66 ±.15
+−9.62 ±.20
+−9.43 ±.18
+-1.48 ±.08
+-1.53 ±.09
+Jrobust(Mπ)
+0.39 ±.04
+0.51 ±.08
+0.51 ±.03
+0.56 ±.12
+0.44 ±.07
+Jconstrained(Mπ)
+0.13 ±.22
+0.13 ±.30
+0.23 ±.32
+-0.10 ±.25
+0.17 ±.19
+cheetah
+H(Mπ
+S)
+11.57 ±.43
+12.66 ±.15
+11.74 ±.43
+13.69 ±.15
+13.63 ±.10
+H(Mπ)
+9.96 ±.21
+10.59 ±.88
+11.68 ±.89
+17.85 ±.04
+17.83 ±.07
+−KL(Mπ
+S; Mπstoch
+S
+)
+−6.54 ±.68
+−5.58 ±.20
+−5.56 ±.31
+-4.36 ±.15
+-4.56 ±.31
+−KL(Mπ; Mπstoch)
+−8.64 ±.45
+−7.90 ±.90
+−7.25 ±.76
+-1.11 ±.05
+-1.02 ±.08
+−KL(Mπ
+S; Mπdet
+S
+)
+−6.52 ±.78
+−5.58 ±.28
+−5.45 ±.65
+-4.35 ±.27
+-4.38 ±.18
+−KL(Mπ; Mπdet)
+−8.92 ±.40
+−8.14 ±.85
+−7.55 ±.79
+-1.19 ±.05
+-1.23 ±.08
+Jrobust(Mπ)
+0.19 ±.07
+0.22 ±.04
+0.24 ±.06
+0.24 ±.04
+0.21 ±.01
+Jconstrained(Mπ)
+0.11 ±.08
+0.18 ±.09
+0.14 ±.18
+0.19 ±.10
+0.23 ±.07
+quadruped
+H(Mπ
+S)
+13.84 ±.49
+13.67 ±.74
+13.37 ±.43
+14.48 ±.23
+14.43 ±.24
+H(Mπ)
+10.19 ±.08
+10.18 ±.14
+10.11 ±.08
+19.09 ±.03
+19.10 ±.01
+−KL(Mπ
+S; Mπstoch
+S
+)
+−5.54 ±.47
+−5.99 ±.60
+−5.44 ±.28
+-4.95 ±.35
+-4.64 ±.20
+−KL(Mπ; Mπstoch)
+−9.93 ±.08
+−9.87 ±.18
+−9.92 ±.16
+-0.75 ±.02
+-0.76 ±.04
+−KL(Mπ
+S; Mπdet
+S
+)
+−5.64 ±.53
+−6.07 ±.74
+−5.61 ±.30
+−4.96 ±.14
+-4.52 ±.16
+−KL(Mπ; Mπdet)
+−9.95 ±.07
+−9.99 ±.22
+−9.94 ±.20
+-0.79 ±.02
+-0.79 ±.02
+Jrobust(Mπ)
+0.07 ±.01
+0.14 ±.02
+0.09 ±.03
+0.17 ±.04
+0.08 ±.01
+Jconstrained(Mπ)
+0.03 ±.03
+0.02 ±.04
+0.04 ±.06
+0.06 ±.04
+0.07 ±.06
+maze
+H(Mπ
+S)
+10.31 ±.34
+10.68 ±.21
+10.83 ±.56
+10.62 ±.66
+11.22 ±.70
+H(Mπ)
+10.00 ±.48
+10.96 ±.70
+10.52 ±.66
+15.67 ±.08
+15.54 ±.16
+−KL(Mπ
+S; Mπstoch
+S
+)
+−6.32 ±.62
+-6.15 ±.67
+−6.49 ±.36
+-5.23 ±.31
+-5.25 ±.90
+−KL(Mπ; Mπstoch)
+−7.22 ±.34
+−6.61 ±.14
+−6.45 ±.61
+-1.08 ±.21
+-1.39 ±.31
+−KL(Mπ
+S; Mπdet
+S
+)
+−6.62 ±.54
+−6.42 ±.58
+−6.57 ±.61
+-5.76 ±.32
+-5.07 ±.69
+−KL(Mπ; Mπdet)
+−8.67 ±.54
+−7.27 ±.96
+−7.27 ±.58
+-2.37 ±.27
+-2.51 ±.35
+Jrobust(Mπ)
+0.17 ±.10
+0.44 ±.06
+0.34 ±.19
+0.33 ±.13
+0.52 ±.05
+Jconstrained(Mπ)
+−0.01 ±.11
+0.46 ±.22
+0.53 ±.24
+0.31 ±.22
+0.57 ±.14
+from a Gaussian with a fixed standard deviation of σ = 0.3 to a squashed Gaussian with learnable standard deviation. This
+modification is applied to all of the algorithms we evaluate. All networks are MLPs with embedding layers; width and depth
+are reported in Table 6.
+Unlike FB, Soft FB trains an action-state value function to estimate discounted sums of entropy terms (see Equation 8),
+which shares the same optimization hyperparameters and the same architecture as the forward map Fθ, but outputs scalar
+values instead of embeddings. As the forward map, the critic also relies on twin networks, and on a target network updated
+at the same pace. While the discounted sum of entropies may also be estimated implicitly through forward and backward
+representations, we found that training a separate critic resulted in more reliable estimates.
+When explicit measure models are used for inference, a flow-matching generative model is trained in parallel with Soft
+FB. For this purpose, we closely follow the implementation details described in (Farebrother et al., 2025). Due to limited
+computational budget, we train the model for fewer gradient steps (3M instead of 8M). While this was sufficient for policy
+selection, allocating further resource to measure estimation may bring additional performance gains.
+Our implementation of Soft FB inherits all of FB’s hyperparameters, without any additional tuning; we present the main
+hyperparameters in Table 6. Soft FB does not introduce any additional hyperparameter: the standard entropy regularization
+coefficient common in entropy-regularized RL (Haarnoja et al., 2017) is not needed, as Soft FB trains on all levels of entropy
+regularization, as discussed in Section 4.3. Additionally scaling the entropy term by a fixed coefficient is possible, and may
+lead to better performance for tasks in which high- or low-entropy policies are favored.
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Soft Forward-Backward Representations
+Table 6. Hyperparameter Configuration
+Parameter
+Value
+Fθ - Learning rate
+1 × 10−4
+Fθ - Width
+1024
+Fθ - Depth
+4
+Bϕ - Learning rate
+1 × 10−4
+Bϕ - Width
+256
+Bϕ - Depth
+3
+πψ - Learning rate
+1 × 10−4
+πψ - Width
+1024
+πψ - Depth
+4
+QH,η - Learning rate
+1 × 10−4
+QH,η - Width
+1024
+QH,η - Depth
+4
+Optimizer
+Adam (Kingma & Ba, 2015)
+Dimensionality of z
+50
+Polyak coefficient τ
+0.01
+Orthonormality regularization coefficient
+1.0
+Goal sampling ratio
+0.5
+Q-value aggregation
+mean
+Batch size
+1024
+E.1. Low-dimensional Evaluation
+The didactic MDP described in Section 5.1 has a discount factor of 0.5; due to its simplicity, agents are trained for 5 · 104
+gradient steps. The task inference procedure is carried out as described in Section 4.4 with 1024 uniformly sampled reward
+embeddings as candidates. In the case of standard FB, they are always sampled from the surface of an hypersphere, as the
+agent was not trained for embeddings lying within its volume. For each z, 1024 samples are drawn from the z-conditional
+successor measure ˆ
+M πz, estimated through either implicit or explicit measure models. These samples are then evaluated
+according the objective, which are presented in full in Table 7; the highest-scoring sample is provided as a conditioning to
+the policy, which is then evaluated in the environment for 1024 episodes to produce the scores reported in Table 1.
+Objectives were designed to be easily interpretable: the linear task encourages states on a unit circle around the origin,
+the goal-conditioned task involves landing in proximity of a certain state, while the deterministic and stochastic imitation
+learning tasks feature an expert which always visits the same state, or visits states uniformly on a line, respectively. The
+pure exploration objective simply maximizes state coverage, while the robust objective considers the minimum between
+a goal conditioned objective and its complement, and the constrained objective maximizes a goal-conditioned objective
+within a given range. For objectives requiring estimation of entropies or Kullback-Leibler divergence, we employ a standard
+nearest-neighbor-based estimator (Wang et al., 2009), with k = 3. For each objective, we normalized scores between
+minima and maxima (theoretical if available, or estimated from the policies with lowest performance), as described in the
+last two columns of Table 7. Across this work, confidence intervals are computed assuming scores are normally distributed.
+E.2. High-dimensional evaluation
+High-dimensional experiments revolve around locomotion and navigation tasks from the Deepmind Control Suite (Tassa
+et al., 2018) and use ExORL data (Yarats et al., 2022). All evaluation parameters, including linear reward functions, are
+taken from Touati & Ollivier (2021): algorithms are trained until convergence (for 3M gradient steps) with a discount factor
+of 0.98 (0.99 for maze). The inference procedure for General Utilities differs minimally from the didactic environment
+(detailed previously): it evaluates 1024 candidates for z, but considers slightly more samples from the estimated successor
+measure (2048). The chosen policy is then evaluated through a Monte Carlo estimator: we execute the policy for 10 episodes
+and resample visited state-action pairs according to a geometric distribution parameterized by 1 −γ.
+Objectives involving entropy or Kullback-Leibler divergences also rely on a K-nearest-neighbor-based estimator, with
+k = 3 (Wang et al., 2009). For imitation learning objectives, the expert is a deterministic optimal policy for one of
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Soft Forward-Backward Representations
+Table 7. Objectives considered in the quantitative evaluation in low-dimensional settings (see Figure 4). s = (x, y) denotes the two
+coordinates of each state s ∈S.
+Task
+Objective
+min
+max
+Linear RL
+maxπ⟨Mπ
+S, R⟩with R(x, y) = −((x2 + y2) −1)
+≈0
+1
+Goal-conditioned RL
+maxπ⟨Mπ
+S, R(0.0,0.5)(x, y)⟩with R(xg,yg)(x, y) = 1(x−xg)2+(y−yg)2<0.2
+0
+1
+Deterministic IL
+maxπ −DKL(Mπ
+S||M⋆
+S) with M⋆
+S = 1s=(0.0,0.5)
+≈−15
+0
+Stochastic IL
+maxπ −DKL(Mπ
+S||M⋆
+S) with M⋆
+S = U({x ∈[−0.5, 0.5], y = 0]})
+≈−15
+0
+Pure Exploration
+maxπ H(Mπ
+S)
+≈8
+≈16
+Robust MDP
+maxπ min
+ ⟨Mπ
+S, R(0.0,0.5)(x, y)⟩, ⟨Mπ
+S, 1 −R(0.0,0.5)(x, y)⟩
+
+0
+0.5
+Constrained RL
+maxπ⟨Mπ
+S, R(0,0.5)(x, y)⟩s.t. ⟨Mπ
+S, R(0.,0.5)(x, y)⟩< 0.9
+0
+0.9
+walker
+cheetah
+quadruped
+maze
+Figure 8. The four domains considered from ExORL (Yarats et al., 2022) and the Deepmind Control Suite (Tassa et al., 2018).
+the tasks defined by the suite (walk for all domains, except for maze, which demonstrates reach bottom left);
+the stochastic variants simply inject Gaussian noise (σ = 1.0) to expert actions. The robust and constrained objectives
+are less direct in their definition. For simplicity, we consider the velocities of the first two degrees of freedoms for all
+embodiments (e.g., going right/left and up/down for maze), and refer to the function extracting them from a state as as
+vx and vy. The robust objective is simply the minimum between the discounted averages of the two absolute velocities,
+i.e. Jrobust(Mπ) = min(⟨Mπ, Rx⟩, ⟨Mπ, Ry⟩), where Rx(s) = abs(vx(s)) and Ry(s) = abs(vy(s)). The constrained
+objective encourages high velocity in the first degree of freedom, while ensuring the velocity is not always positive:
+Jconstrained(Mπ) = ⟨Mπ, R⟩constrained by ⟨Mπ, Rc⟩> 0 with R(s) = vx(s) and Rc(s) = 1vx(s)<0.
+As in this case minimum and maximum performance are not easily estimated, we do not normalize scores.
+20
