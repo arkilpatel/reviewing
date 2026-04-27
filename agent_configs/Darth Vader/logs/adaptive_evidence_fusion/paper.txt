@@ -1,0 +1,1993 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+Anonymous Authors1
+Abstract
+Many machine learning systems have access to
+multiple sources of evidence for the same predic-
+tion target, yet these sources often differ in relia-
+bility and informativeness across inputs. In bioa-
+coustic classification, species identity may be in-
+ferred both from the acoustic signal and from spa-
+tiotemporal context such as location and season;
+while Bayesian inference motivates multiplica-
+tive evidence combination, in practice we typi-
+cally only have access to discriminative predic-
+tors rather than calibrated generative models. We
+introduce Fusion under INdependent Conditional
+Hypotheses (FINCH), an adaptive log-linear ev-
+idence fusion framework that integrates a pre-
+trained audio classifier with a structured spa-
+tiotemporal predictor. FINCH learns a per-sample
+gating function that estimates the reliability of
+contextual information from uncertainty and in-
+formativeness statistics. The resulting fusion fam-
+ily contains the audio-only classifier as a special
+case and explicitly bounds the influence of contex-
+tual evidence, yielding a risk-contained hypothe-
+sis class with an interpretable audio-only fallback.
+Across benchmarks, FINCH consistently outper-
+forms fixed-weight fusion and audio-only base-
+lines, improving robustness and error trade-offs
+even when contextual information is weak in iso-
+lation. We achieve state-of-the-art performance
+on CBI and competitive or improved performance
+on several subsets of BirdSet using a lightweight,
+interpretable, evidence-based approach. Code is
+available: anonymous-repository
+1. Introduction
+Ensemble learning studies how multiple predictive models
+for the same target variable can be combined to improve
+performance, robustness, or calibration relative to any sin-
+gle model (Kuncheva, 2004; Kittler et al., 1998). Classical
+ensemble methods such as bagging, boosting, and stacking
+typically assume that all predictors are trained on the same
+underlying data distribution and that ensemble weights or
+Figure 1. Haemorhous mexicanus (North American House Finch),
+the namesake of our model.
+combination rules can be learned jointly with model param-
+eters.
+In many modern applications, however, predictive models
+are pre-trained, heterogeneous, and fixed at inference time.
+These models may rely on different sources of evidence, be
+trained on distinct datasets, and operate under incompatible
+modeling assumptions. As a result, joint retraining or fine-
+tuning is often infeasible. Instead, the problem becomes one
+of combining the outputs of fixed predictors in a principled
+manner.
+We consider the common setting in which multiple predic-
+tive models provide complementary evidence about a shared
+latent target. Let y denote a class label, and let x and s de-
+note two sources of evidence. Conditional independence,
+x ⊥s | y,
+(1)
+provides a useful idealization that motivates multiplicative
+evidence fusion. If the full generative distributions were
+available, Bayesian inference would yield
+p(y | x, s) ∝p(x | y) p(s | y) p(y).
+(2)
+FINCH adopts the corresponding log-linear fusion form
+while remaining applicable in regimes where this indepen-
+dence assumption holds only approximately, and deviations
+can be mitigated through adaptive, bounded weighting.
+In practice, however, generative models are often unavail-
+able. Instead, one typically has access only to discriminative
+predictors pθ(y | x) and pψ(y | s), trained independently.
+In this case, the posterior can be expressed as
+p(y | x, s) ∝pθ(y | x) p(x) pψ(y | s) p(s)
+p(y)
+,
+(3)
+1
+
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+where the marginal distributions p(x), p(s), and the implied
+prior p(y) are generally unknown. As a result, the true
+posterior is not directly computable from the discriminative
+models alone.
+A common approximation in this setting is to combine dis-
+criminative predictors using log-linear models or product-
+of-experts formulations (Hinton, 2002; Genest & Zidek,
+1986). These models operate directly on posterior outputs
+and define a fused distribution of the form
+log p(y | x, s) = log pθ(y | x)+log pψ(y | s)−log Z(x, s),
+(4)
+where Z(x, s) is a normalization constant ensuring
+P
+y p(y | x, s) = 1. Throughout the paper, we write fusion
+rules in unnormalized log-space; the normalization constant
+is implicitly handled by the final softmax and is therefore
+omitted when it does not affect comparisons across classes.
+Log-linear fusion is decision-theoretically justified as a log-
+arithmic opinion pool under mild axioms (Heskes, 1998)
+and provides a practical surrogate when only discriminative
+models are available.
+Existing approaches typically employ fixed or globally
+learned weights when combining predictors. This implic-
+itly assumes that the relative reliability of each evidence
+source is constant across the input space. In many applica-
+tions, this assumption does not hold. The informativeness
+of a given evidence source may vary substantially across
+samples, leading to degraded performance or pathological
+dominance when fixed weights are used.
+In this work, we introduce an adaptive log-linear fusion
+framework that preserves the structure and interpretability
+of classical product-of-experts models while allowing per-
+sample modulation of evidence strength. We assume that
+the constituent predictors are fixed and discriminative, and
+we do not retrain or recalibrate their parameters. Instead,
+we learn a gating function that estimates the reliability of
+contextual evidence on a per-sample basis. The resulting
+fused posterior is defined (up to normalization) as
+log ˜pω(y | x, s) = log pθ(y | x) + ω(x, s) log pψ(y | s),
+(5)
+where ω(x, s) ≥0 is a learned weighting function. The
+normalized posterior pω(y | x, s) is obtained by applying a
+softmax over y. This formulation recovers the first model
+classifier when ω(x, s) = 0, bounds the influence of contex-
+tual evidence, and enables adaptive fusion without retraining
+the base models.
+We evaluate this framework in the context of bioacoustic
+species classification by combining a state-of-the-art acous-
+tic classifier with a structured spatiotemporal prior derived
+from large-scale observational data. Experiments show that
+adaptive weighting consistently outperforms fixed-weight
+fusion and audio-only baselines, particularly in regimes
+where contextual information is heterogeneous or weak in
+isolation.
+2. Related Work
+We organize related work into two themes: (i) theory and
+mechanisms for combining probabilistic predictors (log-
+linear pooling, products of experts, and gating), and (ii)
+bioacoustic applications, distinguishing audio-only founda-
+tion encoders from systems that incorporate spatiotemporal
+context.
+2.1. Log-Linear Fusion, Opinion Pools, and Products of
+Experts
+The combination of multiple classifiers has been studied
+extensively in machine learning and statistics (Kuncheva,
+2004; Kittler et al., 1998). Classical ensemble methods
+(e.g., averaging, voting, Bayesian combination) depend on
+classifier diversity and error correlation, and often learn
+weights jointly with model parameters or via validation
+tuning.
+Maximum entropy models and logarithmic opinion pools
+formalize classifier fusion as a log-linear aggregation of pre-
+dictive distributions (Berger et al., 1996; Genest & Zidek,
+1986). Product-of-experts models combine distributions by
+multiplication, yielding sharp posteriors when experts agree
+and diffuse posteriors when they disagree (Hinton, 2002).
+Logarithmic opinion pools provide a decision-theoretic jus-
+tification for weighted log-linear combinations under mild
+axioms (Heskes, 1998), and log-linear fusion can be viewed
+as a practical surrogate to Bayesian inference when only
+discriminative predictors are available (Bishop, 2006).
+Most prior approaches employ fixed or globally learned
+weights, implicitly assuming that expert reliability is sta-
+tionary across the input space. Our work focuses instead on
+per-sample weighting of contextual evidence while preserv-
+ing the interpretability of log-linear fusion.
+2.2. Gating Networks, Mixtures of Experts, and
+Reliability Estimation
+Mixture-of-experts models introduce gating networks that
+assign input-dependent weights to multiple predictors (Ja-
+cobs et al., 1991; Jordan & Jacobs, 1994). These models
+are typically trained end-to-end, with both experts and gates
+optimized jointly.
+Our setting differs in two key respects. First, we treat the
+constituent predictors as fixed and trained independently
+on different evidence sources. Second, we use multiplica-
+tive fusion in probability space (log-additive in log-space),
+motivated by conditional independence of evidence sources
+given the label. The gating function modulates the strength
+2
+
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+of contextual evidence rather than selecting among experts.
+A related line of work studies uncertainty estimation and se-
+lective prediction. Bayesian approximations and calibrated
+uncertainty signals (Gal & Ghahramani, 2016; Kendall &
+Gal, 2017) as well as confidence-based methods (Hendrycks
+& Gimpel, 2017) are commonly used to identify unreliable
+predictions or out-of-distribution inputs. Selective classifi-
+cation allows abstention when confidence is low (Geifman
+& El-Yaniv, 2017). In contrast, our method uses reliability
+signals to continuously modulate the contribution of con-
+textual evidence within a probabilistic fusion model, rather
+than abstaining or discarding an expert.
+2.3. Audio Foundation Models for Bioacoustics
+(Audio-Only Encoders)
+Modern bioacoustic classifiers increasingly rely on self-
+supervised or large-scale pretrained audio encoders, fol-
+lowed by lightweight adaptation (e.g., linear probes or proto-
+typical probes) on downstream datasets (Lauha et al., 2022;
+Wang et al., 2022; Hagiwara, 2022; Choudhary et al., 2022;
+Nolasco et al., 2023; Rauch et al., 2025). Recent foundation-
+model style approaches provide strong transferable repre-
+sentations for animal sounds, including BEATs (Chen et al.,
+2022) and NatureLM-Audio (Robinson et al., 2025), as well
+as large-scale benchmark/analysis efforts such as BEANS
+and studies of what drives bioacoustic representation quality
+(Hagiwara et al., 2022; Miron et al., 2025). Perch-style mod-
+els emphasize large-scale pretraining for bird and wildlife
+acoustics and provide strong embeddings for transfer learn-
+ing (Ghani et al., 2023; van Merri¨enboer et al., 2025).
+These audio-only encoders are powerful because they can
+be pretrained on audio corpora without requiring spatiotem-
+poral metadata, and then reused across tasks and regions.
+Our method explicitly preserves this modularity by freezing
+the audio encoder/classifier and incorporating context only
+at the fusion layer.
+2.4. Spatiotemporal Context in Bioacoustics: Priors vs.
+Joint Models
+Contextual information such as location and season is of-
+ten incorporated via ecological priors derived from species
+distribution models (Fink et al., 2013; Madhusudhana et al.,
+2021), including large-scale citizen-science abundance mod-
+els (Fink et al., 2010; 2014; Johnston et al., 2015). Many
+practical bioacoustic systems combine acoustic predictions
+with such priors either heuristically (e.g., post-hoc filtering)
+or by concatenating metadata with learned audio features.
+BirdNET is a widely used system for avian monitoring and
+is commonly deployed with metadata-informed constraints
+(e.g., location/date based filtering or contextual feasibility)
+alongside acoustic classification (Kahl et al., 2021). More
+generally, joint approaches that ingest audio and metadata
+into a single predictor p(y | x, s) are more expressive but
+must learn audio-context interactions directly and require
+paired supervision. As formalized in Appendix A2, such
+joint modeling becomes necessary when conditional depen-
+dence between evidence sources is strong, whereas under
+(approximate) conditional independence log-linear fusion
+is sufficient and avoids the complexity of retraining large
+multimodal architectures.
+Our contribution targets the common regime where con-
+text is informative but heterogeneous: we combine a strong
+pretrained audio classifier with a structured spatiotempo-
+ral prior through a bounded, per-sample gating function,
+improving robustness while preserving audio-only fallback
+and modular pretraining benefits.
+3. Method
+3.1. Notation and Evidence Sources
+We consider a multi-class classification problem with the
+following notation:
+• x ∈X: audio observation, represented as a 3 s log-mel
+spectrogram,
+• s ∈S: spatiotemporal context (latitude, longitude, and
+time),
+• y ∈Y: species label,
+• pθ(y | x): audio-based classifier,
+• pψ(y | s): spatiotemporal (ecological) classifier,
+• pω(y | x, s): fused classifier.
+While our application is bioacoustic classification, the pro-
+posed fusion framework applies generally to any setting
+with multiple conditionally independent evidence sources
+given the target label.
+3.2. Log-Linear Fusion Family
+We adopt a per-sample log-linear fusion model of the form
+log ˜pω(y | x, s) = log pθ(y | x) + ω(x, s) log pψ(y | s),
+(6)
+where ˜pω denotes an unnormalized log-score. The normal-
+ized posterior pω(y | x, s) is obtained by applying a softmax
+over y. The scalar ω(x, s) ≥0 controls the influence of the
+spatiotemporal model on a per-sample basis. We parameter-
+ize ω(x, s) using a bounded transformation with learnable
+scale:
+ω(x, s) = ωmax σ
+ gϕ(u(x, s))
+
++ ϵ,
+3
+
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+where σ(·) denotes the sigmoid function, ϵ > 0 ensures
+numerical stability, and ωmax is a trainable parameter con-
+strained to lie in [ϵ, 10]. This design allows the model to
+adaptively learn the appropriate range of contextual influ-
+ence from data, while preventing degenerate or unbounded
+fusion weights. When ω(x, s) = 0, the fused classifier
+exactly recovers the audio-only model pθ(y | x).
+The fusion is intentionally asymmetric: the audio classifier
+contributes additively in log-space for all samples, whereas
+the contextual model modulates the posterior only when
+deemed informative. This reflects the complementary in-
+ductive biases of the two sources. Audio observations often
+provide high discriminative power but are susceptible to
+confusions between acoustically similar species, while spa-
+tiotemporal models provide coarse but robust constraints by
+encoding ecological feasibility.
+3.3. Adaptive Gating: Reliability and Informativeness
+To adaptively weight contextual evidence, we learn a gating
+function ω(x, s) parameterized by a two-layer MLP. The
+gating network operates on a feature vector u(x, s) that sum-
+marizes uncertainty, confidence, and contextual structure:
+• Audio features:
+faudio(x) =
+
+max
+y
+pθ(y | x), H(pθ(y | x)) , pθ(y1 | x) −pθ(y2 | x)
+
+,
+where y1, y2 denote the top two predicted classes.
+• Spatiotemporal features:
+fprior(s) =
+
+max
+y
+pψ(y | s), H(pψ(y | s)) , pψ(y1 | s) −pψ(y2 | s)
+
+.
+• Metadata features:
+fmeta =
+
+sin
+  2πd
+365
+
+, cos
+  2πd
+365
+
+, sin
+  2πh
+24
+
+, cos
+  2πh
+24
+
+, lat
+90, lon
+180
+
+.
+The concatenated feature vector u(x, s) is passed through a
+two-layer MLP gϕ(u) with ReLU activations and dropout.
+Its output is squashed through a sigmoid and scaled by ωmax,
+yielding ω(x, s) ∈[0, ωmax].
+In addition to the gating parameters, we jointly learn a
+temperature parameter T applied to the audio logits, and
+introduce a small constant ϵ to ensure numerical stability.
+The resulting fused model is
+log ˜p(y | x, s) = log pθ(y | x)
+T
++ ω(x, s) log
+ pψ(y | s) + ϵ
+
+,
+(7)
+and we obtain p(y | x, s) by applying a softmax over y.
+Avoiding Gate Collapse.
+To prevent the adaptive gate
+from collapsing to a trivial solution (e.g., ω(x, s) ≡0), we
+introduce a variance regularization term during training:
+Lvar = −λvar Var(x,s)∼B[ω(x, s)],
+where the variance is computed over each minibatch B. This
+term encourages ω(x, s) to take non-constant values across
+inputs, promoting genuine adaptivity rather than global sup-
+pression of contextual evidence. We set λvar sufficiently
+small and rely on validation-based model selection so that
+the regularizer promotes non-trivial adaptivity without over-
+riding the empirical preference for ω(x, s) ≈0 when con-
+text is helpful.
+3.4. Decision-Theoretic Safety and Robustness
+The proposed fusion framework is designed to be robust
+to misspecified or weak contextual models. A key struc-
+tural property is recoverability: for any input (x, s), setting
+ω(x, s) = 0 exactly recovers the audio-only classifier. Thus,
+the fusion family contains an explicit audio-only fallback
+and does not require reliance on contextual information.
+The influence of the spatiotemporal model is further con-
+trolled by bounding the fusion weight ω(x, s) ≤ωmax,
+which prevents pathological domination of the posterior by
+contextual evidence. Even highly confident but incorrect
+contextual predictions therefore cannot overwhelm strong
+acoustic evidence.
+Adaptive gating enables selective incorporation of context.
+When the spatiotemporal model is uninformative (e.g., near-
+uniform or high entropy), the learned gate is driven toward
+zero. When contextual evidence is informative and consis-
+tent with the audio prediction, increasing ω(x, s) sharpens
+the posterior by suppressing ecologically implausible alter-
+natives.
+From a decision-theoretic perspective, the fused classi-
+fier corresponds to minimizing expected log-loss under a
+bounded, sample-dependent combination of log-likelihood
+terms. Recoverability guarantees that the audio-only hy-
+pothesis remains available within the model class, while
+bounded gating mitigates harmful over-reliance on contex-
+tual evidence in practice. Formal conditions are provided in
+the appendix.
+Finally, freezing the audio classifier throughout fusion train-
+ing preserves the underlying acoustic decision function, en-
+suring that any changes in prediction arise solely from the
+fusion mechanism rather than modification of the audio
+model itself.
+4
+
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+Figure 2. FINCH: adaptive log-linear evidence fusion. (A) An audio encoder and linear head produce an acoustic posterior pθ(y | x)
+from the input spectrogram. (B) A spatiotemporal model maps context s (location and time) to a prior pψ(y | s). (C) A gating network
+computes a nonnegative per-sample weight ω(x, s) from uncertainty and informativeness features, yielding unnormalized log-scores
+log ˜pω(y | x, s) = log pθ(y | x) + ω(x, s) log pψ(y | s), which are normalized by a softmax over y to obtain pω(y | x, s). When
+ω(x, s) = 0, the audio-only model is recovered. (D) Directed acyclic graph illustrating the assumption that x and s are conditionally
+independent given the label y, motivating multiplicative fusion.
+4. Experimental Setup
+4.1. Datasets and Spatiotemporal Prior
+We evaluate our method on two large-scale bioacoustic
+benchmarks:
+the Cornell Birdcall Identification (CBI)
+dataset and BirdSet. CBI is derived from the eBird citizen-
+science corpus and was released as part of a Kaggle compe-
+tition (Howard et al., 2020). The dataset contains short au-
+dio recordings annotated with species labels and associated
+metadata, including latitude, longitude, and date. In total,
+CBI comprises 264 bird species. BirdSet is a large-scale
+benchmark for avian audio classification with standardized
+splits and evaluation protocols (Rauch et al., 2025).
+We incorporate weekly species-level spatiotemporal abun-
+dance priors from the eBird Status and Trends project
+(AdaSTEM) (Fink et al., 2010; 2014; Johnston et al., 2015),
+queried by location and date. Priors are precomputed for
+training efficiency and used directly at inference. Full details
+are provided in Appendix A5.
+Context model per benchmark.
+We use different spa-
+tiotemporal models depending on the dataset. On CBI,
+pψ(y
+|
+s) is given by the external eBird Status &
+Trends (AdaSTEM) prior queried by location and date (Ap-
+pendix A5). On BirdSet, AdaSTEM priors are not available;
+instead, we train a lightweight metadata-only MLP on the
+BirdSet training split to obtain a learned contextual predic-
+tor pψ(y | s) from the same time/location encodings used
+by the gating network (Appendix A1).
+4.2. Audio Encoder and Classification Head
+For audio representation learning, we use the BEATs en-
+coder extracted from the NatureLM-Audio model (Robinson
+et al., 2025). Although NatureLM-Audio is trained end-to-
+end for audio-language tasks, prior work has shown that the
+resulting BEATs encoder achieves state-of-the-art perfor-
+mance on bioacoustic benchmarks when used as a frozen
+feature extractor (Miron et al., 2025).
+All parameters of the audio encoder are frozen throughout
+training. The encoder produces embeddings of dimension
+4096, which are mean-pooled over time and passed to a
+linear classification head
+y = Ah(x) + b,
+(8)
+where A ∈RC×4096 and b ∈RC, with C denoting the
+number of species. For CBI, C = 264.
+5
+
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+4.3. Fusion Models and Training Procedure
+To disentangle representation learning from evidence fusion,
+we adopt a three-stage training procedure in which the audio
+encoder remains frozen throughout.
+Stage 1: Audio-Only Training.
+We first train a linear
+classifier on frozen audio embeddings to obtain an audio-
+only predictor pθ(y | x), establishing a strong acoustic
+baseline.
+Stage 2: Fixed-Weight Fusion.
+We then introduce a fixed
+scalar fusion weight ω ≥0, shared across all samples, to
+combine audio and spatiotemporal evidence. This stage
+learns a globally calibrated fusion baseline.
+Stage 3: Adaptive Gating Fusion.
+Finally, we replace
+the global scalar weight with an adaptive gating network
+(Section 3.3) that predicts a nonnegative, sample-dependent
+fusion weight ω(x, s). The gating network is initialized
+to match the fixed-weight solution and trained to enable
+per-sample adaptivity.
+In Table 4 is a summary of the model components and
+trainable parameters for each training stage.
+5. Results
+5.1. Main Benchmark Results (Aggregate)
+Table 2 summarizes performance on CBI and BirdSet sub-
+sets, comparing FINCH against strong audio-only baselines
+and existing bioacoustic systems. For CBI, FINCH uses an
+external spatiotemporal prior derived from eBird Status &
+Trends (AdaSTEM), whereas for BirdSet it uses a learned
+metadata-only MLP prior trained on the BirdSet training
+split.
+CBI.
+On CBI, FINCH achieves the highest test accuracy
+among all evaluated methods under the linear-probe pro-
+tocol, improving accuracy from 0.806 for the audio-only
+baseline to 0.826 with adaptive fusion. Fixed-weight fusion
+yields only marginal improvement (0.808), indicating that
+globally calibrated fusion is insufficient when contextual
+reliability varies across inputs. The spatiotemporal prior
+performs poorly in isolation (accuracy = 0.030), confirm-
+ing that the observed gains arise from selective integration
+rather than reliance on context alone. Despite introducing
+only a lightweight gating network on top of frozen predic-
+tors, FINCH outperforms both audio-only models and joint
+audio–context systems evaluated under the same protocol.
+BirdSet.
+On BirdSet subsets, FINCH matches or improves
+upon strong audio-only baselines across multiple evaluation
+metrics, including retrieval (AUROC), detection (cmAP),
+and classification (Top-1 accuracy). These results are no-
+table given that the contextual predictor is a simple metadata-
+only MLP trained from limited supervision. While improve-
+ments vary across subsets and metrics, FINCH consistently
+demonstrates that adaptive evidence weighting can leverage
+weak and heterogeneous contextual signals without degrad-
+ing performance relative to audio-only models.
+5.2. Qualitative Analysis: Adaptive Fusion in Practice
+To complement the aggregate results, we present two rep-
+resentative test-time examples in Fig. 3 that illustrate how
+FINCH adaptively balances acoustic and spatiotemporal
+evidence. In the first example, the audio-only classifier as-
+signs low probability to the true species, ranking several
+acoustically similar alternatives higher, while the spatiotem-
+poral model is highly confident and geographically specific.
+FINCH assigns a large gating weight and recovers the cor-
+rect class by amplifying reliable contextual evidence. In
+the second example, neither the acoustic model nor the spa-
+tiotemporal prior is correct in isolation: the prior is diffuse
+across multiple species, and the audio model is confidently
+wrong. Here, adaptive fusion suppresses the acoustically
+dominant but ecologically implausible class, yielding a cor-
+rect posterior prediction despite the failure of both marginal
+predictors. Importantly, the learned gating weights differ
+substantially across the two cases, demonstrating that a
+fixed-weight fusion would be unable to recover both out-
+comes. These examples highlight the role of adaptive relia-
+bility estimation in mediating error trade-offs and align with
+the conditional-independence analysis in Appendix A2.
+6. Discussion
+This work demonstrates that adaptive log-linear fusion of
+approximately conditionally independent evidence sources
+can yield consistent improvements over both standalone
+predictors and fixed-weight fusion schemes. Across large-
+scale bioacoustic benchmarks, FINCH outperforms strong
+audio-only baselines on evaluated subsets, demonstrating
+the effectiveness of adaptive evidence fusion under weak
+and heterogeneous contextual signals.
+These gains arise from selectively integrating contextual ev-
+idence on a per-sample basis rather than enforcing a global
+calibration between modalities.
+A key property of the proposed framework is its decision-
+theoretic safety. Under this formulation, the audio-only clas-
+sifier serves as an explicit fallback within the fusion family.
+When contextual evidence is uninformative or misleading,
+the learned gating function is encouraged to suppress its
+influence, reducing the risk of performance degradation rel-
+ative to the likelihood model. This behavior is reflected
+empirically in both aggregate metrics and qualitative exam-
+6
+
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+Table 1. Main results on CBI and BirdSet subsets. For BirdSet, we report retrieval AUROC (R), detection cmAP (m), and Top-1
+accuracy (A) on four subsets (PER, NES, UHH, SSW), formatted as R / m / A. For CBI, we report Top-1 accuracy and the corresponding
+training regime (“Method”). FINCH uses an external AdaSTEM prior on CBI and a learned metadata-only MLP prior on BirdSet.
+Model
+CBI
+BirdSet (subset metrics: R / m / A)
+Method
+Acc
+PER (R/m/A)
+NES (R/m/A)
+UHH (R/m/A)
+SSW (R/m/A)
+Audio ProtoPNet-5
+–
+–
+0.790 / 0.300 / 0.590
+0.930 / 0.380 / 0.520
+0.870 / 0.310 / 0.490
+0.970 / 0.420 / 0.660
+BirdMAE-L
+–
+–
+0.820 / 0.350 / 0.600
+0.910 / 0.410 / 0.520
+0.820 / 0.300 / 0.420
+0.930 / 0.410 / 0.700
+BirdMAE-L (PP)
+–
+–
+0.820 / 0.310 / 0.590
+0.930 / 0.380 / 0.470
+0.830 / 0.300 / 0.360
+0.940 / 0.380 / 0.620
+Perch 2.0 – Peak-select
+LP
+0.785
+0.802 / 0.255 / 0.528
+0.948 / 0.382 / 0.504
+0.901 / 0.375 / 0.462
+0.974 / 0.455 / 0.782
+Perch 2.0 – Random
+LP
+0.792
+0.786 / 0.232 / 0.535
+0.953 / 0.403 / 0.562
+0.912 / 0.380 / 0.595
+0.973 / 0.469 / 0.789
+Audio-only (pθ(y | x))
+LP
+0.806
+–
+–
+–
+–
+Prior-only (pψ(y | s))
+LP
+0.030
+–
+–
+–
+–
+FINCH (ours)
+LP
+0.826
+0.824 / 0.232 / 0.429
+0.936 / 0.245 / 0.679
+0.927 / 0.536 / 0.747
+0.642 / 0.025 / 0.688
+ples, where adaptive fusion corrects confident audio errors
+when context is reliable and avoids pathological domination
+when it is not.
+The design of the gating mechanism involves several mod-
+eling choices that we treat pragmatically rather than ex-
+haustively. In this work, the gating network operates on
+a compact set of uncertainty- and confidence-based sum-
+mary statistics derived from the predictive distributions. Al-
+ternative feature constructions or more expressive gating
+architectures could be explored, but our results indicate
+that even a lightweight model suffices to capture substantial
+heterogeneity in contextual reliability.
+We also note that the spatiotemporal prior used in this
+study is relatively weak in isolation. With 264 classes, ran-
+dom guessing yields an accuracy of approximately 0.38%,
+whereas the prior achieves roughly 3% accuracy. This gap
+confirms that the observed performance improvements stem
+from selective integration rather than reliance on context
+alone. Stronger ecological models could further amplify
+the benefits of adaptive fusion, but the current results sug-
+gest that even coarse contextual signals can meaningfully
+improve predictions when integrated safely.
+Both the CBI dataset and the spatiotemporal prior are de-
+rived from the broader eBird ecosystem, which raises natural
+questions about potential data entanglement. Importantly,
+the AdaSTEM priors are trained on independent citizen-
+science checklists aggregated over large spatial and tempo-
+ral windows and do not incorporate the audio recordings or
+competition splits used in CBI. Moreover, the prior achieves
+very low standalone accuracy, suggesting that it functions
+as a weak ecological feasibility signal rather than a proxy
+for species labels.
+An important limitation concerns false positives. While con-
+textual information can suppress ecologically implausible
+predictions, the logistic regression–based prior employed
+here interpolates across space and time, assigning nonzero
+probability to regions with sparse or no observations. As a
+result, false positives are reduced but not eliminated, and
+stricter feasibility constraints may trade off robustness under
+dataset shift.
+Finally, the conditional independence assumption underly-
+ing log-linear fusion is inherently strong and does not hold
+exactly in real-world data. We emphasize that conditional
+independence is used here as a modeling motivation rather
+than a strict assumption. Our empirical analysis indicates
+that residual dependence between audio features and spa-
+tiotemporal context exists but is weak and heterogeneous
+across classes. This regime aligns with the intended operat-
+ing conditions of FINCH: independence holds sufficiently
+well to motivate multiplicative fusion, while adaptive gating
+mitigates deviations without requiring explicit modeling of
+audio–context interactions. When conditional dependence
+is strong, fully joint models may be preferable, but they
+incur substantially higher training and data requirements.
+More broadly, FINCH is best viewed as a general fusion
+framework rather than a bioacoustic-specific solution. The
+formulation applies to any setting in which multiple discrim-
+inative predictors provide complementary, approximately
+independent evidence about a shared target, and extending
+this approach to other domains remains a promising direc-
+tion for future work.
+7
+
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+Figure 3. Motivating examples of adaptive fusion at test time. Top: The acoustic model assigns low probability to the true class
+(Grey-crowned Rosy Finch), ranking several acoustically similar species higher. The spatiotemporal model is highly confident and
+geographically specific, and the fused posterior correctly recovers the prior’s top prediction with a high gating weight. Bottom: Neither
+the acoustic model (top prediction: Yellow-bellied Flycatcher) nor the spatiotemporal prior (diffuse over multiple warblers) is correct in
+isolation. However, adaptive fusion suppresses the acoustically dominant but ecologically implausible class, yielding the correct posterior
+prediction (Black-throated Green Warbler). In both cases, the learned gating weight differs substantially across inputs, illustrating why
+fixed-weight fusion would fail to recover these outcomes.
+8
+
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+Impact Statement
+This work contributes a general framework for adaptively
+fusing multiple sources of probabilistic evidence under ap-
+proximate conditional independence. While our experi-
+ments focus on bioacoustic species classification, the pro-
+posed method is applicable to a wide range of domains
+in which heterogeneous predictors provide complementary
+information.
+In ecological monitoring and biodiversity assessment, im-
+proved integration of acoustic and contextual information
+may support more accurate large-scale analysis of species
+distributions and temporal trends. At the same time, predic-
+tions produced by automated systems should not be treated
+as definitive evidence of species presence without appropri-
+ate human validation, particularly in conservation or policy-
+relevant settings.
+More broadly, the proposed fusion mechanism is designed
+to be robust to unreliable or misleading contextual signals
+by bounding their influence and preserving a safe fallback
+to primary evidence. This design choice helps mitigate risks
+associated with overconfident or biased auxiliary models
+when deploying decision-support systems in real-world en-
+vironments.
+References
+Berger, A. L., Della Pietra, S. A., and Della Pietra, V. J. A
+Maximum Entropy Approach to Natural Language Pro-
+cessing. MIT Press, 1996.
+Bishop, C. M. Pattern Recognition and Machine Learning.
+Springer, 2006.
+Chen, S., Wu, Y., Wang, C., Liu, S., Tompkins, D., Chen,
+Z., and Wei, F. Beats: Audio pre-training with acoustic
+tokenizers, 2022. URL https://arxiv.org/abs/
+2212.09058.
+Choudhary, S., Karthik, C. R., Lakshmi, P. S., and Ku-
+mar, S.
+Lean: Light and efficient audio classifica-
+tion network.
+In 2022 IEEE 19th India Council In-
+ternational Conference (INDICON), pp. 1–6. IEEE,
+November 2022.
+doi:
+10.1109/indicon56171.2022.
+10039921. URL http://dx.doi.org/10.1109/
+INDICON56171.2022.10039921.
+Fink, D., Hochachka, W. M., Zuckerberg, B., Winkler,
+D. W., Shaby, B., Munson, M. A., Hooker, G., Riede-
+wald, M., Sheldon, D., and Kelling, S. Spatiotemporal
+exploratory models for broad-scale survey data. Ecologi-
+cal Applications, 20(8):2131–2147, 2010.
+Fink, D., Damoulas, T., Bruns, N. E., La Sorte, F. A.,
+Hochachka, W. M., and Kelling, S. Adaptive spatiotem-
+poral exploratory models reveal complex patterns of bird
+occurrence. Ecological Applications, 23(5):1067–1086,
+2013.
+Fink, D., Damoulas, T., Bruns, N. E., La Sorte, F. A.,
+Hochachka, W. M., Gomes, C. P., and Kelling, S. Crowd-
+sourcing meets ecology: Hemispherewide spatiotempo-
+ral species distribution models.
+AI Magazine, 35(2):
+19–30, 2014. doi: https://doi.org/10.1609/aimag.v35i2.
+2533.
+URL https://onlinelibrary.wiley.
+com/doi/abs/10.1609/aimag.v35i2.2533.
+Gal, Y. and Ghahramani, Z. Dropout as a bayesian approxi-
+mation: Representing model uncertainty in deep learning.
+In International Conference on Machine Learning, 2016.
+Geifman, Y. and El-Yaniv, R. Selective classification for
+deep neural networks. In Advances in Neural Information
+Processing Systems, 2017.
+Genest, C. and Zidek, J. V. Combining probability distribu-
+tions: A critique and an annotated bibliography. Statisti-
+cal Science, 1(1):114–135, 1986.
+Ghani, B., Denton, T., Kahl, S., and Klinck, H. Global
+birdsong embeddings enable superior transfer learning
+for bioacoustic classification. Scientific Reports, 13(1):
+22876, 2023.
+Hagiwara, M. Aves: Animal vocalization encoder based on
+self-supervision, 2022. URL https://arxiv.org/
+abs/2210.14493.
+Hagiwara, M., Hoffman, B., Liu, J.-Y., Cusimano, M., Ef-
+fenberger, F., and Zacarian, K. Beans: The benchmark
+of animal sounds, 2022. URL https://arxiv.org/
+abs/2210.12300.
+Hendrycks, D. and Gimpel, K. A baseline for detecting
+misclassified and out-of-distribution examples in neural
+networks. In International Conference on Learning Rep-
+resentations, 2017.
+Heskes, T. Selecting weighting factors in logarithmic opin-
+ion pools. Advances in Neural Information Processing
+Systems, 10, 1998.
+Hinton, G. E. Training products of experts by minimizing
+contrastive divergence. Neural Computation, 14(8):1771–
+1800, 2002.
+Howard, A., Klinck, H., Dane, S., Kahl, S., tom
+denton, and Denton, T.
+Cornell birdcall identifi-
+cation. https://kaggle.com/competitions/
+birdsong-recognition, 2020. Kaggle.
+Jacobs, R. A., Jordan, M. I., Nowlan, S. J., and Hinton, G. E.
+Adaptive mixtures of local experts. Neural Computation,
+3(1):79–87, 1991.
+9
+
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+Johnston, A., Fink, D., Reynolds, M. D., Hochachka, W. M.,
+Sullivan, B. L., Bruns, N. E., Hallstein, E., Merrifield,
+M. S., Matsumoto, S., and Kelling, S.
+Abundance
+models improve spatial and temporal prioritization of
+conservation resources. Ecological Applications, 25(7):
+1749–1756, 2015. doi: https://doi.org/10.1890/14-1826.1.
+URL https://esajournals.onlinelibrary.
+wiley.com/doi/abs/10.1890/14-1826.1.
+Jordan, M. I. and Jacobs, R. A. Hierarchical mixtures of
+experts and the em algorithm. Neural Computation, 6(2):
+181–214, 1994.
+Kahl, S., Wood, C. M., Eibl, M., and Klinck, H. Birdnet:
+A deep learning solution for avian diversity monitoring.
+Ecological Informatics, 61:101236, 2021.
+Kendall, A. and Gal, Y. What uncertainties do we need in
+bayesian deep learning for computer vision? In Advances
+in Neural Information Processing Systems, 2017.
+Kittler, J., Hatef, M., Duin, R. P. W., and Matas, J. On
+combining classifiers.
+IEEE Transactions on Pattern
+Analysis and Machine Intelligence, 20(3):226–239, 1998.
+Kuncheva, L. I. Combining Pattern Classifiers: Methods
+and Algorithms. Wiley, 2004.
+Lauha, P., Somervuo, P., Lehikoinen, P., Geres, L.,
+Richter, T., Seibold, S., and Ovaskainen, O. Domain-
+specific neural networks improve automated bird sound
+recognition already with small amount of local data.
+Methods in Ecology and Evolution, 13(12):2799–2810,
+October 2022.
+ISSN 2041-210X.
+doi:
+10.1111/
+2041-210x.14003. URL http://dx.doi.org/10.
+1111/2041-210X.14003.
+Madhusudhana, S., Shiu, Y., Klinck, H., Fleishman, E.,
+Liu, X., Nosal, E.-M., Helble, T., Cholewiak, D., Gille-
+spie, D., ˇSirovi´c, A., and Roch, M. A. Improve auto-
+matic detection of animal call sequences with tempo-
+ral context.
+Journal of The Royal Society Interface,
+18(180):20210297, July 2021. ISSN 1742-5662. doi:
+10.1098/rsif.2021.0297. URL http://dx.doi.org/
+10.1098/rsif.2021.0297.
+Miron, M., Robinson, D., Alizadeh, M., Gilsenan-
+McMahon, E., Narula, G., Chemla, E., Cusimano, M., Ef-
+fenberger, F., Hagiwara, M., Hoffman, B., Keen, S., Kim,
+D., Lawton, J., Liu, J.-Y., Raskin, A., Pietquin, O., and
+Geist, M. What matters for bioacoustic encoding, 2025.
+URL https://arxiv.org/abs/2508.11845.
+Nolasco, I., Singh, S., Morfi, V., Lostanlen, V., Strandburg-
+Peshkin, A., Vida˜na-Vila, E., Gill, L., Pamuła, H.,
+Whitehead, H., Kiskin, I., Jensen, F. H., Morford, J.,
+Emmerson, M. G., Versace, E., Grout, E., Liu, H.,
+Ghani, B., and Stowell, D. Learning to detect an an-
+imal sound from five examples. Ecological Informat-
+ics, 77:102258, November 2023. ISSN 1574-9541. doi:
+10.1016/j.ecoinf.2023.102258. URL http://dx.doi.
+org/10.1016/j.ecoinf.2023.102258.
+Rauch, L., Schwinger, R., Wirth, M., Heinrich, R., Huseljic,
+D., Herde, M., Lange, J., Kahl, S., Sick, B., Tomforde,
+S., and Scholz, C. Birdset: A large-scale dataset for
+audio classification in avian bioacoustics, 2025. URL
+https://arxiv.org/abs/2403.10380.
+Robinson, D., Miron, M., Hagiwara, M., Weck, B., Keen,
+S., Alizadeh, M., Narula, G., Geist, M., and Pietquin, O.
+Naturelm-audio: an audio-language foundation model
+for bioacoustics, 2025. URL https://arxiv.org/
+abs/2411.07186.
+van Merri¨enboer, B., Dumoulin, V., Hamer, J., Harrell, L.,
+Burns, A., and Denton, T. Perch 2.0: The bittern lesson
+for bioacoustics, 2025. URL https://arxiv.org/
+abs/2508.04665.
+Wang, H., Xu, Y., Yu, Y., Lin, Y., and Ran, J.
+An ef-
+ficient model for a vast number of bird species identi-
+fication based on acoustic features.
+Animals, 12(18):
+2434, September 2022.
+ISSN 2076-2615.
+doi: 10.
+3390/ani12182434. URL http://dx.doi.org/10.
+3390/ani12182434.
+10
+
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+Table 2. Model results on large-scale bioacoustic classification datasets: BirdSet (Rauch et al., 2025), CBI (Howard et al., 2020). (Method)
+“Pre”: pre-trained classification head, “FT”: full fine-tuning, “LP”: linear probe, “PP”: prototypical probe, “0”: zero-shot. (BirdSet)
+Following along with Perch2.0 (van Merri¨enboer et al., 2025), we report area under ROC (AU-ROC) and class-mean average precision
+(cmAP). (BEANS) Similarly, here we record model accuracy (Acc) and mean AP (mAP). For CBI, FINCH uses the external AdaSTEM
+prior; for BirdSet, FINCH uses a learned metadata-only MLP prior trained on the BirdSet training split. Best results highlighted in bold.
+Second best results underlined.
+BirdSet
+CBI
+Method
+AUROC
+cmAP
+Acc
+Method
+Acc
+Audio ProtoPNet-5
+Pre
+0.896
+0.423
+0.623
+–
+–
+BirdMAE-L
+FT
+0.886
+0.440
+0.601
+–
+–
+BirdMAE-L
+PP
+0.886
+0.409
+0.521
+–
+–
+AVES-Bio
+–
+–
+–
+–
+FT
+0.598
+BirdNet
+–
+–
+–
+–
+FT
+0.702
+BioLingual
+–
+–
+–
+–
+FT
+0.744
+NatureLM-Audio
+–
+–
+–
+–
+0
+0.778
+Perch 2.0 - Peak-select
+Pre
+0.907
+0.430
+0.619
+LP
+0.785
+PP
+0.789
+Perch 2.0 - Random
+Pre
+0.908
+0.431
+0.665
+LP
+0.792
+Audio-only (pθ(y | x))
+FT
+0.833
+0.261
+0.636
+LP
+0.806
+Prior-only (pψ(y | s))
+LP
+0.466
+0.027
+0.461
+LP
+0.030
+FINCH (ours)
+FT
+0.832
+0.260
+0.636
+LP
+0.826
+Appendix A1: Additional Results
+We report additional experiments that complement the main results and further
+characterize the behavior of FINCH under alternative contextual models and fusion strategies.
+BirdSet learned contextual prior. BirdSet does not provide access to an external ecological prior such as eBird Status &
+Trends. For BirdSet experiments, we therefore learn a contextual predictor pψ(y | s) directly from spatiotemporal metadata.
+Specifically, we encode metadata using the same feature representation as in Section 3.3,
+fmeta(s) =
+h
+sin(2πd/365), cos(2πd/365), sin(2πh/24), cos(2πh/24), lat
+90, lon
+180
+i
+,
+and train a small multilayer perceptron (MLP) on the BirdSet training split to predict species labels from fmeta(s) alone.
+After training, this model is treated as the contextual predictor pψ(y | s) and frozen during FINCH fusion training, matching
+the setting of independently-trained experts.
+Table 2 reports results on BirdSet subsets across multiple evaluation metrics. Although the metadata-only prior is weak in
+isolation, adaptive fusion enables FINCH to match or exceed strong audio-only baselines on several subsets, particularly in
+Top-1 accuracy. These results indicate that FINCH remains effective even when contextual information is learned from
+limited supervision and exhibits substantial heterogeneity across datasets.
+Fixed-weight versus adaptive fusion on CBI. We further analyze the effect of fixed fusion weights when combining
+audio predictions with the eBird spatiotemporal prior on a subset of the CBI dataset (Table 3). As the fusion weight ω
+increases, performance degrades monotonically, reflecting the low informativeness and high entropy of the prior when
+applied indiscriminately. In contrast, adaptive fusion substantially outperforms all fixed-weight settings by selectively
+incorporating contextual evidence only when it is informative. This experiment highlights a key failure mode of global
+fusion weights and motivates the use of input-dependent reliability estimation.
+11
+
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+ω
+Acc ↑
+mAP ↑
+0.0
+64.28
+0.333
+0.2
+63.91
+0.328
+0.4
+64.12
+0.332
+0.8
+60.22
+0.325
+1.6
+59.76
+0.316
+2.0
+57.72
+0.311
+Adaptive
+66.10
+0.352
+Table 3. Ablation study for different values of ω. We report accuracy and mAP for models trained on 1000 samples from CBI. Fixed ω
+replaces the gating network in Eq. 6 with a scalar. (Adaptive) learns to dynamically weight feature evidence.
+Appendix A2: Decision-Theoretical Safety of Gated Fusion
+We show that the proposed gated fusion mechanism is
+decision-theoretically safe in the sense of risk containment: it admits the audio-only classifier as a recoverable special case
+and therefore cannot be forced to rely on misleading contextual information.
+Let ℓ(y, ˆp) = −log ˆp(y) denote the log-loss. Consider the unnormalized fused score
+log ˜pω(y | x, s) = log pθ(y | x) + ω(x, s) log pψ(y | s),
+ω(x, s) ≥0,
+and define the normalized predictor pω(y | x, s) by applying a softmax over y.
+The key structural property of this formulation is recoverability: for any input (x, s),
+ω(x, s) = 0
+=⇒
+pω(y | x, s) = pθ(y | x).
+Thus, the audio-only classifier is always contained within the hypothesis class induced by gated fusion.
+As a consequence, for any data-generating distribution and any loss function evaluated pointwise in (x, s), the optimal
+choice of ω(x, s) satisfies
+inf
+ω(x,s)≥0 E
+
+ℓ
+ y, pω(· | x, s)
+
+≤E
+
+ℓ
+ y, pθ(· | x)
+
+.
+In particular, whenever the spatiotemporal predictor pψ(y | s) is uninformative or misleading for a given input, the choice
+ω(x, s) = 0 achieves the same expected risk as the audio-only model.
+Conversely, if contextual information provides non-negative information gain for a subset of inputs, then there exist inputs
+(x, s) for which ω(x, s) > 0 strictly improves expected log-loss relative to the audio-only baseline. The adaptive gating
+network learns a data-driven approximation to this selective incorporation rule.
+Thus, adaptive gated fusion strictly generalizes both audio-only and fixed-weight fusion while preserving a safe fallback.
+Appendix A3: When Log-Linear Fusion is Exact (Conditional Independence Case)
+We justify the log-linear fusion
+rule and clarify its relationship to joint audio–context models. This analysis is intended to clarify the conditions under which
+log-linear fusion is theoretically exact; it does not assume that these conditions hold universally in practice.
+Assume that audio features x and spatiotemporal context s are conditionally independent given the class label y, i.e.,
+p(x, s | y) = p(x | y) p(s | y).
+By Bayes’ rule, the posterior satisfies
+p(y | x, s) = p(x, s | y) p(y)
+p(x, s)
+∝p(x | y) p(s | y) p(y).
+Rewriting this expression in terms of the available predictors,
+p(y | x) = p(x | y)p(y)
+p(x)
+,
+p(y | s) = p(s | y)p(y)
+p(s)
+,
+12
+
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+we obtain
+p(y | x, s) ∝p(y | x) p(y | s)
+p(y)
+.
+Equivalently, up to an additive constant independent of y,
+log p(y | x, s) = log p(y | x) + log p(y | s) −log p(y) + const.
+Effect of Conditional Dependence. If conditional independence is violated, the joint distribution can be written as
+p(x, s | y) = p(x | y) p(s | y) κy(x, s),
+κy(x, s) :=
+p(x, s | y)
+p(x | y)p(s | y).
+The posterior becomes
+p(y | x, s) ∝p(y | x) p(y | s)
+p(y)
+κy(x, s),
+or, in log form (up to a class-independent constant),
+log p(y | x, s) = log p(y | x) + log p(y | s) −log p(y) + log κy(x, s) + const.
+Crucially, log κy(x, s) depends explicitly on y and therefore cannot, in general, be represented by a class-agnostic scalar
+reweighting of log p(y | s).
+Implications for Model Design. When conditional dependence is strong, accurately capturing κy(x, s) requires a joint
+predictor that ingests (x, s) together. Such joint models are strictly more expressive but require paired supervision and
+explicit learning of audio–context interactions.
+In contrast, when conditional independence approximately holds, log-linear fusion of independently trained predictors is
+sufficient and (up to normalization) optimal. FINCH is motivated by this regime: it preserves the posterior form implied by
+independence while introducing adaptive, reliability-aware weighting to account for model mismatch and heterogeneous
+uncertainty.
+Appendix A4: Empirical Test of Conditional Dependence
+The theoretical justification above relies on a conditional
+independence assumption. We now empirically assess the extent to which this assumption holds in practice.
+Fixing a class label y, we test whether audio embeddings e(x) contain information about spatiotemporal context statistics s
+by training a linear predictor
+ˆs = f(e(x))
+to predict spatiotemporal priors from audio embeddings alone. As a baseline, we compare against a constant predictor that
+always outputs the mean prior.
+Across 43 species with sufficient samples, the linear predictor does not consistently outperform the baseline on held-out
+data. While a permutation test indicates that the observed differences are unlikely to arise purely by chance (p < 10−3),
+effect sizes are small (Cohen’s d = −0.261), and explained variance is negligible or negative (mean R2 = −0.34). Only
+16.3% of classes exhibit positive improvement over the baseline, and fewer than 12% achieve R2 > 0.05.
+Taken together, these results suggest that audio and spatiotemporal information are not strictly conditionally independent,
+but their dependence is weak and heterogeneous across classes. These findings support the use of adaptive gating: while
+conditional independence is not exact, deviations are sufficiently weak and variable that a bounded, sample-dependent fusion
+mechanism is preferable to fixed or fully joint models.
+Appendix A5: Spatiotemporal Prior Details
+The spatiotemporal prior is based on weekly relative abundance estimates
+produced by the eBird Status and Trends project. These estimates are generated using Adaptive Spatio-Temporal Exploratory
+Models (AdaSTEM), an ensemble of localized regression models designed to account for heterogeneous sampling effort and
+detection bias in large-scale citizen-science data (Fink et al., 2010; 2014; Johnston et al., 2015). The abundance maps are
+provided on a global 27 km × 27 km grid at weekly resolution. Each abundance value represents the expected number of
+13
+
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Adaptive Evidence Weighting for Audio-Spatiotemporal Fusion
+individuals detected by an expert observer at a specific location and time. Raw values are stored as unsigned integers in the
+range [0, 255] and linearly rescaled to [0, 1].
+To avoid introducing a training-time bottleneck, we precompute a spatiotemporal prior lookup table for all training
+samples. For each audio clip with metadata (lati, loni, datei), we query the corresponding weekly abundance prior
+p(yj | lati, loni, datei) for all species yj. The resulting matrix of shape (Nsamples, Nspecies) is stored in an HDF5 file and
+indexed by sample ID. During training, batches retrieve prior values via indexed lookup, yielding an average access time of
+0.22 µs, compared to approximately 0.01s for on-the-fly querying. At inference time, priors are queried directly from the
+abundance maps, as latency is not performance-critical.
+Appendix A6: Training Configuration and Optimization Details
+All training stages share the same optimization and
+training configuration unless otherwise noted. Optimization is performed using the AdamW optimizer with learning rate
+10−3 and weight decay 10−2. Models are trained for 30 epochs with a batch size of 96.
+We construct a stratified validation split comprising 10% of the training data, stratified by species label. Model selection is
+performed based on validation accuracy.
+A cosine learning rate schedule with linear warmup over the first 10% of training steps is used. Training is performed on
+GPU using mixed-precision arithmetic (bfloat16).
+Checkpoints are saved after every epoch. For each training stage, the checkpoint achieving the highest validation accuracy is
+retained for evaluation.
+Stage 2 is initialized from the best-performing Stage 1 checkpoint, and Stage 3 is initialized from the corresponding Stage 2
+checkpoint. The adaptive gating network is initialized such that its output matches the fixed scalar fusion weight learned in
+Stage 2. This staged initialization stabilizes training.
+Throughout all stages, the audio encoder remains frozen. In Stages 2 and 3, the audio classification head is also frozen, and
+only fusion parameters are updated.
+All experiments are implemented in PyTorch. Random seeds are fixed across runs to ensure reproducibility. Unless explicitly
+stated, no additional data augmentation is applied beyond that inherent to the underlying audio encoder.
+Table 4. Summary of fusion model architectures and training configuration. Parameter counts assume C = 264 species.
+Component
+Stage A
+Stage B
+Audio Encoder
+Frozen
+Frozen
+Encoder Architecture
+BEATs (NatureLM-Audio)
+Encoder Output Dim.
+4096
+Audio Classifier
+4096 × C + C
+4096 × C + C
+Temperature Parameter
+1
+1
+Epsilon Parameter
+1
+1
+Scalar Weight
+1
+–
+Gating Network
+–
+2,945
+Total Trainable Params
+≈1.08M
+≈1.09M
+Optimizer
+AdamW
+Learning Rate
+1 × 10−3
+Batch Size
+96
+Epochs
+30
+LR Schedule
+Cosine w/ warmup
+Precision
+bfloat16
+14
