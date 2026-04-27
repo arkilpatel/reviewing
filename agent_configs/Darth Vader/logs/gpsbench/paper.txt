@@ -1,0 +1,4872 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Anonymous Authors1
+Abstract
+Large Language Models (LLMs) are increasingly
+deployed in applications that interact with the
+physical world, such as navigation, robotics, or
+mapping, making robust geospatial reasoning a
+critical capability. Despite that, LLMs’ ability
+to reason about GPS coordinates and real-world
+geography remains underexplored.
+We intro-
+duce GPSBENCH, a dataset of 57,800 samples
+across 17 tasks for evaluating geospatial reason-
+ing in LLMs, spanning geometric coordinate op-
+erations (e.g., distance and bearing computation)
+and reasoning that integrates coordinates with
+world knowledge. Focusing on intrinsic model
+capabilities rather than tool use, we evaluate 14
+state-of-the-art LLMs and find that GPS reason-
+ing remains challenging, with substantial vari-
+ation across tasks: models are generally more
+reliable at real-world geographic reasoning than
+at geometric computations. Geographic knowl-
+edge degrades hierarchically, with strong country-
+level performance but weak city-level localization,
+while robustness to coordinate noise suggests gen-
+uine coordinate understanding rather than mem-
+orization. We further show that GPS-coordinate
+augmentation can improve in downstream geospa-
+tial tasks, and that finetuning induces trade-offs
+between gains in geometric computation and
+degradation in world knowledge. Our dataset
+and reproducible code are available at https:
+//github.com/joey234/gpsbench/
+1. Introduction
+Large Language Models (LLMs) have achieved strong per-
+formance across diverse reasoning tasks, from mathematical
+problem-solving (Cobbe et al., 2021; Hendrycks et al., 2021)
+to coding (Chen et al., 2021). As LLMs are increasingly in-
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+tegrated into location-aware applications such as navigation
+assistants, geographic information systems, travel planning,
+and emergency response, understanding their capabilities
+in Global Positioning System (GPS) coordinates and spa-
+tial reasoning becomes essential. Consider the range of
+geographic queries users might pose: “How far is it from
+Tokyo to Sydney?”, “What city is at coordinates 48.86°N
+and 2.35°E?”, or “Is Portland north or south of Toronto?”.
+These questions require not just factual recall, but genuine
+spatial reasoning over the Earth’s coordinate system such as
+computing great-circle distances, understanding coordinate-
+to-place mappings, and reasoning about relative positions
+across the globe.
+Despite growing interest in LLM spatial reasoning (Liu
+et al., 2023; Chen et al., 2024; Yamada et al., 2024), existing
+benchmarks focus primarily on small-scale perceptual tasks
+(e.g., “is the cup to the left of the book?”) or visual spatial
+relations in images and 3D scenes (Kamath et al., 2023;
+Marcu et al., 2024). These evaluations largely focus on
+small-scale, tabletop, or highly-controlled environments
+(e.g., rooms, grids, or toy maps), where spatial extent is
+limited and uncertainty is minimal. As a result, they provide
+limited insight into LLMs’ ability to acquire and manipulate
+survey knowledge in realistic geographic settings, where
+spatial reasoning must operate over continuous space, noisy
+observations, spherical geometry, and complex real-world
+constraints. This hypothesis is further supported by Yamada
+et al. (2024) and Yang et al. (2024), revealing that models
+achieve reasonable local spatial awareness but struggle with
+global spatial representations.
+On the other hand, geographic spatial reasoning involves
+dealing with global-scale GPS coordinates, distances span-
+ning thousands of kilometers, and requiring integration of
+world knowledge about countries, cities, and terrains, which
+remains underexplored. This gap is significant: geographic
+reasoning differs fundamentally from tabletop spatial rea-
+soning in scale (meters vs. thousands of kilometers), ge-
+ometry (planar vs. spherical), and knowledge requirements
+(perceptual vs. world knowledge). A model that correctly
+reasons about object positions on a table may struggle when
+it is asked to compute distances or identify the location of a
+given GPS coordinate.
+To address this gap, we propose GPSBENCH, the first
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+comprehensive benchmark for evaluating GPS and location-
+based reasoning in LLMs. GPSBENCH comprises of 57,800
+samples across 17 tasks organized into two tracks: geomet-
+ric coordinate operations (such as distance, bearing, coor-
+dinate transformations, and spherical geometry) requiring
+mathematical reasoning but no world knowledge, and ap-
+plied geographic reasoning (such as coordinate-to-place
+mapping, spatial relationships, and pattern recognition) re-
+quiring integration with real-world knowledge. Tasks are
+grounded in the landmark-route-survey framework from
+spatial cognition (Siegel & White, 1975). All samples are
+derived from the GeoNames database (GeoNames, 2026)
+covering 18,196 locations across six continents, with ground
+truth computed via geodetic formulae or derived from au-
+thoritative databases. Unlike tool-augmented benchmarks
+(Krechetova & Kochedykov, 2025; Zhang et al., 2025),
+GPSBENCH measures intrinsic capabilities: what LLMs
+know and can compute from parameters alone, and which
+matters for latency-sensitive, offline, or privacy-restricted
+deployments. It also reveals training data biases that may
+be overlooked by tool use.
+Our contributions are:
+• GPSBENCH: A large-scale benchmark of 57,800 sam-
+ples across 17 tasks organized into Pure GPS and Ap-
+plied tracks, with tasks grounded in the landmark-route-
+survey framework from spatial cognition (Siegel &
+White, 1975).
+• A systematic evaluation of 14 state-of-the-art LLMs,
+analyzing performance across task types, model fami-
+lies and sizes, and geographic granularities. We show
+that GPS reasoning varies strongly across tasks: mod-
+els perform reasonably on basic geometric operations
+but struggle with complex spherical geometry and fine-
+grained place association. Geographic knowledge de-
+grades hierarchically, with strong country-level identi-
+fication but weak city-level localization, while robust-
+ness to coordinate noise suggests genuine coordinate
+understanding rather than memorization. We further
+demonstrate that augmenting downstream benchmarks
+with GPS coordinates yields substantial improvements,
+and that finetuning introduces trade-offs, improving
+geometric computation at the expense of real-world
+geographic knowledge.
+2. Related work
+2.1. Spatial Cognition Framework
+The psychology of spatial knowledge acquisition provides
+a foundational landmark-route-survey taxonomy for under-
+standing geographic reasoning (Siegel & White, 1975). This
+framework distinguishes three hierarchical but complemen-
+tary forms of spatial knowledge. Landmark knowledge
+involves the recognition and recall of salient environmental
+features (e.g., buildings, intersections, natural features) with-
+out explicit encoding of metric distances or spatial relations.
+Route knowledge captures ordered sequences of actions or
+paths that connect landmarks, typically represented as pro-
+cedural and egocentric knowledge tied to a specific traversal
+experience (e.g., turn left at the church, then walk straight
+to the bridge). Survey knowledge represents an allocentric,
+map-like understanding of space, encoding global layout,
+metric distances, and directional relationships, thereby en-
+abling flexible reasoning such as shortcut discovery, detour
+planning, and novel route inference. These knowledge types
+contribute to geospatial reasoning capabilities and are ac-
+quired through different learning modalities and exhibit
+distinct strengths and limitations. For example, Thorndyke
+& Hayes-Roth (1982) demonstrate that navigation-based
+learning preferentially supports route knowledge, whereas
+map-based learning facilitates survey knowledge. We adopt
+this framework as a foundation for building a comprehensive
+geospatial understanding benchmark.
+2.2. Geospatial Benchmarks
+Evaluating LLMs on geospatial tasks has emerged as an
+active research area, with benchmarks spanning geographic
+knowledge assessment, spatial reasoning, coordinate-based
+computation, and tool-augmented workflows.
+Geographic knowledge and bias
+Several benchmarks
+evaluate LLM factual geographic knowledge.
+World-
+Bench (Moayeri et al., 2024) tests country-level indica-
+tor (i.e., statistics such as population or carbon dioxide
+emissions) recall, revealing 1.5× higher error rates for Sub-
+Saharan Africa versus North America. Manvi et al. (2024a)
+demonstrate systematic biases against low-socioeconomic
+regions. GeoLLM (Manvi et al., 2024b) shows that LLMs
+embed geospatial knowledge which is extractable through
+prompting with OpenStreetMap data. GeoGLUE (Li et al.,
+2023) evaluates geographic language understanding across
+textual similarity and entity alignment tasks.
+Spatial reasoning
+Spatial reasoning has received increas-
+ing attention alongside broader interest in general-purpose
+reasoning for LLMs. Early benchmarks focus on abstract,
+grid-based, or shape-centric reasoning. Yamada et al. (2024)
+show that LLMs possess basic understanding of common
+shapes such as square but struggle with complex shapes
+such as hexagon. SpatialEval (Wang et al., 2024) evalu-
+ates multimodal spatial understanding across navigation,
+grid reasoning, and map interpretation tasks, revealing sub-
+stantial performance degradation as spatial complexity in-
+creases, while SpatialBench (Xu et al., 2025) focuses on
+3D and metric spatial reasoning in vision-language models,
+exposing persistent failures in depth, proximity, and relative
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+positioning. More aligned with geographical reasoning, Ge-
+oGramBench (Luo et al., 2025) tests translation of geometry
+code to spatial representations, with frontier models achiev-
+ing <50% accuracy over problems of the higher abstraction
+levels. MapEval (Dihan et al., 2025) assesses map-based
+reasoning across 700 questions, where no model surpasses
+67% on spatial relationships. For geoparsing, benchmarks
+such as LGL (Lieberman et al., 2010) and WikToR (Gritta
+et al., 2018) evaluate text-to-coordinate mapping.
+Tool-use
+A separate line of work evaluates LLMs’ abil-
+ity to orchestrate external Geographic Information System
+(GIS) tools. GeoBenchX (Krechetova & Kochedykov, 2025)
+benchmarks over 200 multi-step tasks involving 23 GIS
+tools, while GeoAnalystBench (Zhang et al., 2025) evalu-
+ates Python code generation for spatial analysis workflows.
+Systems such as LLM-Geo (Li & Ning, 2023) and Ge-
+oGPT (Zhang et al., 2024) demonstrate end-to-end geospa-
+tial problem solving through tool integration.
+GPSBENCH differs from existing benchmarks in three key
+aspects. First, unlike geographic knowledge benchmarks
+that test factual recall (e.g., country statistics or place at-
+tributes), GPSBENCH requires coordinate-level reasoning,
+computing distances, bearings, and spatial relationships
+from raw GPS coordinates. Second, unlike tool-augmented
+benchmarks that evaluate API orchestration, GPSBENCH
+tests intrinsic capabilities encoded in model parameters, re-
+vealing training gaps that external tools would mask. Third,
+unlike mathematical reasoning benchmarks focused on pla-
+nar geometry, GPSBENCH uniquely tests geodetic compu-
+tation, e.g. Haversine distances, great-circle interpolation,
+spherical polygon areas, formulae essential for geographic
+applications but absent from existing benchmarks.
+3. GPSBENCH
+GPSBENCH comprises 57,800 samples across 17 tasks,
+organized into two tracks: the Pure GPS Track (9 tasks) tests
+coordinate operations, and the Applied Track (8 tasks) tests
+geographic knowledge. Each task contains 3,400 samples
+split into train (60%), dev (10%), and test (30%) sets.
+3.1. Benchmark Design
+GPSBENCH evaluates intrinsic geospatial knowledge, with-
+out relying on any external tools or resources. This distinc-
+tion matters because: (1) we intend to test models’ internal
+representations of geospatial knowledge to reveal patterns
+and biases that otherwise would be masked through tool-use;
+and (2) many use-cases require low latency, offline access,
+or privacy that invalidate tool use.
+Following the landmark-route-survey framework from spa-
+tial cognition research (Siegel & White, 1975), we organize
+tasks by the type of spatial representation required:
+• Landmark (L): Recognizing individual locations from
+coordinates, the most basic spatial representation, requir-
+ing no metric relations between places.
+• Route (R): Sequential, procedural understanding of paths
+connecting locations, egocentric representations learned
+through navigation.
+• Survey (S): Allocentric, map-like representations with
+metric information enabling global spatial reasoning
+across locations.
+• Geometric (G): Pure mathematical operations on coor-
+dinates requiring no geographic knowledge, a control
+condition isolating computational from world-knowledge
+capabilities.
+Table 1 summarizes the tasks included with their spatial
+knowledge types.
+3.2. Data Generation
+Data source
+We leverage the GeoName database (GeoN-
+ames, 2026), containing 32,709 cities with populations ex-
+ceeding 15,000. Each entry provides WGS84 coordinates,
+city/country identifiers, population statistics, and alternate
+name spellings (3–5 variants per city), ensuring global cov-
+erage across 200+ countries. Figure 1 shows the geographic
+distribution of 18,196 unique locations used in GPSBENCH.
+Our location sampling strategies are detailed in Appendix A.
+GPSBench Geographic Coverage
+18,196 Unique Locations from GeoNames
+Cities by Continent
+Europe (4,215)
+Asia (6,136)
+South America (2,533)
+North America (3,048)
+Africa (1,706)
+Oceania (495)
+Other (63)
+Figure 1. Geographic coverage of GPSBENCH. 18,196 unique
+locations from GeoNames span six continents: Asia (33.7%), Eu-
+rope (23.2%), North America (16.8%), South America (13.9%),
+Africa (9.4%), and Oceania (2.7%).
+Sample generation pipeline
+Each task follows a struc-
+tured generation pipeline: (1) city selection using task-
+appropriate sampling strategy (see Appendix A), (2) input
+construction by applying task-specific transformations, and
+(3) ground truth computation using geodetic formulae or
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Table 1. Summary of GPSBENCH tasks organized by spatial knowledge type following the landmark-route-survey framework. Types:
+L=Landmark, R=Route, S=Survey, G=Geometric. Samples are shorten for brevity.
+Track
+Task
+Sample
+Type
+Pure GPS
+Format Conversion
+Convert 32°3’9.0”S, 115°53’16.2”E to decimal →-32.0525,
+115.8878
+G
+Coordinate Transformation
+Transform (19.37, 95.22) to Universal Transverse Mercator
+(UTM) →Zone 46N, 732668E, 2143080N
+G
+Distance Calculation
+Distance from (-2.13, -47.56) to (-22.63, -47.05)? →2,280 km
+G, S
+Bearing Computation
+Bearing from (49.28, -123.13) to (5.89, 5.68)? →55.2° (NE)
+G, S
+Coordinate Interpolation
+50% along (29.93, 117.95) to (-6.99, 106.55)? →(11.53, 111.86)
+G, R
+Area & Perimeter
+Area of polygon [(-2.85, 33.08), (21.15, 72.96), (29.35, 105.89)]?
+→30,829 km²
+G, S
+Bounding Box
+Center of [(-2.85, 33.08), (21.15, 72.96), (53.60, 24.75), ...]? →
+(7.82, 52.08)
+G, S
+Route Geometry
+Simplify 12-point path using the Ramer–Douglas–Peucker algo-
+rithm (ϵ=500m) →keep [0,1,4,5,6,7,11]
+G, R
+Relative Position
+Direction from (40.25, -8.39) to (0.06, 34.29)? →West
+G, S
+Applied
+Place Association
+City at (41.12, -8.65)? →Canidelo, Vila Nova de Gaia, Portugal
+L
+Name Disambiguation
+4 cities named “Naw¯abganj”. Which at (26.93, 81.20)? →India
+L
+Relative Position
+Mikkeli to Sosnovka? →South
+L, S
+Proximity
+Closest to Titirangi: Elsdorf, Itatim, Murray, Cianjur? →Murray
+L, S
+Route Analysis
+Canberra on Gr¨obenzell→Dois Irm˜aos? →No
+L, R
+Spatial Patterns
+Outlier (by distance): Mornington, Ringwood, Caroline Springs,
+Ballajura, Sonneberg? →Sonneberg
+L, S
+Boundary Analysis
+Group by continent: Corroios, Wimbledon, Toms River, Santa
+Ana →EU: Corroios, Wimbledon, NA: Toms River, Santa Ana
+L, S
+Terrain Classification
+Terrain at (-27.47, 153.03)? →Coastal
+L
+database lookups. For Pure GPS tasks, we select cities glob-
+ally, extract coordinates, and compute answers programmat-
+ically (e.g., Haversine distance or spherical bearing). For
+Applied tasks, we select cities based on task constraints (e.g.,
+same-continent pairs for Relative Position, cities with du-
+plicate names for Name Disambiguation), then test whether
+models can recover geographic facts from coordinates alone.
+All generation uses a fixed random seed for reproducibility.
+See Appendix B for per-task generation details.
+Ground truth computation
+All ground-truth values use
+standard geodetic formulae on the WGS84 ellipsoid approx-
+imated as a sphere (R = 6371 km): Haversine for distance,
+forward azimuth for bearing, spherical linear interpolation
+for intermediate points, and L’Huilier’s theorem for poly-
+gon area. Coordinate transformations use Universal Trans-
+verse Mercator (UTM) and Web Mercator (EPSG:3857).
+The full formulae are included in Appendix C. Other non-
+computation tasks’ ground truth are derived from GeoN-
+ames database, such as city names at sampled coordinates,
+country/continent metadata.
+4. Experiments
+4.1. Experiment setting
+Models evaluated
+We evaluate 14 state-of-the-art LLMs
+spanning both proprietary and open-weight families:
+GPT (GPT-5.1,
+GPT-5-mini,
+GPT-5-nano,
+GPT-4.1,
+GPT-4.1-mini) (OpenAI, 2025b;a), Gemini (Gemini-2.5-
+Flash, Gemini-2.5-Pro) (Gemini Team, Google, 2025),
+Claude (Claude-4.5-Haiku) (Anthropic, 2025), Qwen3
+(235B, 30B, 14B, and 8B) (Yang et al., 2025), and Mistral
+2 (Small and Large) (Mistral AI Team, 2024). Appendix D
+provides additional details of these models.
+Prompt format
+All models are evaluated in a zero-shot
+setting using standardized prompts. The system prompt
+provides task-level context, while the user prompt contains
+the specific query. To ensure fair and comparable evaluation
+across models, we do not use chain-of-thought prompting or
+few-shot examples. Task samples and full prompt templates
+for the tasks are provided in Appendix E.
+Metrics
+For multiple-choice tasks, we report standard
+accuracy. For numerical computation tasks, we compute
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+the Mean Absolute Percentage Error (MAPE) between
+predicted and ground-truth values and report its comple-
+ment, 1 −MAPE, to align the directionality of scores with
+accuracy-based metrics, such that higher values consistently
+indicate better performance. This normalization allows di-
+rect aggregation and comparison across task types.
+4.2. Main Results
+We evaluate 14 state-of-the-art LLMs on GPSBENCH across
+two tracks: the Applied Track (8 tasks testing real-world
+geographic reasoning) and the Pure GPS Track (9 tasks
+testing coordinate manipulation).
+4.2.1. RQ1: HOW WELL DO LLMS PERFORM ON GPS
+REASONING TASKS?
+45
+50
+55
+60
+65
+70
+75
+80
+Applied Track Accuracy (%)
+40
+50
+60
+70
+80
+90
+Pure GPS Track Accuracy (%)
+y=x
+GPT-5.1
+GPT-5-mini
+GPT-5-nano
+GPT-4.1
+GPT-4.1-mini
+Qwen3-14b
+Qwen3-8b
+Claude-haiku-4.5
+Gemini-2.5-flash
+Gemini-2.5-pro
+Mistral-large
+Mistral-small-24b-instruct
+Qwen3-235b-a22b-2507
+Qwen3-30b-a3b-instruct-2507
+GPSBench: Applied vs Pure GPS Track Performance
+Model Family
+GPT
+Gemini
+Claude
+Mistral
+Qwen
+Figure 2. Applied vs Pure GPS Track performance. Most models
+cluster below the diagonal (favoring Applied), while GPT-5.1 and
+Gemini-2.5-Pro uniquely excel at Pure GPS computation.
+Overall performance
+As shown in Figure 2, GPT-5-mini
+achieves the highest Applied Track accuracy (74.1%), fol-
+lowed by Gemini-2.5-Flash (73.4%) and GPT-4.1 (73.3%).
+On the Pure GPS Track, GPT-5.1 leads with 84.4%, fol-
+lowed by Gemini-2.5-Pro (76.7%). The overall mean across
+14 models is 67.7% for Applied and 57.8% for Pure GPS,
+with a +9.9% gap favoring Applied tasks (see Appendix F.1
+for full results).
+Model family patterns
+Model families exhibit distinct
+capability profiles. GPT and Gemini models exhibit rel-
+atively balanced performance, with small Applied-Pure
+gaps (4–5%). In contrast, Mistral, Claude, and Qwen mod-
+els show substantially larger gaps (13–18%), performing
+well on world-knowledge-driven tasks but struggling with
+coordinate-level computation. Notably, only two models
+exceed the diagonal in Figure 2: GPT-5.1 (Pure GPS >
+Applied by 12.4%) and Gemini-2.5-Pro (by 5.0%). This
+pattern suggests that strong Pure GPS reasoning is not ubiq-
+uitous, but concentrated in flagship models with advanced
+mathematical capabilities.
+GPT-5.1 achieves 84.4% Pure GPS accuracy, surpassing
+GPT-5-mini (73.0%) by 11.4%. It dominates 5 of 9 Pure
+GPS tasks: Distance (99.9%), Bearing (99.9%), Route Ge-
+ometry (96.3%), Coordinate Transformation (90.8%), and
+Interpolation (71.4%). In contrast, Gemini-2.5-Pro leads
+on Applied tasks requiring world knowledge: Spatial Pat-
+terns (95.4%) and Place Association (23.0%, the highest
+among all models). This indicates that GPS reasoning de-
+composes into two partially independent capabilities. See
+Appendix F.2 for additional discussion on performance pat-
+terns of different model families.
+Task difficulty
+Figure 3 reveals that task difficulty corre-
+lates with knowledge type rather than computational com-
+plexity. Tasks cluster into three tiers. Solved tasks (>95%)
+include Name Disambiguation and Bounding Box, which
+can be addressed through simple heuristics such as coarse
+spatial cues. Brittle tasks (25–95%) such as Distance Cal-
+culation, Coordinate Transformation, and Spatial Patterns
+show high variance across models, indicating that these
+capabilities are unevenly distributed; some models excel
+while others fail entirely. Unsolved tasks (<25%) include
+Place Association, Polygon Area, and Coordinate Interpo-
+lation. Place Association requires dense coordinate-to-city
+mappings absent from training data, while Polygon Area
+and Interpolation demand multi-step spherical geometry rea-
+soning. Notably, Polygon Area fails despite being purely
+mathematical, revealing that models have not learned geode-
+tic formulae (see Appendix F.3 for per-model breakdown).
+Qualitative analysis of model outputs indicates that fail-
+ures arise from two primary sources: knowledge gaps (e.g.,
+incorrect coordinate-to-place mappings, often defaulting
+to globally prominent cities within the correct country or
+region), computational limitations (e.g., incorrect formu-
+lae or error accumulation in multi-step calculations), and
+geographic bias, where models default to well-known loca-
+tions when city names are ambiguous (e.g., assuming “Rye”
+refers to the English town rather than Rye, Australia, caus-
+ing the model to misidentify the geographic outlier without
+doing the actual calculation). Representative error cases are
+discussed in Appendix F.4.
+Regional bias
+We further analyze performance across
+geographic subregions (Figure 4). Averaged across all 17
+tasks, overall accuracy varies by 10.6% between subregions,
+from 66.4% in North America to 55.8% in East Asia. The
+Applied Track exhibits substantially larger regional vari-
+ation (16.2%), with North America (75.8%) and Oceania
+(74.6%) outperforming East Asia (59.6%) and the Middle
+East (61.8%). For Place Association in particular, dispari-
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Rel.
+Position
+Route
+Geom.
+BearingCoord.
+Trans.
+BoundaryTerrain Interp. Spatial
+Pat.
+Place
+Assoc.
+Route
+Analysis
+Format
+Conv.
+Proximity Rel.
+Position
+DistancePolygon
+Area
+Bounding
+Box
+Name
+Disamb.
+Task
+0
+20
+40
+60
+80
+100
+Accuracy (%)
+Solved (>95%)
+Unsolved (<25%)
+Task Difficulty: Mean Accuracy Across 14 LLMs (±1 std)
+Applied Track
+Pure GPS Track
+Figure 3. Mean accuracy across all models per task, sorted by
+difficulty. Error bars show ±1 standard deviation. Tasks cluster
+into solved (>95%), brittle (25–95%), and unsolved (<25%) tiers.
+ties are stark: North America (14.7%) and Western Europe
+(11.0%) outperform South Asia (2.6%) and East Asia (3.8%)
+by factors of 4–6×.
+In contrast, Pure GPS computation tasks exhibit minimal
+regional bias. Performance on Distance Calculation (74.6–
+83.3%), Bounding Box (95.2–98.5%), and Format Conver-
+sion (97.4–100%) varies by less than 9% across all subre-
+gions. This divergence confirms that geographic bias primar-
+ily arises from uneven coordinate-to-place representations
+in training data rather than from limitations in geometric
+computation. This implies that location-aware applications
+that rely on world knowledge are likely to underperform in
+underrepresented regions, whereas purely geometric GPS
+reasoning remains comparatively robust worldwide. De-
+tailed regional results are provided in Appendix F.5.
+North America
+South America
+Western Europe
+Eastern Europe
+East Asia
+South Asia
+Southeast Asia
+Middle East
+Africa
+Oceania
+Subregion
+0
+20
+40
+60
+80
+Accuracy (%)
+75
+70
+64
+59
+58
+59
+62
+58
+62
+74
+49
+51
+55
+52
+52
+53
+54
+59
+65
+36
+65
+60
+59
+55
+55
+56
+58
+59
+64
+58
+Regional Performance Across GPSBench by Subregion (14 LLMs Aggregated)
+Applied Track
+Pure GPS Track
+Overall
+Figure 4. Regional performance by subregion across all GPS-
+BENCH tasks. Applied Track shows the largest gaps: North Amer-
+ica (75.8%) vs. East Asia (59.6%), a 16.2% difference. Pure GPS
+Track is more uniform across most subregions.
+4.2.2. RQ2: HOW DOES GEOGRAPHIC GRANULARITY
+AFFECT PERFORMANCE?
+We examine how model performance varies across levels of
+geographic granularity and assess robustness to coordinate
+noise, using the Place Association task as a diagnostic probe.
+Hierarchical degradation
+Figure 5 reveals a clear hierar-
+chy in geographic knowledge. Country-level identification
+accuracy ranges from 59–97%, province/state-level accu-
+racy drops to 26–73%, and exact city identification collapses
+to 1–23%. Together with the strong performance on the
+Country
+Province/State
+City (exact)
+Geographic Granularity Level
+0
+20
+40
+60
+80
+100
+Accuracy (%)
+Hierarchical Degradation in Geographic Knowledge (All 14 Models)
+GPT-5-mini
+claude-haiku-4.5
+gemini-2.5-flash
+gemini-2.5-pro
+gpt-4.1-mini
+gpt-4.1
+GPT-5.1-2025-08-07
+gpt-5-nano-2025-08-07
+mistral-large-2512
+mistral-small-24b-instruct-2501
+qwen-qwen3-14b
+qwen-qwen3-235b-a22b-2507
+qwen-qwen3-30b-a3b-instruct-2507
+qwen-qwen3-8b
+Figure 5. Hierarchical degradation in geographic knowledge. Mod-
+els perform well at country-level but accuracy drops sharply for
+finer granularities, with city-level accuracy below 25% for all.
+Name Disambiguation task, these results indicate that LLMs
+encode geographic knowledge primarily at coarse spatial
+resolutions, but lack the dense coordinate-to-city mappings
+required for fine-grained localization (cf. Appendix F.6).
+Robustness to noise
+To test sensitivity to coordinate pre-
+cision and potential memorization, we perturb input coordi-
+nates with Gaussian noise (σ ∈{0, 10, 50, 100, 500, 1000}
+m), spanning conditions from high-precision GPS (±10
+m) to coarse IP-based geolocation (±1 km). Each noise
+level contains approximately 567 samples. If models relied
+on memorized coordinate-place pairs, such perturbations
+would disrupt these mappings and degrade accuracy. We
+analyze performance at all granularity levels (Figure 6, see
+detailed results in Appendix F.7).
+Across all noise levels, accuracy remains relatively stable.
+Country-level accuracy stays within 79–82% (∆= ±1.6%),
+province-level within 46–52% (∆= ±5.8%), and city-level
+within 6–9% (∆= ±2.0%). The stable performance indi-
+cates that models rely on generalized geographic represen-
+tations rather than memorized coordinate strings.
+Further analysis of the 92.7% of predictions that fail at city-
+level identification reveals that 80.4% of these cases still
+correctly identify the country, while only 19.6% miss the
+country entirely. This pattern is consistent across models:
+for example, Qwen3-8B achieves only 1.0% city-level accu-
+racy yet correctly identifies the country in 59.4% of cases,
+whereas Gemini-2.5-Pro has 23.0% city accuracy along-
+side 96.8% country accuracy (23.0% city-level and 73.8%
+country-only). These results confirm that LLMs possess
+robust coarse-grained geographic knowledge but lack the
+dense coordinate-to-city mappings for precise localization.
+To further test whether models have memorized entries from
+geographic databases such as GeoNames, we introduce a
+Missing Data probe that requires inferring one coordinate
+(latitude or longitude) given a city name and the other co-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+ordinate (e.g., “Given latitude 10.33384°and the location
+name San Diego, what is the longitude?”). If models had
+memorized GeoNames-style records, they would achieve
+high accuracy within a ±0.1◦tolerance. Instead, perfor-
+mance is uniformly low across all models (mean: 8.3%),
+with even the strongest model, Gemini-2.5-Pro, reaching
+only 12.4%. This further supports the conclusion that LLMs
+do not memorize geocoding databases; rather, they encode
+coarse geographic structure while lacking fine-grained coor-
+dinate–place associations.
+Clean
+10m
+50m
+100m
+500m
+1km
+Noise Level
+0
+20
+40
+60
+80
+100
+Accuracy (%)
+Effect of Coordinate Noise by Granularity Level
+Country
+Province
+City
+Figure 6. Effect of coordinate noise across granularity levels.
+All levels show flat performance regardless of noise magnitude
+(10m to 1km), suggesting models rely on generalized geographic
+knowledge rather than memorized coordinate-to-place mappings.
+4.2.3. RQ3: DOES GPS AUGMENTATION IMPROVE
+DOWNSTREAM GEOSPATIAL TASKS?
+Given that LLMs can process GPS coordinates for many
+tasks (RQ1), we investigate whether augmenting existing
+geographic reasoning benchmarks with explicit coordinates
+improves performance.
+Datasets
+We evaluate on two benchmarks that test differ-
+ent aspects of geographic reasoning:
+• MapEval (Dihan et al., 2025): A benchmark of 200
+map-based questions requiring spatial reasoning over real-
+world locations. Tasks include trip planning (“Which
+route is shorter from A to B?”), POI queries (“Find restau-
+rants near the museum”), and nearby search. Questions
+reference specific place names without coordinates.
+• Hierarchical Spatial (Fulman et al., 2024): A diagnostic
+benchmark of 22 questions testing intercardinal direction
+judgments between city pairs (e.g., “Is Toronto northeast
+or northwest of Portland?”). The benchmark is designed
+to expose systematic biases in spatial reasoning, including
+hierarchical bias (assuming relative positions based on
+country-level geography) and alignment bias (assuming
+cities align cardinally).
+For MapEval, we geocode all place names mentioned in
+each question using the Google Maps API, then append
+a [GPS Reference Coordinates] section to the
+prompt listing latitude/longitude for each location (e.g.,
+“Cusco Cathedral: 13.5163°S, 71.9779°W”). We filter to
+samples where all places were successfully geocoded (n=66
+of 200). For Hierarchical Spatial, we prepend each city’s
+coordinates directly to the question (e.g., “Portland, OR is
+located at coordinates (45.5202°N, 122.6742°W). Toronto,
+ON is located at coordinates (43.6532°N, 79.3832°W). Is
+Toronto northeast or northwest of Portland?”).
+Trip
+Planning
+POI
+Queries
+Overall
+Category
+0
+20
+40
+60
+80
+100
+Accuracy (%)
++9.1%
++4.0%
++6.0%
+MapEval
+Base
++GPS
+Hierarchical
+Bias
+Alignment
+Bias
+Overall
+Bias Type
+0
+20
+40
+60
+80
+100
+Accuracy (%)
++30%
++50%
++23%
+Hierarchical Spatial
+Base
++GPS
+Figure 7. Effect of GPS coordinate augmentation on downstream
+tasks. MapEval shows +6.1% improvement; Hierarchical Spatial
+shows +22.7%, with GPS eliminating hierarchical and alignment
+biases.
+Findings
+GPS augmentation produces consistent improve-
+ments (Figure 7).
+On MapEval, accuracy improves by
++6.1% (75.8%→81.8%) when all locations are geocoded.
+Trip planning benefits most (+9.1%), as coordinates enable
+precise distance comparisons. On Hierarchical Spatial, GPS
+coordinates eliminate hierarchical bias (70%→100%) and
+alignment bias (50%→100%). For example, models previ-
+ously assumed Toronto is north of Portland because Canada
+is north of the US; with coordinates, they correctly compute
+that Portland (45.5°N) is north of Toronto (43.7°N). How-
+ever, proximity and rotation biases remain at 0%, suggesting
+these errors stem from deeper spatial reasoning limitations
+rather than missing coordinate information. Overall, GPS
+augmentation provides +6–23% benefit for tasks requiring
+precise spatial relationships (detailed in Appendix F.8).
+4.2.4. RQ4: CAN FINETUNING IMPROVE GPS
+REASONING?
+We investigate whether task-specific finetuning can improve
+GPS reasoning by training Qwen3-30B on GPSBENCH
+training data and comparing against its zero-shot baseline.
+As shown in Figure 8, finetuning yields mixed outcomes:
+Applied Track slightly degrades (−1.6%) while Pure GPS
+improves (+4.3%), with +1.5% net improvement overall. At
+the task level, geometric reasoning improves substantially:
+Spatial Patterns (+56.5%), Polygon Area (+25.9%), Inter-
+polation (+18.9%), Route Geometry (+12.4; while world-
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Place Assoc.
+Name Disamb.
+Rel. Position
+Proximity
+Route Analysis*
+Boundary
+Spatial Pat.
+Terrain
+Task
+0
+20
+40
+60
+80
+100
+Accuracy (%)
+-17
+-20
+-9
+-25
++56
+Applied Track: Zero-shot vs Finetuned
+Zero-shot
+Finetuned
+Format Conv.
+Coord. Trans.
+Distance*
+Bearing*
+Interpolation
+Polygon Area*
+Bounding Box
+Route Geom.
+Rel. Position*
+Task
+0
+20
+40
+60
+80
+100
+Accuracy (%)
+-12
++19
++26
++12
+Pure GPS Track: Zero-shot vs Finetuned
+Zero-shot
+Finetuned
+Figure 8. Zero-shot vs. finetuned Qwen3-30B. Finetuning im-
+proves geometric computation but degrades world-knowledge
+tasks.
+knowledge tasks degrade: Boundary Analysis (−25.2%),
+Name Disambiguation (−17.1%). Notably, Bearing also de-
+grades (−12.3%) despite being a Pure GPS task, suggesting
+there is some degree of task-specific variability.
+The pattern suggests finetuning strengthens coordinate com-
+putation at the expense of world knowledge integration. This
+highlights that GPS reasoning comprises two distinct capa-
+bilities: (1) coordinate manipulation, which is learnable, and
+(2) geographic knowledge, which risks degradation during
+finetuning. Future work should explore continual learning
+techniques to preserve base capabilities while adding GPS
+skills (see Appendix F.9 for per-task breakdown).
+4.2.5. RQ5: HOW DOES MODEL SCALE AFFECT GPS
+REASONING?
+We analyze scaling behavior using model families with
+known parameter counts: Mistral (24B and 123B) and
+Qwen3 (8B, 14B, 30B, and 235B).
+101
+102
+Parameters (B)
+40
+50
+60
+70
+80
+Accuracy (%)
+24B
+123B
+8B
+14B
+30B*
+235B*
+Pure GPS Track
+Mistral
+Qwen3
+101
+102
+Parameters (B)
+40
+50
+60
+70
+80
+Accuracy (%)
+24B
+123B
+8B
+14B
+30B*
+235B*
+Applied Track
+Mistral
+Qwen3
+101
+102
+Parameters (B)
+40
+50
+60
+70
+80
+Accuracy (%)
+24B
+123B
+8B
+14B
+30B*
+235B*
+Overall
+Mistral
+Qwen3
+Figure 9. Scaling analysis for Mistral and Qwen3 model families.
+Both families show overall improvement with scale.
+As shown in Figure 9, both model families improve with
+scale, though with different dynamics. Mistral shows consis-
+tent gains with 5.1× scale-up (24B→123B). Qwen3 exhibits
+slight degradation at smaller sizes (8B→14B) but strong im-
+provement at larger scales. Across the full Qwen3 range
+(8B→235B, 29×), we observe substantial gains: Pure GPS
++19.7%, Applied +11.1%, and Overall +16.0%. These pat-
+terns reveal that scaling remains an effective strategy to
+encode geographic knowledge and reasoning capabilities.
+5. Conclusion
+We introduced GPSBENCH, a comprehensive benchmark
+for evaluating GPS reasoning in LLMs, spanning geometric
+coordinate computation and applied geographic reasoning
+tasks. Our evaluation reveals that GPS reasoning remains
+partially solved: models perform reasonably on basic geo-
+metric operations but struggle with complex spherical ge-
+ometry and fine-grained place association. We find that
+world knowledge does not transfer to coordinate computa-
+tion, with most models showing stronger applied reasoning
+than pure GPS skills. Geographic bias is task-specific—
+applied tasks exhibit substantial regional disparities driven
+by sparse coordinate-to-place mappings, while pure com-
+putation remains region-agnostic. Models encode coarse
+geography but lack fine-grained localization, and robustness
+to coordinate noise confirms genuine understanding rather
+than memorization. Finetuning reveals capability trade-offs
+where geometric computation improves at the expense of
+world knowledge.
+6. Limitations
+Scope and generalization
+We evaluate only text-based
+LLMs; multimodal models that process maps, satellite im-
+agery, or street-view photographs may exhibit different ca-
+pability profiles. Our evaluation uses zero-shot prompt-
+ing without chain-of-thought reasoning or tool augmenta-
+tion, which may underestimate achievable performance with
+more sophisticated prompting strategies. All prompts are in
+English, leaving out cross-lingual geographic reasoning.
+Geographic coverage is constrained by GeoNames data
+availability, which favors urban areas and may underrep-
+resent rural areas. Population-based sampling means larger
+cities are overrepresented relative to their geographic foot-
+print. Regions such as maritime, polar, and deserts are
+absent from our evaluation, as well as building-level geo-
+graphic reasoning tasks.
+Point-based city representation
+GeoNames provides a
+single reference coordinate per city, but cities are geographic
+areas spanning many square kilometers. A coordinate near
+a city boundary might reasonably map to multiple cities,
+yet our evaluation treats the GeoNames reference point as
+definitive. This is particularly problematic for Place Associ-
+ation, where a model answering with an adjacent city may
+have valid geographic reasoning but receives zero credit.
+Distance-based error
+We use percentage-based error that
+treats all scales equivalently. A 5% error on a 100 km
+distance (5 km) has different practical implications than 5%
+on 10,000 km (500 km). Navigation may require meter-
+level precision locally but tolerate kilometer-level errors for
+continental distances.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Impact Statement
+This paper presents work whose goal is to advance the eval-
+uation of geographic and spatial reasoning in large language
+models. By systematically identifying where models suc-
+ceed and fail across geographic granularity, our results can
+help guide the development of future LLMs and applications
+that rely on them, particularly by clarifying when coarse
+geographic reasoning is reliable and when fine-grained lo-
+calization should not be trusted. Our findings help reduce
+the risk of misapplication of LLMs in location-sensitive set-
+tings by making their limitations explicit, and can inform the
+design of safer, more robust downstream systems that incor-
+porate validation or external tools when precise geographic
+reasoning is required. The benchmark uses only publicly
+available geographic data and does not involve personal or
+sensitive location information.
+References
+Anthropic.
+Introducing
+claude
+haiku
+4.5,
+2025.
+URL
+https://www.anthropic.com/news/
+claude-haiku-4-5. Accessed: 2026-01-27.
+Chen, B., Xu, Z., Kirmani, S., Ichter, B., Driess, D., Flo-
+rence, P., Sadigh, D., Guibas, L., and Xia, F. SpatialVLM:
+Endowing vision-language models with spatial reasoning
+capabilities. In CVPR, pp. 14455–14465, 2024.
+Chen, M., Tworek, J., Jun, H., Yuan, Q., de Oliveira Pinto,
+H. P., Kaplan, J., Edwards, H., Burda, Y., Joseph, N.,
+Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov,
+M., Khlaaf, H., Sastry, G., Mishkin, P., Chan, B., Gray,
+S., Ryder, N., Pavlov, M., Power, A., Kaiser, L., Bavar-
+ian, M., Winter, C., Tillet, P., Such, F. P., Cummings, D.,
+Plappert, M., Chantzis, F., Barnes, E., Herbert-Voss, A.,
+Guss, W. H., Nichol, A., Paino, A., Tezak, N., Tang,
+J., Babuschkin, I., Balaji, S., Jain, S., Saunders, W.,
+Hesse, C., Carr, A. N., Leike, J., Achiam, J., Misra,
+V., Morikawa, E., Radford, A., Knight, M., Brundage,
+M., Murati, M., Mayer, K., Welinder, P., McGrew, B.,
+Amodei, D., McCandlish, S., Sutskever, I., and Zaremba,
+W. Evaluating large language models trained on code.
+arXiv preprint arXiv:2107.03374, 2021.
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+R., Hesse, C., and Schulman, J. Training verifiers to solve
+math word problems. arXiv preprint arXiv:2110.14168,
+2021.
+Dihan, M. L., Hassan, M. T., Parvez, M. T., Hasan, M. H.,
+Alam, M. A., Cheema, M. A., Ali, M. E., and Parvez,
+M. R. MapEval: A map-based evaluation of geo-spatial
+reasoning in foundation models. In ICML, 2025.
+Fulman, N., Memduho˘glu, A., and Zipf, A. Distortions in
+judged spatial relations in large language models. The
+Professional Geographer, 76(6):703–711, 2024.
+Gemini Team, Google. Gemini 2.5: Pushing the frontier
+with advanced reasoning, multimodality, long context,
+and next generation agentic capabilities. arXiv preprint
+arXiv:2507.06261, 2025.
+GeoNames.
+Geonames Geographical Database.
+www.
+geonames.org, 2026. Accessed: 2026-01-27.
+Gritta, M., Pilehvar, M. T., Limsopatham, N., and Collier,
+N. What’s missing in geographical parsing? Language
+Resources and Evaluation, 52(2):603–623, 2018.
+Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M.,
+Song, D., and Steinhardt, J. Measuring massive multitask
+language understanding. In ICLR, 2021.
+Hu, E. J., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang,
+L., Chen, W., et al. Lora: Low-rank adaptation of large
+language models. In International Conference on Learn-
+ing Representations, 2022.
+Kamath, A., Hessel, J., and Chang, K.-W. What’s “up” with
+vision-language models? Investigating their struggle with
+spatial reasoning. In EMNLP, pp. 9161–9175, 2023.
+Krechetova, V. and Kochedykov, D. GeoBenchX: Bench-
+marking LLMs in agent solving multistep geospatial tasks.
+In ACM SIGSPATIAL International Workshop on Gen-
+erative and Agentic AI for Multi-Modality Space-Time
+Intelligence, pp. 27–35, 2025.
+Li, D., Ding, R., Zhang, Q., Li, Z., Chen, B., Xie, P., Xu,
+Y., Li, X., Guo, N., Huang, F., et al. GeoGLUE: A geo-
+graphic language understanding evaluation benchmark.
+arXiv preprint arXiv:2305.06545, 2023.
+Li, Z. and Ning, H. Autonomous GIS: The next-generation
+AI-powered GIS. International Journal of Digital Earth,
+16(2):4668–4686, 2023.
+Lieberman, M. D., Samet, H., and Sankaranarayanan, J.
+Geotagging with local lexicons to build indexes for
+textually-specified spatial data. In ICDE, pp. 201–212,
+2010.
+Liu, F., Emerson, G., and Collier, N. Visual spatial reason-
+ing. Transactions of the Association for Computational
+Linguistics, 11:635–651, 2023.
+Luo, S., Zhu, Z., Yuan, Y., Yang, Y., Shan, L., and
+Wu, Y.
+GeoGramBench: Benchmarking the geomet-
+ric program reasoning in modern LLMs. arXiv preprint
+arXiv:2505.17653, 2025.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Manvi, R., Khanna, S., Burke, M., Lobell, D., and Ermon,
+S. Large language models are geographically biased. In
+ICML, pp. 34654–34669, 2024a.
+Manvi, R., Khanna, S., Mai, G., Burke, M., Lobell, D. B.,
+and Ermon, S. GeoLLM: Extracting geospatial knowl-
+edge from large language models. In ICLR, 2024b.
+Marcu, A.-M., Chen, L., H¨unermann, J., Karnsund, A.,
+Hanotte, B., Chidananda, P., Nair, S., Badrinarayanan,
+V., Kendall, A., Shotton, J., Arani, E., and Sinavski, O.
+LingoQA: Visual question answering for autonomous
+driving. In ECCV, pp. 252–269, 2024.
+Mistral AI Team.
+Large enough:
+Mistral Large 2,
+July 2024.
+URL https://mistral.ai/news/
+mistral-large-2407/. Accessed: 2026-01-27.
+Moayeri, M., Tabassi, E., and Feizi, S. WorldBench: Quan-
+tifying geographic disparities in LLM factual recall. In
+ACM Conference on Fairness, Accountability, and Trans-
+parency, pp. 1211–1228, 2024.
+OpenAI. Introducing GPT-4.1 in the API, April 2025a. URL
+https://openai.com/index/gpt-4-1/.
+Ac-
+cessed: 2026-01-27.
+OpenAI.
+GPT-5
+and
+the
+new
+era
+of
+work,
+2025b.
+URL https://openai.com/index/
+gpt-5-new-era-of-work/. Accessed: 2026-01-
+27.
+Siegel, A. W. and White, S. H. The development of spatial
+representations of large-scale environments. Advances in
+Child Development and Behavior, 10:9–55, 1975.
+Thinking Machines Lab. Tinker, 2025. URL https://
+thinkingmachines.ai/tinker/.
+Thorndyke, P. W. and Hayes-Roth, B. Differences in spatial
+knowledge acquired from maps and navigation. Cognitive
+Psychology, 14(4):560–589, 1982.
+Wang, J., Ming, Y., Shi, Z., Vineet, V., Wang, X., Li, Y., and
+Joshi, N. Is a picture worth a thousand words? delving
+into spatial reasoning for vision language models. In
+NeurIPS, 2024.
+Xu, P., Wang, S., Zhu, Y., Li, J., and Zhang, Y. Spatialbench:
+Benchmarking multimodal large language models for
+spatial cognition. arXiv preprint arXiv:2511.21471, 2025.
+Yamada, Y., Bao, Y., Lampinen, A. K., Kasai, J., and
+Yildirim, I. Evaluating spatial understanding of large
+language models. Transactions on Machine Learning
+Research, 2024.
+Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B.,
+Yu, B., Gao, C., Huang, C., Lv, C., et al. Qwen3 technical
+report. arXiv preprint arXiv:2505.09388, 2025.
+Yang, J., Yang, S., Gupta, A. W., Han, R., Fei-Fei, L.,
+and Xie, S. Thinking in space: How multimodal large
+language models see, remember and recall spaces. In
+CVPR, pp. 10632–10643, 2024.
+Zhang, Q., Gao, S., Wei, C., Zhao, Y., Nie, Y., Chen, Z.,
+Chen, S., Su, Y., and Sun, H. GeoAnalystBench: A
+GeoAI benchmark for assessing large language models
+for spatial analysis workflow and code generation. Trans-
+actions in GIS, 29(7):e70135, 2025.
+Zhang, Y., Wei, C., Wu, S., He, Z., and Yu, W. GeoGPT:
+An assistant for understanding and processing geospatial
+tasks. International Journal of Applied Earth Observation
+and Geoinformation, 131:103976, 2024.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+A. GPSBENCH Data Sampling Strategies
+A.1. Sampling Strategies
+The GeoNames database exhibits natural geographic skew:
+Asia contains 37% of cities, Europe 24%, while Oceania
+has only 1%. To prevent model performance from reflecting
+this imbalance, we implement quota-based sampling with
+target proportions: Africa: 20%, Asia: 25%, Europe: 20%,
+North America: 15%, South America: 15%, Oceania: 5%.
+This rebalancing ensures models cannot exploit regional
+biases while still representing population distribution. All
+global samples enforce a minimum 100 km separation to
+avoid near-duplicate cities. For samples requiring fewer
+than 6 cities, we use weighted random selection from con-
+tinents; for larger samples, we use proportional allocation
+with adjustments to match the exact target count.
+A.2. Regional Sampling
+For polygon-based tasks (Area & Perimeter), we constrain
+vertex selection to the same continent within 50–2,000 km
+of an anchor city. This produces realistic sub-continental
+regions (country or state-sized) rather than globe-spanning
+shapes that would be geometrically trivial.
+The algorithm proceeds as follows:
+1. Select a random continent with sufficient cities (≥2n
+where n is the required vertex count).
+2. Choose a random anchor city from that continent.
+3. Find all cities within 50–2,000 km of the anchor.
+4. Sample n −1 additional cities while enforcing minimum
+50 km inter-vertex distance.
+5. Sort vertices by angle from centroid to ensure valid poly-
+gon ordering.
+A.3. Same-Continent Sampling
+The Applied Track’s Relative Position task uses same-
+continent city pairs with controlled distance ranges to ensure
+difficulty diversity:
+• 200–500 km (very close): Hardest, requires precise re-
+gional knowledge.
+• 500–1,000 km (close): Difficult, same country or neigh-
+boring countries.
+• 1,000–2,000 km (moderate): Medium, same general re-
+gion.
+• 2,000–3,000 km (far): Easier but still requires continental
+knowledge.
+The generator cycles through these ranges to ensure bal-
+anced difficulty distribution. This makes questions substan-
+tially harder than those of the same task in the Pure GPS
+Track (which examine relative position of cross-continental
+cities; detailed next), comparing cities within the same coun-
+try (e.g., “Is Lyon east of Paris?”) requires actual geographic
+knowledge, whereas cross-continental comparisons (e.g., “Is
+Tokyo east of Paris?”) are trivially answered by hemisphere.
+A.4. Difficulty Stratification
+Place Association samples are stratified by city population
+to control difficulty:
+• Easy (population ≥500k): Major cities with distinctive
+locations that are well-known globally.
+• Medium (100k–500k): Regional cities requiring area
+knowledge but still significant urban centers.
+• Hard (< 100k): Small cities in potentially densely popu-
+lated regions where multiple candidates exist nearby.
+B. Task-specific Data Generation
+This section provides detailed per-task sample generation
+procedures. All generation uses a fixed random seed (42)
+for reproducibility.
+B.1. Pure GPS Track Generation
+Format conversion
+For each sample: (1) Select a random
+city from GeoNames. (2) Extract its decimal coordinates.
+(3) Randomly choose conversion direction, i.e., Decimal
+Degrees (DD) ↔Degrees-Minutes-Seconds (DMS). (4)
+Apply the conversion formula and store both representa-
+tions. Ground truth is computed programmatically using
+standard conversion: degrees = floor(decimal), minutes =
+floor((decimal - degrees) × 60), seconds = remainder × 60.
+Coordinate transformation
+For each sample: (1) Select
+a random city. (2) Randomly choose transformation type
+(WGS84 →UTM, WGS84 →Web Mercator, or reverse).
+(3) Compute the target coordinates using standard projection
+formulae. UTM zone is computed as ⌊(λ + 180)/6⌋+ 1.
+Tolerances: UTM ±10m, Web Mercator ±100m.
+Distance calculation
+For each sample: (1) Select 2 cities
+using global balanced sampling with minimum 50 km sepa-
+ration. (2) Compute Haversine distance. (3) Store distance
+in both kilometers and miles. Tolerance: max(5 km, 5% of
+distance).
+Bearing computation
+For each sample: (1) Select 2
+globally balanced cities with minimum 100 km separation.
+(2) Compute initial bearing using spherical trigonometry.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+(3) Map bearing to 8 cardinal directions (N, NE, E, SE, S,
+SW, W, NW) using 45° sectors. Tolerance: ±5°.
+Coordinate interpolation
+For each sample: (1) Select 2
+globally balanced cities with minimum 500 km separation.
+(2) Randomly choose interpolation fraction from {0.25, 0.5,
+0.75}. (3) Compute intermediate point using spherical linear
+interpolation (slerp): convert to 3D unit vectors, interpolate
+along great circle arc, convert back to lat/lon. Tolerance:
+±0.01°.
+Area & perimeter
+For each sample: (1) Select n = 3–6
+cities from the same continent using regional sampling (50–
+2,000 km range). (2) Sort vertices by angle from centroid to
+form a valid polygon. (3) Compute area using L’Huilier’s
+theorem via triangulation from first vertex. (4) Compute
+perimeter as sum of Haversine distances between consecu-
+tive vertices. Tolerance: ±5%.
+Bounding box
+For each sample: (1) Select 3–8 globally
+balanced cities. (2) Compute min/max latitude and longi-
+tude. (3) Calculate center as midpoint of bounds. (4) Calcu-
+late centroid as arithmetic mean of all coordinates. (5) Com-
+pute diagonal distance using Haversine.
+Route geometry
+For each sample:
+(1) Generate a
+path of 8–15 waypoints along a route.
+(2) Apply
+Ramer–Douglas–Peucker simplification with randomly cho-
+sen epsilon (0.5–2.0 km). (3) Store original points and
+indices of retained points after simplification.
+Relative position (Pure GPS)
+For each sample: (1) Select
+2 globally balanced cities with minimum 100 km separa-
+tion. This ensures cities are typically on different continents,
+making direction obvious from hemisphere. (2) Compute
+bearing and map to cardinal direction. Note: This task is
+intentionally easier than that in the Applied Track.
+B.2. Applied Track Generation
+Place association
+For each sample: (1) Select a random
+city from GeoNames. (2) Apply Gaussian noise to co-
+ordinates with σ randomly chosen from {0, 10, 50, 100,
+500, 1000} m, cycling through levels for balanced dis-
+tribution (∼17% each).
+Noise is converted to degrees:
+σϕ = σm/111000, σλ = σm/(111000 · cos ϕ). (3) As-
+sign difficulty based on population: easy (>500K), medium
+(100K–500K), hard (<100K). Ground truth is the original
+city name and any GeoNames alternate spellings.
+Name disambiguation
+For each sample: (1) Identify city
+names that appear 4+ times globally in GeoNames (847
+unique name groups, e.g., “Springfield” with 34 instances).
+(2) Select 4 candidate cities sharing the same name from
+different countries/regions. (3) Choose one as the answer
+and add Gaussian noise (100–500 m) to its coordinates to
+prevent exact coordinate matching as a shortcut. (4) Present
+candidates as multiple choice options with country identi-
+fiers.
+Relative position (Applied)
+For each sample: (1) Select
+2 cities from the same continent using regional sampling.
+(2) Enforce distance constraints by cycling through ranges:
+200–500 km (hardest), 500–1,000 km, 1,000–2,000 km,
+2,000–3,000 km. This creates genuinely challenging ques-
+tions (e.g., “Is Lyon east of Paris?”) unlike Pure GPS where
+different continents make direction trivial. (3) Present us-
+ing city names only (no coordinates), requiring geographic
+knowledge.
+Proximity
+For each sample: (1) Select 5 globally bal-
+anced cities with minimum 100 km separation. (2) Desig-
+nate first city as reference point. (3) Compute Haversine
+distances to remaining 4 candidates. (4) Ground truth is the
+candidate with minimum distance. All distances are stored
+for evaluation.
+Route analysis
+For each sample: (1) Select 3 glob-
+ally balanced cities (start, end, waypoint) with minimum
+200 km separation. (2) Compute direct great-circle dis-
+tance (start →end). (3) Compute via-waypoint distance
+(start →waypoint →end). (4) Calculate detour percentage:
+(dvia −ddirect)/ddirect. (5) Label as “on route” if detour
+<10%.
+Spatial patterns (outlier detection)
+For each sample:
+(1) Define 6 geographic regions (Europe, Asia, Africa, North
+America, South America, and Oceania). (2) Randomly se-
+lect a main region and a different outlier region. (3) Sample
+4 cities from main region and 1 from outlier region. (4) Com-
+pute centroid and each city’s distance to it. (5) Validate that
+exactly one city (the outlier) has distance > 2× the median
+distance, with clarity ratio (furthest/second-furthest) >1.3
+to ensure unambiguous answers.
+Boundary analysis
+For each sample: (1) Select 4–6 glob-
+ally balanced cities. (2) Retrieve country and continent from
+GeoNames metadata. (3) Create grouping task (e.g., “Group
+by continent”) with ground truth derived from ISO 3166
+country-to-continent mapping.
+Terrain classification
+For each sample: (1) Select coordi-
+nates from curated geographic locations with unambiguous
+terrain types. (2) Categories: Urban (major city centers),
+Coastal (within 5 km of coastline), Mountain (elevation
+>2000 m), Desert (arid regions such as Sahara and Gobi),
+Forest (tropical/temperate forest regions), and Agricultural
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+(major farming regions). (3) Labels validated against Open-
+StreetMap Nominatim and satellite imagery.
+B.3. Train/Dev/Test split
+Each task’s 3,400 samples are split deterministically: Train
+(60%, 2,040 samples), Dev (10%, 340 samples), and Test
+(30%, 1,020 samples). Splits are stratified to preserve diffi-
+culty distribution and geographic balance. Zero overlap is
+verified programmatically by checking sample IDs across
+splits.
+C. Ground Truth Computation
+All ground truth values use standard geodetic formulae on
+the WGS84 ellipsoid approximated as a sphere with radius
+R = 6371 km.
+C.1. Haversine Distance
+The great-circle distance between points (ϕ1, λ1) and
+(ϕ2, λ2):
+d = 2R arcsin
+s
+sin2
+∆ϕ
+2
+
++ cos ϕ1 cos ϕ2 sin2
+∆λ
+2
+
+(1)
+where ∆ϕ = ϕ2 −ϕ1 and ∆λ = λ2 −λ1. This formula is
+accurate to within 0.5% for most Earth distances.
+C.2. Initial Bearing
+The forward azimuth (initial bearing) from point P1 to P2:
+θ = atan2
+
+sin ∆λ cos ϕ2,
+cos ϕ1 sin ϕ2 −sin ϕ1 cos ϕ2 cos ∆λ
+
+(2)
+The result is normalized to [0, 360) and mapped to eight
+cardinal directions:
+• N: [337.5, 22.5)
+• NE: [22.5, 67.5)
+• E: [67.5, 112.5)
+• SE: [112.5, 157.5)
+• S: [157.5, 202.5)
+• SW: [202.5, 247.5)
+• W: [247.5, 292.5)
+• NW: [292.5, 337.5)
+C.3. Great Circle Interpolation
+An intermediate point at fraction f ∈[0, 1] along the great
+circle path is computed using spherical linear interpolation
+(slerp). First, convert coordinates to 3D unit vectors:
+p = (cos ϕ cos λ, cos ϕ sin λ, sin ϕ)
+(3)
+Then interpolate:
+a = sin((1 −f)δ)
+sin δ
+,
+b = sin(fδ)
+sin δ
+(4)
+pf = a · p1 + b · p2
+(5)
+where δ is the angular distance between the points. Convert
+back to latitude and longitude:
+ϕf = atan2(zf,
+q
+x2
+f + y2
+f),
+λf = atan2(yf, xf)
+(6)
+C.4. Spherical Polygon Area
+Spherical polygon area is calculated using L’Huilier’s the-
+orem via triangulation. For each spherical triangle with
+sides a, b, c (angular distances) and semi-perimeter s =
+(a + b + c)/2, the spherical excess E is:
+tan
+E
+4
+
+=
+p
+tan( s
+2) tan( s−a
+2 ) tan( s−b
+2 ) tan( s−c
+2 )
+(7)
+The total polygon area A = R2 
+Pn−2
+i=1 Ei
+, where n is the
+number of vertices.
+C.5. Coordinate Transformations
+UTM projection
+The UTM projection divides Earth into
+60 zones of 6° longitude each:
+Zone =
+λ + 180
+6
+
++ 1
+(8)
+Easting and Northing are computed via Transverse Merca-
+tor projection with scale factor k0 = 0.9996. The central
+meridian of each zone is:
+λ0 = (Zone −1) × 6 −180 + 3
+(9)
+False easting of 500,000 m is added to ensure positive values.
+For southern hemisphere, false northing of 10,000,000 m is
+added.
+Web Mercator projection (EPSG:3857)
+The Web Mer-
+cator projection used by web mapping services is:
+x = Rλ,
+y = R ln
+
+tan
+π
+4 + ϕ
+2
+
+(10)
+where λ is in radians. This projection is valid for latitudes
+between approximately ±85.05.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Table 2. Model details for GPSBENCH evaluation. All models use temperature 0 for reproducibility. Parameter counts are estimates
+where not officially disclosed.
+Model
+Endpoint / Model ID
+Params
+Type
+Temp. Provider
+API
+GPT-5.1
+gpt-5.1
+undisclosed
+Reasoning
+0
+OpenAI
+OpenAI
+GPT-4.1
+gpt-4.1
+undisclosed
+Non-reasoning
+0
+OpenAI
+OpenAI
+GPT-5-mini
+gpt-5-mini-2025-08-07
+undisclosed
+Reasoning
+0
+OpenAI
+OpenAI
+GPT-4.1-mini
+gpt-4.1-mini
+undisclosed
+Non-reasoning
+0
+OpenAI
+OpenAI
+GPT-5-nano
+gpt-5-nano-2025-08-07
+undisclosed
+Reasoning
+0
+OpenAI
+OpenAI
+Gemini-2.5-Pro
+gemini-2.5-pro
+undisclosed
+Reasoning
+0
+Google
+Google AI
+Gemini-2.5-Flash gemini-2.5-flash
+undisclosed
+Non-reasoning
+0
+Google
+Google AI
+Claude-Haiku-4.5 anthropic/claude-haiku-4.5
+undisclosed
+Non-reasoning
+0
+Anthropic OpenRouter
+Qwen3-235B
+qwen/qwen3-235b-a22b-2507
+235B (22B active) Reasoning (MoE)
+0
+Alibaba
+OpenRouter
+Qwen3-30B
+qwen/qwen3-30b-a3b-instruct-2507
+30B (3B active)
+Reasoning (MoE)
+0
+Alibaba
+OpenRouter
+Qwen3-14B
+qwen/qwen3-14b
+14B
+Reasoning (Dense) 0
+Alibaba
+OpenRouter
+Qwen3-8B
+qwen/qwen3-8b
+8B
+Reasoning (Dense) 0
+Alibaba
+OpenRouter
+Mistral-Large
+mistralai/mistral-large-2512
+∼123B
+Non-reasoning
+0
+Mistral AI OpenRouter
+Mistral-Small
+mistralai/mistral-small-24b-instruct-2501 24B
+Non-reasoning
+0
+Mistral AI OpenRouter
+C.6. Knowledge Task Ground Truth (Applied Track)
+Unlike geometric tasks with mathematical formulae, Ap-
+plied Track tasks derive ground truth from authoritative
+geographic databases as follows.
+Place association
+Ground truth is the city name from
+GeoNames at the sampled coordinate. Evaluation accepts
+the canonical city name or any of its alternate spellings (3–5
+variants per city in GeoNames).
+Name disambiguation
+For cities with duplicate names
+globally (e.g., “Springfield”), GeoNames provides distinct
+entries with unique coordinates. Ground truth is the option
+whose GeoNames coordinates match the query coordinates
+(within 500m tolerance to account for coordinate noise).
+Relative position (Applied)
+Given two city names, we re-
+trieve their GeoNames coordinates and compute the bearing
+using the formula in Section C. The bearing is mapped to 8
+cardinal directions.
+Proximity
+Ground truth is determined by computing
+Haversine distances from the reference city to all candi-
+date cities and selecting the minimum. The correct answer
+is deterministic given the GeoNames coordinates.
+Route analysis
+Given start, end, and query cities, we
+compute whether the query city lies within a corridor around
+the great-circle path. A city is “on route” if its perpendicular
+distance to the path is < 500 km and it lies between the
+start/end latitudes (with tolerance).
+Spatial patterns (outlier detection)
+For each set of 5
+cities, we compute the centroid and measure each city’s
+distance to it. The outlier is the city with the maximum
+distance, required to have a ratio > 1.3× the second-farthest
+city to ensure unambiguous answers.
+Boundary
+analysis
+Country
+and
+continent
+assign-
+ments come directly from GeoNames metadata fields
+(country code, mapped to continents via ISO 3166).
+Terrain classification
+Coordinates are sampled from well-
+known geographic locations with unambiguous terrain types
+(e.g., Brisbane coordinates for Urban, Sahara coordinates for
+Desert, and Himalayan coordinates for Mountain). Labels
+are validated against OpenStreetMap Nominatim and cross-
+referenced with satellite imagery and geographic databases.
+D. Model Details
+Table 2 summarizes the 14 models evaluated.
+Model selection
+We selected models to cover diverse ar-
+chitectures (dense vs. MoE), scales (24B–235B+ parame-
+ters), and reasoning capabilities. All frontier model families
+with public API access as of January 2026 are represented.
+Reasoning
+vs.
+non-reasoning
+Models
+marked
+as “Reasoning” employ extended thinking or chain-
+of-thought capabilities.
+For GPT-5.x models,
+we
+set reasoning effort=low to minimize reason-
+ing overhead.
+For Gemini Flash models,
+we set
+thinking budget=0.
+For OpenRouter models, we
+disabled reasoning via reasoning.effort=none.
+Non-reasoning models generate responses directly.
+Inference settings
+All evaluations use temperature 0 for
+deterministic outputs. Maximum output tokens were set
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+to 8192 for all models to accommodate complex task re-
+sponses. No system prompts were used beyond task-specific
+instructions (detailed in Appendix E).
+API access
+OpenAI models (GPT-4.1 and GPT-5.x) were
+accessed via the OpenAI API. Gemini models were accessed
+via Google AI Studio. All other models (Claude, Qwen, and
+Mistral) were accessed via OpenRouter.1
+E. Prompt Templates and Examples
+We use the following prompt template in combined with the
+subsequent task-specific instructions to prompt the LLMs.
+System Prompt
+You are an expert in GPS coordinates,
+geographic information systems, and
+spatial reasoning.
+Provide accurate, precise answers based
+on the given coordinates and geographic
+data.
+You may show your reasoning or
+calculations, but you MUST always end
+with:
+FINAL ANSWER: [your answer]
+For multiple choice questions, include
+only the letter (A, B, C, D, etc.)
+in FINAL ANSWER. For numeric answers,
+provide the number with appropriate
+units.
+For location names, provide the
+specific location name.
+E.1. Pure GPS Track Tasks
+Format Conversion
+Task Prompt
+Convert the coordinate from DMS to
+decimal degrees.
+Source coordinate (DMS): 43°55’31.8"N,
+81°24’43.6"E
+FINAL ANSWER: [converted coordinate]
+Gold Answer: 43.92550, 81.41211
+Distance Calculation
+Task Prompt
+Calculate the distance between these two
+points:
+Point A: Djenn´e (13.90608, -4.55332)
+Point B: Parbhani (19.26855, 76.77081)
+FINAL ANSWER: [distance] km
+Gold Answer: 8,610.5 km
+Bearing Computation
+1https://openrouter.ai/
+Task Prompt
+Calculate the initial bearing from Point
+A to Point B:
+Point A: Tokyo (35.6762, 139.6503)
+Point B: Sydney (-33.8688, 151.2093)
+FINAL ANSWER: [bearing]°
+Gold Answer: 169.83°
+Coordinate Interpolation
+Task Prompt
+Find the coordinates of the point that
+is 30% of the way from Point A to Point
+B along the geodesic path:
+Point A: London (51.5074, -0.1278)
+Point B: New York (40.7128, -74.0060)
+FINAL ANSWER: [latitude], [longitude]
+Gold Answer: 53.7722, -24.7404
+Coordinate System Transformation
+Task Prompt
+Convert the following coordinates from
+WGS84 (EPSG:4326) to UTM Zone 46N:
+Location:
+Myaydo
+Latitude:
+19.36838
+Longitude:
+95.21512
+FINAL ANSWER: [converted coordinates]
+Gold Answer: 732668.82 E, 2143080.82 N (UTM Zone
+46N)
+Polygon Area
+Task Prompt
+Calculate the area of the polygon formed
+by these coordinates:
+Vertex 1:
+El Mansouria (33.74643,
+-7.30194)
+Vertex 2:
+Beni Enzar (35.26, -2.93)
+Vertex 3:
+Menzel Abderhaman (37.23737,
+9.86313)
+Use spherical geometry (Earth radius
+≈6371 km).
+FINAL ANSWER: [area] km2
+Gold Answer: 30,829.07 km2
+Bounding Box
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Task Prompt
+Calculate the bounding box (minimum
+rectangle) containing these 7 points:
+- Misungwi (-2.85, 33.08333)
+- Chalthan (21.15421, 72.96141)
+- Yongchuan (29.35376, 105.89392)
+- Shchuchyn (53.6014, 24.7465)
+- Avon (41.80982, -72.83065)
+- Coruripe (-10.12556, -36.17556)
+- Whakatane (-37.95855, 176.98545)
+Provide the bounding box as:
+min lat,
+max lat, min lon, max lon
+FINAL ANSWER: [min lat], [max lat],
+[min lon], [max lon]
+Gold Answer: -37.95855, 53.6014, -72.83065, 176.98545
+Route Geometry
+Task Prompt
+Analyze this route with 12 waypoints:
+Waypoint 1:
+(14.78333, -16.96667)
+Waypoint 2:
+(14.770326, -16.98198)
+Waypoint 3:
+(14.744601, -16.975185)
+...
+Waypoint 12:
+(14.15, -16.55)
+Calculate the total route length by
+summing distances between consecutive
+waypoints, then use it to answer the
+question.
+FINAL ANSWER: [your answer]
+Gold Answer: A (points kept: [0, 1, 4, 5, 6, 7, 11])
+Relative Position (Pure GPS)
+Task Prompt
+What is the cardinal direction from
+Point A (0.0607, 34.28806) to Point B
+(40.24678, -8.39402)?
+A) North
+B) South
+C) East
+D) West
+FINAL ANSWER: [letter]
+Gold Answer: D) West
+E.2. Applied Track Tasks
+Place Association
+Task Prompt
+What city is located at coordinates
+48.8566, 2.3522?
+FINAL ANSWER: [city name]
+Gold Answer: Paris, France
+Name Disambiguation
+Task Prompt
+There are multiple cities named
+"Springfield".
+Which Springfield
+is located at coordinates 39.7817,
+-89.6501?
+A) Springfield, Massachusetts
+B) Springfield, Illinois
+C) Springfield, Missouri
+D) Springfield, Ohio
+FINAL ANSWER: [letter]
+Gold Answer: B) Springfield, Illinois
+Proximity
+Task Prompt
+Which of these cities is closest to
+Paris (48.8566, 2.3522)?
+A) London (51.5074, -0.1278)
+B) Berlin (52.5200, 13.4050)
+C) Brussels (50.8503, 4.3517)
+D) Amsterdam (52.3676, 4.9041)
+FINAL ANSWER: [letter]
+Gold Answer: C) Brussels
+Relative Position (Applied)
+Task Prompt
+What is the cardinal direction from
+Mikkeli to Sosnovka?
+A) North
+B) South
+C) East
+D) West
+FINAL ANSWER: [letter]
+Gold Answer: B) South
+Route Analysis
+Task Prompt
+Is Canberra approximately on the direct
+path from Gr¨obenzell to Dois Irm˜aos?
+FINAL ANSWER: [Yes/No]
+Gold Answer: No (detour: 170.4%)
+Boundary Analysis
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Task Prompt
+Group these cities by continent:
+Corroios, Wimbledon, Toms River, Santa
+Ana
+FINAL ANSWER: [grouping]
+Gold Answer: Europe: {Corroios, Wimbledon}, North
+America: {Toms River, Santa Ana}
+Spatial Patterns
+Task Prompt
+Which location is the geographic outlier
+among:
+Gda´nsk, Castlereagh, Vostryakovo,
+Shch¨ekino, Chiconcuac?
+FINAL ANSWER: [city name]
+Gold Answer: Chiconcuac (located in Mexico; other four
+cities are in Europe)
+Terrain Classification
+Task Prompt
+What type of terrain/environment is at
+coordinates -27.4698, 153.0251?
+A) Urban
+B) Arctic/Ice
+C) Ocean/Sea
+D) Mountain
+E) River/Lake
+F) Desert
+FINAL ANSWER: [letter]
+Gold Answer: A) Urban (Brisbane, Australia)
+F. Additional Results
+F.1. Overall Performance Results
+Table 3 presents performance results of the different LLMs
+averaged over the tasks of each track.
+F.2. Applied vs. Pure GPS Gap Analysis
+Table 3 reveals that 12 of 14 models score higher on the Ap-
+plied Track than on the Pure GPS Track, with gaps ranging
+from +0.8% (Qwen3-30B) to +18.2% (Mistral-Large). The
+two exceptions are GPT-5.1 (−12.4%) and Gemini-2.5-Pro
+(−5.0%), both flagship reasoning models whose Pure GPS
+scores surpass their Applied scores. The mean gap across
+all 14 models is +9.9%, confirming that world knowledge
+encoded during pretraining provides a substantial advantage
+over raw coordinate-level computation for the majority of
+current LLMs.
+The GPT family (5 models) leads both tracks, averaging
+70.7% on Applied and 66.0% on Pure GPS. A clear split
+emerges within this family: the reasoning models GPT-5.1
+and GPT-5-mini show near-balanced or reversed gaps, while
+Table 3. Overall model performance on GPSBENCH (% accuracy).
+Model
+Applied
+Pure GPS
+Gap
+GPT-5.1
+72.0
+84.4
+−12.4
+GPT-5-mini
+74.1
+73.0
++1.1
+GPT-5-nano
+63.5
+55.2
++8.2
+GPT-4.1
+73.3
+60.9
++12.3
+GPT-4.1-mini
+70.5
+56.6
++13.9
+Gemini-2.5-Pro
+71.7
+76.7
+−5.0
+Gemini-2.5-Flash
+73.4
+58.5
++14.9
+Claude-Haiku-4.5
+71.9
+54.7
++17.2
+Mistral-Large
+72.5
+54.3
++18.2
+Mistral-Small-24B
+59.8
+42.1
++17.7
+Qwen3-235B
+69.8
+55.2
++14.6
+Qwen3-30B
+53.9
+53.1
++0.8
+Qwen3-14B
+50.3
+35.4
++14.9
+Qwen3-8B
+47.1
+33.3
++13.8
+the non-reasoning GPT-4.1 and GPT-4.1-mini exhibit large
+positive gaps. The Gemini family (2 models) mirrors this
+pattern: Gemini-2.5-Pro (reasoning) achieves a −5.0% gap
+while Gemini-2.5-Flash shows +14.9%. The Mistral fam-
+ily (2 models) exhibits the largest average gap (+17.9%),
+with both models showing nearly identical gaps (+18.2%
+and +17.7%) despite a 5× difference in parameter count,
+suggesting this reflects a training-data characteristic rather
+than a scale-dependent phenomenon. The Qwen family (4
+models) provides the most granular scaling view: overall
+accuracy increases from 40.2% (8B) to 62.5% (235B), with
+the gap narrowing for MoE models. Notably, Qwen3-30B
+(3B active parameters) achieves a near-zero gap of +0.8%,
+suggesting MoE architectures may allocate specialized ex-
+perts to geometric computation.
+Table 4. Per-task accuracy (%) over Applied Track tasks. Bold
+indicates best per task.
+Model
+Name Route Spatial Bound. Terrain Prox. Rel. Pos. Place
+GPT-5.1
+97.7
+81.7
+93.7
+98.1
+72.6
+73.3
+58.5
+2.5
+GPT-5-mini
+100.0 90.1
+95.2
+67.4
+70.6
+89.6
+56.6
+12.9
+GPT-5-nano
+99.9
+84.8
+59.4
+98.5
+67.4
+33.1
+52.6
+1.3
+GPT-4.1
+100.0 88.6
+94.2
+45.2
+71.3
+84.4
+64.8
+16.8
+GPT-4.1-mini
+100.0 89.3
+92.5
+56.0
+70.4
+82.4
+53.1
+4.7
+Gemini-2.5-Pro
+99.9
+91.7
+95.4
+21.5
+69.2
+86.4
+62.2
+23.0
+Gemini-2.5-Flash
+99.4
+86.9
+92.1
+47.7
+20.7
+80.5
+87.2
+17.1
+Claude-Haiku-4.5 100.0 89.7
+87.4
+97.6
+68.1
+71.3
+51.7
+3.6
+Mistral-Large
+99.4
+87.9
+90.1
+77.3
+70.3
+81.8
+47.5
+10.6
+Mistral-Small-24B 99.1
+82.0
+85.9
+97.8
+49.3
+0.6
+44.8
+2.6
+Qwen3-235B
+99.9
+88.3
+92.6
+67.4
+71.2
+70.9
+50.0
+2.8
+Qwen3-30B
+99.7
+85.7
+8.1
+99.7
+57.9
+24.2
+42.5
+0.8
+Qwen3-14B
+99.5
+83.2
+5.3
+98.2
+52.4
+18.6
+38.2
+2.2
+Qwen3-8B
+98.9
+80.1
+3.8
+96.5
+48.6
+12.4
+35.1
+1.0
+Mean
+99.5
+86.4
+75.4
+74.5
+62.8
+59.3
+51.8
+7.3
+Std
+0.8
+3.5
+32.1
+24.8
+15.8
+30.2
+13.6
+7.0
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Place Assoc.
+Name Disamb.
+Rel. Pos.
+Proximity
+Route Anal.
+Boundary
+Spatial Pat.
+Missing Data
+Terrain
+Task
+GPT-5-mini
+Gemini-2.5-flash
+GPT-4.1
+Mistral-Large
+GPT-5.1
+Claude-haiku-4.5
+Gemini-2.5-pro
+GPT-4.1-mini
+Qwen3-235b
+GPT-5-nano
+Qwen3-8b
+Mistral-Small-24B
+Qwen3-14b
+Qwen3-30b
+Model
+85
+71
+13
+100
+57
+90
+90
+67
+95
+88
+73
+17
+99
+79
+80
+87
+45
+92
+94
+71
+17
+100
+65
+84
+89
+45
+94
+88
+70
+11
+99
+47
+82
+88
+77
+90
+70
+73
+2
+98
+59
+73
+82
+98
+94
+77
+68
+4
+100
+52
+71
+90
+98
+87
+96
+69
+23
+100
+62
+86
+92
+21
+95
+86
+70
+5
+100
+53
+82
+89
+56
+93
+85
+71
+3
+100
+50
+71
+88
+67
+93
+74
+67
+1
+100
+53
+33
+85
+99
+59
+57
+44
+1
+96
+44
+55
+81
+97
+83
+76
+49
+3
+99
+45
+1
+82
+98
+86
+53
+49
+2
+96
+43
+56
+77
+88
+71
+66
+58
+1
+100
+43
+24
+86
+100
+8
+Applied Track
+Format Conv.
+Coord. Trans.
+Distance
+Bearing
+Interpolation
+Polygon Area
+Bbox
+Route Geom.
+Rel. Pos.
+Task
+GPT-5-mini
+Gemini-2.5-flash
+GPT-4.1
+Mistral-Large
+GPT-5.1
+Claude-haiku-4.5
+Gemini-2.5-pro
+GPT-4.1-mini
+Qwen3-235b
+GPT-5-nano
+Qwen3-8b
+Mistral-Small-24B
+Qwen3-14b
+Qwen3-30b
+47
+88
+79
+100
+100
+54
+0
+97
+92
+71
+88
+36
+96
+73
+3
+19
+100
+41
+48
+88
+59
+99
+97
+11
+0
+100
+46
+58
+88
+59
+87
+57
+1
+0
+100
+39
+71
+88
+91
+100
+100
+71
+43
+100
+96
+58
+89
+21
+98
+84
+3
+0
+99
+40
+70
+88
+84
+100
+99
+52
+54
+100
+44
+51
+88
+16
+95
+91
+9
+0
+100
+59
+43
+88
+21
+100
+83
+12
+20
+100
+30
+65
+88
+55
+80
+67
+0
+17
+97
+26
+35
+88
+11
+73
+63
+1
+1
+95
+29
+39
+90
+10
+75
+47
+0
+0
+81
+37
+50
+83
+6
+54
+58
+2
+4
+79
+33
+64
+90
+10
+98
+90
+6
+0
+100
+19
+Pure GPS Track
+0
+20
+40
+60
+80
+100
+Accuracy (%)
+0
+20
+40
+60
+80
+100
+Accuracy (%)
+Figure 10. Per-task accuracy (%) across all models. (a) Applied Track tasks requiring world knowledge integration. (b) Pure GPS Track
+tasks requiring geometric computation. Green indicates high accuracy, red indicates low accuracy.
+F.3. Per-Task Performance Breakdown
+Tables 4 and 5 further reports per-task performance of the
+models over the two tracks, respectively, while Figure 10
+visualizes these results.
+Table 5. Per-task accuracy (%) over Pure GPS Track tasks. Bold
+indicates best per task.
+Model
+BBox Format Dist. Bearing Rel. Pos. Route Coord. Interp. Area
+GPT-5.1
+99.7
+87.8
+99.9
+99.9
+70.7
+96.3
+90.8
+71.4
+43.4
+GPT-5-mini
+97.5
+88.0
+99.9
+99.8
+46.6
+91.8
+79.4
+54.1
+0.0
+GPT-5-nano
+97.5
+88.0
+80.4
+67.3
+65.5
+26.4
+54.7
+0.3
+17.1
+GPT-4.1
+100.0
+88.1
+99.1
+97.5
+47.5
+46.0
+59.0
+11.4
+0.0
+GPT-4.1-mini
+99.9
+88.1
+94.8
+90.9
+51.0
+59.0
+16.3
+9.1
+0.0
+Gemini-2.5-Pro
+100.0
+88.1
+99.9
+99.2
+69.7
+43.6
+84.2
+52.1
+53.9
+Gemini-2.5-Flash 100.0
+88.0
+96.3
+72.7
+70.8
+41.0
+36.1
+2.7
+18.9
+Claude-Haiku-4.5
+99.3
+88.6
+97.6
+84.5
+58.1
+40.4
+20.7
+2.6
+0.0
+Mistral-Large
+99.7
+87.8
+87.2
+56.7
+57.6
+39.0
+59.5
+0.7
+0.0
+Mistral-Small-24B 81.2
+89.8
+75.3
+47.1
+38.6
+37.1
+9.9
+0.1
+0.0
+Qwen3-235B
+99.7
+88.1
+99.5
+83.0
+42.5
+30.5
+21.3
+11.9
+20.1
+Qwen3-30B
+100.0
+90.4
+97.8
+90.5
+64.1
+18.7
+9.7
+6.4
+0.0
+Qwen3-14B
+97.2
+87.3
+72.5
+52.3
+35.8
+12.4
+5.2
+2.1
+0.0
+Qwen3-8B
+95.8
+86.1
+68.2
+45.1
+32.4
+8.6
+3.8
+0.8
+0.0
+Mean
+97.6
+88.3
+90.6
+77.6
+53.6
+42.2
+39.3
+16.1
+11.0
+Std
+5.0
+1.1
+12.1
+20.4
+13.8
+26.5
+31.2
+24.6
+18.1
+F.4. Qualitative Error Analysis
+We analyze model outputs across tasks to identify systematic
+error patterns. Table 6 summarizes the dominant failure
+modes for a subset of tasks where clear patterns emerge.
+Place association: nearby city substitution
+Models con-
+sistently identify the correct country and province but sub-
+stitute larger nearby cities for exact locations. For exam-
+ple, given coordinates 10.607°N, 72.979°W (Villanueva,
+Table 6. Dominant error patterns by task category.
+Task
+Dominant Error Pattern
+Place Association
+Nearby city substitution
+Polygon Area
+Formula stated but not executed
+Coord. Interpolation
+Cumulative numerical errors
+Coord.
+Transforma-
+tion
+Nonlinear projection arithmetic
+Bearing/Distance
+Computational approximations
+Spatial Patterns
+Heuristic-based reasoning
+Format Conversion
+Precision mismatch & hemisphere
+swaps
+Colombia), GPT-4.1 responds “Maicao, La Guajira, Colom-
+bia”: the correct province but wrong city (Maicao is 50 km
+away). Similarly, coordinates for Emure-Ekiti, Nigeria yield
+“Akure, Ondo State, Nigeria” (the state capital). This pattern
+confirms that models encode coarse geographic knowledge
+but lack dense coordinate-to-city mappings:
+Input:
+What location is at coordinates 7.436403,
+5.459255?
+Ground Truth: Emure-Ekiti, Nigeria
+GPT-4.1: “The coordinates are in Nigeria. Specifically,
+this point is in the city of Akure, the capital of Ondo
+State.”
+Analysis: Correct country and state, but substitutes
+state capital for actual city.
+Polygon area: formula without execution
+Models cor-
+rectly identify the spherical excess formula but fail to ex-
+ecute the multi-step calculation precisely. Responses typi-
+cally show abbreviated reasoning (“Approximate calculation
+yields ...”) followed by estimates that deviate significantly
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+from ground truth:
+Input: Calculate the area of the polygon: Launceston,
+City of Port Phillip, Hervey Bay, Greenacre (Australia)
+Ground Truth: 371,518 km2
+GPT-4.1: “Use the spherical excess formula for a
+quadrilateral: Area ≈E × R2... Approximate calcula-
+tion yields: FINAL ANSWER: 2,200,000 km2”
+Analysis: States correct method but estimate is 5.9×
+too large.
+Coordinate interpolation: cumulative numerical er-
+rors
+Models correctly apply the spherical linear interpola-
+tion (Slerp) algorithm conceptually but accumulate errors
+through multi-step calculations (coordinate conversion →
+Cartesian transformation →angle computation →weight-
+ing →interpolation →normalization →back-conversion).
+With tight tolerance (0.01°), even small intermediate errors
+compound:
+Input: Find the point 0.5 of the way from West En-
+glewood (41.778°N, 87.667°W) to Achaguas (7.779°N,
+68.224°W)
+Ground Truth: 25.089°N, 76.560°W
+GPT-4.1: 25.104°N, 76.484°W
+Analysis: Latitude error: 0.015° (> 0.01° tolerance),
+longitude error: 0.076°. Close but fails due to accumu-
+lated rounding in intermediate steps.
+Bearing computation: high success rate
+Bearing com-
+putation achieves high accuracy (up to 97.7% for GPT-4.1)
+because it requires fewer computational steps than interpo-
+lation and has generous tolerance (±5°). The few failures
+occur on long-distance, cross-hemisphere routes where the
+great-circle path crosses the antimeridian:
+Input: Calculate bearing from Tacloban, Philippines
+(11.24°N, 125.00°E) to Cimarron Hills, USA (38.86°N,
+104.70°W)
+Ground Truth: 39.77° (NE)
+GPT-4.1: [Explains formula but calculation incom-
+plete]
+Analysis: Cross-Pacific routes require careful handling
+of longitude wrapping; model’s intermediate steps are
+correct but final computation not completed.
+Coordinate System Transformation: Nonlinear projec-
+tion arithmetic
+Errors are due to projection complex-
+ity. UTM (Transverse Mercator) fails far more often than
+Web Mercator, and within Web Mercator, the linear x-
+formula (x = Rλ) is usually correct while the nonlinear
+y-formula involving tan and ln accounts for most of the er-
+rors. This suggests models can handle linear arithmetic but
+struggle with chains of transcendental functions. Southern-
+hemisphere UTM is especially error-prone, as models some-
+times truncate the 10-million-meter false northing offset:
+Input: Convert WGS84 coordinates for Ngong, Kenya
+(-1.3527°, 36.6699°) to UTM Zone 37S.
+Ground Truth:
+Easting:
+240,718 m, Northing:
+9,850,361 m
+GPT-4.1: Easting: 266,222 m, Northing: 985,045 m
+Analysis: Easting is off by 25 km, and Northing drops
+a digit (985K instead of 9.85M), omitting the southern-
+hemisphere false northing.
+Spatial patterns: heuristic-based reasoning.
+When the
+geographic outlier is obvious (e.g., one city on a different
+continent), models succeed reliably. Errors occur when city
+names are ambiguous or when models apply simple geo-
+graphic heuristics instead of computing centroid distances:
+Input: Which location is the geographic outlier: Hunts
+Cross, Atkarsk, Moskovskiy, Challans, Rye?
+Ground Truth: Rye (Australia, 5,657 km from cen-
+troid)
+GPT-4.1: “Rye is a town in East Sussex, England...
+Atkarsk is the farthest east and most distant from the
+cluster of Western European locations. FINAL AN-
+SWER: Atkarsk”
+Analysis: Model incorrectly identifies Rye as the En-
+glish town rather than Rye, Victoria, Australia. Uses
+“farthest east” heuristic instead of computing centroid
+distances, selecting Atkarsk (Russia, 3,068 km) over
+the true outlier.
+Format Conversion: precision mismatch and hemi-
+sphere swaps
+Format conversion achieves high accuracy
+(88% for GPT-4.1), but the 121 errors reveal two distinct
+failure modes. The majority are precision mismatches: the
+model outputs correct values but with inconsistent deci-
+mal places (e.g., “30.43” instead of the expected “30.4”)
+or omitted trailing zeros (e.g., “30” instead of “30.0”). A
+smaller but more concerning class involves hemisphere label
+swaps, where latitude and longitude hemisphere indicators
+are transposed:
+Input: Convert 2.408500°, 42.977100° to DMS for-
+mat.
+Ground Truth: 2°24’30.6”N, 42°58’37.6”E
+GPT-4.1: 2°24’30.6”E, 42°58’37.6”N
+Analysis: Numerical conversion is exact, but N and E
+hemisphere labels are swapped between latitude and
+longitude, producing an invalid coordinate (2°E lati-
+tude, 42°N longitude).
+F.5. Regional Performance Breakdown
+We analyze regional performance across tasks by extracting
+location information from coordinates, country codes, and
+prompt text. Table 7 reports the accuracy results across sub-
+regions, while Figure 11 visualizes the results. The results
+reveal that geographic bias is task-specific, not universal.
+Task-specific patterns
+Place Association shows the
+strongest regional bias: North America (14.7%) and West-
+ern Europe (11.0%) outperform South Asia (2.6%) and East
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Table 7. Accuracy (%) by subregion across all GPSBench tasks. Bold indicates highest accuracy per task; ‘–’ indicates insufficient data.
+Task
+N.Am
+S.Am
+W.Eur
+E.Eur
+E.Asia
+S.Asia
+SE.Asia
+M.East
+Africa
+Oceania
+Applied Track
+Place Assoc.
+14.7
+6.7
+11.0
+8.3
+3.8
+2.6
+5.9
+5.0
+4.5
+8.0
+Name Disamb.
+99.1
+99.5
+99.1
+98.8
+98.8
+97.1
+99.3
+–
+99.4
+100.0
+Rel. Position
+48.1
+55.4
+53.7
+59.7
+44.6
+56.5
+53.1
+53.4
+55.8
+56.5
+Proximity
+61.4
+63.6
+69.6
+70.6
+63.7
+65.6
+63.2
+68.5
+60.8
+59.2
+Route Analysis
+85.8
+81.8
+91.4
+88.6
+80.9
+86.2
+84.3
+88.8
+88.2
+84.0
+Boundary
+75.9
+73.8
+78.6
+74.6
+76.0
+78.3
+75.1
+74.7
+74.3
+75.1
+Spatial Patterns
+81.4
+84.4
+76.9
+80.4
+82.6
+87.1
+82.9
+76.1
+78.0
+83.1
+Terrain Class.
+69.8
+69.3
+50.3
+50.0
+52.4
+58.8
+62.6
+55.0
+60.4
+61.6
+Pure GPS Track
+Format Conv.
+99.5
+97.4
+99.3
+99.5
+98.9
+99.1
+98.9
+99.5
+97.8
+100.0
+Coord. Trans.
+43.7
+38.4
+41.8
+39.3
+36.4
+40.3
+38.8
+40.9
+39.5
+43.5
+Distance
+78.9
+79.0
+80.6
+76.4
+78.2
+77.4
+77.7
+83.3
+78.1
+74.6
+Bearing
+68.6
+75.8
+69.2
+67.4
+62.3
+72.7
+72.4
+73.7
+79.4
+64.4
+Interpolation
+14.2
+17.9
+16.7
+14.9
+11.2
+15.4
+11.6
+17.1
+21.7
+8.6
+Polygon Area
+10.6
+12.0
+8.9
+10.9
+7.9
+11.4
+9.5
+10.2
+11.9
+7.8
+Bounding Box
+98.5
+96.7
+98.0
+97.8
+97.9
+98.5
+96.4
+96.1
+95.9
+95.2
+Route Geom.
+41.9
+43.8
+46.0
+46.8
+47.8
+43.9
+50.0
+43.3
+46.7
+34.1
+Rel. Pos. (Pure)
+45.9
+53.9
+56.9
+46.5
+52.3
+61.4
+57.3
+57.9
+58.5
+48.6
+N.Am
+S.Am
+W.Eur
+E.Eur
+E.Asia
+S.Asia
+SE.Asia
+Mid.East
+Africa
+Oceania
+Place Assoc.
+Name Disamb.
+Rel. Position
+Proximity
+Route Analysis
+Boundary
+Spatial Patterns
+Terrain Class.
+Format Conv.
+Coord. Trans.
+Distance
+Bearing
+Interpolation
+Polygon Area
+Bounding Box
+Route Geom.
+Rel. Pos. (Pure)
+15
+7
+11
+8
+4
+3
+6
+5
+5
+8
+99
+100
+99
+99
+99
+97
+99
+--
+99
+100
+48
+55
+54
+60
+45
+56
+53
+53
+56
+57
+61
+64
+70
+71
+64
+66
+63
+68
+61
+59
+86
+82
+91
+89
+81
+86
+84
+89
+88
+84
+76
+74
+79
+75
+76
+78
+75
+75
+74
+75
+81
+84
+77
+80
+83
+87
+83
+76
+78
+83
+70
+69
+50
+50
+52
+59
+63
+55
+60
+62
+99
+97
+99
+100
+99
+99
+99
+99
+98
+100
+44
+38
+42
+39
+36
+40
+39
+41
+40
+43
+79
+79
+81
+76
+78
+77
+78
+83
+78
+75
+69
+76
+69
+67
+62
+73
+72
+74
+79
+64
+14
+18
+17
+15
+11
+15
+12
+17
+22
+9
+11
+12
+9
+11
+8
+11
+10
+10
+12
+8
+99
+97
+98
+98
+98
+99
+96
+96
+96
+95
+42
+44
+46
+47
+48
+44
+50
+43
+47
+34
+46
+54
+57
+47
+52
+61
+57
+58
+59
+49
+Regional Performance Across All GPSBench Tasks by Subregion
+(14 LLMs Aggregated)
+0
+20
+40
+60
+80
+100
+Accuracy (%)
+Figure 11. Regional performance across all GPSBench tasks by subregion. Applied Track tasks (top) show varying degrees of geographic
+bias, with Place Association exhibiting the strongest disparity. Pure GPS Track tasks (bottom) show minimal regional variation, confirming
+that geometric computation is largely region-agnostic.
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+Asia (3.8%) by 4–6×. This reflects sparse coordinate-to-
+city mappings in training data for non-Western regions. In
+contrast, most Pure GPS computation tasks show minimal
+regional variation: Distance (74.6–83.3%), Bounding Box
+(95.2–98.5%), and Format Conversion (97.4–100%) are
+nearly uniform across subregions, confirming that geomet-
+ric computation is region-agnostic. Name Disambiguation
+shows no bias (97.1–100%), indicating that this task is
+“solved” regardless of location. The comprehensive anal-
+ysis confirms that geographic bias stems primarily from
+knowledge gaps rather than computational limitations.
+F.6. Geographic Granularity Results
+Table 8 reports Place association accuracy results over tests
+at different geographic granularity levels.
+Table 8. Place Association accuracy (%) by geographic granularity
+level across all 14 models.
+Model
+City
+Province
+Country
+Region
+GPT-5.1
+12.9
+61.2
+81.1
+0.4
+GPT-5-mini
+2.5
+44.4
+77.1
+0.3
+GPT-5-nano
+1.3
+32.2
+71.9
+0.2
+GPT-4.1
+16.8
+61.7
+85.4
+1.4
+GPT-4.1-mini
+4.7
+49.1
+82.1
+2.4
+Gemini-2.5-Pro
+23.0
+72.9
+96.5
+40.0
+Gemini-2.5-Flash
+17.1
+69.1
+91.8
+13.0
+Claude-Haiku-4.5
+3.6
+48.9
+86.0
+38.4
+Mistral-Large
+10.6
+60.0
+91.8
+1.0
+Mistral-Small-24B
+2.6
+42.9
+86.1
+7.0
+Qwen3-235B
+2.8
+52.5
+86.5
+2.8
+Qwen3-30B
+0.8
+35.2
+73.2
+3.5
+Qwen3-14B
+2.2
+29.8
+63.4
+0.1
+Qwen3-8B
+1.0
+26.4
+59.4
+1.5
+F.7. Coordinate Noise Analysis
+We test LLM robustness by adding Gaussian noise to co-
+ordinates at all granularity levels. This also probes memo-
+rization: if models memorized specific coordinate-to-place
+mappings from training data, perturbing coordinates would
+break these associations. Table 9 shows mean accuracy
+across models at each granularity level and noise magnitude.
+The relatively small performance variation at any level, in-
+cluding high-accuracy country identification (80%), sug-
+gests models encode genuine geographic knowledge rather
+than memorized coordinate strings.
+Table 10 details per-model city-level accuracy changes.
+F.8. GPS Augmentation Detailed Results
+Table 11 reports accuracy results when GPS coordinates are
+added to downstream tasks.
+Table 9. Mean accuracy (%) by noise level and granularity. All
+levels show stable performance across noise magnitudes, suggest-
+ing generalized knowledge rather than memorization.
+Noise
+Country
+Province
+City
+Clean
+80.7
+46.3
+7.4
+10m
+79.1 (−1.6)
+51.8 (+5.5)
+5.8 (−1.6)
+50m
+80.1 (−0.5)
+52.1 (+5.8)
+9.3 (+1.9)
+100m
+82.3 (+1.6)
+45.8 (−0.5)
+7.1 (−0.3)
+500m
+82.1 (+1.5)
+49.7 (+3.4)
+7.0 (−0.5)
+1km
+81.0 (+0.4)
+48.3 (+2.0)
+7.0 (−0.4)
+Max |∆|
+1.6
+5.8
+1.9
+Table 10. Place association accuracy change (∆%) relative to clean
+coordinates across all 14 models. Values show difference from
+clean baseline. Note: no correlation between noise magnitude and
+|∆| (mean |∆| = 1.3–2.1% across all levels).
+Model
+Clean (%) ∆10m ∆50m ∆100m ∆500m ∆1km
+GPT-5.1
+13.1
+−2.2
++3.7
+−2.0
+−0.4
+−0.5
+GPT-5-mini
+1.7
+−1.1
++0.1
++2.2
++2.5
++0.8
+GPT-5-nano
+1.1
+−1.1
++1.9
++0.2
+−1.1
++0.9
+GPT-4.1
+16.0
+−2.7
++5.7
+−1.5
++0.4
++2.3
+GPT-4.1-mini
+5.7
+−3.9
++0.9
++0.9
+−0.9
+−2.7
+Gemini-2.5-Pro
+24.0
+−1.0
++4.9
+−3.6
+−3.4
+−2.7
+Gemini-2.5-Flash
+18.9
+−0.7
+−0.2
+−5.0
+−0.1
+−4.6
+Claude-Haiku-4.5
+4.6
+−4.0
++1.5
+−0.6
+−0.9
+−1.5
+Mistral-Large
+13.1
+−4.7
+−1.7
+−2.0
+−4.7
+−2.5
+Mistral-Small-24B
+1.7
+−1.1
++1.9
++2.2
++0.7
++1.8
+Qwen3-235B
+2.9
+−1.0
++0.8
+−0.2
++0.8
+−0.3
+Qwen3-30B
+0.6
+−0.6
++1.2
++0.7
+−0.6
++0.4
+Qwen3-14B
+0.6
++0.6
++3.0
++2.1
++1.2
++2.5
+Qwen3-8B
+0.0
++0.6
++2.4
++2.6
++0.0
++0.5
+Mean |∆|
+–
+1.8
+2.1
+1.8
+1.3
+1.7
+Table 11. Effect of GPS augmentation on downstream tasks (%).
+Results using GPT-4.1.
+Dataset
+Category
+N Base +GPS
+∆
+MapEval
+Trip planning
+11 90.9 100.0 +9.1
+POI queries
+51 72.5 76.5
++3.9
+Nearby search
+3 66.7 100.0 +33.3
+Overall
+66 75.8 81.8
++6.1
+Hierarchical
+Spatial
+Hierarchical bias
+10 70.0 100.0 +30.0
+Alignment bias
+4 50.0 100.0 +50.0
+Proximity bias
+4
+0.0
+0.0
+0.0
+Rotation bias
+4
+0.0
+0.0
+0.0
+Overall
+22 40.9 63.6 +22.7
+21
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+GPSBench: Do Large Language Models Understand GPS Coordinates?
+F.9. Finetuning Analysis
+Finetuning
+setting
+We
+finetune
+Qwen3-30B-A3B-
+Instruct (a 30B-total, 3B-active MoE model) using LoRA
+(Hu et al., 2022) on the GPSBench training split. Training
+uses both the Pure GPS and Applied tracks.
+We use
+the Tinker platform (Thinking Machines Lab, 2025) for
+distributed finetuning with the following hyperparameters:
+learning rate 2 × 10−5 with linear decay, batch size 32,
+LoRA rank 64, maximum sequence length 16,384 tokens,
+and 2 training epochs. The low learning rate is chosen to
+mitigate catastrophic forgetting of pretrained knowledge.
+Training data consists of the standard 60% train split
+(2,040 samples per task × 17 tasks = 34,680 total samples).
+Evaluation is performed on the 30% held-out test split.
+Table 12. Overall finetuning results on Qwen3-30B.
+Track
+Zero-shot
+Finetuned
+∆
+Applied
+52.3%
+50.7%
+−1.6%
+Pure GPS
+53.1%
+57.4%
++4.3%
+Combined
+52.7%
+54.1%
++1.5%
+Table 13 provides per-task breakdown, revealing divergent
+effects on geometric vs. world-knowledge tasks.
+Table 13. Per-task finetuning comparison on Qwen3-30B (%).
+Green: improvement (>5%), red: degradation (<−5%).
+Task
+Zero-shot
+Finetuned
+∆
+Applied Track
+Place Association
+0.8
+1.7
++0.9
+Name Disambiguation
+99.7
+82.6
+−17.1
+Relative Position
+42.5
+22.9
+−19.6
+Proximity
+24.2
+15.4
+−8.8
+Route Analysis
+85.7
+89.9
++4.2
+Boundary Analysis
+99.7
+74.5
+−25.2
+Spatial Patterns
+8.1
+64.6
++56.5
+Terrain
+57.9
+53.9
+−4.0
+Applied Overall
+52.3
+50.7
+−1.6
+Pure GPS Track
+Format Conversion
+90.4
+90.9
++0.5
+Coord. Transform
+9.7
+6.6
+−3.1
+Distance
+97.8
+94.2
+−3.6
+Bearing
+90.5
+78.2
+−12.3
+Interpolation
+6.4
+25.3
++18.9
+Polygon Area
+0.0
+25.9
++25.9
+Bounding Box
+100.0
+99.9
+−0.1
+Route Geometry
+18.7
+31.1
++12.4
+Relative Position
+64.1
+64.1
+0.0
+Pure GPS Overall
+53.1
+57.4
++4.3
+22
