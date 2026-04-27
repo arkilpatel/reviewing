@@ -1,0 +1,30 @@
+# Final Review
+
+This paper introduces Video-OPD, an efficient post-training framework designed for Temporal Video Grounding (TVG). By replacing the sparse, sequence-level rewards of GRPO with dense, token-level supervision derived from a frontier teacher model via a reverse KL objective, Video-OPD mitigates credit assignment issues and avoids the computational burden of multiple on-policy rollouts. Furthermore, the authors propose Teacher-Validated Disagreement Focusing (TVDF), a curriculum strategy that utilizes ground-truth annotations to validate teacher reliability and prioritize highly informative trajectories.
+
+## Novelty
+The paper fundamentally applies an existing post-training paradigm—On-Policy Distillation—to a new downstream task (Temporal Video Grounding). The authors explicitly note that recent large language models (such as Qwen3 and MiMo-V2-Flash) utilize token-level reverse KL divergence computed over on-policy trajectories. Therefore, the core framework is a direct domain transfer of this existing methodology. The primary task-specific adaptation is the TVDF curriculum. However, using ground-truth data to filter out teacher hallucinations is a standard technique in knowledge distillation, and prioritizing high-disagreement trajectories is a well-established active learning heuristic. While these components are combined into a sensible and effective engineering pipeline, the methodological delta over prior work remains incremental. The paper does not introduce fundamentally new formulations, but rather creatively combines known techniques to achieve strong empirical results.
+
+## Technical Soundness
+The technical claims regarding credit assignment and variance reduction are well-supported. The variance decomposition analysis appropriately demonstrates that the uniform trajectory rewards of GRPO induce strong cross-time correlations and high variance, a flaw that Video-OPD's token-level rewards effectively mitigate. The claim that the method avoids the distributional shift of SFT is also verified, as optimization is strictly performed over student-sampled trajectories.
+
+However, there is a minor contradiction concerning the role of the teacher model. In Section 3.1, the authors explicitly state that "the teacher never generates tokens itself." Yet, the TVDF curriculum relies on measuring teacher reliability via the "mean IoU between the teacher's top-k predicted temporal boundaries and the annotated ground-truth interval" (Appendix B). Predicting a temporal boundary fundamentally requires the teacher to perform inference and generate tokens, contradicting the earlier claim. Furthermore, while the method circumvents multi-rollout overhead, evaluating the reverse KL divergence requires computing the teacher's probability distribution over the student's sampled tokens—a computationally massive operation for a 32B model that is somewhat glossed over when lauding the efficiency of the method. Despite these minor issues, the overall technical foundation is solid and the theoretical variance reduction matches the observed empirical dynamics.
+
+## Experimental Rigor
+The experimental setup isolates the components of the proposed method effectively. The inclusion of strong baselines, particularly SFT, standard GRPO, and both Off-Policy Forward and Reverse KL Distillation, successfully separates the benefits of distillation from the necessity of on-policy sampling. The ablation studies are thorough, convincingly isolating the individual contributions of the TVDF components, demonstrating performance scaling with larger teachers, and showing sustained gains over multiple training rounds.
+
+However, the empirical evaluation contains a significant gap regarding statistical rigor. The paper relies on a relatively small dataset of 2,500 samples for RL/distillation training, a regime often highly sensitive to initialization and data sampling. Despite this, the authors report absolute metrics without any mention of random seeds, error bars, or significance testing. The lack of variance reporting makes it difficult to ascertain the robustness of the modest +1-2% performance gains over baselines. Additionally, the paper lacks qualitative error analysis—there is no breakdown of failure cases by video length or query difficulty, limiting our understanding of the specific conditions under which Video-OPD excels or struggles. 
+
+## Impact
+From a technical standpoint, the utility of Video-OPD is substantial. Post-training via GRPO on long-horizon video contexts is computationally exhaustive. By demonstrating an 80% reduction in training wall-clock time while achieving state-of-the-art open-source performance, this method offers a highly practical alternative for laboratories operating under constrained compute budgets. It is highly probable that applied researchers will adopt this drop-in distillation loss for aligning video MLLMs.
+
+Scientifically, the impact is more constrained. The insight that dense, token-level rewards resolve credit assignment issues more efficiently than sparse, sequence-level rewards is widely recognized in the broader alignment literature. The paper serves to empirically confirm that these dynamics hold true (and are perhaps exacerbated) in TVG, but it does not radically alter our fundamental understanding of reinforcement learning or large language models. Consequently, we project solid citation metrics (20-50 citations annually) as a useful systems/application paper, though it falls short of being a foundational scientific breakthrough.
+
+## Scoring Breakdown
+- **Impact**: 5.0
+- **Technical Soundness**: 6.0
+- **Experimental Rigor**: 5.5
+- **Novelty**: 4.5
+
+**Formula applied**: score = (4.0 * Impact + 2.0 * Tech_Soundness + 2.0 * Exp_Rigor + 2.0 * Novelty) / 10
+**Final Score**: 5.2

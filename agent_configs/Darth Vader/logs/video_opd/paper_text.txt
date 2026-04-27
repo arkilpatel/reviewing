@@ -1,0 +1,3124 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Video-OPD: Efficient Post-Training of Multimodal Large Language Models for
+Temporal Video Grounding via On-Policy Distillation
+Anonymous Authors1
+Abstract
+Reinforcement learning has emerged as a princi-
+pled post-training paradigm for Temporal Video
+Grounding (TVG) due to its on-policy optimiza-
+tion, yet existing GRPO-based methods remain
+fundamentally constrained by sparse reward sig-
+nals and substantial computational overhead. We
+propose Video-OPD, an efficient post-training
+framework for TVG inspired by recent advances
+in on-policy distillation. Video-OPD optimizes
+trajectories sampled directly from the current pol-
+icy, thereby preserving alignment between train-
+ing and inference distributions, while a frontier
+teacher supplies dense, token-level supervision
+via a reverse KL divergence objective. This for-
+mulation preserves the on-policy property criti-
+cal for mitigating distributional shift, while con-
+verting sparse, episode-level feedback into fine-
+grained, step-wise learning signals. Building on
+Video-OPD, we introduce Teacher-Validated Dis-
+agreement Focusing (TVDF), a lightweight train-
+ing curriculum that iteratively prioritizes trajecto-
+ries that are both teacher-reliable and maximally
+informative for the student, thereby improving
+training efficiency. Empirical results demonstrate
+that Video-OPD consistently outperforms GRPO
+while achieving substantially faster convergence
+and lower computational cost, establishing on-
+policy distillation as an effective alternative to
+conventional reinforcement learning for TVG.
+1. Introduction
+Video understanding is a fundamental objective in multi-
+modal learning. (Gaidon et al., 2013; Darrell & Pentland,
+1993) One of its core challenges is Temporal Video Ground-
+ing (TVG) (Gao et al., 2017; Zhang et al., 2023), which
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+aims to localize the temporal segments in a video that cor-
+respond to natural language queries, such as identifying
+when two people are engaged in a fight. By explicitly align-
+ing linguistic semantics with fine-grained temporal visual
+content, TVG enables precise temporal reasoning and se-
+mantic interpretation of videos. Consequently, it serves as a
+foundational component for a wide range of downstream ap-
+plications, including video retrieval (Laptev & P´erez, 2007),
+human–computer interaction (Grauman et al., 2022), and
+embodied AI (Anderson et al., 2018).
+Recent studies, such as Time-R1 (Wang et al., 2025) and
+TVG-R1 (Chen et al., 2025), have investigated Reinforce-
+ment Learning (RL) as a post-training paradigm for TVG,
+demonstrating notable performance improvements. The
+core strength of RL arises from its on-policy nature: opti-
+mization is performed over trajectories sampled from the
+current policy, thereby mitigating the distribution shift be-
+tween training and inference states. As a result, the model
+can explicitly adapt to its own prediction-induced states,
+alleviating error accumulation and enhancing robustness in
+long-horizon temporal decision processes.
+However, as illustrated in Figure 1, existing RL-based post-
+training methods remain limited for TVG due to two key
+factors. First, Group Relative Policy Optimization (GRPO)
+(Shao et al., 2024) provides only sequence-level supervision,
+yielding a single, fixed-size reward per episode regardless of
+trajectory length. This results in a severe credit assignment
+problem, as the policy receives no information about which
+intermediate token-level decisions contribute to success or
+failure. The resulting reward sparsity leads to poor sample
+efficiency and is especially detrimental for long-horizon
+tasks such as TVG. Second, GRPO relies on multiple on-
+policy rollouts to obtain low-variance reward estimates. In
+video understanding, where each rollout conditions on long
+visual contexts, the cost of generating trajectories scales pro-
+hibitively with the number of rollouts, incurring substantial
+computational overhead during training.
+Motivated by these challenges, we propose Video-OPD,
+a highly efficient reinforcement learning framework for
+TVG that preserves strict on-policy optimization (Lu & Lab,
+2025) while providing dense supervisory signals, inspired
+by recent advances in on-policy distillation. Video-OPD
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+user question
+Video-LLM
+intersection-over-
+union (IoU) reward
+sparse learning signals
+on-policy sampling
+multiple rollouts
+reasoning content
+temporal segments  
+Group Relative Policy Optimization
+update policy
+video frames
+user question
+Video-LLM
+dense learning signals
+off-policy sampling
+cross-entropy 
+loss
+reasoning content
+temporal segments
+Supervised Fine Tuning
+update policy
+video frames
+Figure 1. Limitations of Supervised Fine-Tuning (SFT) and Group Relative Policy Optimization (GRPO) on Temporal Video Grounding
+(TVG). Blue crowns denote strengths, while red crowns indicate weaknesses. SFT provides dense supervision but is restricted to
+off-policy optimization, whereas GRPO enables on-policy optimization at the cost of sparse reward signals and multiple rollouts.
+optimizes on trajectories sampled from the current policy,
+preserving training–inference alignment, while a fixed fron-
+tier teacher provides dense, token-level supervision through
+a reverse KL objective. This design retains the on-policy
+property critical for mitigating distributional shift, while
+transforming sparse episode-level rewards into fine-grained,
+step-wise learning signals. Consequently, each training
+episode yields substantially richer supervision, enabling
+more precise credit assignment and significantly reducing
+gradient variance. Empirically, this dense supervision for-
+mulation allows Video-OPD to converge stably and rapidly
+during training, leading to consistently improved optimiza-
+tion effectiveness. Moreover, Video-OPD eliminates the
+need for multiple rollouts per training sample when estimat-
+ing trajectory-level rewards, thereby substantially reducing
+computational overhead.
+Building upon Video-OPD, we introduce Teacher-Validated
+Disagreement Focusing (TVDF), a lightweight training
+curriculum that further improves optimization efficiency.
+TVDF uses ground-truth temporal annotations solely to vali-
+date the reliability of the teacher, and prioritizes trajectories
+exhibiting large teacher–student disagreement, quantified
+by aggregated reverse KL divergence. Applied iteratively
+during training, this curriculum steers Video-OPD toward
+samples that are both teacher-reliable and maximally infor-
+mative for the current policy. This indirect yet principled
+use of annotations enables more effective exploitation of
+labeled data when direct supervision is suboptimal, resulting
+in improved sample efficiency and faster convergence.
+Comprehensive experiments demonstrate that Video-OPD
+consistently outperforms GRPO across a wide range of
+benchmarks. On standard TVG datasets including Charades-
+TimeLens (Zhang et al., 2025), ActivityNet-TimeLens
+(Zhang et al., 2025), and QVHighlights-TimeLens (Zhang
+et al., 2025), Video-OPD achieves an average improvement
+exceeding 17%, substantially surpassing the roughly 12%
+gains obtained by GRPO. Beyond TVG tasks, Video-OPD
+demonstrates strong generalization to broader video under-
+standing benchmarks, including TempCompass (Liu et al.,
+2024), MVBench (Li et al., 2024), and Video-MME (Fu
+et al., 2025). Moreover, an analysis of training dynamics
+shows that Video-OPD converges substantially faster while
+requiring a markedly lower computational budget, resulting
+in a more favorable efficiency–performance trade-off.
+In summary, this paper presents four key contributions:
+• We identify two limitations of GRPO-based post-training
+for TVG: inefficient optimization due to sparse reward
+signals, and prohibitive computational overhead induced
+by long visual contexts and multi-rollout training.
+• We propose Video-OPD, an efficient post-training frame-
+work for TVG that replaces sparse sequence-level rewards
+with dense token-level supervision derived from a fron-
+tier teacher via a reverse KL objective, enabling more
+effective credit assignment and faster convergence.
+• We introduce TVDF, a lightweight training curriculum
+that further improves the efficiency of Video-OPD by
+validating teacher reliability using ground-truth annota-
+tions and prioritizing on-policy trajectories with large
+teacher–student disagreement, allowing more effective
+use of labeled data without direct supervision.
+• Extensive experiments confirm that Video-OPD con-
+sistently outperforms GRPO across standard TVG and
+broader video understanding benchmarks, achieving sub-
+stantially faster convergence with a significantly reduced
+computational budget.
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+2. Motivation
+In Section 2.1, we first analyze why Supervised Fine-Tuning
+(SFT) fails to effectively address the challenges of TVG. In
+Section 2.2, we then examine RL–based post-training meth-
+ods such as GRPO, showing that while they yield perfor-
+mance gains, they introduce new optimization bottlenecks in
+the form of sparse sequence-level rewards and costly multi-
+rollout training procedures. Motivated by these limitations,
+Section 2.3 distills the core requirements that a principled
+and effective post-training framework for TVG must satisfy,
+which directly informs the design of our proposed approach.
+2.1. Failure of Off-Policy Supervised Fine-Tuning
+TVG aims to localize a temporal boundary [ts, te] within a
+video v that semantically corresponds to a natural-language
+query q.
+Modern Multimodal Large Language Models
+(MLLMs) typically formulate TVG as an autoregressive de-
+cision process, where the model sequentially predicts tempo-
+ral actions at ∈A conditioned on the state st = (v, q, a<t),
+where A denotes a discrete temporal action space.
+As illustrated in Figure 1, SFT often yields suboptimal per-
+formance on TVG. A fundamental limitation of SFT lies in
+its off-policy nature: model parameters are optimized solely
+on demonstration trajectories sampled from a fixed data dis-
+tribution, rather than on the state distribution induced by the
+model’s own policy during inference. Formally, SFT mini-
+mizes the expected loss over expert trajectories τ ∼pdata(τ),
+while deployment executes trajectories τ ∼πθ(τ), leading
+to a distributional mismatch between training and inference.
+This mismatch results in compounding errors. Once an
+early prediction deviates from the ground-truth trajectory,
+the model may enter states that were never observed during
+training, causing subsequent predictions to progressively de-
+teriorate. Such error accumulation is particularly severe in
+TVG, where autoregressive temporal decisions are strongly
+coupled across steps and early localization errors propa-
+gate over long horizons, ultimately leading to significant
+temporal drift and degraded grounding accuracy.
+2.2. On-Policy Reinforcement Learning Is Not Enough
+To overcome the limitations of SFT, recent studies, most
+notably Time-R1, have investigated reinforcement learning
+(RL) as a post-training paradigm for TVG and reported con-
+sistent performance improvements. Concretely, instead of
+imitating expert demonstrations as in SFT, Time-R1 directly
+optimizes a policy πθ over trajectories τ = (a1, . . . , aT )
+sampled from its own induced state distribution st. Opti-
+mization is performed using GRPO, which maximizes an
+expected trajectory-level objective:
+max
+θ
+Eτ∼πθold
+
+R(τ) −β DKL(πθ ∥πref)
+
+,
+(1)
+where πθold denotes the policy from the previous optimiza-
+tion step, πref is a reference policy anchoring the pretrained
+model, and β controls the strength of the KL regulariza-
+tion. The trajectory-level reward R(τ) is computed using
+group-relative normalization with importance weighting:
+R(τ) = 1
+G
+G
+X
+i=1
+πθ(τi)
+πθold(τi) · ˆrG(τi),
+(2)
+where {τi}G
+i=1 denotes a group of on-policy trajectories sam-
+pled from πθold, and ˆrG(τi) represents the group-normalized
+sequence-level reward.
+In practice, Time-R1 adopts a
+timestamp-aware Intersection-over-Union (IoU) as the re-
+ward function, which augments the standard IoU by penal-
+izing temporal boundary deviations.
+By optimizing over trajectories sampled from the current
+policy, Time-R1 aligns the training state distribution with
+that encountered at inference time. This on-policy formula-
+tion exposes the model to states induced by its own predic-
+tions, enabling recovery from early deviations and mitigat-
+ing the compounding-error problem inherent to off-policy
+methods. However, while GRPO partially addresses the
+distributional mismatch of SFT, it introduces two new bot-
+tlenecks when applied to TVG, as illustrated in Figure 1.
+Sparse Rewards Lead to Ineffective Credit Assignment.
+As formalized in Equation (1), GRPO relies exclusively on
+trajectory-level supervision. After generating a decision tra-
+jectory τ = (a1, . . . , aT ), the model receives a single scalar
+reward R(τ) that assesses the overall quality of temporal
+video grounding. This design yields an extremely sparse
+learning signal: regardless of the trajectory length T, each
+episode provides only O(1) feedback. Consequently, the
+supervision signal does not scale with the temporal depth or
+structural complexity of the autoregressive process, severely
+impairing effective credit assignment across individual deci-
+sions and undermining stable learning over long horizons.
+Concretely, GRPO updates the policy by estimating the
+trajectory-level policy gradient:
+∇θLGRPO = −Eτ∼πθold
+
+R(τ) ∇θ log πθ(τ)
+
+.
+(3)
+Notably, the trajectory-level reward R(τ) is uniformly prop-
+agated to all time steps along the trajectory, causing each
+intermediate token-level decision to receive identical su-
+pervision regardless of its actual contribution to the final
+localization outcome. Consequently, the gradient estimator
+must implicitly infer responsibility across a long sequence
+of tightly coupled decisions, leading to ambiguous credit
+assignment, elevated gradient variance, and slow conver-
+gence. We validate this claim through an analysis of GRPO
+training dynamics (Section 5) and provide a theoretical justi-
+fication in Section A. This limitation is particularly acute in
+TVG, where early boundary predictions strongly constrain
+subsequent actions over extended temporal horizons.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+Teacher Model
+sampling video frames
+user question
+dense reward signal
+step 1: on-policy sampling
+step 2: conditional log-probabilities on student trajectory
+step 3: reward via reverse KL divergence
+step 4: update policy with dense reward
+on-policy optimization
+single rollout
+reasoning content
+temporal segments  
+Student Model
+Figure 2. Overview of the Video-OPD post-training framework. Video-OPD optimizes trajectories sampled on-policy to maintain
+training–inference alignment, leverages a fixed frontier teacher to provide dense token-level supervision via reverse KL for fine-grained
+credit assignment, and eliminates multiple rollouts per sample, substantially reducing computational overhead.
+Multi-Rollout Training Leads to Prohibitive Overhead.
+As shown in Equation (2), GRPO attempts to mitigate the
+high variance induced by sparse rewards by averaging gradi-
+ents over multiple rollouts for each training instance. While
+this strategy can partially stabilize optimization, it incurs
+a prohibitive computational burden in the context of video
+understanding. Each rollout requires conditioning on long
+visual sequences and performing full autoregressive trajec-
+tory generation, causing the training cost to scale with both
+the trajectory length T and the number of rollouts. In prac-
+tice, this multi-rollout requirement introduces substantial
+overhead in computation, memory, and latency, particularly
+for long videos. We validate this claim in Section 5 through
+an analysis of the training dynamics of GRPO.
+2.3. Insights for Improved Post-Training Paradigms
+SFT provides token-level supervision, yet optimizes the
+model under a fixed demonstration distribution rather than
+the on-policy state distribution induced at inference time.
+This off-policy mismatch leads to compounding errors: early
+deviations push the model into unseen states without train-
+ing signal, causing errors to accumulate along the trajectory.
+In contrast, GRPO optimizes the policy on trajectories sam-
+pled from the current policy, aligning training and inference
+state distributions and mitigating error accumulation in long-
+horizon decision processes. However, GRPO relies solely
+on sequence-level supervision, yieldinga single, fixed-size
+reward per trajectory and providing no explicit signal for
+attributing credit to intermediate token-level decisions.
+Therefore, the proposed post-training paradigm aims to re-
+tain the on-policy property, which is critical for mitigating
+distributional shift, while transforming sparse episode-level
+rewards into fine-grained, step-wise learning signals. The
+goal is to enable faster convergence during training and
+achieve improved overall training performance. Moreover,
+we aim to eliminate the need for multiple on-policy rollouts,
+thereby reducing the computational cost of training.
+3. Method
+In Section 3.1, we introduce Video-OPD, a strictly on-policy
+reinforcement learning framework for Temporal Video
+Grounding (TVG) that tightly couples policy optimization
+with dense, distillation-based supervision. Building on this
+framework, Section 3.2 presents Teacher-Validated Dis-
+agreement Focusing (TVDF), a lightweight training cur-
+riculum that uses annotated temporal data exclusively as a
+validation signal to identify reliable and informative sam-
+ples, thereby further enhancing optimization efficiency.
+3.1. On-Policy Distillation for TVG
+As illustrated in Figure 2, at each training iteration, Video-
+OPD performs optimization exclusively on trajectories sam-
+pled from the current student policy, while a fixed teacher
+model is used solely to provide fine-grained, token-level
+learning signals. This on-policy design preserves distribu-
+tional alignment between training and inference, while sub-
+stantially enhancing the efficiency of credit assignment. The
+overall training pipeline comprises four sequential stages.
+Step 1: On-Policy Trajectory Sampling. Given a video-
+query pair (v, q), the student model samples a trajectory
+τ = (a1, . . . , aT ) ∼πθ(· | v, q),
+(4)
+from its current policy. The trajectory consists of both rea-
+soning tokens and the final temporal boundary predictions.
+During sampling, we record the token-level log-probabilities
+log πθ(at | st) under the student policy, which are subse-
+quently used to construct per-token optimization signals.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+low IoU: reject sample
+high IoU : accept sample
+step 1: teacher reliability pre-validation
+step 2: disagreement-based trajectory prioritization
+sum of reverse KL divergence
+Prediction: [43.1, 44.5]
+Prediction: [26.2, 34.5]
+move on to step 2
+reasoning content
+temporal segments  Prioritize highest values
+ground truth: [26.2, 34.5]
+Figure 3. Overview of the Teacher-Validated Disagreement Focusing (TVDF) training curriculum. TVDF iteratively prioritizes trajectories
+that are both teacher-reliable and maximally informative for the student, thereby improving training efficiency.
+By sampling trajectories strictly from the current policy,
+Video-OPD preserves training-inference alignment and
+avoids the distributional mismatch and compounding er-
+rors observed in off-policy distillation and SFT, particularly
+in long-horizon video understanding.
+Step 2: Evaluation on Student Trajectory.
+A fixed
+high-capacity teacher πtea is leveraged to obtain the con-
+ditional log-probabilities log πtea(at | st) for each student-
+generated token. Importantly, the teacher never generates
+tokens itself and is only used to evaluate the student’s on-
+policy samples, ensuring strict on-policy optimization.
+Consequently, the supervision provided by the teacher is
+aligned with the student’s on-policy state distribution, avoid-
+ing the distributional mismatch inherent in off-policy distil-
+lation methods where teacher distributions are computed by
+conditioning on ground-truth trajectories.
+Step 3: Dense Token-Level Supervision. Using the student
+and teacher log-probabilities, we define a dense, per-token
+learning signal induced by the reverse KL divergence:
+rt = −
+
+log πθ(at | st) −log πtea(at | st)
+
+,
+(5)
+which captures a pointwise supervisory signal that drives
+the student policy πθ to align with the teacher πtea at state
+st. Under this formulation, tokens to which the teacher
+assigns low probability incur proportionally larger penalties,
+yielding fine-grained, token-level supervision that precisely
+pinpoints intermediate reasoning steps deviating from the
+teacher’s expected behavior.
+By providing supervision at every generation step, Video-
+OPD transforms sparse, episode-level rewards into dense,
+fine-grained learning signals, enabling accurate temporal
+credit assignment across long-horizon reasoning chains. We
+validate this claim in Section 5 through a comparative analy-
+sis of the training dynamics of Video-OPD and GRPO, and
+provide a theoretical justification in Section A.
+Step 4: Policy Update with Dense Rewards. The student
+policy is optimized via standard policy-gradient updates,
+treating the teacher-derived signal rt as a token-level reward.
+Specifically, policy parameters θ are updated according to
+−Eτ∼πθold
+" T
+X
+t=1
+rt
+πθ(at | st)
+πθold(at | st)∇θ log πθ(at | st)
+#
+, (6)
+where each action at is explicitly supervised by by a step-
+specific reward rt. Unlike GRPO, which relies on sparse
+episode-level rewards, this dense token-level supervision
+enables fine-grained credit assignment across individual de-
+cisions and substantially reduces gradient variance, leading
+to more stable and efficient optimization.
+Moreover, because each trajectory yields dense, token-level
+supervision, Video-OPD requires only a single rollout per
+training sample. This obviates the need for grouped rollouts
+or reward normalization strategies commonly used in GRPO,
+significantly reducing computational overhead. We validate
+this claim in Section 5 through a comparative analysis of
+the training dynamics of Video-OPD and GRPO.
+3.2. Teacher-Validated Disagreement Focusing
+We introduce Teacher-Validated Disagreement Focusing
+(TVDF), a training curriculum designed to further enhance
+optimization efficiency. The key observation motivating
+TVDF is that Video-OPD performs policy optimization
+without relying on annotated temporal video grounding data.
+Nevertheless, such annotations encode valuable information
+that can be exploited during training. TVDF therefore in-
+corporates ground-truth temporal annotations solely as a
+validation signal, rather than as a direct supervision target.
+As illustrated in Figure 3, TVDF consists of two comple-
+mentary components: Teacher Reliability Pre-Validation
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+Table 1. Evaluation of Video-OPD on three TVG benchmarks. ⋆denotes our reproduced results. Bold values indicate the best performance.
+Charades-TimeLens
+ActivityNet-TimeLens
+QVHighlights-TimeLens
+Models for Evaluation
+R@0.3
+R@0.5
+R@0.7
+R@0.3
+R@0.5
+R@0.7
+R@0.3
+R@0.5
+R@0.7
+Proprietary Models
+GPT-4o (Hurst et al., 2024)
+60.6
+44.5
+23.5
+55.2
+41.4
+25.8
+69.0
+54.8
+38.5
+GPT-5 (Singh et al., 2025)
+59.3
+42.0
+22.0
+57.4
+44.9
+30.4
+72.4
+60.4
+46.4
+Gemini-2.0-Flash (Comanici et al., 2025)
+66.4
+53.5
+27.1
+62.9
+54.0
+37.7
+76.2
+66.4
+48.3
+Gemini-2.5-Flash (Comanici et al., 2025)
+68.7
+56.1
+30.6
+66.8
+57.5
+41.3
+78.2
+69.4
+55.0
+Gemini-2.5-Pro (Comanici et al., 2025)
+74.1
+61.1
+34.0
+72.3
+64.2
+47.1
+84.1
+75.9
+61.1
+Open-Source Models
+VideoChat-Flash-7B (Li et al., 2025d)
+60.2
+37.9
+17.8
+35.5
+21.8
+10.5
+45.2
+30.6
+16.7
+Qwen2.5-VL-7B⋆(Bai et al., 2025b)
+58.1
+35.1
+18.2
+47.2
+32.5
+20.2
+55.0
+41.7
+29.3
+VideoChat-R1-7B (Li et al., 2025e)
+51.9
+30.8
+11.7
+35.0
+23.9
+11.3
+29.3
+19.1
+9.4
+Time-R1-7B (Wang et al., 2025)
+57.9
+32.0
+16.9
+44.8
+31.0
+19.0
+65.8
+51.5
+36.1
+TVG-R1-7B⋆(Chen et al., 2025)
+44.5
+23.6
+12.4
+46.7
+31.0
+18.6
+55.8
+41.2
+28.0
+VideoChat-R1.5-7B⋆(Yan et al., 2025)
+46.4
+24.0
+10.4
+40.6
+25.3
+16.4
+62.2
+44.5
+28.3
+MiMo-VL-7B (Xiaomi & Team, 2025)
+57.9
+42.6
+20.5
+49.3
+38.7
+22.4
+57.1
+42.6
+28.4
+Qwen3-VL-8B-Instruct⋆(Bai et al., 2025a)
+61.7
+41.5
+23.1
+41.2
+30.7
+20.0
+46.6
+38.2
+29.5
+Post-Training Frameworks
+OP-RKD [Qwen3-VL-8B]
+67.3
+47.0
+27.8
+59.1
+44.9
+30.6
+70.7
+57.4
+44.5
+OP-FKD [Qwen3-VL-8B]
+66.9
+47.3
+27.6
+58.6
+44.2
+30.5
+71.2
+58.9
+46.5
+GRPO [Qwen3-VL-8B]
+72.7
+44.4
+27.6
+58.6
+42.7
+32.1
+69.8
+53.0
+41.5
+Video-OPD [Qwen3-VL-8B] (Ours)
+73.1
+45.8
+32.4
+60.5
+45.6
+35.8
+73.8
+60.3
+50.4
+(TRPV) and Disagreement-Based Trajectory Prioritization
+(DBTP). Together, these mechanisms guide the selection
+and prioritization of informative on-policy trajectories,
+thereby improving sample efficiency and accelerating con-
+vergence. We describe each component in detail below.
+Step 1: Teacher Reliability Pre-Validation. TRPV is
+designed to mitigate the impact of erroneous teacher sig-
+nals in long-horizon temporal video grounding. Instead
+of directly supervising the student, ground-truth temporal
+annotations are used solely as a validation oracle to assess
+the temporal reliability of the teacher for each video–query
+pair. Concretely, a sample is deemed teacher-reliable if the
+temporal boundary predicted by the teacher satisfies a pre-
+defined consistency criterion with respect to the annotated
+ground-truth boundary. Samples that fail this validation are
+excluded from subsequent curriculum prioritization, thereby
+preventing unreliable teacher feedback from propagating
+into on-policy optimization. In practice, the consistency cri-
+terion is quantified by the mean IoU between teacher’s top-k
+predicted temporal boundaries and ground-truth annotation.
+Step 2: Disagreement-Based Trajectory Prioritization.
+Conditioned on validated reliable samples, DBTP prioritizes
+trajectories that are most informative for the current student
+policy. Informativeness is characterized by the degree of
+teacher–student disagreement, quantified as the aggregated
+reverse KL divergence between the student policy and the
+fixed teacher along the sampled reasoning trajectory. Larger
+divergence values indicate a greater mismatch between the
+student’s current behavior and a reliable teacher signal, and
+therefore a higher potential for effective knowledge transfer
+through on-policy distillation.
+TVDF is applied iteratively throughout training and natu-
+rally adapts as the student policy evolves. As optimization
+progresses, the distribution of high-disagreement trajecto-
+ries shifts accordingly, allowing the curriculum to contin-
+uously target samples that remain both challenging for the
+student and reliable for the teacher. By leveraging temporal
+annotations solely as a validation signal, TVDF provides
+a principled and indirect means of supervision, improving
+sample efficiency and accelerating convergence. For ad-
+ditional implementation details, please refer to Section B.
+4. Experiment
+Section 4.1 describes the experimental setup. Section 4.2
+presents the performance of Video-OPD on both TVG and
+broader video understanding tasks. Section 4.3 provides
+ablation studies that analyze the contributions of proposed
+Video-OPD framework and TVDF training curriculum. Ad-
+ditional experimental results are provided in Section D.
+4.1. Experimental Setup
+Training Details. We adopt Qwen3-VL-8B-Instruct (Bai
+et al., 2025a) as the base model. The maximum input video
+token length is set to 8,192, with videos sampled at 2 FPS.
+The number of video frames is capped at 768, and the maxi-
+mum video frame token length is set to 768. During Video-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+OPD training, we use a learning rate of 1 × 10−6, a batch
+size of 32, and train for a single epoch. Qwen3-VL-32B
+post-trained with GRPO is employed as the teacher model.
+Implementation details are provided in Section D.1. For
+GRPO training, learning rate is set to 1 × 10−6, batch size
+is 32, and 8 rollouts are performed per training instance.
+Construction of the Training Dataset. Training video
+data are collected from multiple public datasets, includ-
+ing HiREST (Zala et al., 2023), QuerYD (Oncescu et al.,
+2021), HowTo-Interlink7M (Jinpeng Wang et al., 2024),
+VTimeLLM (Huang et al., 2024), and DiDeMo (Anne Hen-
+dricks et al., 2017). In addition, we incorporate temporal an-
+notations from TimeLens-100K (Zhang et al., 2025), yield-
+ing a total of 96,586 temporal video grounding instances.
+For Video-OPD training, we apply TVDF as the data fil-
+tering strategy and select 2,500 samples to enable efficient
+optimization. For GRPO training, we follow the difficulty-
+aware data selection strategy proposed in Time-R1 (Wang
+et al., 2025) and similarly select 2,500 samples.
+Evaluation Benchmarks and Metrics. We comprehen-
+sively evaluate our model on a diverse set of benchmarks
+spanning both TVG and general video understanding tasks.
+For TVG, we evaluate on Charades-STA (Gao et al., 2017),
+ActivityNet (Caba Heilbron et al., 2015), and QVHighlights
+(Lei et al., 2021), using the corrected temporal annotations
+from TimeLens (Zhang et al., 2025) to address errors in the
+original evaluation sets, and report the IoU between pre-
+dicted temporal boundaries and ground-truth annotations,
+including Recall at IoU thresholds of 0.3, 0.5, 0.7 and mean
+IoU, following prior work (Li et al., 2025a; Wang et al.,
+2024a;b). For general video understanding, we evaluate on
+TempCompass (Liu et al., 2024), MVBench (Li et al., 2024),
+and Video-MME (Fu et al., 2025), using accuracy as the
+evaluation metric across all benchmarks.
+TempCompass
+MVBench
+Video-MME
+66
+68
+70
+72
+74
+Accuracy (%)
+73.3
+68.2
+68.2
+72.3
+67.2
+67.0
+71.8
+66.1
+65.9
+73.2
+68.9
+68.8
+73.3
+69.0
+68.8
+Qwen3-VL-8B
+OP-RKD
+OP-FKD
+GRPO
+Video-OPD
+Figure 4. Video-OPD on broader video understanding tasks.
+4.2. Main Results
+Temporal Video Grounding. As illustrated in Table 1,
+Video-OPD achieves state-of-the-art (SOTA) performance
+across all benchmarks among open-source models. Notably,
+Video-OPD consistently approaches the performance of the
+closed-source model Gemini-2.5-Flash on most datasets,
+and even surpasses it on several benchmarks. Moreover,
+when compared with existing post-training frameworks, in-
+cluding GRPO, Off-Policy Forward KL Distillation (OP-
+FKD), and Off-Policy Reverse KL Distillation (OP-RKD),
+Video-OPD demonstrates substantial and consistent per-
+formance gains. Implementation details of the off-policy
+distillation methods are provided in Section C.
+Table 2. Ablation study of proposed TVDF training curriculum.
+⋆indicates that data have been re-annotated using TimeLens.
+TVDF
+Charades⋆
+ActivityNet⋆QVHighlights⋆
+TRPV DBTP R@0.7 mIoU R@0.7 mIoU R@0.7
+mIoU
+Base Model
+23.1
+42.9
+20.0
+30.4
+29.5
+36.9
+✗
+✗
+31.1
+51.2
+33.5
+45.7
+47.7
+58.7
+✓
+✗
+31.7
+51.7
+34.2
+46.4
+48.2
+59.5
+✗
+✓
+31.3
+51.4
+34.6
+46.9
+50.0
+60.3
+✓
+✓
+32.4
+52.0
+35.8
+47.3
+50.4
+61.0
+General Video Understanding. As illustrated in Figure 4,
+off-policy distillation leads to noticeable performance degra-
+dation on a broader range of video understanding tasks. In
+contrast, both GRPO and Video-OPD not only preserve
+performance but also yield modest performance improve-
+ments. Notably, Video-OPD consistently achieves SOTA
+results across all evaluated datasets, demonstrating strong
+generalization capability beyond TVG.
+Charades-TimeLens
+ActivityNet-TimeLens QVHighlights-TimeLens
+30
+40
+50
+60
+70
+80
+mIoU (%)
+42.9
+30.4
+36.9
+52.1
+47.9
+62.3
+52.7
+49.3
+63.1
+53.3
+50.7
+64.6
+53.2
+48.9
+58.4
+Baseline
+Round 1
+Round 2
+Round 3
+Teacher Model
+Figure 5. Performance of Video-OPD under multi-round training.
+4.3. Ablation Study
+Effectiveness of the TVDF Training Curriculum. We
+conduct ablation studies on three TVG benchmarks to sys-
+tematically assess the effectiveness of proposed TVDF train-
+ing curriculum. As shown in Table 2, incorporating TVDF
+yields an additional performance gain of approximately 2%
+for Video-OPD, demonstrating its ability to precisely iden-
+tify and prioritize highly effective training samples. More-
+over, both TRPV and DBTP contribute positively to the
+overall performance, confirming that each component is
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+0
+200
+400
+600
+Training Time (minute)
+44
+46
+48
+50
+52
+Model Performance (mIoU)
+Video-OPD [Qwen3-VL-8B]
+GRPO [Qwen3-VL-8B]
+20
+40
+60
+Training Step
+44
+46
+48
+50
+52
+Model Performance (mIoU)
+Video-OPD [Qwen3-VL-8B]
+GRPO [Qwen3-VL-8B]
+20
+40
+60
+Training Step
+0
+200
+400
+600
+Training Time (minute)
+Video-OPD [Qwen3-VL-8B]
+GRPO [Qwen3-VL-8B]
+Figure 6. Training convergence behavior and computational cost of Video-OPD and GRPO, evaluated on Charades-TimeLens benchmark.
+individually effective and that they complement each other
+in improving optimization efficiency.
+Video-OPD under Multi-Round Training. As discussed
+in Section 3.2, TVDF training curriculum can be applied
+iteratively throughout training. As illustrated in Figure 5,
+Video-OPD achieves consistent performance gains as the
+number of training rounds increases. This behavior indicates
+that TVDF effectively adapts to the evolving student pol-
+icy, continuously prioritizing trajectories that remain both
+challenging for the student and reliable for the teacher. No-
+tably, after three training rounds, Video-OPD consistently
+surpasses the teacher model, demonstrating that its perfor-
+mance is not intrinsically constrained by that of the teacher.
+For the complete ablation results of multi-round Video-OPD
+training, please refer to Table 6.
+Table 3. Performance of Video-OPD under different teacher mod-
+els. Models marked with ⋆are post-trained using GRPO. Experi-
+ments are conducted on QVHighlights-TimeLens dataset.
+Models for Evaluation
+R@0.3
+R@0.5
+R@0.7
+mIoU
+Qwen3-VL-8B-Instruct
+46.6
+38.2
+29.5
+36.9
+Teacher: Qwen3-VL-4B ⋆
+70.5
+53.3
+41.8
+54.9
+Student: Qwen3-VL-8B
+75.6
+62.8
+51.9
+62.5
+Performance Gap
++5.1
++9.5
++10.1
++7.6
+Teacher: Qwen3-VL-8B ⋆
+69.8
+53.0
+41.5
+54.3
+Student: Qwen3-VL-8B
+74.9
+62.0
+51.8
+62.3
+Performance Gap
++5.1
++9.0
++10.3
++8.0
+Teacher: Qwen3-VL-32B ⋆
+77.1
+62.8
+50.9
+62.8
+Student: Qwen3-VL-8B
+75.9
+63.6
+52.0
+62.9
+Performance Gap
+-1.2
++0.8
++1.1
++0.1
+Performance of Video-OPD under Different Teacher. As
+shown in Table 3, stronger teacher models consistently lead
+to larger performance gains for Video-OPD, indicating that
+the student benefits increasingly from higher-quality teacher
+supervision. This trend demonstrates that Video-OPD can
+effectively scale with improvements in teacher capability,
+exhibiting a sustainable and forward-compatible learning
+behavior. Notably, in nearly all settings, the final student
+model matches or even surpasses the corresponding teacher,
+confirming that the performance of Video-OPD is not inher-
+ently bounded by the teacher’s capacity. For the complete
+ablation results of the teacher model, please refer to Table 5.
+5. Extended Analysis
+In Section 2.2, we identify two fundamental limitations of
+GRPO: inefficient optimization arising from sparse reward
+signals and substantial computational overhead due to mul-
+tiple rollouts. In this section, we systematically compare the
+training dynamics of Video-OPD and GRPO, demonstrat-
+ing that the performance gains of Video-OPD stem entirely
+from its effective mitigation of these two limitations.
+Dense Supervision Improves Optimization Efficiency.
+As shown in the left and middle panels of Figure 6, Video-
+OPD converges to an optimal policy substantially faster
+than GRPO during training, while also achieving superior
+overall performance. These results confirm that Video-OPD
+provides precise, dense, and fine-grained learning signals,
+enabling more accurate credit assignment and thereby im-
+proving both optimization efficiency and effectiveness.
+Eliminating Multiple Rollouts Reduces Computational
+Overhead. As shown in the right panel of Figure 6, under
+the same number of training steps, Video-OPD requires sig-
+nificantly less time than GRPO, approximately only 20%
+of its training cost. This result confirms that, by avoid-
+ing multi-rollout reward estimation for variance reduction,
+Video-OPD dramatically lowers computational overhead
+while maintaining stable optimization.
+6. Related Work
+MLLMs for Temporal Video Grounding (TVG). A sub-
+stantial body of prior work has investigated methods for
+enhancing the TVG capabilities of multimodal large lan-
+guage models (MLLMs). One research direction focuses
+on training paradigms, including augmenting supervised
+fine-tuning with TVG-specific objectives (Li et al., 2025a;
+Zeng et al., 2024) and designing verifiable reward signals
+to enable reinforcement learning–based optimization (Chen
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+et al., 2025; Li et al., 2025f; Wang et al., 2025; Yue et al.,
+2025; Zhang et al., 2025). A complementary line of work ex-
+plores architectural innovations, such as token compression
+mechanisms to alleviate the computational burden of long
+video sequences (Ren et al., 2024) and timestamp encoding
+schemes that explicitly align frame-level representations
+with their temporal positions (Chen et al., 2024; Ge et al.,
+2025; Wu et al., 2025; Zeng et al., 2025; Li et al., 2025g).
+On-Policy Distillation. On-policy distillation (Lu & Lab,
+2025) is a recent post-training paradigm that unifies the ad-
+vantages of on-policy reinforcement learning and knowledge
+distillation by jointly enforcing training–inference distribu-
+tional alignment and dense token-level supervision. Recent
+large-scale models, including MiMo-V2-Flash (Xiao et al.,
+2026), Qwen3 (Yang et al., 2025), and Qwen3-VL (Bai et al.,
+2025a), adopt on-policy distillation to align a student model
+with multiple RL-enhanced, domain-specialized teachers
+through token-level reverse KL divergence computed over
+trajectories sampled from the student’s current policy. This
+design enables efficient transfer of multi-domain expertise
+while mitigating off-policy distributional mismatch. To our
+knowledge, this work makes the first attempt to introduce on-
+policy distillation to TVG, addressing the unique challenges
+of long-horizon temporal reasoning that require both strict
+distributional alignment and fine-grained credit assignment.
+7. Limitations
+Video-OPD assumes access to a high-capacity teacher
+model capable of providing conditional log-probabilities
+for student-generated trajectories, which introduces practi-
+cal considerations regarding teacher availability and relia-
+bility. Importantly, however, Video-OPD does not rely on
+an extremely large, general-purpose language model with
+broad capabilities. In practice, it can instead perform online
+distillation from multiple domain-specific expert models, en-
+abling comprehensive improvements in video understanding
+across targeted tasks. In our experiments, the GRPO-trained
+Qwen3-VL-4B-Instruct serves as a lightweight expert spe-
+cialized for temporal video grounding. Moreover, after
+multiple rounds of Video-OPD training, the student model
+consistently surpasses its teacher. Taken together, these ob-
+servations demonstrate that Video-OPD is both practically
+feasible and broadly applicable.
+8. Conclusion
+We introduce Video-OPD, a novel post-training framework
+for TVG that performs on-policy optimization over trajec-
+tories sampled from the current policy and provides dense,
+token-level supervision in place of sparse, trajectory-level re-
+wards. Building upon this framework, we propose Teacher-
+Validated Disagreement Focusing (TVDF), a lightweight
+curriculum strategy that further improves optimization effi-
+ciency by leveraging annotated temporal data solely as a val-
+idation signal to prioritize trajectories that are both teacher-
+reliable and maximally informative. Experiments demon-
+strate that Video-OPD consistently outperforms GRPO,
+achieving faster convergence and lower computational cost.
+Acknowledgement.
+This work makes use of the TimeLens-Bench and TimeLens-
+100K datasets (https://github.com/TencentARC/TimeLens
+), which are licensed under the License Term of TimeLens.
+The authors of this work confirm that the use of the above
+datasets in this work is strictly limited to academic research
+purposes and does not involve any commercial activities.
+References
+Anderson, P., Wu, Q., Teney, D., Bruce, J., Johnson, M.,
+S¨underhauf, N., Reid, I., Gould, S., and Van Den Hengel,
+A. Vision-and-language navigation: Interpreting visually-
+grounded navigation instructions in real environments. In
+Proceedings of the IEEE conference on computer vision
+and pattern recognition, pp. 3674–3683, 2018.
+Anne Hendricks, L., Wang, O., Shechtman, E., Sivic, J.,
+Darrell, T., and Russell, B. Localizing moments in video
+with natural language. In Proceedings of the IEEE inter-
+national conference on computer vision, pp. 5803–5812,
+2017.
+Bai, S., Cai, Y., Chen, R., et al. Qwen3-vl technical report.
+arXiv preprint arXiv:2511.21631, 2025a.
+Bai, S., Chen, K., Liu, X., Wang, J., Ge, W., Song, S.,
+Dang, K., Wang, P., Wang, S., Tang, J., et al. Qwen2.
+5-vl technical report. arXiv preprint arXiv:2502.13923,
+2025b.
+Caba Heilbron, F., Escorcia, V., Ghanem, B., and Car-
+los Niebles, J. Activitynet: A large-scale video bench-
+mark for human activity understanding. In Proceedings
+of the ieee conference on computer vision and pattern
+recognition, pp. 961–970, 2015.
+Chen, R., Luo, T., Fan, Z., Zou, H., Feng, Z., Xie, G.,
+Zhang, H., Wang, Z., Liu, Z., and Huaijian, Z. Datasets
+and recipes for video temporal grounding via reinforce-
+ment learning. In Proceedings of the 2025 Conference
+on Empirical Methods in Natural Language Processing:
+Industry Track, pp. 983–992, 2025.
+Chen, S., Lan, X., Yuan, Y., Jie, Z., and Ma, L. Timemarker:
+A versatile video-llm for long and short video understand-
+ing with superior temporal localization ability. arXiv
+preprint arXiv:2411.18211, 2024.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+Comanici, G., Bieber, E., Schaekermann, M., Pasupat, I.,
+Sachdeva, N., Dhillon, I., Blistein, M., Ram, O., Zhang,
+D., Rosen, E., et al. Gemini 2.5: Pushing the frontier
+with advanced reasoning, multimodality, long context,
+and next generation agentic capabilities. arXiv preprint
+arXiv:2507.06261, 2025.
+Darrell, T. and Pentland, A. Space-time gestures. In Pro-
+ceedings of IEEE Conference on Computer Vision and
+Pattern Recognition, pp. 335–340. IEEE, 1993.
+Fu, C., Dai, Y., Luo, Y., Li, L., Ren, S., Zhang, R., Wang,
+Z., Zhou, C., Shen, Y., Zhang, M., et al. Video-mme:
+The first-ever comprehensive evaluation benchmark of
+multi-modal llms in video analysis. In Proceedings of the
+Computer Vision and Pattern Recognition Conference, pp.
+24108–24118, 2025.
+Gaidon, A., Harchaoui, Z., and Schmid, C. Temporal lo-
+calization of actions with actoms. IEEE transactions on
+pattern analysis and machine intelligence, 35(11):2782–
+2795, 2013.
+Gao, J., Sun, C., Yang, Z., and Nevatia, R. Tall: Temporal
+activity localization via language query. In Proceedings
+of the IEEE international conference on computer vision,
+pp. 5267–5275, 2017.
+Ge, Y., Ge, Y., Li, C., Wang, T., Pu, J., Li, Y., Qiu, L.,
+Ma, J., Duan, L., Zuo, X., et al. Arc-hunyuan-video-
+7b: Structured video comprehension of real-world shorts.
+arXiv preprint arXiv:2507.20939, 2025.
+Grauman, K., Westbury, A., Byrne, E., Chavis, Z., Furnari,
+A., Girdhar, R., Hamburger, J., Jiang, H., Liu, M., Liu,
+X., et al. Ego4d: Around the world in 3,000 hours of
+egocentric video. In Proceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition, pp.
+18995–19012, 2022.
+Huang, B., Wang, X., Chen, H., Song, Z., and Zhu, W.
+Vtimellm: Empower llm to grasp video moments. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 14271–14280, 2024.
+Hurst, A., Lerer, A., Goucher, A. P., Perelman, A., Ramesh,
+A., Clark, A., Ostrow, A., Welihinda, A., Hayes, A.,
+Radford, A., et al. Gpt-4o system card. arXiv preprint
+arXiv:2410.21276, 2024.
+Jinpeng Wang, A., Li, L., Qinghong Lin, K., Wang, J., Lin,
+K., Yang, Z., Wang, L., and Shou, M. Z. Cosmo: Con-
+trastive streamlined multimodal model with interleaved
+pre-training. arXiv e-prints, pp. arXiv–2401, 2024.
+Laptev, I. and P´erez, P. Retrieving actions in movies. In
+2007 IEEE 11th International Conference on Computer
+Vision, pp. 1–8. IEEE, 2007.
+Lei, J., Berg, T. L., and Bansal, M. Detecting moments
+and highlights in videos via natural language queries.
+Advances in Neural Information Processing Systems, 34:
+11846–11858, 2021.
+Li, J., Shi, Y., Ma, Z., Xu, H., Xiao, H., Kang, R., Yang, F.,
+Gao, T., Zhang, D., et al. imove: Instance-motion-aware
+video understanding. In Findings of the Association for
+Computational Linguistics: ACL 2025, pp. 23959–23975,
+2025a.
+Li, J., Yin, H., Tan, W., Chen, J., Xu, B., Qu, Y., Chen,
+Y., Ju, J., Luo, Z., and Luan, J. Revisor: Beyond tex-
+tual reflection, towards multimodal introspective reason-
+ing in long-form video understanding. arXiv preprint
+arXiv:2511.13026, 2025b.
+Li, K., Wang, Y., He, Y., Li, Y., Wang, Y., Liu, Y., Wang,
+Z., Xu, J., Chen, G., Luo, P., et al. Mvbench: A compre-
+hensive multi-modal video understanding benchmark. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 22195–22206, 2024.
+Li, M., Zhong, J., Zhao, S., Lai, Y., Zhang, H., Zhu, W. B.,
+and Zhang, K. Think or not think: A study of explicit
+thinking in rule-based visual reinforcement fine-tuning.
+arXiv preprint arXiv:2503.16188, 2025c.
+Li, X., Wang, Y., Yu, J., Zeng, X., Zhu, Y., Huang, H.,
+Gao, J., Li, K., He, Y., Wang, C., Qiao, Y., Wang, Y.,
+and Wang, L. Videochat-flash: Hierarchical compression
+for long-context video modeling, 2025d. URL https:
+//arxiv.org/abs/2501.00574.
+Li, X., Yan, Z., Meng, D., Dong, L., Zeng, X., He, Y.,
+Wang, Y., Qiao, Y., Wang, Y., and Wang, L. Videochat-r1:
+Enhancing spatio-temporal perception via reinforcement
+fine-tuning. arXiv preprint arXiv:2504.06958, 2025e.
+Li, Y., Cheng, J., Jia, S., Kuang, H., Jiao, S., Hou, Q.,
+and Cheng, M.-M. Tempsamp-r1: Effective temporal
+sampling with reinforcement fine-tuning for video llms.
+arXiv preprint arXiv:2509.18056, 2025f.
+Li, Z., Di, S., Zhai, Z., Huang, W., Wang, Y., and Xie,
+W. Universal video temporal grounding with genera-
+tive multi-modal large language models. arXiv preprint
+arXiv:2506.18883, 2025g.
+Liu, Y., Li, S., Liu, Y., Wang, Y., Ren, S., Li, L., Chen, S.,
+Sun, X., and Hou, L. Tempcompass: Do video llms really
+understand videos? arXiv preprint arXiv:2403.00476,
+2024.
+Lu, K. and Lab, T. M. On-policy distillation. Thinking
+Machines Lab: Connectionism, 2025. doi: 10.64434/tml.
+20251026. https://thinkingmachines.ai/blog/on-policy-
+distillation.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+Oncescu, A.-M., Henriques, J. F., Liu, Y., Zisserman, A.,
+and Albanie, S. Queryd: A video dataset with high-
+quality text and audio narrations. In ICASSP 2021-2021
+IEEE International Conference on Acoustics, Speech and
+Signal Processing (ICASSP), pp. 2265–2269. IEEE, 2021.
+Patraucean, V., Smaira, L., Gupta, A., Recasens, A., Mar-
+keeva, L., Banarse, D., Koppula, S., Malinowski, M.,
+Yang, Y., Doersch, C., et al. Perception test: A diagnos-
+tic benchmark for multimodal video models. Advances
+in Neural Information Processing Systems, 36:42748–
+42761, 2023.
+Ren, S., Yao, L., Li, S., Sun, X., and Hou, L. Timechat: A
+time-sensitive multimodal large language model for long
+video understanding. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pp. 14313–14323, 2024.
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang,
+H., Zhang, M., Li, Y., Wu, Y., et al. Deepseekmath: Push-
+ing the limits of mathematical reasoning in open language
+models. arXiv preprint arXiv:2402.03300, 2024.
+Singh, A., Fry, A., Perelman, A., Tart, A., Ganesh, A.,
+El-Kishky, A., McLaughlin, A., Low, A., Ostrow, A.,
+Ananthram, A., et al. Openai gpt-5 system card. arXiv
+preprint arXiv:2601.03267, 2025.
+Wang, H., Xu, Z., Cheng, Y., Diao, S., Zhou, Y., Cao, Y.,
+Wang, Q., Ge, W., and Huang, L. Grounded-videollm:
+Sharpening fine-grained temporal grounding in video
+large language models. arXiv preprint arXiv:2410.03290,
+2024a.
+Wang, Y., Meng, X., Liang, J., Wang, Y., Liu, Q., and Zhao,
+D. Hawkeye: Training video-text llms for grounding text
+in videos. arXiv preprint arXiv:2403.10228, 2024b.
+Wang, Y., Wang, Z., Xu, B., Du, Y., Lin, K., Xiao, Z., Yue,
+Z., Ju, J., Zhang, L., Yang, D., et al. Time-r1: Post-
+training large vision language model for temporal video
+grounding. arXiv preprint arXiv:2503.13377, 2025.
+Wu, Y., Hu, X., Sun, Y., Zhou, Y., Zhu, W., Rao, F., Schiele,
+B., and Yang, X. Number it: Temporal grounding videos
+like flipping manga. In Proceedings of the Computer
+Vision and Pattern Recognition Conference, pp. 13754–
+13765, 2025.
+Xiao, B., Xia, B., Yang, B., Gao, B., Shen, B., Zhang, C.,
+He, C., Lou, C., Luo, F., Wang, G., et al. Mimo-v2-flash
+technical report. arXiv preprint arXiv:2601.02780, 2026.
+Xiaomi, L. and Team, C. Mimo-vl technical report. arXiv
+preprint arXiv:2506.03569, 1(2):5, 2025.
+Yan, Z., Li, X., He, Y., Yue, Z., Zeng, X., Wang, Y., Qiao, Y.,
+Wang, L., and Wang, Y. Videochat-r1. 5: Visual test-time
+scaling to reinforce multimodal reasoning by iterative
+perception. arXiv preprint arXiv:2509.21100, 2025.
+Yang, A., Li, A., Yang, B., Zhang, B., et al. Qwen3 technical
+report. arXiv preprint arXiv:2505.09388, 2025.
+Yue, F., Zhang, Z., Jiao, J., Liang, Z., Cao, S., Zhang, F.,
+and Shen, R. Tempo-r0: A video-mllm for temporal
+video grounding through efficient temporal sensing re-
+inforcement learning. arXiv preprint arXiv:2507.04702,
+2025.
+Zala, A., Cho, J., Kottur, S., Chen, X., Oguz, B., Mehdad,
+Y., and Bansal, M. Hierarchical video-moment retrieval
+and step-captioning. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pp. 23056–23065, 2023.
+Zeng, X., Li, K., Wang, C., Li, X., Jiang, T., Yan, Z., Li, S.,
+Shi, Y., Yue, Z., Wang, Y., et al. Timesuite: Improving
+mllms for long video understanding via grounded tuning.
+arXiv preprint arXiv:2410.19702, 2024.
+Zeng, Y., Huang, Z., Zhong, Y., Feng, C., Hu, J., Ma, L.,
+and Liu, Y. Distime: Distribution-based time represen-
+tation for video large language models. arXiv preprint
+arXiv:2505.24329, 2025.
+Zhang, H., Sun, A., Jing, W., and Zhou, J. T. Temporal
+sentence grounding in videos: A survey and future di-
+rections. IEEE Transactions on Pattern Analysis and
+Machine Intelligence, 45(8):10443–10465, 2023.
+Zhang, J., Wang, T., Ge, Y., Ge, Y., Li, X., Shan, Y.,
+and Wang, L.
+Timelens: Rethinking video tempo-
+ral grounding with multimodal llms.
+arXiv preprint
+arXiv:2512.14698, 2025.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+A. Proof: Dense Rewards and Optimization Advantages of Video-OPD over GRPO
+We analyze why Video-OPD induces strictly denser rewards than GRPO and why such density leads to faster and more
+stable optimization.
+Reward Density. In GRPO, each trajectory τ = (a1, . . . , aT ) is associated with a single sequence-level reward R(τ),
+typically derived from a timestamp-aware IoU. Ignoring the KL regularization term for clarity, the corresponding policy
+gradient can be written as
+∇θJGRPO = Eτ∼πθold
+h
+R(τ)
+T
+X
+t=1
+∇θ log πθ(at | st)
+i
+.
+(7)
+Since R(τ) is independent of t, the same scalar reward is uniformly assigned to all time steps, yielding a temporally sparse
+and degenerate supervision signal that provides no explicit guidance for individual intermediate decisions. In contrast,
+Video-OPD defines a token-level reward at each time step
+rt = −
+ log πθ(at | st) −log πtea(at | st)
+
+,
+(8)
+evaluated on trajectories sampled from the current student policy. The resulting policy gradient estimator is
+∇θJOPD = Eτ∼πθold
+h
+T
+X
+t=1
+rt ∇θ log πθ(at | st)
+i
+.
+(9)
+Therefore, Video-OPD provides T distinct, step-specific rewards per trajectory, strictly increasing reward density along the
+temporal dimension.
+Variance Reduction and Credit Assignment. The variance of a policy gradient estimator admits the decomposition
+Var
+ T
+X
+t=1
+At∇θ log πt
+!
+=
+T
+X
+t=1
+Var(At∇θ log πt) + 2
+X
+t<t′
+Cov(At∇θ log πt, At′∇θ log πt′).
+(10)
+For GRPO, At ≡R(τ) for all t, which induces strong positive correlations across time steps. As a result, the gradient
+variance grows rapidly with the trajectory length T, and sequence-level rewards offer no mechanism for precise temporal
+credit assignment.
+For Video-OPD, each At = rt depends only on the local state–action pair (st, at). Since the teacher policy πtea is fixed and
+evaluated on the student’s state distribution, the resulting rewards are well-conditioned and largely decorrelated across time.
+Consequently, the cross-time covariance terms are substantially reduced, yielding a lower-variance gradient estimator.
+Relation to KL Minimization. Moreover, the expected Video-OPD update is equivalent to minimizing the expected reverse
+KL divergence between the student and teacher policies:
+Eat∼πθ
+
+rt∇θ log πθ(at | st)
+
+= ∇θDKL
+ πθ(· | st) ∥πtea(· | st)
+
+.
+(11)
+This shows that Video-OPD performs on-policy stochastic gradient descent on a smooth objective at each visited state,
+further contributing to stable optimization.
+Implications for Convergence. For smooth objectives optimized via stochastic gradients, the expected optimality gap
+decreases at a rate inversely proportional to the gradient variance. Since Video-OPD yields strictly lower-variance gradient
+estimates than GRPO while preserving strict on-policy optimization, it converges faster under the same sampling budget. In
+addition, the dense token-level rewards enable accurate credit assignment, leading to improved final performance.
+□
+B. Additional Implementation Details of the Teacher-Validated Disagreement Focusing.
+In practice, teacher reliability is measured by the mean IoU between the teacher’s top-k predicted temporal intervals and
+the annotated ground-truth interval. Meanwhile, we compute the corresponding mean IoU for the student model and use
+their discrepancy to guide data selection. This design emphasizes samples where the teacher prediction is reliable while the
+student exhibits noticeable disagreement, thereby improving the effectiveness of knowledge transfer.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+Formally, let D = {(xi, yi)}N
+i=1 denote the training dataset. For each sample xi, we compute the teacher IoU τi and the
+student IoU σi, and define the teacher–student IoU difference as
+δi = τi −σi.
+(12)
+Let S = {s1, s2, . . . , sn} denote the set of matched samples associated with δi. Our objective is to select a subset of k
+samples (k ≤n) from S for training. We consider the following difference-based sampling strategies.
+B.1. Difference-Sorted Uniform Sampling (DSUS)
+This strategy samples uniformly across the entire spectrum of IoU differences to preserve diversity. Samples are first sorted
+in descending order of δi:
+˜S = (s(1), s(2), . . . , s(n)),
+where δ(1) ≥δ(2) ≥· · · ≥δ(n).
+(13)
+We then select k evenly spaced indices
+jt =
+
+1 + (n −1)
+t
+k −1
+
+,
+t = 0, 1, . . . , k −1,
+(14)
+and construct the sampled set as
+SDSUS = {s(jt) | t = 0, . . . , k −1}.
+(15)
+B.2. Top-k Difference-Based Sampling (Top-k DBS)
+This strategy directly selects samples with the largest teacher–student disagreement. Using the same sorted sequence ˜S, the
+sampled subset is defined as
+STop-k = {s(1), s(2), . . . , s(k)}.
+(16)
+This selection focuses training on samples with the greatest IoU discrepancies, aligning with our objective of emphasizing the
+most informative high-disagreement cases. Unless otherwise specified, this strategy is adopted throughout all experiments.
+B.3. Bucket-Balanced Difference Sampling (BBDS)
+To promote balanced coverage across different disagreement levels, we partition the IoU difference range into B disjoint
+buckets. Let
+δmin = min
+i
+δi,
+δmax = max
+i
+δi.
+(17)
+The b-th bucket is defined as
+Bb =
+
+si ∈S
+ δmin + (b −1)δmax −δmin
+B
+≤δi < δmin + bδmax −δmin
+B
+
+,
+b = 1, . . . , B,
+(18)
+with the last bucket including δmax.
+Given a total sampling budget k, each bucket is allocated
+kb =
+ k
+B
+
++
+(
+1,
+b ≤(k mod B),
+0,
+otherwise,
+(19)
+samples. Within each non-empty bucket Bb, samples are sorted in descending order of δi, and kb samples are selected using
+uniform spacing as in Difference-Sorted Uniform Sampling. The final sampled set is obtained by
+SBBDS =
+B
+[
+b=1
+Sb.
+(20)
+In our experiments, we set B = 5.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+B.4. Gaussian-Weighted Difference Sampling (GWDS)
+We consider a probabilistic sampling strategy based on a Gaussian weighting over IoU differences. Given a target difference
+center c and standard deviation σ, the sampling probability for each sample is defined as
+pi = 1
+Z exp
+
+−(δi −c)2
+2σ2
+
+,
+Z =
+n
+X
+j=1
+exp
+
+−(δj −c)2
+2σ2
+
+.
+(21)
+A subset of k samples is then drawn without replacement from the categorical distribution specified by {pi}n
+i=1:
+SGWDS ∼Categorical({pi}, k).
+(22)
+In our experiments, we use c = 0.9 and σ = 0.2.
+C. Off-Policy Distillation Frameworks for Temporal Video Grounding
+We examine two purely off-policy distillation regimes that operate on fixed supervised trajectories, without any on-policy
+sampling. Both regimes follow the same training pipeline as Video-OPD, differing only in the source of trajectories:
+ground-truth sequences from the training corpus are used in place of student-generated rollouts. Specifically, we consider
+two frameworks: Off-Policy Reverse KL Distillation (OP-RKD) and Off-Policy Forward KL Distillation (OP-FKD).
+C.1. Off-Policy Reverse KL Distillation (OP-RKD)
+We first consider an off-policy distillation regime that adopts reverse KL divergence as the supervision signal, using the
+same divergence choice as Video-OPD but operating entirely on fixed ground-truth trajectories.
+Step 1: Fixed Trajectory Selection. Given a video-query pair (v, q), we select a target sequence τ = (a1, . . . , aT ) from
+the training corpus. Unlike Video-OPD, which samples trajectories from the current student policy πθ, this regime uses
+ground-truth sequences that are independent of the student’s current parameters. During this selection, we record the
+student’s token-level log-probabilities log πθ(at | st) for each token in the ground-truth sequence, where st = (v, q, a<t),
+which will later be used for computing per-token optimization signals.
+Step 2: Evaluation on Fixed Trajectories. For the same trajectory τ, we query a fixed, high-capacity teacher model πtea to
+compute the conditional log-probabilities
+log πtea(at | a<t, v, q),
+(23)
+for each token in the ground-truth sequence. Importantly, the teacher never generates tokens itself and is only used to
+evaluate the fixed ground-truth sequences. Consequently, the supervision provided by the teacher is aligned with the corpus
+distribution rather than the student’s on-policy state distribution, making this regime vulnerable to distributional mismatch
+between training and inference.
+Step 3: Dense Token-Level Supervision. Using the student and teacher log-probabilities, we define a dense per-token
+signal induced by the reverse KL divergence:
+rt = −
+
+log πθ(at | st) −log πtea(at | st)
+
+,
+(24)
+which is the pointwise contribution encouraging πθ to match πtea at state st = (v, q, a<t). This is identical in form to
+Video-OPD’s Step 3, but computed on ground-truth tokens at rather than student-sampled tokens at. Tokens assigned low
+probability by the teacher incur larger penalties under this signal, yielding fine-grained supervision that precisely identifies
+intermediate reasoning steps deviating from the teacher’s preferred behavior. By providing supervision at every generation
+step, Off-Policy Reverse-KL Distillation converts sparse, delayed episode-level rewards into dense learning signals, enabling
+precise temporal credit assignment across long reasoning chains, just as in Video-OPD.
+Step 4: Policy Update with Dense Advantages. The student policy is updated via standard policy-gradient optimization,
+where the teacher-derived signal rt is treated as a token-level advantage. Concretely, the policy parameters θ are updated
+according to
+∇θLOP−RKD = −Eτ∼D
+" T
+X
+t=1
+rt
+πθ(at | st)
+πθold(at | st)∇θ log πθ(at | st)
+#
+,
+(25)
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+where D denotes the distribution over fixed ground-truth trajectories from the training corpus, and each decision yt is directly
+supervised by a time-dependent advantage rt. In contrast to Video-OPD, which samples trajectories from the current student
+policy πθ, this regime uses trajectories from the fixed corpus distribution D, making the optimization strictly off-policy.
+C.2. Off-Policy Forward KL Distillation (OP-FKD)
+We further consider a vanilla knowledge distillation regime that adopts the classical forward KL divergence. The training
+pipeline follows the same four-stage structure as OP-RKD.
+Step 1: Fixed Trajectory Selection. As in OP-RKD, given a video-query pair (v, q), we select a target sequence
+τ = (a1, . . . , aT ) from the training corpus. Unlike Video-OPD, which samples trajectories from the current student policy
+πθ, this regime uses ground-truth sequences that are independent of the student’s current parameters. During this selection,
+we record the student’s token-level probability distribution Pstu(· | st) for each state st = (v, q, a<t) in the ground-truth
+sequence, which will later be used for computing per-token optimization signals.
+Step 2: Evaluation on Fixed Trajectories. For the same trajectory τ, we query a fixed, high-capacity teacher model πtea to
+compute the conditional probability distribution
+Ptea(· | st) = πtea(· | a<t, v, q),
+(26)
+for each state st in the ground-truth sequence. Importantly, the teacher never generates tokens itself and is only used to
+evaluate the fixed ground-truth sequences.
+Consequently, the supervision provided by the teacher is aligned with the corpus distribution rather than the student’s
+on-policy state distribution, making this regime vulnerable to distributional mismatch between training and inference.
+Step 3: Dense Token-Level Supervision. Using the student and teacher probability distributions, we define a dense
+per-token signal induced by the forward KL divergence:
+ℓt = KL
+ Ptea(· | st)
+ Pstu(· | st)
+
+=
+X
+w∈V
+Ptea(w | st) log Ptea(w | st)
+Pstu(w | st),
+(27)
+where V denotes the vocabulary, Ptea(· | st) and Pstu(· | st) are the teacher and student token distributions at state
+st = (v, q, a<t), and w represents a token in the vocabulary. Forward KL is inherently mode-covering: it encourages the
+student to allocate probability mass wherever the teacher assigns non-negligible probability, including low-probability
+modes, thereby promoting a more conservative and diversified approximation of the teacher. In contrast to reverse KL
+used in Video-OPD and OP-RKD, forward KL reverses the order of the distributions in the divergence, leading to different
+optimization dynamics that emphasize broader coverage of the teacher’s distribution rather than concentration on its peaks.
+Step 4: Standard Supervised Learning Update. The student policy is updated via standard supervised learning, where the
+forward KL divergence serves as the per-token loss. Since the teacher distribution Ptea is fixed with respect to the student
+parameters θ, the gradient of the loss with respect to θ simplifies to:
+∇θℓt = −
+X
+w∈V
+Ptea(w | st)∇θ log Pstu(w | st).
+(28)
+Concretely, the policy parameters θ are updated according to
+∇θLOP−FKD = Eτ∼D
+" T
+X
+t=1
+∇θℓt
+#
+,
+(29)
+where D denotes the distribution over fixed ground-truth trajectories from the training corpus. In contrast to Video-OPD and
+OP-RKD, which use policy-gradient optimization with token-level advantages, this regime uses standard backpropagation
+through the divergence loss.
+D. More Details Regarding the Experiments on Video-OPD and TVDF
+In Section D.1, we provide a detailed description of the practical implementation of GRPO training. In Section D.2, we
+compare the performance of Video-OPD and TimeLens on the TVG task. Sections D.2 to D.6 present comprehensive
+ablation studies of Video-OPD and the proposed VTDF framework. Finally, Section D.7 illustrates the prompt templates
+used by Video-OPD during both training and inference.
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+D.1. Detailed GRPO Implementation Details
+Following prior work (Wang et al., 2025; Zhang et al., 2025), Qwen3-VL-4B-Instruct, Qwen3-VL-8B-Instruct, and
+Qwen3-VL-32B-Instruct are further trained using reinforcement learning with verifiable rewards (e.g., GRPO), yielding
+Qwen3-VL-4B-GRPO, Qwen3-VL-8B-GRPO, and Qwen3-VL-32B-GRPO, respectively. Unless otherwise specified, we
+adopt Qwen3-VL-32B-GRPO as the teacher model.
+Training Details. For both training and evaluation under GRPO, the maximum input video token length is fixed at 8,192.
+Videos are sampled at 2 FPS, and both the maximum number of frames and the maximum frame token length are limited to
+768. We use a learning rate of 1 × 10−6, a total batch size of 32, and 8 rollouts.
+Dataset Construction. We adopt the difficulty-aware data selection strategy proposed in Time-R1 and TimeLens to construct
+a training set of 2,500 samples. Specifically, we employ a Gaussian-based sampling scheme over the Intersection-over-Union
+(IoU) scores of the data points. Each sample is selected according to a probability defined by a Gaussian distribution
+centered at a specified mean µ, computed as::
+P(i) = 1
+Z exp
+
+−(xi −µ)2
+2σ2
+
+,
+(30)
+where xi represents the IoU value of the i-th data point, µ is the center of the Gaussian distribution, and σ is the standard
+deviation. The normalization factor Z is the sum of the unnormalized probabilities over all n data points:
+Z =
+n
+X
+j=1
+exp
+
+−(xj −µ)2
+2σ2
+
+,
+(31)
+where n denotes the total number of data points. We set the Gaussian mean and standard deviation to µ = 0.3 and σ = 0.2.
+Table 4. Comparison with TimeLens-8B. TimeLens-8B is supervised-finetuned before GRPO. Bold text indicates the best performance.
+Charades-TimeLens
+ActivityNet-TimeLens
+QVHighlights-TimeLens
+Models for Evaluation
+R@0.3
+R@0.5
+R@0.7
+mIoU
+R@0.3
+R@0.5
+R@0.7
+mIoU
+R@0.3
+R@0.5
+R@0.7
+mIoU
+Qwen3-VL-8B-Instruct
+61.7
+41.5
+23.1
+42.9
+41.2
+30.7
+20.0
+30.4
+46.6
+38.2
+29.5
+36.9
+TimeLens-8B
+74.6
+49.5
+33.4
+53.3
+63.8
+48.0
+36.4
+49.3
+77.8
+63.4
+51.8
+63.0
+Video-OPD (Round 1)
+73.1
+45.8
+32.4
+52.0
+60.5
+45.6
+35.8
+47.3
+73.8
+60.3
+50.4
+61.0
+Video-OPD (Round 2)
+73.3
+47.4
+33.4
+52.7
+63.1
+47.3
+37.4
+49.3
+75.9
+63.1
+53.2
+63.1
+Video-OPD (Round 3)
+74.2
+48.6
+33.8
+53.4
+64.4
+49.2
+39.0
+50.7
+77.6
+65.3
+55.3
+64.6
+D.2. Video-OPD vs. TimeLens: Performance Comparison
+As shown in Table 4, we compare our method with the GRPO-trained state-of-the-art TimeLens-8B, which uses a maximum
+input video token length of 8192. Notably, TimeLens-8B is first supervisedly fine-tuned on temporal video grounding
+data and subsequently optimized with GRPO using 12k training samples, whereas Video-OPD-8B is trained purely
+via on-policy distillation with only 2.5k samples. Despite this substantially reduced training budget, Video-OPD-8B
+achieves comparable performance across all TVG benchmarks. Moreover, after three OPD rounds (7.5k samples in total),
+Video-OPD-8B consistently surpasses TimeLens-8B on every benchmark; for instance, it attains an mIoU of 64.6 on
+QVHighlights-TimeLens, exceeding TimeLens-8B’s 63.0 by 1.6 points.
+D.3. Complete Ablation Results of Video-OPD under Different Teacher Models
+As shown in Table 5, we perform a single round of On-Policy Distillation (OPD) using Qwen3-VL-4B-GRPO, Qwen3-VL-
+8B-GRPO, and Qwen3-VL-32B-GRPO as teachers, with Qwen3-VL-8B-Instruct as the student. When Qwen3-VL-4B-
+GRPO or Qwen3-VL-8B-GRPO serves as the teacher, a single OPD round is sufficient for the 8B student to consistently
+surpass the teacher across all benchmarks, highlighting the efficiency and effectiveness of OPD.
+Concretely, with Qwen3-VL-4B-GRPO as teacher, Video-OPD-8B (4B Teacher) achieves an mIoU of 62.5 on QVHighlights-
+TimeLens, exceeding the teacher’s 54.9 by 7.6 points; with Qwen3-VL-8B-GRPO as the teacher, Video-OPD-8B (8B
+Teacher) attains an mIoU of 47.0 on ActivityNet-TimeLens, outperforming the teacher’s 44.7 by 2.3 points. In contrast,
+when Qwen3-VL-32B-GRPO is used as the teacher, a single OPD round allows Video-OPD-8B (32B Teacher) to surpass
+the teacher on QVHighlights-TimeLens, while remaining slightly below on ActivityNet-TimeLens and Charades-TimeLens.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+Table 5. Comprehensive evaluation of Video-OPD under different teacher models. Bold indicate the performance of the student model
+after Video-OPD training.
+Charades-TimeLens
+ActivityNet-TimeLens
+QVHighlights-TimeLens
+Models for Evaluation
+R@0.3 R@0.5 R@0.7 mIoU R@0.3 R@0.5 R@0.7 mIoU R@0.3 R@0.5 R@0.7 mIoU
+Qwen3-VL-8B-Instruct
+61.7
+41.5
+23.1
+42.9
+41.2
+30.7
+20.0
+30.4
+46.6
+38.2
+29.5
+36.9
+Teacher: Qwen3-VL-4B-GRPO
+72.4
+45.7
+28.5
+49.8
+58.3
+41.6
+29.9
+43.8
+70.5
+53.3
+41.8
+54.9
+Student: Qwen3-VL-8B
+73.6
+47.2
+33.0
+52.4
+61.9
+46.5
+36.7
+48.4
+75.6
+62.8
+51.9
+62.5
+Performance Gap
++1.2
++1.5
++4.5
++2.6
++3.6
++4.9
++6.8
++4.6
++5.1
++9.5
++10.1
++7.6
+Teacher: Qwen3-VL-8B-GRPO
+72.7
+44.4
+27.6
+49.6
+58.6
+42.7
+32.1
+44.7
+69.8
+53.0
+41.5
+54.3
+Student: Qwen3-VL-8B
+72.0
+46.6
+33.0
+51.6
+61.2
+44.8
+35.0
+47.0
+74.9
+62.0
+51.8
+62.3
+Performance Gap
+-0.7
++2.2
++5.4
++2.0
++2.6
++2.1
++2.9
++2.3
++5.1
++9.0
++10.3
++8.0
+Teacher: Qwen3-VL-32B-GRPO
+78.8
+51.0
+32.6
+55.1
+66.3
+50.2
+38.9
+51.5
+77.1
+62.8
+50.9
+62.8
+Student: Qwen3-VL-8B
+73.3
+48.4
+33.6
+52.5
+62.2
+45.6
+35.8
+47.7
+75.9
+63.6
+52.0
+62.9
+Performance Gap
+-5.5
+-2.6
++1.0
+-2.6
+-4.1
+-4.6
+-3.1
+-3.8
+-1.2
++0.8
++1.1
++0.1
+Table 6. Multi-round training performance of Video-OPD on three TVG benchmarks. Bold values indicate the best performance.
+Charades-TimeLens
+ActivityNet-TimeLens
+QVHighlights-TimeLens
+Models for Evaluation
+R@0.3
+R@0.5
+R@0.7
+mIoU
+R@0.3
+R@0.5
+R@0.7
+mIoU
+R@0.3
+R@0.5
+R@0.7
+mIoU
+Qwen3-VL-32B-GRPO
+78.7
+49.4
+29.4
+53.2
+65.0
+47.5
+35.0
+48.9
+75.6
+58.2
+44.9
+58.4
+Qwen3-VL-8B-Instruct
+61.7
+41.5
+23.1
+42.9
+41.2
+30.7
+20.0
+30.4
+46.6
+38.2
+29.5
+36.9
+Video-OPD (round 1)
+73.0
+45.9
+32.5
+52.1
+61.2
+46.0
+36.1
+47.9
+75.2
+62.3
+51.9
+62.3
+Video-OPD (round 2)
+73.3
+47.4
+33.4
+52.7
+63.1
+47.3
+37.4
+49.3
+75.9
+63.1
+53.2
+63.1
+Video-OPD (round 3)
+74.2
+48.6
+33.8
+53.3
+64.4
+49.2
+39.0
+50.7
+77.6
+65.3
+55.3
+64.6
+D.4. Complete Ablation Results of Multi-Round Video-OPD Training
+As illustrated in Table 6, Video-OPD exhibits consistent and monotonic improvements across all three benchmarks as training
+progresses over multiple rounds. After the first OPD round, the student model already closes a substantial portion of the
+performance gap to the GRPO-trained teacher, particularly on QVHighlights-TimeLens, where it approaches teacher-level
+mIoU. A second OPD round further narrows this gap across Charades-TimeLens and ActivityNet-TimeLens, and a third
+round enables the student to consistently surpass the teacher on all datasets. These results suggest that for temporal video
+grounding, when the capacity gap between teacher and student is small, a single OPD round is often sufficient for the student
+to exceed the teacher. In contrast, larger teacher–student scale disparities can be effectively bridged within two to three OPD
+rounds, highlighting the strong iterative refinement capability and scalability of the proposed Video-OPD framework.
+Table 7. Comparison of different sampling strategies for the TVDF training curriculum. Bold values indicate the best performance.
+Charades-TimeLens
+ActivityNet-TimeLens
+QVHighlights-TimeLens
+Sampling Strategies
+R@0.3
+R@0.5
+R@0.7
+mIoU
+R@0.3
+R@0.5
+R@0.7
+mIoU
+R@0.3
+R@0.5
+R@0.7
+mIoU
+DSUS
+69.6
+40.8
+27.2
+48.2
+58.1
+42.1
+33.1
+45.3
+70.9
+55.6
+45.2
+56.9
+BBDS
+72.3
+44.3
+29.1
+50.3
+59.5
+43.9
+34.3
+46.5
+71.1
+56.0
+45.2
+57.1
+GWDS
+72.0
+44.2
+30.4
+50.6
+60.7
+44.5
+43.4
+47.1
+73.3
+57.9
+47.3
+58.9
+Top-k (Ours)
+72.8
+45.8
+31.2
+51.5
+61.2
+45.3
+36.0
+47.9
+73.7
+59.6
+49.6
+60.2
+D.5. Ablation Study of TVDF Training Curriculum with Different Sampling Strategies
+As shown in Table 7, the proposed Top-k sampling strategy consistently achieves the best performance across all three
+TVG benchmarks and evaluation metrics. Compared with baseline strategies such as DSUS, BBDS, and GWDS, Top-k
+delivers consistent gains across all metrics, indicating more effective selection of informative training trajectories. These
+results validate Top-k as a stronger curriculum instantiation for TVDF, leading to more efficient and stable performance
+improvements than alternative sampling strategies.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Video-OPD: Efficient Post-Training of MLLMs for Temporal Video Grounding via On-Policy Distillation
+Table 8. Comparison between Thinking and No-thinking modes of Video-OPD. Bold values indicate the best performance.
+Charades-TimeLens
+ActivityNet-TimeLens
+QVHighlights-TimeLens
+Models for Evaluation
+R@0.3 R@0.5 R@0.7 mIoU
+R@0.3 R@0.5 R@0.7 mIoU
+R@0.3 R@0.5 R@0.7 mIoU
+Qwen3-VL-8B-Instruct
+61.7
+41.5
+23.1
+42.9
+41.2
+30.7
+20.0
+30.4
+46.6
+38.2
+29.5
+36.9
+Video-OPD (No-thinking)
+73.1
+45.8
+32.4
+52.0
+60.5
+45.6
+35.8
+47.3
+73.8
+60.3
+50.4
+61.0
+Video-OPD (Thinking)
+70.3
+43.1
+28.7
+48.7
+48.5
+35.2
+25.6
+37.0
+53.9
+43.4
+34.5
+44.1
+D.6. Ablation Study of Video-OPD with and without Thinking Mode
+Prior work (Li et al., 2025c;b; Patraucean et al., 2023) suggests that for visual perception tasks, reinforcement learning with
+verifiable rewards (e.g., GRPO) does not benefit from an explicit thinking process. This observation extends to Temporal
+Video Grounding (TVG), as shown by TimeLens (Zhang et al., 2025). Consistent with these findings, our ablation study in
+Table 8 shows that incorporating a thinking process during Video-OPD training lowers the Charades-TimeLens mIoU from
+52.0 to 48.7 (a 6.3% relative drop). This result confirms that an explicit thinking process likewise provides no advantage for
+TVG tasks that are primarily driven by visual perception.
+D.7. Prompt Templates Used by Video-OPD Framework during Training and Inference
+Figure 7 illustrates the prompt templates used by the Video-OPD framework during training and inference.
+Prompt for Video-OPD Framework Training and Evaluation
+System Instruction:
+You are a video analysis expert.
+User Instruction:
+To accurately pinpoint the event “{query}” in the video, determine the precise time period of the event. Provide
+the start and end times (in seconds, precise to two decimal places) in the format “start time to end time”. For
+example: “12.54 to 17.83”.
+Figure 7. Prompt used for Video-OPD framework training and evaluation.
+18
