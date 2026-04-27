@@ -1,0 +1,3368 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+T3D: Few-Step Diffusion Language Models via Trajectory Self-Distillation
+with Direct Discriminative Optimization
+Anonymous Authors1
+Abstract
+Diffusion large language models (DLLMs) have
+the potential to enable fast text generation by de-
+coding multiple tokens in parallel. However, in
+practice, their inference efficiency is constrained
+by the need for many refinement steps, while ag-
+gressively reducing the number of steps leads
+to a substantial degradation in generation qual-
+ity. To alleviate this, we propose a trajectory
+self-distillation framework that improves few-step
+decoding by distilling the model’s own genera-
+tive trajectories. We incorporate Direct Discrimi-
+native Optimization (DDO), a reverse-KL objec-
+tive that promotes mode-seeking distillation and
+encourages the student to concentrate on high-
+probability teacher modes. Across benchmarks,
+our approach consistently outperforms strong few-
+step baselines and standard training under tight
+step budgets.
+Although full-step decoding re-
+mains superior, we substantially narrow the gap,
+establishing a strong foundation towards practical
+few-step DLLMs. The source code is available at
+https://github.com/Tyrion58/T3D.
+1. Introduction
+Inference-time efficiency is a central challenge in large
+language modeling, especially for real-time and compute-
+constrained applications (Zhen et al., 2025; Miao et al.,
+2025; Alizadeh et al., 2024). Many practical deployments,
+such as real-time decision-making and on-device AI, re-
+quire consistently low-latency responses. Diffusion large
+language models (DLLMs) (Labs et al., 2025; Song et al.,
+2025; Nie et al., 2025; Cheng et al., 2025; Ye et al., 2025)
+offer a promising direction by enabling parallel token gen-
+eration. However, existing DLLMs rely on long decoding
+chains consisting of many diffusion steps (Sahoo et al., 2024;
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Schiff et al., 2025; Nie et al., 2025; Ye et al., 2025), which
+significantly limits their efficiency gains. When decoding
+is made more aggressive by reducing the number of steps,
+these models struggle to accurately generate multiple tokens
+simultaneously (Cheng et al., 2025).
+Recent work (Yoo et al., 2025; Chen et al., 2025; Xu et al.,
+2024a; Qian et al., 2026; Kim et al., 2025; Zhang et al.,
+2025b) has explored fine-tuning DLLMs to support few-step
+decoding, aiming to further reduce inference latency beyond
+standard diffusion sampling. However, few-step decoding is
+fundamentally challenged by the common mean-field (token-
+factorized) parameterization used in masked diffusion mod-
+els (Xu et al., 2024a; Yoo et al., 2025; Zhang et al., 2025b),
+which induces a factorization (approximation) error that
+typically grows as the number of denoising steps decreases.
+Moreover, training and inference often operate on different
+intermediate-state distributions: training commonly uses
+random masking, while inference frequently relies on non-
+random heuristics (e.g., confidence-based schedules) that
+change the masked states that the model encounters (Wang
+et al., 2025b; Qian et al., 2026). Together, this motivates the
+following important research question:
+Can we reduce mean-field approximation error
+under tight step budgets for DLLMs?
+We answer this question affirmatively by introducing two
+complementary training ingredients.
+(i) Trajectory supervision.
+First, we introduce trajectory
+self-distillation, which trains the student on the teacher’s
+own rollout trajectories. This directly addresses a train–test
+mismatch in intermediate states: training often relies on ran-
+dom masking, while inference typically uses non-random
+heuristics (e.g., confidence-based schedules) that induce dif-
+ferent masking patterns and introduce dependencies among
+simultaneously decoded tokens. By distilling on rollout
+trajecotires produced by the teacher under the target decod-
+ing procedure, the student is supervised on-policy and can
+use its limited step budget more effectively, matching the
+trajectory distribution encountered at inference time rather
+than optimizing only endpoint transitions as previous self-
+distillation frameworks (Yoo et al., 2025; Chen et al., 2025).
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+(ii) Better training objective for few-step decoding.
+To
+strengthen learning under aggressive step compression,
+we incorporate Direct Discriminative Optimization (DDO)
+(Zheng et al., 2025) into the distillation objective. With
+only a few decoding steps, the denoising posterior becomes
+highly multimodal (Xiao et al., 2021; Xu et al., 2024b), and
+trajectory matching with a forward-KL objective tends to
+be mode-covering, yielding over-smoothed predictions and
+weak alignment with teacher trajectories. DDO mitigates
+this issue via a GAN-inspired likelihood-ratio loss that can
+be interpreted as reverse-KL style, mode-seeking distilla-
+tion: by contrasting the fine-tuned model against its initial-
+ization, it emphasizes high-probability teacher modes rather
+than uniformly matching likelihood across all continuations.
+Moreover, for masked diffusion, this likelihood-ratio objec-
+tive can be evaluated directly from the model’s predicted
+probabilities, avoiding Monte Carlo ELBO estimation (and
+its associated gradient variance).
+Finally, we introduce a path-consistency regularizer that
+reweights token-level losses based on decoding order, miti-
+gating error propagation from early mispredictions in block-
+wise few-step decoding. We refer to the resulting approach
+as Self-Trajectory Distillation via DDO (T3D).
+T3D provides a simple yet effective solution for few-step
+diffusion language modeling. By distilling directly from
+teacher-generated trajectories, T3D eliminates distribution
+shift and stabilizes training in the few-step regime, with-
+out requiring any additional ground-truth supervision. Our
+theoretical analysis shows that trajectory-level distillation re-
+duces conditional dependencies in the reverse process, lead-
+ing to lower factorization error. Extensive experiments on
+standard reasoning and code-generation benchmarks demon-
+strate that T3D consistently outperforms existing few-step
+DLLM methods under tight decoding budgets, substantially
+narrowing the gap to full-step diffusion decoding.
+2. Preliminaries
+This section introduces our notation, reviews Masked Diffu-
+sion Language Models (MDLMs), and Direct Discrimina-
+tive Optimization (DDO).
+Notations.
+Throughout this paper, scalars are denoted
+by lowercase or uppercase letters (e.g., t, T), vectors by
+lowercase boldface letters (e.g., x), and random vectors by
+lowercase boldface letters with a roman font (e.g., x). The
+symbol J denotes a joint distribution. We use KL(·∥·) for
+the Kullback–Leibler divergence and D(·∥·) to denote either
+the forward or reverse Kullback–Leibler divergence.
+2.1. Masked Diffusion Models
+Masked Diffusion Language Models (MDLMs) (Sahoo
+et al., 2024; Shi et al., 2024) are diffusion-based genera-
+tive models for discrete sequences. Let pdata denote the
+data distribution. A data sample x0 ∼pdata is a length-L
+token sequence x0 = (x1
+0, . . . , xL
+0 ), where xi
+0 ∈V denotes
+a discrete token from a finite vocabulary V augmented with
+a special mask token m.
+The forward (noising) diffusion process is defined over con-
+tinuous time t ∈[0, 1] and corrupts a sequence by indepen-
+dently masking tokens. The corruption distribution factor-
+izes across token positions:
+q(xt | x0) =
+L
+Y
+i=1
+q(xi
+t | xi
+0),
+(1)
+where the token-wise kernel q(xi
+t | xi
+0) is governed by a
+monotonically decreasing noise schedule αt ∈[0, 1]: at
+time t, xi
+t is preserved as xi
+0 with probability αt and re-
+placed by the mask token m with probability 1 −αt. We
+choose αt = 1 −t following previous works (Nie et al.,
+2025; Sahoo et al., 2024).
+The reverse (denoising) process is modeled by a neural
+network pθ that also factorizes over tokens:
+pθ(xs | xt) =
+L
+Y
+i=1
+pθ
+
+x(i)
+s
+| xt
+
+.
+(2)
+As shown in (Sahoo et al., 2024; Shi et al., 2024), maximiz-
+ing the evidence lower bound (ELBO) for MDLMs admits
+a remarkably simple form. Concretely, the optimization ob-
+jective reduces to a masked-token cross-entropy objective:
+L(θ) = −Ext∼q(·|x0)
+
+log pθ(x0 | xt)
+
+.
+(3)
+2.2. Direct Discriminative Optimization (DDO)
+Direct Discriminative Optimization (DDO) (Zheng et al.,
+2025) is a GAN-inspired objective for likelihood-based gen-
+erative models. Unlike standard GANs (Goodfellow et al.,
+2020), which introduce an additional discriminator network,
+DDO implicitly parameterizes the discriminator using likeli-
+hood ratios. Consider a pretrained model pθref that supplies
+“fake” samples. To distinguish real data x ∼pdata from
+reference samples x ∼pθref, the optimal discriminator is:
+d∗(x) =
+pdata(x)
+pdata(x)+pθref (x) = σ
+
+log pdata(x)
+pθref (x)
+
+,
+where σ(·) denotes the sigmoid function. DDO replaces the
+unknown pdata by parameterizing a discriminator through a
+learnable likelihood-based model pθ:
+dθ(x) := σ
+
+log
+pθ(x)
+pθref (x)
+
+.
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Substituting this implicit discriminator into the GAN dis-
+criminator loss yields the DDO objective:
+min
+θ
+L(θ) = −Ex∼pdata
+h
+log σ
+
+log
+pθ(x)
+pθref (x)
+i
+−Ex∼pθref
+h
+log
+
+1 −σ
+
+log
+pθ(x)
+pθref (x)
+i
+.
+(4)
+With unlimited model capacity, Zheng et al. (2025) show
+that the global minimizer of the DDO objective above satis-
+fies p∗
+θ = pdata.
+3. Methods
+In this section, we first formulate and introduce trajectory
+distillation in Sec. 3.1. We then present how Direct Dis-
+criminative Optimization (DDO) is adapted to trajectory
+distillation in Sec. 3.2, followed by the path consistency
+regularization described in Sec. 3.3. Finally, we summarize
+the complete training procedures as T3D in Sec. 3.4.
+3.1. Trajectory Self-Distillation
+Motivated by the insight that intermediate denoising states
+encode strong signals of the teacher’s decoding behavior
+(Song & Dhariwal, 2023; Hu et al., 2025a; Wang et al.,
+2025b; Qian et al., 2026), we propose trajectory self-
+distillation, which trains a few-step student directly on
+teacher rollout trajectories.
+Given a pretrained teacher model pϕ, we want to train a
+few-step student model pθ initialized from pϕ without us-
+ing any ground truth data. Instead of matching only the
+marginal distribution pϕ(x0), our approach leverages pairs
+of clean and intermediate states (x0, xt) sampled along the
+teacher’s trajectory pϕ(x0:T ). The most direct approach is
+using a forward KL divergence objective, which leads to the
+following loss:
+Ltraj(θ) = −Epϕ(xt)Ex0∼pϕ(·|xt)[ log pθ(x0 | xt)] . (5)
+Ltraj(θ) differs from the original diffusion loss L(θ)
+(Eqn. 3) only in how training pairs are constructed: it draws
+(x0, xt) from the same teacher-generated trajectory.
+Under mild assumptions, we show that minimizing Eqn. 5
+is optimal for on-policy objective matching; see Proposi-
+tion 4.3 for details. Moreover, in Sec. 4.3 we show that
+trajectory self-distillation enables few-step generation
+by reducing the factorization error in the reverse pro-
+cess. This perspective allows the method to be interpreted
+as a variant of Discrete Rectified Flow (Yoo et al., 2025).
+3.2. Trajectory Distillation via DDO
+When the student is restricted to a small number of decod-
+ing steps, the posterior p(x0 | xt) becomes highly mul-
+timodal, as multiple future completions remain plausible
+under coarse intermediate states (Xiao et al., 2021). In this
+regime, forward-KL–style Ltraj(θ) in Eqn. 5 suffers from
+mode covering, leading to over-smoothed predictions and
+suboptimal alignment with teacher-generated trajectories.
+To address this issue, we adopt Direct Discriminative Opti-
+mization (DDO) (Zheng et al., 2025) for trajectory distilla-
+tion. The DDO objective can be interpreted as a reverse-
+KL–style optimization that encourages mode-seeking
+behavior, allowing the student to focus on high-probability
+teacher modes rather than uniformly covering all possible
+continuations.
+Formally, we define the trajectory-level DDO objective as:
+Ltraj-DDO(θ) = Ext∼pϕ(xt)
+
+l(θ)
+
+,
+(6)
+where the per-step DDO loss is:
+l(θ) = −log σ
+
+Ex0∼pϕ(·|xt)
+h
+log
+pθ(x0|xt)
+pθref (x0|xt)
+i
+−log
+
+1 −σ
+
+Ex0∼pθref (·|xt)
+h
+log
+pθ(x0|xt)
+pθref (x0|xt)
+i
+,
+(7)
+where pθref is a reference model that provides “fake” sam-
+ples and is initialized from pθ. The first term encourages the
+student to assign higher likelihood than the reference model
+to teacher-generated samples, while the second term penal-
+izes overestimation of samples from the reference model.
+In Sec. 4.4, we provide a theoretical analysis of the DDO
+objective, which reveals the implicit optimization target of
+DDO in trajectory distillation.
+3.3. Path Consistency Regularization
+We introduce a lightweight path-consistency regulariza-
+tion to stabilize few-step decoding by emphasizing early-
+decoded tokens, where mistakes are most likely to cascade
+under aggressive step compression. By placing stronger
+supervision on early decoded tokens, we reduce error
+propagation and improve overall decoding stability.
+Specifically, given a sampled x0 = (x1
+0, . . . , xL
+0 ) ∼pϕ(x0)
+and a fixed decoding step budget B, we define π ∈[B]L
+to be the step index of each token, where πi is the step
+at which token xi is decoded in the decoding trajectory.
+Then we define a token-level weighted path-consistency
+regularization loss as:
+Lpath(θ) =
+−Epϕ(xt)Ex0∼pϕ(·|xt)
+"X
+i
+wi
+ log pθ(xi
+0 | x(i)
+t )
+
+#
+,
+(8)
+Here wi ≥0 is a step-dependent weighting coefficient. In
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+this work, we use:
+wi = B−πi+1
+B
+.
+(9)
+This choice assigns larger weights to tokens decoded earlier
+in the trajectory: if token i is decoded at an earlier step, then
+πi is smaller, which increases B −πi + 1 and hence wi.
+3.4. T3D: Trajectory Self-Distillation via DDO
+Putting all the components together, we present a self-
+distillation algorithm for enabling few-step generation in
+diffusion language models. We first construct a trajectory
+dataset by sampling from the pretrained teacher model pϕ,
+decoding one token per step to get the best performance.
+The student is then trained on the collected trajectories using
+DDO, combined with path consistency regularization. We
+term our method:
+LT3D(θ) = Ltraj-DDO(θ) + λ Lpath(θ).
+(10)
+Here, λ controls the strength of the path consistency regular-
+ization. An overview of the method is shown in Fig. 1, and
+the full training algorithm is provided in Appendix A.
+4. Theoretical Analysis
+In this section, we present the theoretical analysis of our
+method. First, we formulate the self-distillation setting
+in Sec. 4.1. After that, in Sec. 4.2, we show that under
+mild assumptions, Trajectory Self-Distillation is optimal
+for on-policy posterior matching. Next, in Sec. 4.3, we
+provide a theoretical analysis showing that Trajectory Self-
+Distillation enables few-step generation by reducing the
+factorization error. Finally, in Sec. 4.4 we analyze how
+the upper bound of the DDO objective characterizes its
+discriminative optimization behavior.
+4.1. Self-Distillation Setting
+Let pϕ denote a pretrained diffusion language model. The
+target teacher distribution pϕ(x0) is defined as the marginal
+distribution over clean sequences induced by the teacher’s
+generative process. Starting from a fully masked sequence
+xT , the teacher generates x0 ∼pϕ(·) by discretizing the
+diffusion process into [T] := {0, 1, 2, . . . , T} steps. We
+choose T = L (the sequence length) and decode exactly
+one token per step, which we treat as a full-step sampling
+procedure; this yields high-quality teacher-generated sam-
+ples and provides a clean target distribution for the following
+trajectory distribution:
+pϕ(x0:T ) = p(xT )
+T
+Y
+t=1
+pϕ(xt−1 | xt).
+(11)
+The marginal distribution of the noisy states xt is obtained
+by integrating out the intermediate states:
+pϕ(xt) =
+Z
+pϕ(xt:T ) dxt+1:T ,
+t ∈[T −1].
+(12)
+For any t ∈[T], we define a joint distribution over (x0, xt)
+by combining this marginal with the forward corruption
+process q(xt | x0) defined in Eqn. 1:
+Jϕ(x0, xt) = pϕ(x0) q(xt | x0).
+(13)
+Now consider a student model pθ, initialized from the
+teacher pϕ. We define the student’s induced joint distri-
+bution over (x0, xt) as:
+Jθ(x0, xt) = pθ(xt) pθ(x0 | xt).
+(14)
+Self-distillation aims to bridge this gap by aligning the stu-
+dent model with the teacher through minimizing a diver-
+gence between their joint distributions. Concretely, we
+optimize either the KL or reverse KL divergence between
+the teacher and student joint distributions over intermediate
+diffusion states:
+θ∗= arg min
+θ
+Et
+
+D
+ Jϕ(x0, xt)
+ Jθ(x0, xt)
+
+.
+(15)
+When choosing the forward KL as the objective, the result-
+ing self-distillation loss reduces to a form closely resembling
+the standard training objective of masked diffusion models:
+Ldistill(θ) = −Epϕ(x0) Ext∼q(xt|x0)[log pθ(x0 | xt)] .
+(16)
+4.2. Optimality of Trajectory Self-Distillation
+We study the optimality properties of trajectory self-
+distillation by comparing the teacher- and student-induced
+joint distributions over (x0, xt). Our analysis focuses on
+their reverse conditionals pϕ(x0 | xt) and pθ(x0 | xt),
+which characterize how each model maps an intermediate
+state back to a clean sequence.
+Definition 4.1 (Trajectory Joint Distribution). Let pϕ be a
+pretrained diffusion language model with T diffusion steps.
+For any t ∈[T], we define the trajectory joint distribution
+between the clean sequence x0 and an intermediate state xt
+as:
+JTra
+ϕ
+(x0, xt) := pϕ(xt) pϕ(x0 | xt)
+(17)
+where pϕ(xt) denotes the marginal distribution of xt and
+pϕ(x0 | xt) denotes the posterior distribution of the clean
+sequence given the intermediate state.
+Assumption 4.2 (Margin Matching). Given the teacher tra-
+jectory joint distribution JTra
+ϕ
+(x0, xt) and the student joint
+distribution Jθ(x0, xt), we assume that the teacher and stu-
+dent share the same marginal distribution over intermediate
+states xt, that is,
+pϕ(xt) = pθ(xt),
+∀t ∈[T].
+(18)
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+The Assumption 4.2 allows us to compare the teacher and
+student reverse conditionals under a common reference dis-
+tribution over xt. It is a reasonable on-policy assumption
+in our distillation setting for two reasons. First, the student
+model is initialized from the teacher. Second, trajectory
+distillation is performed exclusively on trajectories gener-
+ated by the teacher, which limits marginal distribution drift
+during optimization.
+Proposition 4.3 (Optimality of JTra
+ϕ
+for on-policy poste-
+rior matching). For a teacher model pϕ and student model
+pθ, we define the on-policy risk for distillation: ∀t ∈[T],
+Rt(θ) := Ext∼pϕ(xt)
+h
+D
+ pϕ(· | xt) ∥pθ(· | xt)
+i
+.
+(19)
+Given the target joint distribution Jϕ and JTra
+ϕ
+defined in
+Eqn. 13 and Definition 4.1, as well as joint distribution of
+student model Jθ in Eqn. 14, let
+θ⋆
+Tra ∈arg min
+θ
+D(JTra
+ϕ
+(x0, xt) ∥Jθ(x0, xt)),
+θ⋆∈arg min
+θ
+D(Jϕ(x0, xt) ∥Jθ(x0, xt)).
+Under the Assumption 4.2, there is
+Rt(θ⋆
+Tra) ≤Rt(θ⋆).
+(20)
+Proposition 4.3 shows that trajectory distillation yields a so-
+lution that is optimal for the on-policy conditional matching
+objective (see the proof in Appendix B). Intuitively, trajec-
+tory self-distillation aligns the student with the teacher under
+the same intermediate-state distribution encountered at in-
+ference time, thereby avoiding the factorization mismatch
+induced by marginal-only training.
+4.3. Trajectory-Distillation as Discrete Rectified Flow.
+Rectified Discrete Flow (ReDi).
+Rectified Discrete Flow
+(ReDi) (Yoo et al., 2025) provides a theoretical framework
+for enabling few-step generation in discrete diffusion mod-
+els by reducing the factorization error induced by inde-
+pendent token-wise decoding. The core quantity underly-
+ing ReDi is the conditional total correlation (TC) defined
+in Definition 4.4, which measures the discrepancy between
+the true joint conditional distribution and its fully factorized
+approximation.
+Definition 4.4 (Conditional Total Correlation (TC)). Let
+J(xs, xt) = p(xt) p(xs | xt) be a joint distribution over
+two intermediate states in a diffusion process, with s < t.
+The Conditional Total Correlation (TC) of xs given xt is
+defined as
+TCJ(xs | xt) := Ext
+"
+KL
+
+p(xs | xt)
+
+N
+Y
+i=1
+p(xi
+s | xt)
+#
+.
+(21)
+A smaller conditional TC implies that the joint conditional
+distribution can be better approximated by parallel, token-
+wise conditionals (Xu et al., 2024a; Yoo et al., 2025), which
+is a necessary condition for accurate few-step generation.
+ReDi iteratively constructs and refines a joint distribution
+over (x0, xT ) by alternating between rectification and re-
+fitting. Under certainty assumptions, each ReDi iteration
+monotonically decreases the conditional TC.
+Theorem 4.5 (Trajectory distribution induces lower Con-
+ditional Total Correlation). Let pϕ denote a pretrained
+teacher model and pθ a student model. Consider the trajec-
+tory joint distribution JTra
+ϕ
+defined in Definition 4.1, and the
+model-induced joint distribution Jθ defined in Eqn. 14. We
+use JTra
+θ∗
+to denote this optimal student distribution. Then
+under certain assumptions the following inequalities hold:
+Et
+h
+TCJTra
+θ∗(x0 | xt) + TCJTra
+θ∗(xt | xT )
+i
+≤
+Et
+h
+TCJTra
+ϕ (x0 | xt) + TCJTra
+ϕ (xt | xT )
+i
+,
+(22)
+where TC(· | ·) denotes the Conditional Total Correlation
+defined in Definition 4.4. Please see the proof in Appendix B.
+Trajectory Distillation induces lower Conditional Total
+Correlation.
+While ReDi operates on the joint distribu-
+tion (x0, xT ), our proposed T3D generalizes this rectifica-
+tion process to intermediate states along the diffusion tra-
+jectory. As shown in Theorem 4.5, trajectory distillation
+further reduces Conditional Total Correlation, yielding a
+stronger inductive bias toward factorized decoding. This
+provides a theoretical explanation for why trajectory-level
+supervision enables more accurate few-step generation.
+4.4. Analysis of DDO
+We observe that the DDO objective admits the following
+upper bound:
+LTraj-DDO(θ) ≤−EJTra
+ϕ [log σ(∆)]
+−EJθref
+
+log
+ 1 −σ(∆)
+
+,
+(23)
+where
+∆= log
+pθ(x0|xt)
+pθref (x0|xt).
+(24)
+This upper bound reveals that DDO performs a discrimina-
+tive comparison between the student and the reference tra-
+jectory distributions by optimizing the log-likelihood ratio
+∆. Consequently, the objective emphasizes regions where
+the student assigns lower conditional likelihood than the
+reference model, focusing optimization on trajectory states
+that require the most correction.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Table 1. Few-step performance comparison across baselines on SDAR-1.7B-Chat and SDAR-4B-Chat (Cheng et al., 2025). All trainable
+baselines are trained with a decoding block size of 8. Few-step performance is evaluated using tokens-per-step (TokPS): for example,
+Block Size= 4 and TokPS= 2 means decoding uses blocks of 4 tokens while generating 2 tokens per diffusion step, resulting in 4/2 = 2
+diffusion steps per block. SD means Self-Distillation methods. Improvement denotes the percentage change relative to the original
+model; ↑(green) indicates improvement and ↓(red) indicates degradation. Boldface denotes the best performance among self-distillation
+methods. The Original Model and SFT are reported for reference only and are excluded from best-result comparisons.
+TokPS
+Method
+SD
+Block Size = 4
+Block Size = 8
+Average
+Improvement (%)
+MATH500
+GSM8K
+MBPP
+HumanEval
+MATH500
+GSM8K
+MBPP
+HumanEval
+SDAR-1.7B-Chat
+2
+Original Model
+-
+39.40
+63.00
+30.40
+32.93
+33.60
+55.88
+27.80
+37.20
+40.03
+-
+SFT
+✗
+43.00
+61.79
+30.00
+34.76
+36.80
+62.55
+27.20
+37.80
+41.74
+↑4.28
+ReDi
+✓
+40.60
+63.99
+13.20
+16.46
+36.40
+62.17
+12.80
+13.41
+32.38
+↓19.11
+dParallel
+✓
+43.40
+68.23
+22.20
+24.39
+45.20
+67.70
+23.20
+26.83
+40.14
+↑0.29
+Naive TD
+✓
+43.00
+66.19
+21.20
+19.51
+39.00
+63.99
+17.20
+18.29
+36.05
+↓9.94
+T3D (Ours)
+✓
+47.00
+70.96
+27.20
+30.49
+47.80
+68.84
+26.60
+25.61
+43.06
+↑7.59
+4
+Original Model
+-
+5.00
+13.34
+10.60
+12.20
+4.80
+12.74
+10.20
+10.37
+9.91
+-
+SFT
+✗
+22.40
+36.62
+6.20
+5.49
+20.00
+39.65
+4.40
+7.93
+17.84
+↑80.05
+ReDi
+✓
+15.00
+32.45
+3.40
+5.49
+12.80
+29.72
+4.00
+4.88
+13.47
+↑35.95
+dParallel
+✓
+22.80
+45.26
+10.20
+12.20
+25.40
+42.91
+10.40
+11.59
+22.60
+↑128.09
+Naive TD
+✓
+24.20
+46.02
+6.00
+15.24
+26.60
+39.73
+9.00
+9.76
+22.07
+↑122.78
+T3D (Ours)
+✓
+25.60
+42.91
+9.40
+15.24
+24.40
+37.38
+9.20
+14.02
+22.27
+↑124.79
+SDAR-4B-Chat
+2
+Original Model
+-
+54.40
+78.77
+34.20
+49.39
+49.60
+72.33
+33.40
+46.95
+52.38
+-
+SFT
+✗
+54.60
+54.60
+26.80
+37.20
+54.44
+77.41
+25.60
+29.88
+46.76
+↓10.73
+ReDi
+✓
+41.00
+73.62
+20.00
+21.95
+23.60
+71.87
+19.20
+23.17
+36.80
+↓29.74
+dParallel
+✓
+52.60
+76.57
+23.80
+39.63
+51.20
+75.97
+18.20
+28.66
+45.83
+↓12.51
+Naive TD
+✓
+50.80
+72.78
+21.40
+24.39
+47.00
+68.01
+19.60
+22.56
+40.82
+↓22.07
+T3D (Ours)
+✓
+60.00
+83.85
+38.80
+51.83
+61.60
+81.96
+37.00
+56.10
+58.89
+↑12.43
+4
+Original Model
+-
+13.80
+41.09
+14.00
+18.29
+16.80
+41.02
+10.00
+16.46
+21.43
+-
+SFT
+✗
+39.00
+48.14
+9.00
+15.85
+40.20
+55.42
+8.80
+11.59
+28.50
+↑32.98
+ReDi
+✓
+25.40
+53.30
+5.00
+7.32
+20.20
+47.84
+6.80
+6.71
+21.57
+↑0.65
+dParallel
+✓
+34.20
+45.94
+13.20
+20.73
+40.80
+53.83
+9.60
+20.12
+29.80
+↑39.05
+Naive TD
+✓
+39.00
+57.92
+10.40
+17.07
+36.20
+50.80
+12.40
+9.00
+28.92
+↑34.95
+T3D (Ours)
+✓
+47.80
+69.90
+22.60
+23.78
+44.80
+63.99
+21.20
+23.17
+39.66
+↑85.02
+5. Experiments
+In this section, we present experimental results demonstrat-
+ing that our method, T3D, effectively improves few-step
+generation performance in diffusion language models. In
+addition, we conduct a series of ablation studies to com-
+plement our main results. Please refer to Appendix D for
+further details.
+5.1. Experimental Settings
+Baselines.
+We first compare against ReDi (Yoo et al.,
+2025), which learns directly from teacher-generated sam-
+ples and can be viewed as a standard self-distillation method
+corresponding to Eqn. 16. We also include dParallel (Chen
+et al., 2025), a distillation approach that maximizes the
+transition probability from fully masked sequences to clean
+sequences generated by the teacher model. We also take
+the Naive Trajectory Self-Distillation (Navie TD) defined
+in Eqn. 5 as baseline to verify the role of DDO. Finally, we
+report results from Supervised Fine-Tuning (SFT) on real
+data as a reference point to contextualize the performance
+of self-distillation methods.
+Training Dataset.
+For self-distillation methods, we col-
+lect model-generated responses on the MATH training
+set (Hendrycks et al., 2021) for mathematical reasoning
+tasks and the PrimeIntellect dataset (Jaghouar et al., 2024)
+for code generation tasks. For the SFT baseline, we use
+a dataset derived from the Bespoke-Stratos-17k bench-
+mark (Labs et al., 2025). Following prior work (Wang
+et al., 2025a), we adopt two open-source collections that are
+pre-filtered to a maximum sequence length of 600 tokens.
+Benchmark Datasets.
+We conduct experiments on four
+widely used benchmarks covering mathematical reasoning
+and code generation: GSM8K (Cobbe et al., 2021) (grade-
+school arithmetic word problems), MATH500 (Lightman
+et al., 2023) (challenging high-school and competition-level
+mathematics problems), MBPP (Austin et al., 2021), and
+HumanEval (Chen, 2021).
+These benchmarks require
+multi-step reasoning or iterative refinement to produce cor-
+rect solutions, making them particularly sensitive to decod-
+ing quality under step compression. As such, they provide a
+suitable testbed for evaluating the effectiveness and robust-
+ness of few-step generation in diffusion language models.
+Models.
+All experiments are conducted on the SDAR fam-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+ily of models (Cheng et al., 2025). SDAR is a block-based
+diffusion language model that performs diffusion-based gen-
+eration within each block and autoregressive generation
+across blocks, resulting in a semi-autoregressive decoding
+process. Compared to full diffusion models, prior studies
+have shown that SDAR-style block diffusion achieves a
+better trade-off between generation quality and inference
+efficiency (Cheng et al., 2025; Arriola et al., 2025). We use
+SDAR-1.7B-Chat and SDAR-4B-Chat as our base models.
+Implementations.
+In our experiments, we construct the
+training datasets by prompting the teacher model to an-
+swer questions from the corresponding training sets. To get
+data with better quality, we use low-confidence remasking
+strategy (Nie et al., 2025; Wang et al., 2025b) with static
+decoding, setting block size to 4 and steps per block to
+4. To recover the exact generation trajectories, we record
+the decoding order of tokens in the final clean sequences,
+following a procedure similar to prior work (Wang et al.,
+2025b). Given a trajectory, intermediate states xt are ob-
+tained by masking tokens according to the recorded decod-
+ing order. We also mix some random tokens into the input
+to improve the training robustness that is following the pre-
+vious work (Zhu et al., 2025). For all training settings, we
+perform full-parameter fine-tuning. All experiments are
+conducted using 8 × NVIDIA A100 (40GB) GPUs. For
+more details, please refer to Appendix C.
+5.2. Improving Performance of Few-Step Decoding by
+Self-Distillation
+Settings.
+In this experiment, we evaluate the ability of
+diffusion language models to perform few-step decoding
+under high Tokens Per Step (TokPS) settings. We consider
+four configurations by varying both the block size and the
+decoding budget. Specifically, we use block sizes of 4 and 8,
+and for each block size we evaluate TokPS values of 2 and 4.
+For block size 4, TokPS = 2 and 4 correspond to decoding
+each block in two and one steps, respectively; for block size
+8, TokPS = 2 and 4 correspond to decoding each block in
+four and two steps, respectively. Together, these settings
+enforce increasingly aggressive few-step generation and
+allow us to systematically assess model robustness under
+tight decoding budgets.
+Results.
+Table 1 compares different self-distillation meth-
+ods under aggressive few-step decoding across four TokPS
+settings and two model scales. Overall, T3D consistently
+achieves the best or near-best performance among all
+self-distillation baselines, demonstrating strong robustness
+under tight decoding budgets.
+For both SDAR-1.7B-Chat and SDAR-4B-Chat, T3D main-
+tains stable performance as TokPS increases, while compet-
+ing methods degrade substantially under more aggressive
+few-step settings (TokPS = 4). These results indicate that
+Table 2. Preserving diffusion performance under full decoding.
+We revert few-step distilled models to full diffusion decoding using
+static decoding (one token per step) without additional training.
+Results are reported under block size 4 and 4 steps per block,
+showing that T3D preserves diffusion performance. Bold numbers
+denote the best result among self-distillation methods.
+Method
+MATH500
+GSM8K
+MBPP
+HumanEval
+SDAR-1.7B-Chat
+Original Model
+59.40
+80.59
+45.20
+59.76
+SFT
+52.00
+73.09
+44.20
+60.37
+ReDi
+47.00
+73.77
+27.60
+31.10
+dParallel
+0.40
+0.23
+34.60
+43.29
+Naive TD
+49.80
+72.40
+35.20
+32.93
+T3D (Ours)
+56.80
+78.01
+41.20
+57.32
+SDAR-4B-Chat
+Original Model
+68.00
+89.84
+58.60
+71.95
+SFT
+60.20
+86.05
+50.20
+69.51
+ReDi
+50.40
+82.03
+34.00
+37.80
+dParallel
+13.20
+2.88
+34.00
+48.17
+Naive TD
+57.40
+82.11
+37.60
+43.90
+T3D (Ours)
+70.00
+89.31
+54.20
+73.78
+T3D is more resilient to extreme few-step generation and
+better preserves generation quality when the decoding bud-
+get is severely constrained.
+5.3. Preserving Diffusion Performance under Full
+Decoding
+Settings.
+In this experiment, we investigate whether few-
+step distillation leads to diffusion property forgetting, i.e.,
+whether a model optimized for compressed decoding de-
+grades when reverted to the original full diffusion process.
+To evaluate this, we take models distilled for few-step gen-
+eration and directly restore them to full diffusion decoding
+using static decoding strategy, decoding one token per step
+without any additional training.
+Results.
+Table 2 reports the results. Across both SDAR-
+1.7B-Chat and SDAR-4B-Chat, our methods preserve strong
+performance under full decoding.
+In particular, T3D
+achieves performance nearly identical to the original pre-
+trained model on all benchmarks, and in some cases slightly
+outperforms it. In contrast, prior baselines such as ReDi and
+dParallel exhibit substantial performance degradation.
+Discussions.
+These results indicate that trajectory self-
+distillation does not overfit to few-step decoding, but in-
+stead preserves the model’s fine-grained denoising capabil-
+ity. Overall, our approach enables few-step generation
+without sacrificing full diffusion performance.
+5.4. Experiments on Dynamic Decoding
+Settings.
+Dynamic decoding (Wu et al., 2025b; Yang et al.,
+2025) is an adaptive inference strategy that determines the
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Table 3. Dynamic decoding results with block size 4, 4 steps
+per block, confidence threshold 0.9, and temperature 0.1. We
+report throughput (TPS), per-sample latency (Latency), average
+decoding steps and sequence length (Avg Steps & Avg Len), and
+accuracy (Acc). Bold numbers indicate the best performance
+among baseline methods. All experiments are done using SDAR-
+4B-Chat model.
+Method
+TPS↑
+Latency↓
+Avg Steps↓
+Avg Len
+Acc↑
+MATH500
+Original
+657.72
+1.10
+196.19
+721.90
+39.00
+ReDi
+715.71
+1.04
+198.24
+757.05
+27.00
+dParallel
+692.08
+0.95
+170.22
+653.98
+45.80
+Naive TD
+693.85
+0.97
+177.99
+678.55
+44.00
+T3D (Ours)
+791.23
+0.66
+137.95
+525.50
+49.40
+GSM8K
+Original
+580.60
+0.43
+71.12
+249.52
+61.56
+ReDi
+636.58
+0.49
+84.63
+311.99
+54.89
+dParallel
+805.02
+0.39
+83.23
+310.58
+67.02
+Naive TD
+696.99
+0.47
+89.78
+330.82
+62.40
+T3D (Ours)
+843.05
+0.37
+83.03
+312.48
+72.40
+MBPP
+Original
+262.66
+0.36
+27.25
+93.64
+23.40
+ReDi
+298.83
+0.21
+17.11
+62.57
+10.00
+dParallel
+215.65
+0.63
+36.03
+135.16
+8.40
+Naive TD
+314.99
+0.31
+26.43
+98.80
+9.80
+T3D (Ours)
+313.18
+0.19
+16.94
+61.62
+23.60
+HumanEval
+Original
+175.48
+0.73
+36.56
+127.54
+33.54
+ReDi
+163.77
+0.47
+21.23
+76.75
+10.00
+dParallel
+130.34
+0.48
+17.41
+62.19
+23.78
+Naive TD
+216.39
+0.29
+17.15
+62.10
+23.17
+T3D (Ours)
+222.68
+0.26
+16.21
+58.10
+29.27
+number of tokens decoded at each step based on a con-
+fidence threshold. Although our methods are trained to
+improve performance under tight static step budgets and are
+primarily evaluated with static decoding for fair compari-
+son, we additionally report results under dynamic decoding
+due to its practical relevance. All dynamic decoding ex-
+periments use block size 4, 4 steps per block, and a fixed
+threshold of 0.9.
+Metrics.
+We report throughput, latency, average decoding
+steps and output length to measure efficiency, along with
+accuracy to assess model quality.
+Results.
+Table 3 summarizes the results under dynamic de-
+coding. Although our models are trained primarily for static
+decoding, trajectory-based self-distillation remains effective
+in this adaptive inference setting. Across all benchmarks,
+T3D consistently achieves strong performance, improving
+accuracy while reducing the number of decoding steps and
+latency. Notably, T3D attains the best or near-best accu-
+racy on all datasets and simultaneously achieves higher
+throughput than other baselines. These results indicate
+that T3D are compatible with dynamic decoding and gener-
+alize beyond static decoding regimes used during training.
+6. Related Work
+Few-step Diffusion
+Despite their remarkable success,
+diffusion-based generative models (Yang et al., 2023) in-
+cur substantial computational cost due to iterative sampling,
+motivating extensive efforts to reduce the number of sam-
+pling steps. Consistency Models (Song et al., 2023; Song
+& Dhariwal, 2023) accelerate generation by enforcing con-
+sistency across time, while flow-map-based methods (Geng
+et al., 2025; Boffi et al., 2024) reduce sampling by di-
+rectly modeling state-to-state displacements. In practice,
+their distillation-based variants are often more stable and
+achieve stronger performance, largely because they exploit
+teacher trajectories as supervision: Consistency Distilla-
+tion (Song et al., 2023) matches teacher intermediate states,
+CMT (Hu et al., 2025a) bootstraps training with teacher
+rollouts, and Re-MeanFlow (Zhang et al., 2025a) leverages
+teacher-rectified trajectories for efficient one-step modeling.
+In discrete spaces, recent work (Yoo et al., 2025; Chen et al.,
+2025; Deschenaux & Gulcehre, 2024) also distills discrete
+diffusion by borrowing insights from continuous diffusion,
+but does not fully utilize supervision available throughout
+the generated denoising trajectory.
+Efficiency for Diffusion Language Models.
+In practice,
+the efficiency of Diffusion Language Models (DLMs) is of-
+ten limited by the requirement of many refinement steps and
+the lack of effective KV caching (Li et al., 2025), resulting in
+high inference latency. Recent work has therefore explored
+improving DLM efficiency from several complementary
+perspectives. Dynamic Decoding (Wu et al., 2025b) pro-
+poses a training-free strategy that accelerates inference by
+adaptively selecting the number of tokens decoded at each
+step. Building on this idea, dParallel (Chen et al., 2025) fur-
+ther improves decoding efficiency by explicitly training the
+model to increase the maximum number of tokens that can
+be decoded per step, thereby enabling more aggressive dy-
+namic decoding. Other approaches investigate how to adapt
+KV caching mechanisms to DLMs despite their bidirec-
+tional attention (Hu et al., 2025b; Ma et al., 2025; Liu et al.,
+2025). Specifically, dKV-Cache (Ma et al., 2025) and Fast-
+DLLM (Wu et al., 2025b) address the challenges caused by
+bidirectional dependencies using delayed and conditioning-
+based caching strategies. Block-Diffusion (Arriola et al.,
+2025; Cheng et al., 2025; Wu et al., 2025a) further exploit
+block-level generation to enable block-wise KV caching and
+reduce inference cost. Finally, Discrete Diffusion Forcing
+(D2F) (Wang et al., 2025a) reformulates discrete diffusion
+language models with block-wise autoregressive generation,
+achieving significantly faster inference.
+7. Conclusion
+In this work, we introduce T3D, a trajectory self-distillation
+framework that trains a few-step student by distilling from
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+rollout trajectories generated by the same pretrained model
+under the target decoding procedure. To better handle the
+highly multimodal denoising posteriors under tight step
+budgets, we replace mode-covering forward-KL trajectory
+matching with a mode-seeking Direct Discriminative Op-
+timization (DDO) objective, and introduce a lightweight
+path-consistency reweighting to mitigate error propagation
+from early decoding decisions. Across reasoning and code-
+generation benchmarks, our approach improves few-step
+accuracy at lower latency and generalizes to dynamic de-
+coding, substantially narrowing the gap to full-step diffu-
+sion—taking a concrete step toward practical few-step dif-
+fusion language models.
+Impact Statement
+This paper presents work whose goal is to advance the field
+of machine learning. There are many potential societal
+consequences of our work, none of which we feel must be
+specifically highlighted here.
+References
+Alizadeh, K., Mirzadeh, S. I., Belenko, D., Khatamifard, S.,
+Cho, M., Del Mundo, C. C., Rastegari, M., and Farajtabar,
+M. Llm in a flash: Efficient large language model infer-
+ence with limited memory. In Proceedings of the 62nd
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pp. 12562–12584,
+2024.
+Arriola, M., Gokaslan, A., Chiu, J. T., Yang, Z., Qi, Z., Han,
+J., Sahoo, S. S., and Kuleshov, V. Block diffusion: Inter-
+polating between autoregressive and diffusion language
+models. arXiv preprint arXiv:2503.09573, 2025.
+Austin, J., Odena, A., Nye, M., Bosma, M., Michalewski,
+H., Dohan, D., Jiang, E., Cai, C., Terry, M., Le, Q., et al.
+Program synthesis with large language models. arXiv
+preprint arXiv:2108.07732, 2021.
+Boffi, N. M., Albergo, M. S., and Vanden-Eijnden, E. Flow
+map matching. arXiv preprint arXiv:2406.07507, 2, 2024.
+Chen, M. Evaluating large language models trained on code.
+arXiv preprint arXiv:2107.03374, 2021.
+Chen, Z., Fang, G., Ma, X., Yu, R., and Wang, X. dparallel:
+Learnable parallel decoding for dllms. arXiv preprint
+arXiv:2509.26488, 2025.
+Cheng, S., Bian, Y., Liu, D., Zhang, L., Yao, Q., Tian, Z.,
+Wang, W., Guo, Q., Chen, K., Qi, B., et al. Sdar: A syn-
+ergistic diffusion-autoregression paradigm for scalable
+sequence generation. arXiv preprint arXiv:2510.06303,
+2025.
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+R., et al. Training verifiers to solve math word problems.
+arXiv preprint arXiv:2110.14168, 2021.
+Deschenaux, J. and Gulcehre, C. Beyond autoregression:
+Fast llms via self-distillation through time. arXiv preprint
+arXiv:2410.21035, 2024.
+Geng, Z., Deng, M., Bai, X., Kolter, J. Z., and He, K. Mean
+flows for one-step generative modeling. arXiv preprint
+arXiv:2505.13447, 2025.
+Goodfellow, I., Pouget-Abadie, J., Mirza, M., Xu, B.,
+Warde-Farley, D., Ozair, S., Courville, A., and Bengio, Y.
+Generative adversarial networks. Communications of the
+ACM, 63(11):139–144, 2020.
+Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart,
+S., Tang, E., Song, D., and Steinhardt, J. Measuring math-
+ematical problem solving with the math dataset. arXiv
+preprint arXiv:2103.03874, 2021.
+Hu, Z., Lai, C.-H., Mitsufuji, Y., and Ermon, S. Cmt: Mid-
+training for efficient learning of consistency, mean flow,
+and flow map models. arXiv preprint arXiv:2509.24526,
+2025a.
+Hu, Z., Meng, J., Akhauri, Y., Abdelfattah, M. S., Seo, J.-s.,
+Zhang, Z., and Gupta, U. Accelerating diffusion language
+model inference via efficient kv caching and guided dif-
+fusion. arXiv preprint arXiv:2505.21467, 2025b.
+Jaghouar, S., Ong, J. M., Basra, M., Obeid, F., Straube,
+J., Keiblinger, M., Bakouch, E., Atkins, L., Panahi, M.,
+Goddard, C., et al. Intellect-1 technical report. arXiv
+preprint arXiv:2412.01152, 2024.
+Kim, M., Xu, C., Hooper, C., Singh, H., Athiwaratkun, B.,
+Zhang, C., Keutzer, K., and Gholami, A. Cdlm: Con-
+sistency diffusion language models for faster sampling.
+arXiv preprint arXiv:2511.19269, 2025.
+Labs, I., Khanna, S., Kharbanda, S., Li, S., Varma, H., Wang,
+E., Birnbaum, S., Luo, Z., Miraoui, Y., Palrecha, A., et al.
+Mercury: Ultra-fast language models based on diffusion.
+arXiv preprint arXiv:2506.17298, 2025.
+Li, T., Chen, M., Guo, B., and Shen, Z. A survey on diffu-
+sion language models. arXiv preprint arXiv:2508.10875,
+2025.
+Lightman, H., Kosaraju, V., Burda, Y., Edwards, H., Baker,
+B., Lee, T., Leike, J., Schulman, J., Sutskever, I., and
+Cobbe, K. Let’s verify step by step. In The Twelfth
+International Conference on Learning Representations,
+2023.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Liu, Z., Yang, Y., Zhang, Y., Chen, J., Zou, C., Wei, Q.,
+Wang, S., and Zhang, L. dllm-cache: Accelerating diffu-
+sion large language models with adaptive caching. arXiv
+preprint arXiv:2506.06295, 2025.
+Ma, X., Yu, R., Fang, G., and Wang, X. dkv-cache: The
+cache for diffusion language models.
+arXiv preprint
+arXiv:2505.15781, 2025.
+Miao, X., Oliaro, G., Zhang, Z., Cheng, X., Jin, H., Chen,
+T., and Jia, Z. Towards efficient generative large language
+model serving: A survey from algorithms to systems.
+ACM Computing Surveys, 58(1):1–37, 2025.
+Nie, S., Zhu, F., You, Z., Zhang, X., Ou, J., Hu, J., Zhou, J.,
+Lin, Y., Wen, J.-R., and Li, C. Large language diffusion
+models. arXiv preprint arXiv:2502.09992, 2025.
+Qian, Y.-Y., Su, J., Hu, L., Zhang, P., Deng, Z., Zhao, P., and
+Zhang, H. d3llm: Ultra-fast diffusion llm using pseudo-
+trajectory distillation. arXiv preprint arXiv:2601.07568,
+2026.
+Sahoo, S., Arriola, M., Schiff, Y., Gokaslan, A., Marroquin,
+E., Chiu, J., Rush, A., and Kuleshov, V. Simple and
+effective masked diffusion language models. Advances
+in Neural Information Processing Systems, 37:130136–
+130184, 2024.
+Schiff, Y., Sahoo, S. S., Phung, H., Wang, G., Boshar, S.,
+Dalla-torre, H., de Almeida, B. P., Rush, A. M., PIER-
+ROT, T., and Kuleshov, V. Simple guidance mechanisms
+for discrete diffusion models. In The Thirteenth Interna-
+tional Conference on Learning Representations, 2025.
+Shi, J., Han, K., Wang, Z., Doucet, A., and Titsias, M.
+Simplified and generalized masked diffusion for discrete
+data. Advances in neural information processing systems,
+37:103131–103167, 2024.
+Song, Y. and Dhariwal, P. Improved techniques for training
+consistency models. arXiv preprint arXiv:2310.14189,
+2023.
+Song, Y., Dhariwal, P., Chen, M., and Sutskever, I. Consis-
+tency models. In International Conference on Machine
+Learning, pp. 32211–32252. PMLR, 2023.
+Song, Y., Zhang, Z., Luo, C., Gao, P., Xia, F., Luo, H.,
+Li, Z., Yang, Y., Yu, H., Qu, X., et al. Seed diffusion:
+A large-scale diffusion language model with high-speed
+inference. arXiv preprint arXiv:2508.02193, 2025.
+Wang, X., Xu, C., Jin, Y., Jin, J., Zhang, H., and Deng,
+Z. Diffusion llms can do faster-than-ar inference via dis-
+crete diffusion forcing. arXiv preprint arXiv:2508.09192,
+2025a.
+Wang, Y., Yang, L., Li, B., Tian, Y., Shen, K., and Wang,
+M. Revolutionizing reinforcement learning framework
+for diffusion large language models.
+arXiv preprint
+arXiv:2509.06949, 2025b.
+Wolfer, G. and Watanabe, S. Geometric aspects of data-
+processing of markov chains. Transactions of Mathemat-
+ics and Its Applications, 8(1):tnae001, 2024.
+Wu, C., Zhang, H., Xue, S., Diao, S., Fu, Y., Liu, Z.,
+Molchanov, P., Luo, P., Han, S., and Xie, E.
+Fast-
+dllm v2: Efficient block-diffusion llm. arXiv preprint
+arXiv:2509.26328, 2025a.
+Wu, C., Zhang, H., Xue, S., Liu, Z., Diao, S., Zhu, L., Luo,
+P., Han, S., and Xie, E. Fast-dllm: Training-free acceler-
+ation of diffusion llm by enabling kv cache and parallel
+decoding. arXiv preprint arXiv:2505.22618, 2025b.
+Xiao, Z., Kreis, K., and Vahdat, A. Tackling the generative
+learning trilemma with denoising diffusion gans. arXiv
+preprint arXiv:2112.07804, 2021.
+Xu, M., Geffner, T., Kreis, K., Nie, W., Xu, Y., Leskovec,
+J., Ermon, S., and Vahdat, A. Energy-based diffusion
+language models for text generation.
+arXiv preprint
+arXiv:2410.21357, 2024a.
+Xu, Y., Gong, M., Xie, S., Wei, W., Grundmann, M., Bat-
+manghelich, K., and Hou, T. Semi-implicit denoising
+diffusion models (siddms). Advances in neural informa-
+tion processing systems, 36:17383, 2024b.
+Yang, H., Hu, R., Sun, Z., Zhou, R., Cai, Y., and Wang,
+Y. Wavefrontdiffusion: Dynamic decoding schedule for
+improved reasoning. arXiv preprint arXiv:2511.19473,
+2025.
+Yang, L., Zhang, Z., Song, Y., Hong, S., Xu, R., Zhao, Y.,
+Zhang, W., Cui, B., and Yang, M.-H. Diffusion models:
+A comprehensive survey of methods and applications.
+ACM computing surveys, 56(4):1–39, 2023.
+Ye, J., Xie, Z., Zheng, L., Gao, J., Wu, Z., Jiang, X., Li,
+Z., and Kong, L. Dream 7b: Diffusion large language
+models. arXiv preprint arXiv:2508.15487, 2025.
+Yoo, J., Kim, W., and Hong, S. Redi: Rectified discrete flow.
+arXiv preprint arXiv:2507.15897, 2025.
+Zhang, X., Tan, S., Nguyen, Q., Dao, Q., Han, L., He,
+X., Zhang, T., Mrdovic, A., and Metaxas, D.
+Flow
+straighter and faster: Efficient one-step generative model-
+ing via meanflow on rectified trajectories. arXiv preprint
+arXiv:2511.23342, 2025a.
+Zhang, Y., Schwing, A., and Zhao, Z. Variational masked
+diffusion models.
+arXiv preprint arXiv:2510.23606,
+2025b.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Zhen, R., Li, J., Ji, Y., Yang, Z., Liu, T., Xia, Q., Duan, X.,
+Wang, Z., Huai, B., and Zhang, M. Taming the titans: A
+survey of efficient llm inference serving. arXiv preprint
+arXiv:2504.19720, 2025.
+Zheng, K., Chen, Y., Chen, H., He, G., Liu, M.-Y., Zhu, J.,
+and Zhang, Q. Direct discriminative optimization: Your
+likelihood-based visual generative model is secretly a gan
+discriminator. arXiv preprint arXiv:2503.01103, 2025.
+Zhu, Y., Wang, X., Lathuili`ere, S., and Kalogeiton, V. Di
+[m] o: Distilling masked diffusion models into one-step
+generator. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pp. 18606–18618, 2025.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Appendix
+This appendix provides additional technical details that support the main paper. In Appendix A, we summarize our
+method and present the full algorithm for clarity. In Appendix B, we provide detailed proofs for the theoretical analysis.
+In Appendix C, we report implementation details used in our experiments, including:
+• Implementation of the random token mixture training (Appendix C.1),
+• Multi-round reference model update (Appendix C.2),
+• Prompts used for data collection during experiments (Appendix C.3),
+• The accelerated inference engine used for rollouts (Appendix C.4).
+Finally, in Appendix D, we present additional ablation studies, including:
+• The choice of regularization coefficient λ (Appendix D.1),
+• Analysis of preserving full-step diffusion properties (Appendix D.2),
+• Additional ablations on few-step generation (Appendix D.3).
+A. Algorithm
+In this section, we describe the training algorithm of T3D. Algorithm 1 provides the pseudocode of the full training procedure,
+while Fig. 1 presents a high-level overview of the method for better conceptual understanding.
+Algorithm 1 T3D Training
+Require: Teacher model pϕ
+Require: Student model pθ (initialized from teacher)
+Require: Path regularization weight λ
+1: Sample trajectory pairs (x0, xt) ∼pϕ
+2: repeat
+3:
+Set reference model pθref ←StopGrad(pθ)
+4:
+Compute trajectory DDO loss Ltraj−DDO
+5:
+Compute path consistency loss Lpath
+6:
+Update student model using
+L = Ltraj−DDO + λLpath
+7: until convergence
+output pθ
+B. Proof of Theoretical Analysis
+In this section, we provide detailed proofs for the theoretical results presented in the main paper. Our analysis focuses on
+understanding the behavior of trajectory-level self-distillation under few-step decoding and its effect on the factorization
+properties of the reverse diffusion process.
+Assumption B.1 (Margin Matching). Given the teacher trajectory joint distribution JTra
+ϕ
+(x0, xt) and the student joint
+distribution Jθ(x0, xt), we assume that the teacher and student share the same marginal distribution over intermediate states
+xt, that is,
+pϕ(xt) = pθ(xt),
+∀t ∈[T].
+(25)
+Lemma B.2 (KL decomposition for joint distributions). For any two joint distributions P(x, y) = P(y)P(x | y) and
+Q(x, y) = Q(y)Q(x | y), the Kullback–Leibler divergence admits the decomposition
+KL(P(x, y)∥Q(x, y)) = KL(P(y)∥Q(y)) + Ey∼P (y)
+
+KL
+ P(x | y)∥Q(x | y)
+
+.
+(26)
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+M
+M
+M
+M
+M
+B
+M
+M
+M
+D
+M
+M
+B
+C
+B
+D
+A
+B
+C
+D
+M
+B
+M
+M
+A
+B
+C
+D
+M
+B
+M
+M
+A’
+B
+C’
+D’
+Trajectory Self-Dis0lla0on
+via DDO (T3D)
+On-Policy 
+Discrimina0ve 
+Op0miza0on
+Distribu0on Matchinng
+Reference Model 𝑝!!"#
+Student Model 𝑝"
+Gradient 
+Update
+Sample
+One Step
+Copy
+Every N 
+steps
+Trajectory
+Matching
+Full Step (e.g., 4 steps)
+𝑥!
+𝑥"
+M
+M
+M
+M
+M
+D
+M
+B
+A
+B
+C
+D
+Few Step (e.g., 1 or 2 steps)
+(a) Teacher Full Trajectory
+(b) Trajectories Objective Learning of T3D
+(c) Few-Step Decoding
+🤖🔥
+🤖❄
+Figure 1. Overview of T3D for enabling few-step diffusion decoding. (a) Teacher full trajectory. A pretrained diffusion language
+model generates sequences through a full diffusion trajectory from the fully masked state xT to the clean sequence x0 using many
+refinement steps, producing intermediate states that reflect the inference-time decoding distribution. (b) Trajectory-level objective
+learning. T3D trains a few-step student model via trajectory self-distillation on teacher rollout trajectories. We incorporate Direct
+Discriminative Optimization (DDO) to perform mode-seeking trajectory matching between the student and a reference model under an
+on-policy discriminative objective. (c) Few-step decoding. After training, the student can decode using significantly fewer diffusion
+steps (e.g., 1–2 steps per block) while preserving generation quality, substantially narrowing the gap with full-step decoding and enabling
+efficient parallel token generation.
+Proposition B.3 (Optimality of JTra
+ϕ
+for on-policy posterior matching). For a given teacher model pϕ and student model
+pθ, we define the on-policy risk for distillation at step t:
+Rt(θ) := Ext∼pϕ(xt)
+h
+D
+ pϕ(· | xt) ∥pθ(· | xt)
+i
+,
+∀t ∈[T]
+(27)
+Given the target joint distribution Jϕ and JTra
+ϕ
+defined in Eqn. 13 and Definition 4.1, as well as joint distribution of student
+model Jθ in Eqn. 14, let
+θ⋆
+Tra ∈arg min
+θ
+D(JTra
+ϕ
+(x0, xt) ∥Jθ(x0, xt)),
+θ⋆∈arg min
+θ
+D(Jϕ(x0, xt) ∥Jθ(x0, xt)).
+Under the Assumption 4.2, there is
+Rt(θ⋆
+Tra) ≤Rt(θ⋆).
+(28)
+Proof. Forward KL case.
+We first consider the case where D is the forward Kullback–Leibler divergence. Under
+Assumption 4.2, the teacher and student share the same marginal distribution over intermediate states, i.e., pθ(xt) = pϕ(xt)
+for all t ∈[T].
+By applying Lemma B.2 to the joint distributions, for any fixed t we can decompose the KL divergence as
+KL(JTra
+ϕ
+(x0, xt) ∥Jθ(x0, xt)) = Ext∼pϕ(xt)
+h
+KL
+ pϕ(x0 | xt) ∥pθ(x0 | xt)
+i
+,
+(29)
+KL(Jϕ(x0, xt) ∥Jθ(x0, xt)) = KL
+ pA(xt) ∥pθ(xt)
+
++ Ext∼pA(xt)
+h
+KL
+ pϕ(x0 | xt) ∥pθ(x0 | xt)
+i
+,
+(30)
+where pA(xt) =
+R
+pϕ(x0)q(xt | x0) dx0 denotes the marginal distribution induced by the forward noising process.
+Eqn. 29 shows that minimizing KL(JTra
+ϕ
+∥Jθ) is exactly equivalent to minimizing the on-policy distillation risk R(θ) =
+Ext∼pϕ(xt)[KL(pϕ(· | xt) ∥pθ(· | xt))]. Hence, θ⋆
+Tra is a global minimizer of R(θ). Since θ⋆is an arbitrary parameter
+choice from the perspective of R(θ), the inequality follows immediately:
+Rt(θ⋆
+Tra) ≤Rt(θ⋆),
+(31)
+which completes the proof for the forward KL case.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Reverse KL case.
+Now we prove the claim also holds when D is the reverse KL divergence, i.e., D(P∥Q) = KL(Q∥P).
+Accordingly, define the on-policy reverse-KL risk
+RrKL
+t
+(θ) := Ext∼pϕ(xt)
+h
+KL
+ pθ(· | xt) ∥pϕ(· | xt)
+i
+.
+(32)
+Under Assumption 4.2, we have pθ(xt) = pϕ(xt) for all t. Applying Lemma B.2 to the reverse direction, for any fixed t we
+obtain
+KL(Jθ ∥JTra
+ϕ
+) = KL
+ pθ(xt) ∥pϕ(xt)
+
++ Ext∼pθ(xt)
+h
+KL
+ pθ(x0 | xt) ∥pϕ(x0 | xt)
+i
+= Ext∼pϕ(xt)
+h
+KL
+ pθ(x0 | xt) ∥pϕ(x0 | xt)
+i
+(33)
+= RrKL
+t
+(θ),
+(34)
+where the second equality uses pθ(xt) = pϕ(xt).
+Similarly, recall that Jϕ(x0, xt) = pA(xt) pϕ(x0 | xt) with pA(xt) =
+R
+pϕ(x0)q(xt | x0) dx0. Again by Lemma B.2,
+KL(Jθ ∥Jϕ) = KL
+ pθ(xt) ∥pA(xt)
+
++ Ext∼pθ(xt)
+h
+KL
+ pθ(x0 | xt) ∥pϕ(x0 | xt)
+i
+= KL
+ pθ(xt) ∥pA(xt)
+
++ RrKL
+t
+(θ),
+(35)
+where the last equality again uses pθ(xt) = pϕ(xt).
+Therefore, minimizing KL(Jθ∥JTra
+ϕ
+) is exactly minimizing RrKL
+t
+(θ), hence θ⋆
+Tra is an optimizer of RrKL
+t
+(θ). On the other
+hand, minimizing KL(Jθ∥Jϕ) is minimizing RrKL
+t
+(θ) plus the constant KL(pϕ(xt)∥pA(xt)), which does not depend on θ.
+This implies
+RrKL
+t
+(θ⋆
+Tra) ≤RrKL
+t
+(θ⋆).
+(36)
+Definition B.4 (Conditional Total Correlation (TC)). Let J(xs, xt) = p(xt) p(xs | xt) be a joint distribution over two
+intermediate states in a diffusion process, with s < t. The Conditional Total Correlation (TC) of xs given xt is defined as
+TCJ(xs | xt) := Ext
+"
+KL
+
+p(xs | xt)
+
+N
+Y
+i=1
+p(xi
+s | xt)
+#
+.
+(37)
+This quantity measures the degree of conditional dependence among the components of xs given xt, by comparing the true
+conditional joint distribution to its fully factorized approximation.
+Assumption B.5 (Ideal Optimality of TD and T3D). We assume that both trajectory distillation methods considered in
+this work reach their ideal optima under sufficient model capacity and perfect optimization. Specifically, we assume that
+∀t ∈[T],
+pθ∗
+Tra = arg min
+pθ KL
+
+pϕ(x0 | xt)
+ pθ(x0 | xt)
+
+,
+(38)
+where pθ∗
+Tra is the optimal result of T3D. This assumption abstracts away optimization and approximation errors and allows
+us to focus on the effect of trajectory factorization and sampling constraints in few-step generation.
+Assumption B.6. Let P be the family of T-step decoding processes. We assume that ∀t ∈[T], pθ(x0|xt) lies within the
+log-convex hull of P.
+Lemma B.7 (Pythagorean Inequality for KL Divergence (Wolfer & Watanabe, 2024)). Let Q be a log-convex set. If
+q∗= arg minq∈Q KL(p∥q) and r ∈Q, then
+KL(p∥r) ≥KL(p∥q∗) + KL(q∗∥r).
+Theorem B.8 (Trajectory distribution induces lower conditional dependence). Let pϕ denote a pretrained teacher model
+and pθ a student model. Consider the trajectory joint distribution JTra
+ϕ
+defined in Definition 4.1, and the model-induced
+joint distribution Jθ defined in Eqn. 14. Let
+θ⋆
+Tra ∈arg min
+θ
+KL(JTra
+ϕ
+(x0, xt) ∥Jθ(x0, xt)),
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+and we use JTra
+θ∗
+to denote this optimal student distribution. Then the following inequalities hold:
+Et
+h
+TCJTra
+θ∗(x0 | xt) + TCJTra
+θ∗(xt | xT )
+i
+≤Et
+h
+TCJTra
+ϕ (x0 | xt) + TCJTra
+ϕ (xt | xT )
+i
+,
+(39)
+where TC(· | ·) denotes the Conditional Total Correlation defined in Definition B.4.
+Proof.
+TCJTra
+ϕ (x0, xt) = Ext∼pϕ(xt)
+"
+KL
+
+pϕ(x0 | xt)
+
+N
+Y
+i=1
+pϕ(xi
+0 | xt)
+#
+(40)
+≥Ext∼pϕ(xt)
+"
+KL
+
+pϕ(x0 | xt)
+ pθ∗
+Tra(x0 | xt)
+
++ KL
+
+pθ∗
+Tra(xi
+0 | xt)
+
+N
+Y
+i=1
+pϕ(xi
+0 | xt)
+#
+(41)
+≥Ext∼pϕ(xt)
+"
+KL
+
+pθ∗
+Tra(xi
+0 | xt)
+
+N
+Y
+i=1
+pϕ(xi
+0 | xt)
+#
+(42)
+= Ext∼pϕ(xt)
+"
+KL
+
+pθ∗
+Tra(xi
+0 | xt)
+
+N
+Y
+i=1
+pθ∗
+Tra(xi
+0 | xt)
+
++
+N
+X
+i
+KL
+
+pθ∗
+Tra(xi
+0 | xt)
+ pϕ(xi
+0 | xt)
+#
+(43)
+≥Ext∼pϕ(xt)
+"
+KL
+
+pθ∗
+Tra(xi
+0 | xt)
+
+N
+Y
+i=1
+pθ∗
+Tra(xi
+0 | xt)
+#
+(44)
+= TCJTra
+θ∗(x0, xt)
+(45)
+The first inequality follows from Assumption B.5, which assumes that optimizing trajectory self-distillation is equivalent to
+minimizing the expected KL divergence. The result then follows by applying Lemma B.7 and Assumption B.6. Because the
+TCJTra
+ϕ (xt, xT ) is not optimized in our method, there is TCJTra
+ϕ (xt, xT ) = TCJTra
+θ∗(xt, xT ), we have
+∀t ∈[T], TCJTra
+θ∗(x0 | xt) + TCJTra
+θ∗(xt | xT ) ≤TCJTra
+ϕ (x0, xt) + TCJTra
+ϕ (xt, xT ).
+(46)
+Since the above inequality holds for any fixed t, taking expectation over t preserves the inequality. Therefore, we obtain
+Et
+h
+TCJTra
+θ∗(x0 | xt) + TCJTra
+θ∗(xt | xT )
+i
+≤Et
+h
+TCJTra
+ϕ (x0 | xt) + TCJTra
+ϕ (xt | xT )
+i
+.
+(47)
+C. Implementation Details.
+In this section, we provide implementation details of our method and experimental setup.
+C.1. Mixture of Random Tokens
+As described in Sec. 5.1, we replace some mask tokens with random tokens sampled from the vocabulary V uniformly. This
+design is inspired by recent work on one-step discrete generative modeling for images (Zhu et al., 2025), where mixing mask
+tokens with uniformly sampled tokens is shown to improve training stability and robustness. Formally, let x = (x1, . . . , xL)
+denote a token sequence of length L, and let V denote the vocabulary. For each position i, we introduce a binary replacement
+indicator ri ∼Bernoulli(prand), where prand is the probability of replacing a mask token with a random token.
+Let exi denote the corrupted token at position i. For positions originally masked, the corruption process is defined as
+exi =
+(
+ui,
+if ri = 1,
+[MASK],
+if ri = 0,
+(48)
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+where ui ∼Uniform(V) is sampled independently from the vocabulary. Equivalently, the corruption distribution for masked
+positions can be written as
+q(exi | masked) = prand · Uniform(V) + (1 −prand) · δ[MASK],
+(49)
+where δ[MASK] denotes a point mass at the mask token. For positions that are not masked, we keep the original token
+unchanged, i.e., exi = xi. In our experiments, we set prand = 0.1 during the training and keep it to 0 during the inference.
+C.2. Multi-Round and Self-Play Update
+In our loss function Eqn. 7, we introduce a reference model pθref, which is initialized from the student model pθ. Following
+the setup of prior work (Zheng et al., 2025), we adopt a multi-round refinement strategy for training. Formally, this process
+can be written as:
+Round n :
+· · · →
+pθ∗
+n−1
+| {z }
+Reference
+→σ
+
+β log
+pθn
+pθ∗
+n−1
+
+|
+{z
+}
+Discriminator
+Round n + 1 :
+→
+pθ∗n
+|{z}
+Reference
+→· · ·
+where θ∗
+n−1 denotes the best-performing student model obtained in round n. In each round, the reference model serves as a
+fixed generator. In our experiments, we update the reference model every 10 global steps, which corresponds to one round in
+our training schedule.
+C.3. Prompts
+In this section, we present the prompts used in our experiments. These prompts are used to query the model and generate
+responses, which are then collected as trajectories for training.
+Prompt For Math Reasoning
+[User]:
+{problem}. Please reason step by step, and put your final answer within boxed{}. You are a precise math problem
+solver. Solve the given math problem step by step.
+[Assistant]:
+Prompt For Code Generation
+[User]:
+This is the problem: {problem}. Place your code within a single Python code block ‘‘‘python‘‘‘. Do not include
+more than one code block.
+[Assistant]:
+C.4. Accelerated Inference
+For all SDAR-series experiments, rollouts are performed using JetEngine 1, a vLLM-style inference framework tailored
+for diffusion language models. JetEngine is a lightweight yet high-performance inference engine designed for SDAR
+models and other block-wise diffusion decoding architectures. It supports both dense and MoE models, as well as Tensor
+Parallel distributed inference, and achieves significant speedups compared to naive inference implementations.
+D. Ablation Study
+In this section, we present ablation studies for our proposed T3D. In Appendix D.1, we analyze the effect of the regularization
+coefficient λ. In Appendix D.2, we examine how different components of our method contribute to preserving the full
+diffusion decoding behavior. Finally, in Appendix D.3, we present ablations under few-step generation settings to evaluate
+the contribution of each component to the overall performance of our method.
+1https://github.com/Labman42/JetEngine
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Table 4. Ablation study on the effect of the regularization weight λ under different decoding configurations. We report the model
+performance across varying Tokens Per Step (TokPS), block sizes, and decoding steps. All experiments are done using MATH500 dataset.
+TokPS
+Block Size
+Decoding Steps
+λ = 0.05
+λ = 0.2
+λ = 0.5
+1
+4
+4
+67.80
+69.00
+69.20
+1
+8
+8
+62.60
+64.80
+65.40
+2
+8
+4
+57.20
+58.60
+56.20
+4
+4
+1
+47.00
+47.20
+46.00
+4
+8
+2
+40.20
+45.20
+42.00
+8
+8
+1
+7.20
+7.60
+6.20
+Table 5. Ablations of self-distillation objectives under full-step diffusion decoding (block size=4, decoding steps=4), evaluated on
+MATH500. BS means Block size and DS means Decoding Step per Block.
+Decoding
+Models
+MATH500 ACC
+BS=4, DS=4
+SDAR-4B-Chat
+68.00
+SDAR-4B-Chat + SFT
+60.20
+SDAR-4B-Chat + ReDi
+50.40
+SDAR-4B-Chat + Naive TD
+22.00
+SDAR-4B-Chat + Naive TD + Lpath
+58.00
+SDAR-4B-Chat + Naive TD + Random Tokens
+57.40
+SDAR-4B-Chat + Naive TD + Lpath + Random Tokens
+58.60
+SDAR-4B-Chat + DDO
+12.00
+SDAR-4B-Chat + DDO + random
+65.40
+SDAR-4B-Chat + DDO + Lpath + Random Tokens (Ours)
+69.00
+D.1. The Effectiveness of λ in Training Objective
+We conduct an ablation study on the regularization weight λ in Eqn. 10. We run these experiments using the SDAR-4B-
+Chat model and evaluate it on MATH500 benchmark. Table 4 reports performance under different decoding configurations
+with varying Tokens Per Step (TokPS), block sizes, and decoding steps.
+Results.
+Overall, moderate regularization consistently yields the best or near-best performance across most settings. In
+particular, λ = 0.2 achieves the strongest results in the majority of configurations, especially under more aggressive few-step
+decoding regimes (e.g., higher TokPS). In contrast, a smaller regularization weight (λ = 0.05) is often insufficient to
+stabilize training, while overly strong regularization (λ = 0.5) can lead to degraded performance in several settings. Based
+on these observations, we fix λ = 0.2 for all experiments reported in the main results.
+D.2. Preserving Full-Step Diffusion Properties
+In this section, we investigate how different components of the training objective affect a model’s ability to preserve
+the original full-step diffusion decoding behavior. Specifically, after training with different variants of the few-step
+training objective, we directly revert the resulting models to full diffusion decoding without any additional fine-tuning, and
+evaluate whether the diffusion properties of the teacher model are retained.
+Experimental Settings.
+We evaluate models under full diffusion decoding using block size 4 and 4 steps per block,
+corresponding to the original full-step diffusion process. We compare different primary distillation objectives (Naive TD or
+DDO), combined with different regularization strategies (random initialization or Lpath). All experiments are conducted
+using SDAR-4B-Chat and evaluated on the MATH500 benchmark.
+Results and Analysis.
+Table 5 reports ablation results under full-step diffusion decoding. Although all models are trained
+using few-step distillation, evaluation is performed by reverting to the original diffusion process. We observe that naively
+applying trajectory distillation significantly degrades diffusion behavior. Both Naive TD and DDO without additional
+regularization lead to severe performance collapse (22.00 and 12.00 ACC, respectively), indicating strong diffusion property
+forgetting.
+Introducing random initialization, as described in Sec. 5.1, substantially mitigates this issue. For both Naive TD and DDO,
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+Table 6. Ablation study on few-step generation under block size (BS) 8 and 4 decoding steps (DS) per block.
+Decoding
+Models
+MATH500 ACC
+BS=8, DS=4
+SDAR-4B-Chat
+49.60
+SDAR-4B-Chat + SFT
+54.44
+SDAR-4B-Chat + ReDi
+23.60
+SDAR-4B-Chat + Naive TD
+52.60
+SDAR-4B-Chat + Naive TD + Lpath
+49.40
+SDAR-4B-Chat + Naive TD + random
+46.60
+SDAR-4B-Chat + Naive TD + Lpath + random
+47.20
+SDAR-4B-Chat + DDO
+52.22
+SDAR-4B-Chat + DDO + random
+59.60
+SDAR-4B-Chat + DDO + Lpath
+60.60
+SDAR-4B-Chat + DDO + Lpath + random (Ours)
+58.60
+Table 7. Ablation study on few-step generation under block size (BS) 8 and 2 decoding steps (DS) per block.
+Decoding
+Models
+MATH500 ACC
+BS=8, DS=2
+SDAR-4B-Chat
+16.80
+SDAR-4B-Chat + SFT
+40.20
+SDAR-4B-Chat + ReDi
+20.20
+SDAR-4B-Chat + Naive TD
+38.80
+SDAR-4B-Chat + Naive TD + Lpath
+37.20
+SDAR-4B-Chat + Naive TD + random
+28.80
+SDAR-4B-Chat + Naive TD + Lpath + random
+35.00
+SDAR-4B-Chat + DDO
+36.40
+SDAR-4B-Chat + DDO + random
+43.20
+SDAR-4B-Chat + DDO + Lpath
+41.00
+SDAR-4B-Chat + DDO + Lpath + random (Ours)
+45.00
+random initialization alone recovers a large portion of the original performance, suggesting that it helps prevent the student
+model from overfitting to degenerate few-step trajectories. Furthermore, incorporating the proposed path consistency loss
+Lpath consistently improves robustness. When combined with random initialization, Lpath restores—and in some cases
+surpasses—the original full-step diffusion performance, with DDO + Lpath + random achieving the best result (69.00
+ACC).
+Overall, these results demonstrate that both random initialization and path-level regularization are critical for preserving
+the intrinsic diffusion properties of the model under aggressive few-step distillation.
+D.3. Ablation Study on Few-Step Generation
+In this section, we investigate how different components of the distillation objective affect few-step generation
+performance. In Sec. 5, we showed that T3D effectively improves model performance under few-step generation. Here, we
+decompose our method and systematically compare individual components against representative baselines to evaluate their
+contributions to few-step generation.
+Experimental Settings. We consider decoding with block size 8 under two regimes: a moderate setting with 4 steps per
+block and a more aggressive setting with 2 steps per block. We compare representative baselines including SFT and ReDi,
+as well as naive trajectory distillation (Naive TD) and our proposed DDO objective. For both Naive TD and DDO, we
+further ablate the effects of random initialization and the proposed path consistency loss Lpath. All experiments are
+conducted on the SDAR-4B-Chat model and evaluated on the MATH500 benchmark.
+Results and Analysis.
+Table 6 and Table 7 summarize the results under block size 8 with 4 and 2 decoding steps,
+respectively. We first observe that few-step generation exhibits behavior that is qualitatively different from full-step diffusion
+decoding. Naive trajectory distillation already improves over the pretrained baseline in several settings, but its performance
+is sensitive to both initialization and regularization.
+In particular, random initialization consistently degrades few-step generation performance for Naive TD but improves
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Few-Step Diffusion Language Models via Trajectory Self-Distillation with Direct Discriminative Optimization
+performance for DDO, highlighting its importance for stabilizing mode-seeking optimization such as DDO. A similar
+phenomenon has been observed in prior work (Zhu et al., 2025).
+The effect of the path consistency loss Lpath is more regime-dependent. Under moderate compression (block size = 8,
+decoding steps = 4), incorporating Lpath further improves DDO and yields the best overall performance. Under more
+aggressive compression (block size = 8, decoding step = 2), path regularization mainly improves robustness when combined
+with random initialization, suggesting a complementary interaction between the two components.
+Notably, DDO consistently outperforms Naive TD when equipped with appropriate initialization and regularization. Across
+both decoding regimes, the strongest results are achieved by combining discriminative trajectory optimization, random
+initialization, and path consistency regularization, highlighting the importance of all three components for effective
+few-step generation.
+19

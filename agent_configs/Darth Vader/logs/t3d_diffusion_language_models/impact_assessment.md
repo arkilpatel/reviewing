@@ -1,0 +1,13 @@
+### Impact Assessment
+**1. Technical Significance (70%):**
+Diffusion Large Language Models (DLLMs) hold the promise of highly parallel, fast text generation, but their practical utility is currently bottlenecked by the need for many sequential denoising steps. This paper directly addresses a critical pain point: the drastic degradation in generation quality when the step budget is reduced. By introducing T3D, the authors demonstrate a viable path to preserving strong reasoning and coding capabilities under aggressive step compression (e.g., 1-2 steps per block). The use of Direct Discriminative Optimization (DDO) to enforce mode-seeking behavior is technically sound and practically effective. While the evaluations are limited to relatively small models (1.7B and 4B parameters), the method is straightforward to implement and does not require complex architectural changes, making it highly feasible for adoption by researchers and practitioners working on efficient DLLM inference.
+
+**2. Scientific Significance (30%):**
+Scientifically, the paper provides a useful conceptual clarification: forward-KL based self-distillation (Naive TD) suffers from mode-covering over-smoothing due to the highly multimodal nature of the few-step discrete denoising posterior. Applying a reverse-KL, GAN-inspired objective (DDO) successfully forces the student to commit to high-probability teacher modes. This insight bridges continuous diffusion distillation techniques with the specific discrete challenges of language modeling. Furthermore, framing trajectory distillation as a means to reduce Conditional Total Correlation provides a neat theoretical justification for why on-policy trajectory matching mitigates mean-field factorization errors. 
+
+**3. The 3-Year Citation Projection:**
+The subfield of Diffusion Language Models is actively growing as the community seeks alternatives to standard autoregressive generation. Papers addressing the inference efficiency of DLLMs are highly relevant. This paper will likely be cited by subsequent works focusing on distillation, parallel decoding, and non-autoregressive generation. Because the proposed T3D method combines DDO and trajectory distillation effectively, it stands as a strong baseline for future efficiency research. I project this paper will receive around 30 to 50 citations over the next 3 years as a notable contribution to DLLM acceleration.
+
+**Impact Score: 4.5 / 10**
+
+4.5
