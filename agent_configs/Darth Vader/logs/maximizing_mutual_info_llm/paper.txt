@@ -1,0 +1,3583 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Maximizing mutual information between user-contexts and responses improves
+LLM personalization with no additional data
+Anonymous Authors1
+Abstract
+While post-training has successfully improved
+large language models (LLMs) across a variety
+of domains, these gains heavily rely on human-
+labeled data or external verifiers. Existing data
+has already been exploited, and new high-quality
+data is expensive to collect. More fundamen-
+tally, true intelligence goes far beyond tasks
+that are easily verifiable. Therefore, we need
+self-improvement frameworks that allow mod-
+els to improve without external oversight. We
+propose Mutual Information Preference Opti-
+mization (MIPO), a contrastive data augmen-
+tation method that constructs preference pairs
+by generating a positive response conditioning
+on the correct prompt, and a negative response
+by conditioning on a random, unrelated prompt.
+We show that using Direct Preference Optimiza-
+tion (DPO) to learn from this paired data maxi-
+mizes pointwise conditional mutual information
+(MI) (under the base LLM) between prompts and
+model responses. Empirical results with various-
+sized Llama- and Qwen-Instruct models show that
+when used to maximize MI between user con-
+text and response, MIPO provides an effective
+personalization technique, achieving 3–40% im-
+provements on personalization tasks using real-
+user datasets compared to strong baselines. Sur-
+prisingly, MIPO can also be applied to improve
+performance on math and multiple-choice prob-
+lems, yielding 1–18% without any additional data
+or human supervision. These results suggest a
+promising direction for self-improvement.
+1. Introduction
+“Data is the fossil fuel of AI.” – Ilya Sutskever
+Large language models (LLMs) have achieved remarkable
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country.
+success across diverse tasks and domains, from open-ended
+text generation to reasoning and mathematics. Post-training
+has been pivotal in driving this success through methods
+such as Reinforcement Learning with Human Feedback
+(RLHF) (Stiennon et al., 2022; Touvron et al., 2023; Ouyang
+et al., 2022) and Reinforcement Learning with Verifiable
+Rewards (RLVR) (Lambert et al., 2025; Guo et al., 2025).
+However, these methods still rely heavily on human feed-
+back or external verifiers. As models become increasingly
+advanced and continue to develop beyond (average) human
+capabilities, this poses two challenges to existing frame-
+works: (1) intelligence extends far beyond verifiable tasks,
+and (2) high-quality human data, whether as preference
+labels or correct solutions, is expensive to collect. The anal-
+ogy of data as the “fossil fuel” of AI applies not only to
+pre-training but also to post-training.
+Alternative approaches have been developed to reduce ex-
+ternal supervision by leveraging stronger models instead.
+For example, in Reinforcement Learning from AI Feedback
+(RLAIF) (Bai et al., 2022a; Lee et al., 2024a), human pref-
+erences are replaced by an LLM-as-a-judge; or a stronger
+model provides natural language feedback to a smaller stu-
+dent model (Chen et al., 2024a). While these approaches
+successfully minimize human oversight during training, they
+still depend on larger models. Self-training using the same
+model remains under-explored. In fact, as a potential nega-
+tive result, Huang et al. (2024) observe that self-corrections
+by models can degrade performance when external feedback
+or verifiers are unavailable.
+These challenges and the lack of existing solutions motivate
+our research: Can models improve without additional data,
+external rewards, or human supervision? A central issue
+is that the quality of a model’s own generated responses is
+hard to verify or guarantee. Existing works have shown that
+we may not need to verify if a model’s response is correct or
+not if we can assume it is generally better than some alterna-
+tive (Yao et al., 2024); for example Geng et al. (2025) show
+that creating preference pairs where an 8B model’s response
+is always preferred to a 3B model’s response can yield per-
+formance gains. But this still requires a larger model to
+create supervised labels. If we think back to the literature
+on computer vision (e.g. (Krizhevsky et al., 2012)), data
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Mutual Information Preference Optimization
+Figure 1. We propose an intrinsically motivated post-training method based on mutual information that does not require human labels or
+verifiers. We present two versions of MIPO: (1) maximizing mutual information between responses and prompts, and (2) maximizing
+conditional mutual information between responses and user contexts given prompts The second objective is particularly useful for
+personalization, as it encourages the policy to generate responses that are more likely conditioned on the specific user context, but rare
+globally.
+augmentation approaches like translation and rotation im-
+proved learning without the use of any external supervision.
+Can we develop an analogous approach for LLMs, creating
+reliable learning signals intrinsic to the problem, without
+relying on human data or verifiers?
+In this work, we turn to the mutual information between
+inputs and model outputs as a useful intrinsic signal. Mutual
+information has been leveraged as an intrinsic reward for
+exploration (Mohamed & Rezende, 2015; Montufar et al.,
+2016; Houthooft et al., 2017), and skill discovery (Sharma
+et al., 2020) in classic reinforcement learning (RL) set-
+tings. In the context of large language models, we claim
+that maximizing mutual information between prompts and
+responses can help models improve their in-context adapta-
+tion performance, which is particularly useful for improv-
+ing steerability and personalization. We further show that
+this method can be generally applied to improve general
+problem-solving performance by encouraging the models to
+pay closer attention to information in the prompt.
+Building on these two ideas, we propose Mutual Infor-
+mation Preference Optimization (MIPO), a contrastive
+data augmentation method that constructs preference pairs
+by generating a chosen response with the correct prompt
+and user-context, and a negative response conditioned on
+either the incorrect prompt (for the general case), or the
+correct prompt but without the user context (to improve
+personalization). We then use Direct Preference Optimiza-
+tion (DPO) (Rafailov et al., 2024) to train the model with
+the constructed dataset of preference pairs. Importantly,
+this generation process only requires a set of prompts and
+the model being trained, since the learning signal is intrin-
+sically defined in terms of the inputs (i.e., prompts and
+user-contexts) and the model’s own generation. Thus, it
+requires no additional labeled data.
+Our empirical results with varying-sized Llama- and Qwen-
+Instruct models show that MIPO provides effective per-
+sonalization by encouraging the learned model to generate
+responses specific to a given user context rather than general
+responses. We evaluate five different models on one plural-
+istic benchmark (Multi-Bench (Lee et al., 2024b)) and two
+real-user datasets (PRISM (Kirk et al., 2024a) and Commu-
+nity Alignment (Zhang et al., 2025c)) and show that models
+trained with MIPO achieve between 3 and 40% improve-
+ments over strong personalized prompting baselines. While
+personalization itself is an important task given the wide
+adoption of LLMs to social applications and the need for
+pluralistic alignment (Sorensen et al., 2024), we find person-
+alization particularly meaningful as a representative testing
+environment for non-verifiable tasks that many existing self-
+improvement algorithms cannot handle effectively.
+We then experiment with further extending MIPO to more
+general tasks beyond personalization, such as math and
+multiple-choice question answering, when there is no sep-
+aration between queries and user contexts. This requires
+changing the training objective from the conditional mutual
+information between user contexts and model outputs given
+the queries, to the mutual information between prompts
+and model outputs directly. Our experiments on a suite of
+benchmark tasks (Gu et al., 2025), including GSM (Cobbe
+et al., 2021), MMLU (Hendrycks et al., 2021), and the AI2
+Reasoning Challenge (Clark et al., 2018) are quite surpris-
+ing. We show that just applying MIPO, with no additional
+verifiable rewards, can improve performance by between
+1–4% on average across a range of reasoning benchmarks
+(up to 18% depending on the model size and task). Further,
+the performance gain achieved by MIPO often matches or
+exceeds that of performing RLVR directly on ground truth
+rewards.
+In summary, our contributions include:
+• Proposing MIPO, a novel self-training method based
+on data augmentation and DPO;
+• Showing that MIPO maximizes the pointwise mutual
+information between prompt context and model outputs
+according to the base policy;
+• Evaluating with three personalization tasks (including
+two pluralistic real-user datasets) and showing 3–40%
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Mutual Information Preference Optimization
+improvements over personalized prompting baselines;
+• Extending to general problem-solving tasks beyond
+personalization, when there is no separation between
+queries and user contexts; and showing that MIPO
+can also achieve an additional 1–4% improvement on
+average across a range of reasoning benchmarks on
+top of already instruction-finetuned models (up to 18%
+depending on the model size and task).
+2. Related Work
+Reinforcement Learning (RL) fine-tuning of LLMs. Post-
+training with RL has proven effective for tasks that target a
+model’s edge of competence, i.e., tasks that are difficult but
+within the pre-training data distribution (Zhang et al., 2025a).
+Two popular frameworks are: RL with Verifiable Rewards
+(RLVR) (Lambert et al., 2025; Guo et al., 2025) and RL with
+Human Feedback (RLHF) (Stiennon et al., 2022; Ouyang
+et al., 2022) based on whether the reward is verifiable or
+estimated from human preference data. Optimization can be
+implemented with different RL algorithms, including Prox-
+imal Policy Optimization (PPO) (Schulman et al., 2017),
+Group Relative Policy Optimization (GRPO) (Shao et al.,
+2024), and Direct Preference Optimization (DPO) (Rafailov
+et al., 2024).
+Self-training and improvement. RL from AI feedback
+(RLAIF) reduces the burden of human preference data col-
+lection by using an LLM-as-a-judge (Bai et al., 2022b;
+Lee et al., 2024a) or self-rewarding models (Yuan et al.,
+2025). Other methods use multi-agent reinforcement learn-
+ing (MARL) to train both the generator and the evaluator,
+allowing the generator to learn from the evaluator’s reward
+signal (Dong & Ma, 2025; Chen et al., 2024b). However,
+these approaches still rely on verifiable rewards or human-
+annotated data in order to train a reliable evaluator. Simi-
+larly, self-supervised training methods often require exter-
+nal verifiers to ensure correctness of the training data or
+use human-generated rubrics for quality assessment (Singh
+et al., 2024; Ulmer et al., 2024; Liang et al., 2024; Hosseini
+et al., 2024; Yuan et al., 2023). While iterative refinement
+and self-feedback has shown success (Madaan et al., 2023;
+Shridhar et al., 2023; Zelikman et al., 2022), Huang et al.
+(2024) observes that self-correction can degrade model per-
+formance when external feedback or verifiers are not avail-
+able. Tyen et al. (2024) observe that this may be due to
+the model’s limited capability to identify mistakes rather
+than to correct them. We also observe in our experiments
+that prompting models to self-revise and training on these
+revisions can cause performance degradation in some tasks.
+In contrast, Fr¨anken et al. (2024) motivate self-supervised
+constitution-following by minimizing a lower bound on the
+conditional mutual information.
+Direct Preference Optimization (DPO) with data aug-
+mentation.
+Prior works have explored different data
+generation or selection methods to improve RLHF out-
+comes (Dwaracherla et al., 2024; Das et al., 2025; Gou
+& Nguyen, 2025; Qi et al., 2025; Yang et al., 2024; Zhu
+et al., 2025; Yao et al., 2024; Geng et al., 2025). Specifi-
+cally for DPO, we highlight three data generation strategies
+from prior work: (1) Pairing suboptimal data for contrastive
+signals. Yao et al. (2024) empirically show that DPO works
+with less-wrong-over-wrong pairs, even when the chosen
+responses are also incorrect. Similarly, Xu et al. (2024);
+Geng et al. (2025) show that contrasting outputs from a
+strong model against those from a weaker model leads to
+model improvement. (2) Improving data through targeted
+revision. D’Oosterlinck et al. (2024) propose improving
+rejected responses along specific dimensions to obtain tar-
+geted, higher-quality chosen responses. (3) Bootstrapping
+from original data by applying perturbations in either pos-
+itive or negative directions. When ground-truth responses
+are available, Samokhin et al. (2025) suggest pairing cor-
+rect responses with random examples from the dataset to
+create negative pairs. Anderson et al. (2018) create nega-
+tive samples by adding semantic perturbations to the orig-
+inal text. Yin et al. (2024) expand preference pairs based
+on semantic similarity of prompts to pair the chosen and
+rejected responses with additional prompts. While these
+works provide promising results suggesting benefits of tex-
+tual data augmentation, they depend on larger models (Xu
+et al., 2024; Geng et al., 2025), human instructions for re-
+vision (D’Oosterlinck et al., 2024), or ground-truth data or
+verifiers to ensure the relative quality of the chosen over
+the rejected (Samokhin et al., 2025; Yin et al., 2024). In
+contrast, we show that models can self-improve without any
+external supervision or verifiers by contrasting responses
+conditioned on correct versus incorrect prompts.
+Personalization of LLMs. Despite the success of mak-
+ing LLMs more helpful and performant (Bai et al., 2022a;
+Ouyang et al., 2022), recent work shows that human prefer-
+ences are diverse and sometimes even conflicting (Sorensen
+et al., 2024; Kirk et al., 2024a; Zhang et al., 2025c). There-
+fore, preference alignment for LLMs should consider plural-
+istic or personalized alignment to individual preferences and
+traits. This capability is also known as in-context adaption,
+as models need to steer their outputs based on in-situ infor-
+mation gathered about users during conversations (Sorensen
+et al., 2025). To address this growing interest, many syn-
+thetic and a mix of hybrid and real-user datasets modeling
+user interactions with LLM chatbots have been constructed
+as personalization benchmarks (Lee et al., 2024b; Kim et al.,
+2025; Zhao et al., 2025; Jiang et al., 2025a; Li et al., 2025).
+A number of methods have also been developed to improve
+personalization, sharing the core idea of learning a user-
+conditioned policy or preference model that can distinguish
+among heterogeneous preferences (Li et al., 2024; Liu et al.,
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Mutual Information Preference Optimization
+2025). Approaches typically differ in how they represent
+users (e.g., as latent embedding vectors (Poddar et al., 2024)
+or learned summaries of user profiles (Nam et al., 2026)).
+We view personalization as an especially interesting ex-
+ample of non-easily verifiable tasks but also a highly rel-
+evant application of LLMs in social settings given their
+widespread use. Unlike prior approaches that rely on expert
+demonstrations or preference datasets, we show that per-
+sonalization can be achieved without human supervision by
+leveraging the model’s intrinsic signal to maximize the mu-
+tual information between its responses and user-dependent
+information.
+3. Preliminaries
+Post-training language models with preference data. Let
+D be a dataset of annotated preferences consisting of a
+prompt x, a corresponding chosen and rejected response
+pair over the same prompt yc (chosen) and yr (rejected).
+The Bradley Terry reward model r∗assumes the following
+preference likelihood function:
+p∗(yc ≻yr|x) =
+exp r∗(x, yc)
+exp r∗(x, yc) + exp r∗(x, yr),
+(1)
+where the probability that yc is preferred over yr depends ex-
+ponentially on the underlying rewards of yc and yr. The goal
+of preference optimization is to first learn this reward model
+ˆr using (human) labeled data, then learn an optimal policy
+πθ maximizing this reward (Ouyang et al., 2022); or directly
+optimize it with direct preference optimization (Rafailov
+et al., 2024) by modifying the probabilities of the generator
+language model. Reward maximization is combined with a
+constraint that limits the KL divergence from the pre-trained
+reference policy πref or base model leading to the following
+RLHF objective (Jaques et al., 2017):
+max
+πθ Ex∼D,y∼πθ(.|x) [ˆr(x, y)] −βDKL [πθ||πref] .
+(2)
+For personalization, we additionally define c as the user-
+specific context, and modify the policy to condition on both
+the prompt x and the context c, πθ(y|x, c); similarly, the
+reward is defined over both the prompt and the context as
+r(x, y, c). This is known as a personalized user-conditioned
+policy and is used in prior pluralistic alignment work to
+distinguish diverse user preferences (Poddar et al., 2024; Li
+et al., 2024; Nam et al., 2026).
+Supervised Fine-tuning (SFT) minimizes the forward KL
+divergence between the learned policy and the data generat-
+ing policy (Xiao et al., 2025), and the loss is computed over
+the chosen responses:
+LSFT(θ; D) = −E(x,yc)∼D [log πθ(yc|x)] .
+(3)
+Direct Preference Optimization (DPO) (Rafailov et al.,
+2024). The optimal policy π∗
+θ is obtained from a reference
+model πref via an energy re-weighting (Lv et al., 2025):
+π∗
+θ(y|x) = πref(y|x)
+exp
+
+1
+β r(x, y)
+
+Z(x)
+,
+(4)
+where r is the reward, 1
+β > 0 is temperature, and Z(x) =
+Ey∼πref
+h
+exp
+
+1
+β r(x, y, )
+i
+. This simplifies the two stage
+RLHF process of finding the reward, then an optimal policy
+to maximize this reward, into a single step:
+LDPO = −ED
+
+log σ
+
+β log πθ(yc|x)
+πref(yc|x) −β log πθ(yr|x)
+πref(yr|x)
+
+(5)
+Contrastive representation learning has been widely ex-
+plored to learn latent representations that embed positive
+pairs close to each other and negative pairs far from each
+other. Particularly relevant to our work, van den Oord et al.
+(2019) proposes the Information Noise-contrastive Estima-
+tion (InfoNCE) loss and shows that minimizing this loss is
+equivalent to maximizing a lower bound on the mutual in-
+formation between variables X, Y . Their learning objective
+samples positive examples from a conditional distribution
+p(y|x) and negatives from the marginal distribution p(y)
+and shows that the optimal critic f(x, y) is proportional to
+log p(y|x)
+p(y) . This objective has been adapted by numerous
+other works in RL and representation learning (Chen et al.,
+2020; Eysenbach et al., 2023; Mazoure et al., 2022; Hejna
+et al., 2024).
+4. Mutual Information Preference
+Optimization (MIPO)
+We propose two instantiations of MIPO based on the same
+underlying principle: maximizing the mutual information
+between prompts and model responses as an intrinsic re-
+ward signal. First, we introduce a simplified version that
+maximizes the mutual information between model outputs
+and prompts to make the connection with contrastive repre-
+sentation learning clear. Then we will modify this objective
+to maximize the conditional mutual information between
+responses and user contexts given the prompts, which is
+used for personalization.
+MIPO training setup: For a given prompt x ∈X, we
+first sample a chosen response conditioned on the correct
+prompt: yc ∼πref(y|x), and pair it with a rejected response
+generated using a random prompt yr ∼πref(y|x′), x′ ∼
+X. Then we use this preference dataset of (x, yr, yc) to
+train Direct Preference Optimization (DPO) (Rafailov et al.,
+2024).
+What is the implicit reward being optimized in MIPO?
+DPO maximizes an implicit reward that requires a two-step
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Mutual Information Preference Optimization
+process in traditional RLHF methods. In typical RLHF
+settings, the training data comprises human-labeled pref-
+erences between chosen and rejected responses, but what
+learning signal do the negative (random) samples in MIPO
+provide? The key lies in its connection to the InfoNCE
+objective (van den Oord et al., 2019). InfoNCE maximizes
+a lower bound on the mutual information between X, Y 1:
+I(X; Y ) ≥log(N)+EX
+"
+log
+exp r(x, y)
+P
+yi∈Y exp r(x, yi)
+#
+|
+{z
+}
+−LinfoNCE
+, (6)
+where Y is a set of N random samples containing one pos-
+itive from the conditional distribution, yc ∼π(y|x), and
+N −1 negative samples from the marginal, yr ∼π(y). Im-
+portantly, van den Oord et al. (2019) (Section 2.3 & A.1)
+show that the optimal critic is proportional to the density
+ratio of the conditional and the marginal distributions:
+r∗(x, y) ∝log π(y|x)
+π(y) .
+(7)
+If the rejected responses were drawn from the marginal π(y)
+and the chosen responses from the conditional distribution
+π(y|x), then the DPO objective in our setup maximizes
+this density ratio as an implicit reward. Note that the In-
+foNCE loss (with N = 2) matches the DPO loss in form but
+with key differences in how the training data are generated:
+in DPO, the chosen and rejected reflect human preferences,
+whereas in InfoNCE, the chosen and rejected are determined
+by the data-generating distributions.
+LinfoNCE = −E(x,yr,yc)∼D
+
+log
+exp r(x, yc)
+exp r(x, yr) + exp r(x, yc)
+
+(8)
+Since Eq.(4) can be written in terms of the reward:
+r(x, y) = β log π∗
+θ(y|x)
+πref(y|x) −log Z(x),
+(9)
+substituting this into Eq. (8) exactly recovers the DPO loss
+in Eq. (5). Therefore, DPO finds an optimal policy to the
+following objective:
+max
+θ
+Ex∼X,y∼πθ(y|x) [log π(y|x) −log π(y)]
+|
+{z
+}
+reward r(x,y)
+−DKL(πθ||πref).
+(10)
+By optimizing this reward, we maximize the pointwise
+mutual information between prompts and model outputs
+under π. While the density ratio (reward) is fixed by π,
+1Another alternative is to maximize this mutual information
+lower bound, i.e., minimize the InfoNCE loss, with an optimal
+critic following the set up of Poole et al. (2019) (see Eq. 12). We
+compare this baseline to MIPO.
+Algorithm 1 MIPO for personalization
+Input: prompts X, contexts C, learnable policy πθ
+Initialize πθ = πref.
+for x ∼X do
+Generate chosen yc ∼πθ(y|x, c)
+if using missing contexts then
+Generate rejected yr ∼πθ(y|x)
+else
+Generate rejected yr ∼πθ(y|x, c′), c′ ∼C
+end if
+Add (x, c, yc, yr) to D
+end for
+Minimize LDPO(πθ, D).
+the learned policy πθ can still maximize this reward by
+outputting responses that are more likely under π(y|x) given
+the prompt, but globally less likely under π(y).
+One important clarification is that data for MIPO is gener-
+ated by the reference policy, πref, so the pointwise mutual
+information is also with respect to the reference policy. We
+note that this is different from maximizing mutual informa-
+tion under the learned policy πθ. Achieving this objective
+would only be possible in online RL settings, where the
+policy and reward are updated simultaneously to achieve
+the following objective:
+max
+πθ Iθ(x; y) = max Ex∼X,y∼πθ log
+πθ(y|x)
+πθ(y)
+
+(11)
+However, since DPO performs offline reward maximization,
+it assumes fixed rewards under πref. Hence, MIPO maxi-
+mizes the pointwise mutual information according to the
+fixed reference policy.
+Approximating sampling from the marginal.
+In the
+context of language models, sampling y ∼p(y|x) corre-
+sponds to generating responses for the prompt x, whereas
+y ∼p(y) requires sampling across all prompts.2
+In-
+stead, we use a one-sample Monte Carlo estimate: Since
+p(y) = Ex′∼X [p(y|x′)], we approximate sampling from the
+marginal by sampling a response conditioned on a random
+prompt. Despite this approximation, we find that MIPO
+outperforms directly maximizing the mutual information
+reward with an online RL algorithm, which also requires
+approximation for computing p(y).
+4.1. MIPO for personalization: Maximizing conditional
+mutual information given prompts
+For personalization, we use the conditional mutual infor-
+mation between responses y and user-specific contexts c
+given prompts x to learn an optimal user-conditioned policy
+2This is generally considered intractable (Fr¨anken et al., 2024).
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Mutual Information Preference Optimization
+πθ(y|x, c). For example, for a user’s query x = Explain ran-
+dom variables, there could be two different users: c = I have
+a math PhD, and c′ = I am in 7th grade and just learned
+about probability. The goal of personalization is not only to
+respond to the query x but also to tailor the response to the
+user-specific details captured in c or c′. This changes the
+mutual information objective in Eq. (6) to the conditional
+mutual information objective as follows:
+I(Y ; C|X) ≥EX
+"
+log
+exp r(x, yc, c)
+P
+yi∈Y exp r(x, yc, c) + exp r(x, yr, c)
+#
+,
+(12)
+and the corresponding optimal critic to:
+r∗(x, y, c) ∝log π(y|x, c)
+π(y|x) .
+(13)
+Maximizing the conditional mutual information between
+the model’s responses and user contexts, given the prompts,
+aligns well with the personalization objective, as it encour-
+ages the learned policy to focus on user-specific attributes
+rather than generic answers that work for any user.
+Similarly to before, we need to approximate sampling from
+the marginal, but this time, we need to sample negative
+responses from p(y|x). We experiment with two different
+approximations:
+yr ∼
+
+
+
+πref(y|x)
+(i) missing context
+πref(y|x, c′), c′ ∼C
+(ii) random context
+if c and x are indep., else Cx
+In the second case, if contexts depend on prompts, sample
+from the eligible contexts for the given prompt. Examples
+of prompt-dependent contexts include: I like traveling to
+warm climates (for prompt about travel recommendation), I
+like mystery novels but do not have much time for reading
+(for prompt about book recommendation), whereas prompt-
+independent contexts may include: I like short responses, I
+like descriptive responses that consider balanced perspec-
+tives and possibilities. While both approaches are valid
+approximations, our empirical results across three personal-
+ization tasks show that sampling with missing user contexts
+generally outperforms random contexts.
+5. Experiments
+5.1. Baselines
+Personalized Prompting. For personalization tasks, models
+are prompted with additional user context and instructions
+to personalize their responses. The default models are only
+given the query and no user-specific context.
+Supervised fine-tuning (SFT) uses the same amount of
+information as self-improved DPO, as both require only
+prompts and no ground-truth or human responses. Models
+are trained with their own generated responses, which are
+the same as the chosen responses in MIPO.
+SFT with revision. We improve SFT by using models to
+refine their own responses based on the evaluation criteria.
+Specifically, we consider two types of revision based on the
+amount of available information: (i) Revision with ground
+truth. In verifiable settings, models are given the correct
+final answers and asked to revise their original answers
+accordingly, which is not available to MIPO and vanilla
+SFT. (ii) Revision with examples. For personalization
+tasks, models are given a list of user-specific attributes, a
+good response generated from the correct user-context, and
+a bad response generated from the incorrect context but the
+same prompt, and instructed to improve the good response
+based on the user’s context.
+RL with Verifiable Rewards (RLVR). For verifiable tasks,
+the reward model is given the correct answer and instructed
+to output a score on a 1–5 scale based on the model’s rea-
+soning and accuracy against the ground truth.
+RL with AI feedback (RLAIF) (Bai et al., 2022a; Lee
+et al., 2024a). LLM-as-a-judge gets the user’s query, con-
+text, and the model’s response to give a score between 1–5
+based on how well the response addresses the user’s stated
+preferences. Rather than using a stronger critic model, we
+use the same, but frozen, model as the critic. RLVR and
+RLAIF are implemented with PPO (Schulman et al., 2017).
+5.2. Mutual information reward baselines
+For personalization tasks, we additionally implement other
+methods that use conditional mutual information between
+user contexts and model outputs as the reward. Specifically,
+we implement the following baselines: (i) MI-PPO uses
+PPO to maximized the conditional mutual information un-
+der the learned policy. (ii) MI-RLAIF combines mutual
+information reward with the task-specific reward from LLM-
+as-a-judge. (iii) InfoNCE. Fr¨anken et al. (2024); Poole et al.
+(2019) propose directly maximizing a lower bound on the
+mutual information as follows:
+LinfoNCE = −ED
+"
+1
+K
+K
+X
+i=1
+log
+πθ(yi|x, ci)
+1
+K
+PK
+j=1 πθ(yi|x, cj)
+#
+,
+(14)
+with K = 2.
+Implementation.
+Our experiments are implemented
+using OpenRLHF (Hu et al., 2024) and conducted
+with five different models of varying sizes (Qwen2.5-
+1.5/3/7B-Instruct (Qwen et al., 2025) and Llama-3.2-1/3B-
+Instruct (MetaAI, 2024). We used two H200 GPUs for most
+model training, except for PPO on 7B models, which is run
+on four H200 GPUs. Training details are in Appendix D.
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Mutual Information Preference Optimization
+5.3. Domains
+We evaluate on a variety of tasks including personalization
+, math
+(GSM8k (Cobbe et al., 2021) and SVAMP (Pa-
+tel et al., 2021)) and multiple choice questions (MCQs)
+(MMLU (Hendrycks et al., 2021), AI2 Reasoning Challenge
+(ARC) (Clark et al., 2018)). We provide details on the per-
+sonalization tasks below, and for standard LLM evaluation
+benchmarks, please refer to Appendix C.
+Community alignment (Zhang et al., 2025c) is a large-
+scale, real-user dataset of 3,000 participants across cultures
+and countries to capture pluralistic user preferences and val-
+ues. Since users select their chosen and rejected responses,
+but do not explicitly state their preferences, we use GPT-4o
+to verbalize their underlying preferences to obtain contexts.
+PRISM (Kirk et al., 2024a). This pluralistic dataset
+comprises open-ended conversations from 1,500 users
+across 75 countries and 20 LLMs. Similarly as above, we in-
+fer user preferences from their selected chosen and rejected
+responses using GPT-4o to include as contexts.
+Multifaceted Bench (Lee et al., 2024b) is a dataset
+designed to evaluate model’s ability to generate context-
+specific responses.
+It includes 921 instructions from
+five existing benchmarks (AlpacaEval 2.0 (Dubois et al.,
+2025), FLASK (Ye et al., 2024), Koala (Arnav, 2023), MT-
+Bench (Zheng et al., 2023), and Self-Instruct (Wang et al.,
+2023)) paired with synthetic human-verified system mes-
+sages specifying user preferences across four dimensions:
+style, background knowledge, informativeness, and harm-
+lessness. We rewrite system messages into user language
+that can be directly included in the user’s message and item-
+ize the preferences. As a result, every prompt-preference
+pair from the original dataset yields four variants, each tar-
+geting a single preference.
+5.4. Evaluation
+Personalization
+is evaluated using larger judge models
+(Qwen2.5-14B-Instruct for the Qwen series, and Llama-3-
+8B-Instruct for the Llama series). Judges score responses
+using itemized rubrics based on how well the response ad-
+dresses the user’s specific contexts and preferences (see
+appendix C). For easier interpretation of results, we com-
+pute win-rates (including ties) against ground-truth chosen
+responses from the dataset, or GPT-4o responses based on
+the aggregated rubric scores. To validate the reward model
+alignment with human preferences, we compute the tie-
+tolerant accuracy of the reward models in predicting the
+ground-truth preferences: Llama-8B-Instruct achieves 92%
+on both Community Alignment and PRISM, and Qwen-
+14B-Instruct achieves 93.5% and 92.2%, respectively.
+General problem solving benchmarks
+. We report
+the accuracy of the final answer on math
+and MCQ
+.
+6. Results
+R1:
+MIPO achieves effective personalization, mak-
+ing 3–40% improvements over personalized prompt-
+ing. Table 1 shows the win rates of MIPO-generated re-
+sponses against either ground-truth chosen responses (for
+PRISM and Community Alignment) or GPT-4o generated
+responses (for Multi-Bench). Since the base models are
+already instruction-finetuned, personalized prompting offers
+a strong baseline that has access to the same user attributes
+and preferences as MIPO and is further instructed to person-
+alize its responses based on the available user context. The
+strong performance of the prompting baselines compared
+to the default generation is shown in Table 1, where the
+personalized prompting (in yellow) achieves nearly dou-
+ble the win rate. Nevertheless, MIPO achieves substantial
+improvements on top of these strong baselines. Notably,
+Qwen-7B-Instruct improves by 3%, and all 1–3B models
+improve by 11–15%. In particular, Qwen-1.5B shows a
+significant improvement of 40%.
+While RLAIF provides a compelling baseline for some
+larger models, it performs poorly for smaller 1B models.
+In particular, Qwen-1.5B’s performance on PRISM drops
+from 39% with personalized prompting to 16%. This drop
+is likely caused by the low prediction accuracy of smaller
+critic models. We also observe that the reward signals from
+smaller critic models are unreliable (see Appendix 6 for
+critic accuracy evaluation). The noisy critic can lead to poor
+RLAIF performance because the reward optimized by PPO
+may not align with the final objective.
+Qualitative improvement in MIPO-personalized re-
+sponses. Appendix B shows examples where the untrained
+model gives generic answers despite personalized prompt-
+ing instructions to focus on certain aspects of the speaker’s
+motivation. On the other hand, MIPO follows the user’s
+request by addressing different needs and perspectives and
+suggests possibilities specific to the given user context. The
+question involves a conversation between two co-workers
+about their lunch options, where one speaker suggests go-
+ing to a coffee shop and concludes by saying they will join
+their colleague there and get a salad. The prompt asks the
+model to discuss the speaker’s motivation for their last state-
+ment (“No, I think I’ll come with you. I’m longing for a
+nice salad.”) followed by more specific instructions of what
+to consider (e.g., social dynamics between colleagues and
+emotions underlying the speaker’s response). The default
+model mostly focuses on the speaker’s desire for a salad
+rather than social politeness or desire for companionship,
+while the MIPO policy is able to suggest different causes
+behind the speaker’s prosocial decision.
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Mutual Information Preference Optimization
+Table 1.
+Personalization win-rates evaluated on (i) Commu-
+nity Alignment (CA) (Zhang et al., 2025c), (ii) PRISM (Kirk
+et al., 2024a), (iii) Multi-Bench (MB) (Lee et al., 2024b).
+Reported mean ± std from 3 seeds, except for Qwen-7B and
+inference-only baselines (i.e., default, personalized prompting).
+Changes larger than 3 points from personalized prompting are
+highlighted in blue (for increase) and red (for decrease).
+Model
+CA
+PRISM
+MB
+Llama-3.2-1B-Instruct
+31
+36.6
+59.52
++ Personalized Prompting
+78.00
+72.17
+79.76
++ SFT
+83.83 ± 1.53
+69.76 ± 1.07
+78.97 ± 3.0
++ SFT (Revision)
+80.00 ± 1.00
+73.37 ± 2.15
+77.78 ± 3.00
++ PPO (MI)
+80.17 ± 3.33
+73.37 ± 5.86
+82.22 ± 4.05
++ RLAIF
+79.83 ± 5.69
+56.87 ± 2.44
+84.12 ± 0.69
++ RLAIF (MI)
+81 ± 2.50
+69.07 ± 6.82
+82.93 ± 1.82
++ INFONCE
+89.5 ± 2.00
+80.93 ± 1.86
+91.67 ± 1.19
++ MIPO
+93.67 ± 1.26+15.7
+80.93 ± 3.61+8.8
+93.26 ± 0.69+13.5
+Llama-3.2-3B-Instruct
+37
+40.72
+77.38
++ Personalized Prompting
+78
+76.80
+83.33
++ SFT
+84.17 ± 1.61
+78.52 ± 0.79
+90.48 ± 1.19
++ SFT (Revision)
+81.67 ± 3.75
+78.35 ± 1.86
+88.89 ± 0.69
++ PPO (MI)
+72.67 ± 6.05
+73.02 ± 1.66
+90.08 ± 3.00
++ RLAIF
+90.17 ± 2.02
+80.07 ± 2.84
+90.48 ± 1.19
++ RLAIF (MI)
+74.50 ± 8.67
+80.58 ± 1.19
+93.65 ± 2.75
++ INFONCE
+83.67 ± 2.75
+80.58 ± 1.19
+93.65 ± 2.75
++ MIPO
+90.33 ± 2.08+12.3
+81.62 ± 2.08+4.8
+94.84 ± 1.82+11.5
+Qwen2.5-1.5B-Instruct
+25.5
+8.25
+15.48
++ Personalized Prompting
+63.5
+39.18
+39.29
++ SFT
+60.5 ± 0
+35.05 ± 0.52
+39.68 ± 3.00
++ SFT (Revision)
+67 ± 2.78
+46.56 ± 0.79
+35.31 ± 1.82
++ PPO (MI)
+39.67 ± 8.81
+32.47 ± 3.61
+36.90 ± 2.06
++ RLAIF
+50.33 ± 7.09
+13.92 ± 3.09
+39.29 ± 5.46
++ RLAIF (MI)
+59.83 ± 5.84
+16.83 ± 4.79
+34.52 ± 2.38
++ INFONCE
+58.83 ± 1.04
+57.87 ± 1.46
+59.52 ± 2.06
++ MIPO
+78.83 ± 2.84+15.3
+56.53 ± 1.81+17.4
+74.60 ± 3.00+35.31
+Qwen2.5-3B-Instruct
+34
+11.86
+46.43
++ Personalized Prompting
+76
+49.49
+63.10
++ SFT
+74.33 ± 0.29
+44.67 ± 0.79
+64.29 ± 3.16
++ SFT (Revision)
+74.83 ± 0.29
+53.09 ± 0.52
+64.68 ± 2.48
++ PPO (MI)
+72.67 ± 6.05
+50.52 ± 6.08
+66.67 ± 1.19
++ RLAIF
+77.33 ± 2.08
+48.63 ± 1.30
+70.64 ± 2.75
++ RLAIF (MI)
+74.50 ± 8.67
+51.72 ± 3.94
+72.22 ± 2.48
++ INFONCE
+70 ± 1.73
+51.89 ± 1.57
+73.02 ± 3.00
++ MIPO
+80.33 ± 1.76+4.3
+59.79 ± 1.36+10.3
+74.60 ± 0.69+18.2
+Qwen2.5-7B-Instruct
+39
+20.62
+47.62
++ Personalized Prompting
+78.5
+58.25
+70.24
++ SFT
+77
+56.70
+75
++ SFT (Revision)
+77
+59.28
+72.62
++ PPO (MI)
+79
+54.12
+72.62
++ RLAIF
+80.5
+63.40
+76.19
++ RLAIF (MI)
+86
+64.43
+78.57
++ INFONCE
+82.5
+58.25
+72.62
++ MIPO
+81.5+3
+58.76 +0.5
+73.81+3.57
+Different ways of sampling rejected responses. We ex-
+periment with two different negative sampling strategies to
+approximate sampling responses from the marginal distri-
+bution: (1) missing contexts: yr ∼p(y|x) (i.e., no user-
+specific context is provided to the model); and (2) random
+contexts: yr ∼p(y|x, c′). Appendix Table 5 compares
+both approaches and shows that generally missing context
+rejections lead to better performance than random context
+rejections.
+R2:
+MIPO does not compromise model’s output di-
+versity. One potential concern with optimizing the model’s
+responses is that it may lead to reward hacking and reduced
+output diversity. However, our empirical results based on
+self-BLEU-4 (Zhu et al., 2018) show that in fact, MIPO
+helps improve output diversity as indicated by the lower
+self-BLEU scores across generation tasks. In contrast, SFT
+using only the chosen responses results in higher self-BLEU
+scores both on average as shown in Table 3, and similarly
+we observe higher scores across individual model-task pairs
+(i.e., SFT decreases diversity in 11 out of 15 cases; while
+MIPO increases diversity in 11 out of 15 cases. See Table 4
+for full results). This difference between SFT and MIPO
+can be explained by the balance between two competing
+terms in the MIPO-objective: log πθ(y|x) encourages out-
+puts that are likely conditioned on the prompt (similar to
+SFT), but −log πθ(y) prefers outputs that are globally less
+likely which is unique to MIPO’s training objective. We
+suspect that this second term prevents the trained models
+from losing diversity. We find this result especially meaning-
+ful given the recent observations and concerns about LLM
+homogeneity (Jiang et al., 2025b; Zhang et al., 2025b; Kirk
+et al., 2024b).
+Results 1 & 2 establish MIPO as an effective personaliza-
+tion technique; however, does MIPO generalize to tasks
+beyond personalization? MIPO for personalization max-
+imizes the conditional mutual information between model
+responses and user contexts, conditioned on the prompts.
+We empirically show that this can be further extended to a
+more general objective: maximizing the mutual information
+between prompts and model outputs.
+In particular, we are interested in evaluating its effectiveness
+on general LLM benchmarks, including math and multiple-
+choice question answering. While we do not expect to
+outperform RLVR or methods that assume privileged access
+to verifiers, we empirically test the validity of using mutual
+information between prompts and responses as an intrinsic
+motivation across different tasks.
+R3:
+MIPO generalizes to benchmark tasks be-
+yond personalization, e.g., math and multiple-choice an-
+swering, leading to 1–3.6% improvements and an 18%
+improvement by Llama-1B-Instruct. While gains for
+larger models (Qwen-7B) are modest for all methods, MIPO
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Mutual Information Preference Optimization
+Table 2. Math
+and multiple-choice question (MCA)
+benchmark performance. GSM and SVAMP use 8-shot; otherwise zero-shot.
+Reported mean and standard deviation from 3 seeds. Changes larger than ±3 are highlighted with red (decrease) and blue (increase).
+Methods that use ground-truth answers during training to either revise the model’s output or give a score are noted with (Ground-truth).
+Model
+GSM (8-shot)
+SVAMP (8-shot)
+MMLU
+ARC-Easy
+ARC-Challenge
+Avg.
+Llama-3.2-1B-Instruct
+22
+51.67
+27.5
+44
+33.2
+35.67
++ SFT
+24.83 ± 1.61+2.8
+54.44 ± 1.50+2.8
+24.5 ± 0.87-3.0
+34.13 ± 5.5-9.9
+28.53 ± 0.64-4.7
+33.29-2.4
++ MIPO (Ours)
+29.5 ± 2.29+7.5
+60.11 ± 0.19+8.4
+32.83 ± 0.76+5.3
+51.87 ± 2.01+7.9
+39.53 ± 3.11+6.3
+42.77+7.1
++ SFT (Ground-truth)
+24.17 ± 1.04+2.2
+52.56 ± 0.51+0.9
+20.5 ± 0.5-7.0
+28.53 ± 1.10-15.5
+27.13 ± 2.19-6.1
+30.58-5.1
++ RLVR (Ground-truth)
+10.67 ± 1.26-11.3
+52.56 ± 2.50+0.9
+34.17 ± 1.15+6.7
+58.8 ± 0.92 +14.8
+42.2 ± 1.04+9.0
+39.68+4.0
+Llama-3.2-3B-Instruct
+71.00
+78.67
+56
+80.4
+68.6
+70.93
++ SFT
+64.5 ± 1.32-6.5
+79.66 ± 1.53+1.0
+53.83 ± 1.53-2.2
+77.47 ± 2.25-2.9
+63.67 ± 0.50-4.9
+67.83 -3.1
++ MIPO (Ours)
+70.17 ± 2.02-0.8
+78.22 ± 1.57-0.4
+63.17 ± 2.36+7.2
+85.26 ± 0.58+5.8
+70.93 ± 0.7+2.3
+73.55+2.6
++ SFT (Ground-truth)
+69.17 ± 1.89-1.8
+77.21 ± 1.00-1.5
+57.83 ± 4.16+1.8
+78.73 ± 1.14-1.7
+70.53 ± 1.45+1.9
+70.69-0.2
++ RLVR (Ground-truth)
+71.67 ± 1.76+0.7
+79.11 ± 2.99+0.4
+59.33 ± 2.02+3.3
+80.07 ± 2.73-0.3
+70.33 ± 1.80+1.7
+72.10+1.2
+Qwen2.5-1.5B-Instruct
+65.5
+82.33
+53.5
+79
+63.6
+68.79
++ SFT
+67 ± 3.50+1.5
+82.00 ± 1.53-0.3
+44.5 ± 0.5-9.0
+66.07 ± 1.51-12.9
+52.47 ± 1.03-11.1
+62.41-6.4
++ MIPO (Ours)
+71 ± 1.80+5.5
+81.67 ± 2.03-0.7
+53.83 ± 1.53+0.3
+82.27 ± 0.81+3.3
+65.93 ± 1.70+2.3
+70.94+2.1
++ SFT (Ground-truth)
+67.50 ± 2.00+2.0
+81.33 ± 0.34-1.0
+47.33 ± 0.29-6.2
+75.2 ± 0.87-3.8
+62.2 ± 1.83-1.4
+66.71-2.1
++ RLVR (Ground-truth)
+62.5 ± 7.76-3.0
+83 ± 1.67+0.7
+60.5 ± 3.29+7.0
+85.4 ± 0.2+6.4
+70.47 ± 0.76+6.9
+72.22+3.4
+Qwen2.5-3B-Instruct
+84.5
+90.67
+63.5
+92
+79.4
+82.01
++ SFT
+85.83 ± 0.76+1.3
+89.78 ± 1.02-0.9
+68 ± 3.5+4.5
+87.47 ± 0.23-4.5
+78.67 ± 1.17-0.7
+81.95-0.1
++ MIPO (Ours)
+89.17 ± 3.75+4.7
+91.33 ± 1.73+0.7
+67.67 ± 1.26+4.2
+90.80 ± 0.35-1.2
+80.13 ± 2.01+0.7
+83.82+1.8
++ SFT (Ground-truth)
+83.83 ± 2.47-0.7
+90.56 ± 0.20-0.1
+68.17 ± 0.76+4.7
+90.33 ± 0.99-1.7
+79.6 ± 1.11+0.2
+82.50+0.5
++ RLVR (Ground-truth)
+82.83 ± 1.53-1.7
+90.22 ± 0.69-0.5
+66.17 ± 1.44+2.7
+91.8 ± 0.2-0.2
+79.4 ± 1.25
+82.08+0.07
+Qwen2.5-7B-Instruct
+93.5
+91.33
+72.50
+93.80
+88.20
+87.87
++ SFT
+92.50-1.0
+92.00+0.7
+75.00+2.5
+93.60-0.2
+87.80-0.4
+88.18+0.3
++ MIPO (Ours)
+93.00-0.5
+91.67+0.3
+75.00+2.5
+93.80
+90.4+2.2
+88.77+0.9
++ SFT (Ground-truth)
+92.00-1.5
+91.33
+76.00+3.5
+93.60-0.2
+90.00+1.8
+88.27+0.4
++ RLVR (Ground-truth)
+92.50-1.0
+91.33
+73.00+0.5
+94.20+0.4
+88.60+0.4
+88.59+0.7
+Table 3. Self-BLEU-4 (Zhu et al., 2018) from pre- and post-
+training averaged across three personalization tasks. Lower
+values indicate greater diversity (✓indicates diversity improve-
+ment). See Table 4 for individual task-model scores.
+Model
+Pre-Training
+Post-SFT
+Post-MIPO
+Llama 1B
+0.420
+0.427 ✗
+0.393 ✓
+Llama 3B
+0.379
+0.389 ✗
+0.371 ✓
+Qwen 1.5B
+0.310
+0.316 ✗
+0.256 ✓
+Qwen 3B
+0.312
+0.316 ✗
+0.272 ✓
+Qwen 7B
+0.310
+0.318 ✗
+0.309 ✓
+achieves substantial improvements for smaller models de-
+spite the potential suboptimality of the training data. This
+aligns with findings by Yao et al. (2024) that models can
+learn by contrasting “less incorrect” responses with “more
+incorrect” ones.
+The benefit of contrastive learning is further highlighted by
+the performance gap between SFT and MIPO. Poor SFT
+performance is likely due to the suboptimality of the train-
+ing data, as indicated by the small base model’s low initial
+performance (e.g., 22-52% accuracy for Llama-1B). In con-
+trast, contrastive data pairs in MIPO still lead to substantial
+performance improvements compared to SFT (e.g., 18%
+improvement by Llama-1B and 3% by Qwen-1.5B over
+the instruction-finetuned baselines), despite both having the
+same training data.
+7. Limitation & Discussion
+We propose MIPO, a contrastive data augmentation method
+based on maximizing mutual information between prompts
+and responses, and evaluate it across a suite of both verifi-
+able and non-verifiable tasks. In summary, our empirical
+evaluation of MIPO shows that:
+• MIPO provides effective personalization, improving
+models by 3–40% across three pluralistic user datasets,
+two based on real-user datasets;
+• MIPO achieves these personalization gains while main-
+taining or improving model’s output diversity;
+• While most effective for personalization, MIPO can fur-
+ther be applied to a broader set of math and reasoning
+tasks beyond personalization, achieving an additional
+1–4% improvements on top of already instruction-
+finetuned models on these benchmarks;
+• MIPO provides especially larger gains for smaller mod-
+els whose self-generated data is likely suboptimal (e.g.,
+18% average improvement for Llama-1B-Instruct on
+reasoning benchmarks).
+Crucially, MIPO can achieve these gains without any addi-
+tional data or human supervision. Our work demonstrates
+that the mutual information between prompts and responses
+serves as a useful intrinsic signal across different tasks.
+Combining this signal with external or verifiable rewards in
+online RL settings can be a promising future direction.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Mutual Information Preference Optimization
+Impact Statement
+We propose a method for self-training that maximizes mu-
+tual information between prompts and model responses.
+Despite the promising results for self-training, we are not
+suggesting that human oversight should be completely re-
+moved from model development: human preferences and
+data remain important but are often expensive to obtain.
+We show that an intrinsic reward signal based on mutual
+information can be a useful alternative when human data
+is expensive to collect, potentially allowing more human
+data collection efforts to focus on model evaluation and
+oversight during deployment to ensure safe and respectful
+model behaviors.
+References
+Anderson, P., Wu, Q., Teney, D., Bruce, J., Johnson, M.,
+S¨underhauf, N., Reid, I., Gould, S., and van den Hen-
+gel, A. Vision-and-language navigation: Interpreting
+visually-grounded navigation instructions in real envi-
+ronments, 2018. URL https://arxiv.org/abs/
+1711.07280.
+Arnav,
+G.
+Koala evaluation set,
+2023.
+URL
+https://github.com/arnav-gudibande/
+koala-test-set.
+Bai, Y., Jones, A., Ndousse, K., Askell, A., Chen, A., Das-
+Sarma, N., Drain, D., Fort, S., Ganguli, D., Henighan,
+T., Joseph, N., Kadavath, S., Kernion, J., Conerly, T.,
+El-Showk, S., Elhage, N., Hatfield-Dodds, Z., Hernan-
+dez, D., Hume, T., Johnston, S., Kravec, S., Lovitt, L.,
+Nanda, N., Olsson, C., Amodei, D., Brown, T., Clark,
+J., McCandlish, S., Olah, C., Mann, B., and Kaplan,
+J. Training a helpful and harmless assistant with rein-
+forcement learning from human feedback, 2022a. URL
+https://arxiv.org/abs/2204.05862.
+Bai, Y., Kadavath, S., Kundu, S., Askell, A., Kernion, J.,
+Jones, A., Chen, A., Goldie, A., Mirhoseini, A., McK-
+innon, C., Chen, C., Olsson, C., Olah, C., Hernandez,
+D., Drain, D., Ganguli, D., Li, D., Tran-Johnson, E.,
+Perez, E., Kerr, J., Mueller, J., Ladish, J., Landau, J.,
+Ndousse, K., Lukosuite, K., Lovitt, L., Sellitto, M.,
+Elhage, N., Schiefer, N., Mercado, N., DasSarma, N.,
+Lasenby, R., Larson, R., Ringer, S., Johnston, S., Kravec,
+S., Showk, S. E., Fort, S., Lanham, T., Telleen-Lawton,
+T., Conerly, T., Henighan, T., Hume, T., Bowman, S. R.,
+Hatfield-Dodds, Z., Mann, B., Amodei, D., Joseph, N.,
+McCandlish, S., Brown, T., and Kaplan, J. Constitu-
+tional ai: Harmlessness from ai feedback, 2022b. URL
+https://arxiv.org/abs/2212.08073.
+Chen, T., Kornblith, S., Norouzi, M., and Hinton, G. A
+simple framework for contrastive learning of visual repre-
+sentations, 2020. URL https://arxiv.org/abs/
+2002.05709.
+Chen, X., Wen, H., Nag, S., Luo, C., Yin, Q., Li, R.,
+Li, Z., and Wang, W.
+Iteralign: Iterative constitu-
+tional alignment of large language models, 2024a. URL
+https://arxiv.org/abs/2403.18341.
+Chen, Z., Deng, Y., Yuan, H., Ji, K., and Gu, Q. Self-play
+fine-tuning converts weak language models to strong lan-
+guage models, 2024b. URL https://arxiv.org/
+abs/2401.01335.
+Clark, P., Cowhey, I., Etzioni, O., Khot, T., Sabharwal,
+A., Schoenick, C., and Tafjord, O.
+Think you have
+solved question answering? try arc, the ai2 reasoning
+challenge, 2018. URL https://arxiv.org/abs/
+1803.05457.
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H.,
+Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+R., Hesse, C., and Schulman, J. Training verifiers to solve
+math word problems, 2021. URL https://arxiv.
+org/abs/2110.14168.
+Das, N., Chakraborty, S., Pacchiano, A., and Chowdhury,
+S. R. Active preference optimization for sample efficient
+rlhf, 2025. URL https://arxiv.org/abs/2402.
+10500.
+Dong, K. and Ma, T. Stp: Self-play llm theorem provers
+with iterative conjecturing and proving, 2025.
+URL
+https://arxiv.org/abs/2502.00212.
+D’Oosterlinck, K., Xu, W., Develder, C., Demeester, T.,
+Singh, A., Potts, C., Kiela, D., and Mehri, S. Anchored
+preference optimization and contrastive revisions: Ad-
+dressing underspecification in alignment, 2024. URL
+https://arxiv.org/abs/2408.06266.
+Dubois, Y., Galambosi, B., Liang, P., and Hashimoto, T. B.
+Length-controlled alpacaeval: A simple way to debias
+automatic evaluators, 2025. URL https://arxiv.
+org/abs/2404.04475.
+Dwaracherla, V., Asghari, S. M., Hao, B., and Roy, B. V.
+Efficient exploration for llms, 2024. URL https://
+arxiv.org/abs/2402.00396.
+Eysenbach, B., Zhang, T., Salakhutdinov, R., and Levine, S.
+Contrastive learning as goal-conditioned reinforcement
+learning, 2023. URL https://arxiv.org/abs/
+2206.07568.
+Fr¨anken, J.-P., Zelikman, E., Rafailov, R., Gandhi, K.,
+Gerstenberg, T., and Goodman, N. D. Self-supervised
+alignment with mutual information: Learning to fol-
+low principles without preference labels, 2024. URL
+https://arxiv.org/abs/2404.14313.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Mutual Information Preference Optimization
+Geng, S., Ivison, H., Li, C.-L., Sap, M., Li, J., Krishna, R.,
+and Koh, P. W. The delta learning hypothesis: Preference
+tuning on weak data can yield strong gains, 2025. URL
+https://arxiv.org/abs/2507.06187.
+Gou, Q. and Nguyen, C.-T. Mixed preference optimization:
+Reinforcement learning with data selection and better
+reference model, 2025. URL https://arxiv.org/
+abs/2403.19443.
+Gu, Y., Tafjord, O., Kuehl, B., Haddad, D., Dodge, J., and
+Hajishirzi, H. Olmes: A standard for language model eval-
+uations, 2025.
+URL https://arxiv.org/abs/
+2406.08446.
+Guo, D., Yang, D., Zhang, H., Song, J., Wang, P., Zhu, Q.,
+Xu, R., Zhang, R., Ma, S., Bi, X., Zhang, X., Yu, X., Wu,
+Y., Wu, Z. F., Gou, Z., Shao, Z., Li, Z., Gao, Z., Liu, A.,
+Xue, B., Wang, B., Wu, B., Feng, B., Lu, C., Zhao, C.,
+Deng, C., Ruan, C., Dai, D., Chen, D., Ji, D., Li, E., Lin,
+F., Dai, F., Luo, F., Hao, G., Chen, G., Li, G., Zhang, H.,
+Xu, H., Ding, H., Gao, H., Qu, H., Li, H., Guo, J., Li,
+J., Chen, J., Yuan, J., Tu, J., Qiu, J., Li, J., Cai, J. L., Ni,
+J., Liang, J., Chen, J., Dong, K., Hu, K., You, K., Gao,
+K., Guan, K., Huang, K., Yu, K., Wang, L., Zhang, L.,
+Zhao, L., Wang, L., Zhang, L., Xu, L., Xia, L., Zhang,
+M., Zhang, M., Tang, M., Zhou, M., Li, M., Wang, M.,
+Li, M., Tian, N., Huang, P., Zhang, P., Wang, Q., Chen,
+Q., Du, Q., Ge, R., Zhang, R., Pan, R., Wang, R., Chen,
+R. J., Jin, R. L., Chen, R., Lu, S., Zhou, S., Chen, S., Ye,
+S., Wang, S., Yu, S., Zhou, S., Pan, S., Li, S. S., Zhou, S.,
+Wu, S., Yun, T., Pei, T., Sun, T., Wang, T., Zeng, W., Liu,
+W., Liang, W., Gao, W., Yu, W., Zhang, W., Xiao, W. L.,
+An, W., Liu, X., Wang, X., Chen, X., Nie, X., Cheng, X.,
+Liu, X., Xie, X., Liu, X., Yang, X., Li, X., Su, X., Lin, X.,
+Li, X. Q., Jin, X., Shen, X., Chen, X., Sun, X., Wang, X.,
+Song, X., Zhou, X., Wang, X., Shan, X., Li, Y. K., Wang,
+Y. Q., Wei, Y. X., Zhang, Y., Xu, Y., Li, Y., Zhao, Y., Sun,
+Y., Wang, Y., Yu, Y., Zhang, Y., Shi, Y., Xiong, Y., He, Y.,
+Piao, Y., Wang, Y., Tan, Y., Ma, Y., Liu, Y., Guo, Y., Ou,
+Y., Wang, Y., Gong, Y., Zou, Y., He, Y., Xiong, Y., Luo,
+Y., You, Y., Liu, Y., Zhou, Y., Zhu, Y. X., Huang, Y., Li,
+Y., Zheng, Y., Zhu, Y., Ma, Y., Tang, Y., Zha, Y., Yan, Y.,
+Ren, Z. Z., Ren, Z., Sha, Z., Fu, Z., Xu, Z., Xie, Z., Zhang,
+Z., Hao, Z., Ma, Z., Yan, Z., Wu, Z., Gu, Z., Zhu, Z., Liu,
+Z., Li, Z., Xie, Z., Song, Z., Pan, Z., Huang, Z., Xu,
+Z., Zhang, Z., and Zhang, Z. Deepseek-r1 incentivizes
+reasoning in llms through reinforcement learning. Nature,
+645(8081):633–638, September 2025. ISSN 1476-4687.
+doi: 10.1038/s41586-025-09422-z. URL http://dx.
+doi.org/10.1038/s41586-025-09422-z.
+Hejna, J., Rafailov, R., Sikchi, H., Finn, C., Niekum, S.,
+Knox, W. B., and Sadigh, D. Contrastive preference
+learning: Learning from human feedback without rl, 2024.
+URL https://arxiv.org/abs/2310.13639.
+Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika,
+M., Song, D., and Steinhardt, J.
+Measuring massive
+multitask language understanding, 2021. URL https:
+//arxiv.org/abs/2009.03300.
+Hosseini, A., Yuan, X., Malkin, N., Courville, A., Sordoni,
+A., and Agarwal, R. V-star: Training verifiers for self-
+taught reasoners, 2024. URL https://arxiv.org/
+abs/2402.06457.
+Houthooft, R., Chen, X., Duan, Y., Schulman, J., Turck,
+F. D., and Abbeel, P. Vime: Variational information
+maximizing exploration, 2017. URL https://arxiv.
+org/abs/1605.09674.
+Hu, J., Wu, X., Zhu, Z., Xianyu, Wang, W., Zhang, D.,
+and Cao, Y. Openrlhf: An easy-to-use, scalable and
+high-performance rlhf framework, 2024. URL https:
+//arxiv.org/abs/2405.11143.
+Huang, J., Chen, X., Mishra, S., Zheng, H. S., Yu, A. W.,
+Song, X., and Zhou, D. Large language models can-
+not self-correct reasoning yet, 2024.
+URL https:
+//arxiv.org/abs/2310.01798.
+Huang, K., Guo, J., Li, Z., Ji, X., Ge, J., Li, W., Guo,
+Y., Cai, T., Yuan, H., Wang, R., Wu, Y., Yin, M., Tang,
+S., Huang, Y., Jin, C., Chen, X., Zhang, C., and Wang,
+M. Math-perturb: Benchmarking llms’ math reasoning
+abilities against hard perturbations, 2025. URL https:
+//arxiv.org/abs/2502.06453.
+Jaques, N., Gu, S., Bahdanau, D., Hern´andez-Lobato, J. M.,
+Turner, R. E., and Eck, D. Sequence tutor: Conserva-
+tive fine-tuning of sequence generation models with kl-
+control. In International Conference on Machine Learn-
+ing, pp. 1645–1654. PMLR, 2017.
+Jiang, B., Hao, Z., Cho, Y.-M., Li, B., Yuan, Y., Chen,
+S., Ungar, L., Taylor, C. J., and Roth, D. Know me,
+respond to me: Benchmarking llms for dynamic user
+profiling and personalized responses at scale, 2025a. URL
+https://arxiv.org/abs/2504.14225.
+Jiang, L., Chai, Y., Li, M., Liu, M., Fok, R., Dziri, N.,
+Tsvetkov, Y., Sap, M., Albalak, A., and Choi, Y. Artificial
+hivemind: The open-ended homogeneity of language
+models (and beyond), 2025b. URL https://arxiv.
+org/abs/2510.22954.
+Kim, T. S., Lee, Y., Park, Y., Kim, J., Kim, Y.-H., and Kim,
+J. Cupid: Evaluating personalized and contextualized
+alignment of llms from interactions, 2025. URL https:
+//arxiv.org/abs/2508.01674.
+Kirk, H. R., Whitefield, A., R¨ottger, P., Bean, A., Margatina,
+K., Ciro, J., Mosquera, R., Bartolo, M., Williams, A., He,
+H., Vidgen, B., and Hale, S. A. The prism alignment
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Mutual Information Preference Optimization
+dataset: What participatory, representative and individu-
+alised human feedback reveals about the subjective and
+multicultural alignment of large language models, 2024a.
+URL https://arxiv.org/abs/2404.16019.
+Kirk, R., Mediratta, I., Nalmpantis, C., Luketina, J., Ham-
+bro, E., Grefenstette, E., and Raileanu, R. Understand-
+ing the effects of rlhf on llm generalisation and di-
+versity, 2024b.
+URL https://arxiv.org/abs/
+2310.06452.
+Krizhevsky, A., Sutskever, I., and Hinton, G. E. Imagenet
+classification with deep convolutional neural networks.
+Advances in neural information processing systems, 25,
+2012.
+Lambert, N., Morrison, J., Pyatkin, V., Huang, S., Ivison, H.,
+Brahman, F., Miranda, L. J. V., Liu, A., Dziri, N., Lyu, S.,
+Gu, Y., Malik, S., Graf, V., Hwang, J. D., Yang, J., Bras,
+R. L., Tafjord, O., Wilhelm, C., Soldaini, L., Smith, N. A.,
+Wang, Y., Dasigi, P., and Hajishirzi, H. Tulu 3: Pushing
+frontiers in open language model post-training, 2025.
+URL https://arxiv.org/abs/2411.15124.
+Lee, H., Phatale, S., Mansoor, H., Mesnard, T., Ferret, J.,
+Lu, K., Bishop, C., Hall, E., Carbune, V., Rastogi, A., and
+Prakash, S. Rlaif vs. rlhf: Scaling reinforcement learning
+from human feedback with ai feedback, 2024a. URL
+https://arxiv.org/abs/2309.00267.
+Lee, S., Park, S. H., Kim, S., and Seo, M. Aligning to
+thousands of preferences via system message general-
+ization, 2024b. URL https://arxiv.org/abs/
+2405.17977.
+Li, S. S., Bose, A., Brahman, F., Du, S. S., Koh, P. W., Fazel,
+M., and Tsvetkov, Y. Personalized reasoning: Just-in-
+time personalization and why llms fail at it, 2025. URL
+https://arxiv.org/abs/2510.00177.
+Li, X., Zhou, R., Lipton, Z. C., and Leqi, L.
+Person-
+alized language modeling from personalized human
+feedback, 2024. URL https://arxiv.org/abs/
+2402.05133.
+Liang, Y., Zhang, G., Qu, X., Zheng, T., Guo, J., Du, X.,
+Yang, Z., Liu, J., Lin, C., Ma, L., Huang, W., and Zhang,
+J. I-sheep: Self-alignment of llm from scratch through
+an iterative self-enhancement paradigm, 2024.
+URL
+https://arxiv.org/abs/2408.08072.
+Liu, R., Wang, P., Li, D., Shen, C., and Yang, J. A shared
+low-rank adaptation approach to personalized rlhf, 2025.
+URL https://arxiv.org/abs/2503.19201.
+Lv, X., Chen, K., Sun, H., Bai, X., Zhang, M., Liu, H., and
+Chen, K. The hidden link between rlhf and contrastive
+learning, 2025. URL https://arxiv.org/abs/
+2506.22578.
+Madaan, A., Tandon, N., Gupta, P., Hallinan, S., Gao, L.,
+Wiegreffe, S., Alon, U., Dziri, N., Prabhumoye, S., Yang,
+Y., Gupta, S., Majumder, B. P., Hermann, K., Welleck,
+S., Yazdanbakhsh, A., and Clark, P. Self-refine: Iterative
+refinement with self-feedback, 2023. URL https://
+arxiv.org/abs/2303.17651.
+Mazoure, B., Eysenbach, B., Nachum, O., and Tompson, J.
+Contrastive value learning: Implicit models for simple
+offline rl, 2022. URL https://arxiv.org/abs/
+2211.02100.
+MetaAI.
+Llama
+3.2:
+Revolutionizing
+edge
+ai
+and
+vision
+with
+open,
+customizable
+models,
+2024.
+URL
+https://ai.meta.com/blog/
+llama-3-2-connect-2024-vision-edge-mobile-devices
+Mohamed, S. and Rezende, D. J. Variational information
+maximisation for intrinsically motivated reinforcement
+learning, 2015. URL https://arxiv.org/abs/
+1509.08731.
+Montufar, G., Ghazi-Zahedi, K., and Ay, N. Information
+theoretically aided reinforcement learning for embod-
+ied agents, 2016. URL https://arxiv.org/abs/
+1605.09735.
+Nam, H., Wan, Y., Liu, M., Ahnn, P., Lian, J., and Jaques, N.
+Learning to summarize user information for personalized
+reinforcement learning from human feedback, 2026. URL
+https://arxiv.org/abs/2507.13579.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright,
+C. L., Mishkin, P., Zhang, C., Agarwal, S., Slama, K.,
+Ray, A., Schulman, J., Hilton, J., Kelton, F., Miller, L.,
+Simens, M., Askell, A., Welinder, P., Christiano, P., Leike,
+J., and Lowe, R. Training language models to follow
+instructions with human feedback, 2022. URL https:
+//arxiv.org/abs/2203.02155.
+Patel, A., Bhattamishra, S., and Goyal, N. Are nlp models
+really able to solve simple math word problems?, 2021.
+URL https://arxiv.org/abs/2103.07191.
+Poddar, S., Wan, Y., Ivison, H., Gupta, A., and Jaques,
+N. Personalizing reinforcement learning from human
+feedback with variational preference learning, 2024. URL
+https://arxiv.org/abs/2408.10075.
+Poole, B., Ozair, S., van den Oord, A., Alemi, A. A., and
+Tucker, G. On variational bounds of mutual informa-
+tion, 2019. URL https://arxiv.org/abs/1905.
+06922.
+Qi, X., Xu, R., and Jin, Z. Difficulty-based preference
+data selection by dpo implicit reward gap, 2025. URL
+https://arxiv.org/abs/2508.04149.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Mutual Information Preference Optimization
+Qwen, :, Yang, A., Yang, B., Zhang, B., Hui, B., Zheng,
+B., Yu, B., Li, C., Liu, D., Huang, F., Wei, H., Lin, H.,
+Yang, J., Tu, J., Zhang, J., Yang, J., Yang, J., Zhou, J.,
+Lin, J., Dang, K., Lu, K., Bao, K., Yang, K., Yu, L.,
+Li, M., Xue, M., Zhang, P., Zhu, Q., Men, R., Lin, R.,
+Li, T., Tang, T., Xia, T., Ren, X., Ren, X., Fan, Y., Su,
+Y., Zhang, Y., Wan, Y., Liu, Y., Cui, Z., Zhang, Z., and
+Qiu, Z. Qwen2.5 technical report, 2025. URL https:
+//arxiv.org/abs/2412.15115.
+Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning,
+C. D., and Finn, C. Direct preference optimization: Your
+language model is secretly a reward model, 2024. URL
+https://arxiv.org/abs/2305.18290.
+Samokhin, V., Shirokikh, B., Goncharov, M., Umerenkov,
+D., Bobrin, M., Oseledets, I., Dylov, D., and Belyaev, M.
+Random direct preference optimization for radiography
+report generation, 2025. URL https://arxiv.org/
+abs/2509.21351.
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A.,
+and Klimov, O.
+Proximal policy optimization algo-
+rithms, 2017.
+URL https://arxiv.org/abs/
+1707.06347.
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X.,
+Zhang, H., Zhang, M., Li, Y. K., Wu, Y., and Guo,
+D.
+Deepseekmath: Pushing the limits of mathemat-
+ical reasoning in open language models, 2024. URL
+https://arxiv.org/abs/2402.03300.
+Sharma, A., Gu, S., Levine, S., Kumar, V., and Hausman, K.
+Dynamics-aware unsupervised discovery of skills, 2020.
+URL https://arxiv.org/abs/1907.01657.
+Shridhar, K., Sinha, K., Cohen, A., Wang, T., Yu, P., Pa-
+sunuru, R., Sachan, M., Weston, J., and Celikyilmaz, A.
+The art of llm refinement: Ask, refine, and trust, 2023.
+URL https://arxiv.org/abs/2311.07961.
+Singh, A., Co-Reyes, J. D., Agarwal, R., Anand, A., Patil,
+P., Garcia, X., Liu, P. J., Harrison, J., Lee, J., Xu, K.,
+Parisi, A., Kumar, A., Alemi, A., Rizkowsky, A., Nova,
+A., Adlam, B., Bohnet, B., Elsayed, G., Sedghi, H.,
+Mordatch, I., Simpson, I., Gur, I., Snoek, J., Penning-
+ton, J., Hron, J., Kenealy, K., Swersky, K., Mahajan,
+K., Culp, L., Xiao, L., Bileschi, M. L., Constant, N.,
+Novak, R., Liu, R., Warkentin, T., Qian, Y., Bansal,
+Y., Dyer, E., Neyshabur, B., Sohl-Dickstein, J., and
+Fiedel, N. Beyond human data: Scaling self-training
+for problem-solving with language models, 2024. URL
+https://arxiv.org/abs/2312.06585.
+Sorensen, T., Moore, J., Fisher, J., Gordon, M., Mireshghal-
+lah, N., Rytting, C. M., Ye, A., Jiang, L., Lu, X., Dziri,
+N., Althoff, T., and Choi, Y. A roadmap to pluralistic
+alignment, 2024. URL https://arxiv.org/abs/
+2402.05070.
+Sorensen, T., Newman, B., Moore, J., Park, C., Fisher,
+J., Mireshghallah, N., Jiang, L., and Choi, Y.
+Spec-
+trum tuning: Post-training for distributional coverage and
+in-context steerability, 2025. URL https://arxiv.
+org/abs/2510.06084.
+Stiennon, N., Ouyang, L., Wu, J., Ziegler, D. M., Lowe,
+R., Voss, C., Radford, A., Amodei, D., and Christiano,
+P. Learning to summarize from human feedback, 2022.
+URL https://arxiv.org/abs/2009.01325.
+Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux,
+M.-A., Lacroix, T., Rozi`ere, B., Goyal, N., Hambro,
+E., Azhar, F., Rodriguez, A., Joulin, A., Grave, E., and
+Lample, G. Llama: Open and efficient foundation lan-
+guage models, 2023. URL https://arxiv.org/
+abs/2302.13971.
+Tyen, G., Mansoor, H., C˘arbune, V., Chen, P., and Mak, T.
+Llms cannot find reasoning errors, but can correct them
+given the error location, 2024. URL https://arxiv.
+org/abs/2311.08516.
+Ulmer, D., Mansimov, E., Lin, K., Sun, J., Gao, X., and
+Zhang, Y. Bootstrapping llm-based task-oriented dialogue
+agents via self-talk, 2024.
+URL https://arxiv.
+org/abs/2401.05033.
+van den Oord, A., Li, Y., and Vinyals, O. Representation
+learning with contrastive predictive coding, 2019. URL
+https://arxiv.org/abs/1807.03748.
+Wang, Y., Kordi, Y., Mishra, S., Liu, A., Smith, N. A.,
+Khashabi, D., and Hajishirzi, H. Self-instruct: Aligning
+language models with self-generated instructions, 2023.
+URL https://arxiv.org/abs/2212.10560.
+Xiao, T., Yuan, Y., Li, M., Chen, Z., and Honavar, V. G. On
+a connection between imitation learning and rlhf, 2025.
+URL https://arxiv.org/abs/2503.05079.
+Xu, C., Rosset, C., Chau, E. C., Corro, L. D., Mahajan, S.,
+McAuley, J., Neville, J., Awadallah, A. H., and Rao,
+N.
+Automatic pair construction for contrastive post-
+training, 2024.
+URL https://arxiv.org/abs/
+2310.02263.
+Yang, Y., Ma, Y., and Liu, P.
+Weak-to-strong reason-
+ing, 2024. URL https://arxiv.org/abs/2407.
+13647.
+Yao, J., Ding, W., Feng, S., Wang, L. L., and Tsvetkov, Y.
+Varying shades of wrong: Aligning llms with wrong an-
+swers only, 2024. URL https://arxiv.org/abs/
+2410.11055.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Mutual Information Preference Optimization
+Ye, S., Kim, D., Kim, S., Hwang, H., Kim, S., Jo, Y., Thorne,
+J., Kim, J., and Seo, M. Flask: Fine-grained language
+model evaluation based on alignment skill sets, 2024.
+URL https://arxiv.org/abs/2307.10928.
+Yin, Y., Wang, Z., Gu, Y., Huang, H., Chen, W., and Zhou,
+M. Relative preference optimization: Enhancing llm
+alignment through contrasting responses across identical
+and diverse prompts, 2024. URL https://arxiv.
+org/abs/2402.10958.
+Yuan, W., Pang, R. Y., Cho, K., Li, X., Sukhbaatar, S., Xu,
+J., and Weston, J. Self-rewarding language models, 2025.
+URL https://arxiv.org/abs/2401.10020.
+Yuan, Z., Yuan, H., Li, C., Dong, G., Lu, K., Tan, C., Zhou,
+C., and Zhou, J. Scaling relationship on learning math-
+ematical reasoning with large language models, 2023.
+URL https://arxiv.org/abs/2308.01825.
+Zelikman, E., Wu, Y., Mu, J., and Goodman, N. D. Star:
+Bootstrapping reasoning with reasoning, 2022.
+URL
+https://arxiv.org/abs/2203.14465.
+Zhang, C., Neubig, G., and Yue, X. On the interplay of
+pre-training, mid-training, and rl on reasoning language
+models, 2025a. URL https://arxiv.org/abs/
+2512.07783.
+Zhang, J., Yu, S., Chong, D., Sicilia, A., Tomz, M. R.,
+Manning, C. D., and Shi, W. Verbalized sampling: How
+to mitigate mode collapse and unlock llm diversity, 2025b.
+URL https://arxiv.org/abs/2510.01171.
+Zhang, L. H., Milli, S., Jusko, K., Smith, J., Amos, B.,
+Bouaziz, W., Revel, M., Kussman, J., Sheynin, Y., Titus,
+L., Radharapu, B., Yu, J., Sarma, V., Rose, K., and Nickel,
+M. Cultivating pluralism in algorithmic monoculture:
+The community alignment dataset, 2025c. URL https:
+//arxiv.org/abs/2507.09650.
+Zhao, S., Hong, M., Liu, Y., Hazarika, D., and Lin, K. Do
+llms recognize your preferences? evaluating personalized
+preference following in llms, 2025. URL https://
+arxiv.org/abs/2502.09597.
+Zheng, L., Chiang, W.-L., Sheng, Y., Zhuang, S., Wu, Z.,
+Zhuang, Y., Lin, Z., Li, Z., Li, D., Xing, E. P., Zhang,
+H., Gonzalez, J. E., and Stoica, I. Judging llm-as-a-judge
+with mt-bench and chatbot arena, 2023. URL https:
+//arxiv.org/abs/2306.05685.
+Zhu, W., He, Z., Wang, X., Liu, P., and Wang, R. Weak-
+to-strong preference optimization: Stealing reward from
+weak aligned model, 2025. URL https://arxiv.
+org/abs/2410.18640.
+Zhu, Y., Lu, S., Zheng, L., Guo, J., Zhang, W., Wang,
+J., and Yu, Y. Texygen: A benchmarking platform for
+text generation models, 2018. URL https://arxiv.
+org/abs/1802.01886.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Mutual Information Preference Optimization
+A. Appendix: Results
+Table 4. Self-BLEU-4 (Zhu et al., 2018) from pre- and post-training in (i) CA Community Alignment (CA), (ii) PRISM, (iii)
+Multi-bench (MB). We report the mean from 3 seeds for all trained models, except Qwen-7B. Lower values mean higher diversity (✓
+indicates diversity improvement).
+Model
+CA
+PRISM
+MB
+Avg.
+Llama-3.2-1B-Instruct (Personalized-Prompting)
+0.393
+0.356
+0.510
+0.420
++ SFT
+0.362
+0.384
+0.535
+0.427
++ MIPO-Personalized
+0.363
+0.365
+0.450
+0.393 ✓
+Llama-3.2-3B-Instruct (Personalized-Prompting)
+0.311
+0.274
+0.551
+0.379
++ SFT
+0.330
+0.297
+0.539
+0.389
++ MIPO-Personalized
+0.329
+0.288
+0.495
+0.371 ✓
+Qwen2.5-1.5B-Instruct (Personalized-Prompting)
+0.208
+0.167
+0.554
+0.310
++ SFT
+0.231
+0.178
+0.538
+0.316
++ MIPO-Personalized
+0.195
+0.150
+0.423
+0.256 ✓
+Qwen2.5-3B-Instruct (Personalized-Prompting)
+0.200
+0.156
+0.581
+0.312
++ SFT
+0.225
+0.158
+0.564
+0.316
++ MIPO-Personalized
+0.188
+0.144
+0.483
+0.272 ✓
+Qwen2.5-7B-Instruct (Personalized-Prompting)
+0.197
+0.158
+0.575
+0.310
++ SFT
+0.211
+0.160
+0.583
+0.318
++ MIPO-Personalized
+0.193
+0.163
+0.570
+0.309 ✓
+Table 5. Comparison of different negative sampling strategies for MIPO-Personalized. We consider three different ways of data
+augmentation for personalization: (i) random: generating with a random, incorrect user-context, c′ ∼p(c|x), or c′ ∼p(c), if the contexts
+are independent of prompts, yr ∼p(y|x, c′); (ii) missing: generating with the prompt only, yr ∼p(y|x); and (iii) prompt: rather than
+maximizing the conditional mutual information between model responses and user contexts, we maximize the mutual information between
+model outputs and the joint unit of user context and prompts. Best results are boldfaced. In Community Alignment and PRISM datasets,
+we design contexts to be independent of prompts; while in Multi-Bench, contexts are tied to prompts, so we sample contexts conditioned
+on the prompt.
+Model
+CA
+PRISM
+MB
+Llama-3.2-1B-Instruct
+31
+36.6
+59.52
++ Personalized prompting
+78
+72.17
+79.76
++ Random
+87 ± 5.57
+77.15 ± 1.66
+89.68 ± 1.82
++ Missing
+93.67 ± 1.26
+80.93 ± 3.61
+93.26 ± 0.69
++ Prompt
+90.17 ± 0.58
+76.80 ± 3.61
+88.49 ± 3.83
+Llama-3.2-3B-Instruct
+37
+40.72
+77.38
++ Personalized prompting
+78
+76.80
+83.33
++ Random
+88 ± 2.29
+79.38 ± 1.03
+94.84 ± 1.82
++ Missing
+90.33 ± 2.08
+81.62 ± 2.08
+94.45 ± 2.48
++ Prompt
+91.50 ± 0.87
+78.35 ± 0.52
+90.87 ± 3.83
+Qwen2.5-1.5B-Instruct
+25.5
+8.25
+15.48
++ Personalized prompting
+63.5
+39.18
+39.29
++ Random
+68 ± 1
+49.82 ± 0.59
+55.95 ± 3.57
++ Missing
+78.83 ± 2.84
+56.53 ± 1.81
+74.60 ± 3.00
++ Prompt
+68.67 ± 1.61
+42.61 ± 1.95
+43.25 ± 3.00
+Qwen2.5-3B-Instruct
+34
+11.86
+46.43
++ Personalized prompting
+76
+49.49
+63.10
++ Random
+80.33 ± 1.76
+55.33 ± 1.07
+70.63 ± 2.48
++ Missing
+79.83 ± 0.29
+59.79 ± 1.36
+74.60 ± 0.69
++ Prompt
+76.53 ± 0.50
+50 ± 1.36
+63.09 ± 2.06
+Qwen2.5-7B-Instruct
+39
+20.62
+47.62
++ Personalized Prompting
+78.50
+58.25
+70.24
++ Random
+79
+58.25
+72.62
++ Missing
+81.5
+58.76
+73.81
++ Prompt
+78.57
+58.25
+77.5
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Mutual Information Preference Optimization
+Table 6. Critic performance evaluated using ground-truth human preference labels. We compute the strict and tie-tolerant
+accuracy of predicting a higher score for the chosen response over the rejected response.
+Community Alignment (CA)
+PRISM
+Critic model
+Strict acc.
+Tie-tolerant acc.
+Strict acc.
+Tie-tolerant acc.
+Llama-3.2-1B-Instruct
+6
+98.5
+36.5
+76.5
+Llama-3.2-3B-Instruct
+54
+89.5
+72.5
+87.5
+Llama-3-8B-Instruct
+76
+92
+68.5
+92
+Qwen2.5-1.5B-Instruct
+27.5
+87
+42.5
+78
+Qwen2.5-3B-Instruct
+6
+100
+74.5
+91.5
+Qwen2.5-7B-Instruct
+63.5
+98.5
+72.46
+92.6
+Qwen2.5-14B-Instruct
+63
+93.5
+78
+91.5
+While prior work on RLHF has also observed similarly moderate reward model accuracy of 69.6% and 72.4%, the learned
+policy still achieved substantial performance gains (see Appendix E.2 (Ouyang et al., 2022)). However, we suspect that an
+accuracy below 50% or unreliable rewards (i.e., the critic always gives 1 or 5 indiscriminately regardless of the response
+quality) is detrimental to learning and can lead to performance degradation after RLAIF.
+In particular, we observe that Llama-1B on Community Alignment mostly assigns a score of 1 to both chosen and rejected
+responses; while Qwen-3B mostly assigns a score of 5. In both cases, the critic fails to discriminate between the chosen and
+rejected responses.
+Figure 2. Entropy over the MCQ answer choices conditioned on correct model predictions. In addition to improving accuracy, MIPO
+(blue) also makes models become more confident about correct predictions compared to the base model (orange) as indicated by the mean
+and overall distribution shift. The x-axis ranges from mean ± 1 std.
+Figure 3. Entropy over the 500 MCQ answer choices in ARC conditioned on output correctness. MIPO-trained models (blue)
+become more confident about correct answers compared to the base models (orange) as indicated by entropy reduction. The range is
+truncated to show the mean ± 2 standard deviation.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Mutual Information Preference Optimization
+B. Appendix: MIPO-Personalized Responses
+Examples from the Multi-Bench personalization benchmark
+Prompt: I like answers that show sensitivity and consideration for different people’s needs or preferences, especially when
+discussing things like food. That means being thoughtful about dietary restrictions, cultural tastes, or health-related matters.
+Given the following dialogue, answer to the question. [Dialogue about people deciding on lunch.], “Target”: “No, I think I’ll
+come with you. I’m longing for a nice salad.”, “Question”: “What is or could be the cause of target?”
+Default #1 (Llama3.2-3B-Instruct): In this dialogue, the cause of ”target” is likely the coffee shop where they plan
+to go for lunch. The speaker, Louise, suggests going to the coffee shop, and the other person agrees to join her, indicating that the
+coffee shop is the target of their lunch plans.
+MIPO-Personalized #1 (Llama3.2-3B-Instruct): The cause of B’s statement could be a few factors:
+1.
+**Dietary Preferences**: B might prefer salads over other types of food, especially if they are health-conscious
+or follow a specific diet.
+2. **Cultural Tastes**: B might have a cultural preference for salads, which aligns with their desire to eat one.
+3.
+**Health-Related Matters**: B might be trying to maintain a healthy lifestyle and see the salad as a better op-
+tion than a cheeseburger and fries.
+4.
+**Social Interaction**: B might want to spend more time with A and enjoy a meal together, and a salad
+might be a suitable choice that both can agree on.
+These factors collectively contribute to B’s decision to join A for lunch and choose a salad.
+Prompt: I like it when stories focus on the personalities and emotions of the characters.
+It helps me connect with
+them and understand their decisions better. Given the following dialogue, answer to the question. [Dialogue about people
+deciding on lunch.], “Target”: “No, I think I’ll come with you. I’m longing for a nice salad.”, “Question”: “What is or could be
+the cause of target?”
+Default #2 (Llama3.2-3B-Instruct):
+Based on the dialogue, the cause of ”I’m longing for a nice salad” could be
+that the person (B) is not getting enough variety in their diet or is craving something healthy, or possibly they are trying to
+maintain a healthy lifestyle.
+MIPO-Personalized #2 (Llama3.2-3B-Instruct): Based on the dialogue, it seems that the cause of B’s decision to
+accompany A to the coffee shop and order a salad could be a combination of several factors. Here are a few possibilities:
+1. **B’s desire for a break from their usual routine**: By saying ”I usually bring my lunch from home and eat at
+my desk,” B implies that they often spend most of their day working alone, which might be isolating. The invitation to go out and
+get lunch together could be a way for B to break up the monotony and socialize with A.
+2.
+**B’s emotional state**: The phrase ”I’m longing for a nice salad” suggests that B might be feeling a bit down
+or stressed, and the thought of eating a salad at a coffee shop is a way for them to treat themselves and lift their mood.
+3.
+**B’s desire to connect with A**: By agreeing to go out with A, B might be seeking a chance to bond with
+their friend and have some quality time together. This could be a way for B to show that they value their relationship with A and
+want to spend time together.
+4.
+**B’s curiosity about A’s preferences**: B’s question about where A would like to eat and their subsequent de-
+cision to join A might also be driven by a desire to understand A’s tastes and preferences. By trying the coffee shop with A, B can
+get a sense of what A enjoys and might even discover new things about their friend.
+Overall, B’s decision to accompany A to the coffee shop seems to be motivated by a mix of practicality, emotional
+needs, and a desire to connect with their friend.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Mutual Information Preference Optimization
+Examples from the Multi-Bench personalization benchmark
+Prompt #3: I’m pretty familiar with casual dining and how people tend to interact in social eating situations, so you don’t have
+to explain the basics to me. Instead, include things that are more specific or relatable to the vibe of going out with friends or
+coworkers. Given the following dialogue, answer to the question. [Dialogue about people deciding on lunch.], “Target”: “No, I
+think I’ll come with you. I’m longing for a nice salad.”, “Question”: “What is or could be the cause of target?”
+Default #3 (Llama3.2-3B-Instruct): The cause of ”Target” in this dialogue is that Louise is suggesting that B should join her at
+the coffee shop, implying that the coffee shop is a suitable place for a casual lunch outing.
+MIPO-Personalized #3 (Llama3.2-3B-Instruct): In this dialogue, the phrase ”I’m longing for a nice salad” is a id-
+iomatic expression that suggests B is craving a salad, but it’s not just a simple desire for a healthy meal. The word ”longing”
+implies a stronger emotional attachment or nostalgia for a salad, possibly because it’s a comfort food or a favorite of theirs. It
+could also be that they’re looking for a break from their usual routine of bringing lunch from home and eating at their desk, and
+the idea of going out to a coffee shop and trying a new food option is appealing to them. The phrase is more about the emotional
+connection they have with the idea of eating out and trying something different, rather than just a physical need for a salad.
+Prompt #4: I like when you go deeper into the meaning behind what people say.
+Social cues and hidden intentions
+make conversations more interesting, so I’d prefer if you unpack those layers instead of just sticking to surface-level meanings.
+Given the following dialogue, answer to the question.
+Default #4 (Llama3.2-3B-Instruct): Let’s unpack the layers of this dialogue to understand the underlying intentions
+and emotions behind B’s response.
+At first glance, B’s statement ”No, I think I’ll come with you. I’m longing for a nice salad” seems straightforward, but upon closer
+analysis, it reveals a more complex emotional landscape.
+The phrase ”I’m longing for a nice salad” is a polite way of saying that B is not actually hungry for a salad, but rather, they’re
+seeking a distraction or a break from their current situation. The word ”longing” implies a sense of yearning or craving, which is
+often associated with emotional or psychological needs rather than physical hunger.
+In this context, B’s statement can be seen as a way of avoiding the possibility of eating at the coffee shop, which might be a more
+casual or social setting that B is not comfortable with. By saying they’re ”longing for a salad,” B is subtly hinting that they’re not
+really interested in eating at the coffee shop, but rather, they’re seeking a more solitary or low-key experience.
+Furthermore, B’s decision to ”come with” A, despite not being hungry, suggests that they’re seeking companionship or a sense of
+connection. This could be a way of avoiding feelings of loneliness or isolation, or perhaps they’re seeking to create a sense of
+obligation or responsibility towards A.
+Overall, B’s response is a masterful example of social politeness, where they’re using a seemingly innocuous statement to convey
+a more complex emotional landscape. By unpacking the layers of this dialogue, we can see that B’s true intentions are not just
+about eating a salad, but about seeking connection, avoiding social situations, and managing their emotions.
+MIPO-Personalized #4 (Llama3.2-3B-Instruct):
+Let’s dive deeper into the conversation to uncover the underlying
+intentions and emotions behind B’s response.
+When B says, ”No, I think I’ll come with you. I’m longing for a nice salad,” there are several layers to this statement. On the
+surface, it seems like B is simply agreeing to join A for lunch and expressing a desire for a salad. However, the word ”longing”
+suggests a deeper emotional connection.
+The word ”longing” typically implies a strong desire or yearning for something, often accompanied by a sense of nostalgia or
+wistfulness. In this context, it’s possible that B is not just craving a salad, but also seeking a sense of comfort, relaxation, or
+escape from their current situation.
+By saying they usually bring their lunch from home and eat at their desk, B may be hinting that their work environment is not
+conducive to taking a break or enjoying a leisurely lunch. This could be due to a stressful job, a busy schedule, or a sense of
+obligation. By suggesting they’ll join A for lunch, B might be seeking a brief respite from their work-related pressures and a
+chance to recharge.
+Furthermore, B’s decision to join A for lunch could also be motivated by a desire for social interaction or human connection. In
+today’s work culture, it’s common for people to spend most of their day staring at screens and interacting with colleagues only
+through digital means. By joining A for lunch, B may be seeking a sense of community and social validation.
+Additionally, B’s response could also be influenced by a sense of obligation or politeness. They might feel obligated to spend
+time with A, or they might be trying to be friendly and courteous. This could be a way of maintaining a positive relationship or
+avoiding conflict. # This possibility does not appear in the default response.
+Overall, B’s statement ”No, I think I’ll come with you. I’m longing for a nice salad” suggests that they’re seeking a combination
+of comfort, social connection, and a break from their work-related stress. By joining A for lunch, B is not just getting a salad, but
+also a chance to momentarily escape their daily routine and connect with someone on a more personal level.
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Mutual Information Preference Optimization
+C. Appendix: Datasets
+C.1. Standard LLM benchmarks on math and multiple-choice answering
+•
+GSM8k (Cobbe et al., 2021) is a standard math benchmark for grade-school-level problems. We sampled 5000
+problems from the training set and 200 problems from the evaluation set, and used the fixed 8-shot from Geng et al.
+(2025), which are included below. SVAMP (Patel et al., 2021) is also a math problem benchmark of similar difficulty
+level as GSM (Huang et al., 2025). Since SVAMP is too small to use for both training and evaluation, we sample 700
+problems from SVAMP and 700 from GSM8k for training data, and evaluate on the remaining 300 SVAMP problems.
+Models output a numeric answer after #### for easy parsing.
+•
+MMLU (Hendrycks et al., 2021) is a dataset for knowledge-intensive question answering across 57 domains,
+including US history, computer science, and law. We sample 5,000 samples from the training and evaluate on 200
+samples from the test split. Models output reasoning followed by their selection of the correct answer as "The
+answer is:
+<X>".
+•
+AI2 Reasoning Challenge (ARC) (Clark et al., 2018) contains 7,787 MCQs targeted at grade-school level science
+that are split into Easy and Challenge based on their problem difficulty, and is one of the reasoning benchmarks included
+in OLMES for standard LLM evaluation (Gu et al., 2025). We use the train split for each problem subset and evaluate
+on 500 samples from each test set using the same template as MMLU.
+C.2. Personalization tasks
+GPT-4o instruction for extracting user contexts from real-user datasets
+System prompt: You are a helpful assistant that infers a user’s preferences based on their selections from a
+previous conversation example. Write personalization instructions based on these inferred preferences. The
+instructions should be general enough to apply to future conversations on different topics and formatted as a JSON
+object. In JSON, all keys and string values must be enclosed in double quotes (”). For example, "key name":
+"value" is valid, but key name: ”value” or ’key name’: ’value’ are not. Each key should use snake case,
+summarizing the corresponding instruction in one or two words, and the value should be detailed instructions
+of no more than two sentences. Avoid using any topic specific instructions and focus on the user’s general preferences.
+User’s prompt: , ”Response options”: f”Option A: Option B: ”, ”User’s preferred response” .
+Then we aggregate all the values as user-contexts to build the context set C.
+GPT-4o instruction for converting system messages into user messages for Multi-Bench
+System prompt: You are a helpful and creative assistant tasked with generating different user preference descriptions.
+example = json.dumps({”dimension”:
+”style”, ”sub-dimension”:
+”conciseness”,”preference”:
+”straight-to-
+the-point narratives”,”explanation”: ”This preference favors narratives that are concise and avoid complex language.
+It values brevity and the clarity of simple, intuitive examples.”, ”user-statement”: ”I prefer simple, intuitive examples
+and dislike long, hard-to-understand explanations that take forever to read.})
+new-example = json.dumps({”dimension”: dimension, ”sub-dimension”: subdimension, ”preference”: pref,
+”explanation”: description, ”user-statement”: ”fill this with your response”})
+User message: Given the following information about the user’s preferences, rewrite it as something the
+user would say to the assistant. Output the response in JSON format. For example: {example}.
+Here’s a new example: {new example}.
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Mutual Information Preference Optimization
+GPT-4o instruction for generating reward model scoring rubric
+System prompt: You are a helpful and creative assistant tasked with generating different user preference descriptions.
+example = json.dumps({”dimension”:
+”style”, ”sub-dimension”:
+”conciseness”,”preference”:
+”straight-to-
+the-point narratives”,”explanation”: ”This preference favors narratives that are concise and avoid complex language.
+It values brevity and the clarity of simple, intuitive examples.”, ”user-statement”: ”I prefer simple, intuitive examples
+and dislike long, hard-to-understand explanations that take forever to read.”})
+new-example = json.dumps({”dimension”: dimension, ”sub-dimension”: subdimension, ”preference”: pref,
+”explanation”: description, ”user-statement”: ”fill this with your response”})
+User message: Given the following information about the user’s preferences, rewrite it as something the
+user would say to the assistant. Output the response in JSON format. For example: {example}. Here’s a new
+example: {new-example}.
+Rubric example # 1: {’criteria’: ’Does the response demonstrate an intermediate understanding of narra-
+tive structures and effectively use dialogue and action instead of adjectives and adverbs?’, ’score-descriptions’: {’1’:
+’The response heavily relies on adjectives and adverbs, showing minimal use of dialogue or action, indicating a poor
+grasp of narrative structures.’, ’2’: ’The response uses some dialogue and action, but still predominantly depends on
+adjectives and adverbs, reflecting only a basic understanding of narrative structures.’, ’3’: ’The response balances the
+use of dialogue, action, and descriptive language, suggesting a moderate understanding of narrative structures.’, ’4’:
+’The response predominantly uses dialogue and action to convey details, with minimal reliance on adjectives and
+adverbs, displaying a good understanding of narrative structures.’, ’5’: ’The response skillfully employs dialogue
+and action to convey details, completely avoiding adjectives and adverbs, demonstrating an excellent mastery of
+intermediate narrative structures.’}}
+Rubric example # 2: {’criteria’: ’Does the model efficiently convey a narrative using storytelling tech-
+niques that minimize the use of adjectives and adverbs, focusing instead on dialogue, narrative pacing, and character
+actions?’, ’score-descriptions’: {’1’: ’The response heavily relies on adjectives and adverbs with minimal or no
+use of suggested storytelling techniques.’, ’2’: ’The response includes some use of dialogue, pacing, or character
+actions but still predominantly relies on adjectives and adverbs.’, ’3’: ’The response balances the use of adjectives
+and adverbs with effective storytelling techniques like dialogue and character actions, though not optimally.’, ’4’:
+’The response skillfully uses storytelling techniques such as dialogue, pacing, and character actions with limited
+reliance on adjectives and adverbs, enhancing narrative efficiency.’, ’5’: ’The response excellently prioritizes
+narrative efficiency through masterful use of dialogue, narrative pacing, and character actions, virtually eliminating
+unnecessary adjectival and adverbial descriptions.’}}
+Rubric example # 3:
+{’criteria’:
+’Does the response exhibit linguistic creativity by effectively commu-
+nicating without using adjectives and adverbs, while maintaining accuracy and clarity in the message?’,
+’score-descriptions’: {’1’: ’The response lacks creativity and clarity, with incorrect or inappropriate use of language.
+Adjectives and adverbs are used, detracting from the effectiveness of the communication.’, ’2’: ’The response
+shows minimal creativity, often relying on adjectives and adverbs. It maintains basic accuracy but fails to enrich the
+narrative or ensure clarity.’, ’3’: ’The response is somewhat creative, occasionally omitting adjectives and adverbs.
+While generally accurate, it lacks consistent clarity and richness in narrative.’, ’4’: ’The response is creatively
+composed with rare use of adjectives and adverbs, maintaining good accuracy and clarity. It could, however, further
+enrich the narrative.’, ’5’: ’The response exemplifies outstanding linguistic creativity with zero use of adjectives and
+adverbs, delivering a clear, accurate, and rich narrative.’}}
+User message: Given the following user’s preference, generate a JSON scoring rubric with criteria and
+score-descriptions. Here are some examples:
+Example 1: {json.dumps(rubric-example1)}
+Example 2: {json.dumps(rubric-example2)}
+Example 3: {json.dumps(rubric-example3)}
+New preference: {pref}.
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Mutual Information Preference Optimization
+RLAIF scoring instruction
+You are a helpful assistant, that evaluates another assistant’s response based on how well the response is personalized
+to this user based on their stated preference. Give a score between 1 and 5, 1 if the response is general, and 5 if the
+response sufficiently addresses the user’s preference. Only respond with a number between 1 and 5 and do not
+provide an explanation.
+User preference: {context}
+User: {user’s query}
+Assistant: {model output}
+Reward evaluation instruction (used during evaluation)
+## for each item in the rubric, we run the scorer and aggregate the scores; Qwen models are evaluated by Qwen-2.5-
+14B-Instruct, Llama models are evaluated by Llama-3-8B-Instruct to avoid any cross-model inconsistencies
+You are a helpful assistant, that evaluates another assistant’s response based on how well the response is
+personalized to this user based on their stated preference. Give a score between 1 and 5, 1 if the response is general,
+and 5 if the response sufficiently addresses the user’s preference. Only respond with a number between 1 and 5 and
+do not provide an explanation.
+User: {user’s query}
+Assistant: {model output}
+User’s preference: {itemized instruction}
+Example user query with and without in-context user preferences
+Vanilla user query: Give me short 2-3 sentence answers to the following prompt: Draft a description of my art
+studio, highlighting the projects I’m working on, and inviting friends and collectors to visit and give feedback.
+Query with user-specific preferences/attributes in context:
+Give me short 2-3 sentence answers to the
+following prompt: Draft a description of my art studio, highlighting the projects I’m working on, and inviting friends
+and collectors to visit and give feedback. Please respect the following requirements made by the user: Use a warm
+and engaging tone that conveys enthusiasm and passion. Provide vivid and immersive descriptions to create a rich
+and evocative experience. Encourage interaction and collaboration by emphasizing the importance of community
+and shared ideas. Extend open and welcoming invitations while showing genuine appreciation for feedback and
+participation. Incorporate sensory details like sounds, scents, and visual aesthetics to enhance the experience.
+21
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+Mutual Information Preference Optimization
+C.3. Verifiable tasks
+8-shot examples used in GSM8k and SVAMP
+Note that the few-shot examples are from FEWSHOT-SOURCES["STD:GSM8k"] of the OLMES repository.
+FEWSHOT SOURCES = [
+{ ”question”: ”There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done,
+there will be 21 trees. How many trees did the grove workers plant today?”, ”answer”: ”There are 15 trees originally.
+Then there were 21 trees after some more were planted. So there must have been 21 - 15 = 6. So the answer is 6.”,
+”short answer”: ”6”, },
+{ ”question”: ”If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the
+parking lot?”, ”answer”: ”There are originally 3 cars. 2 more cars arrive. 3 + 2 = 5. So the answer is 5.”, ”short
+answer”: ”5”, },
+{ ”question”: ”Leah had 32 chocolates and her sister had 42.
+If they ate 35, how many pieces do they
+have left in total?”, ”answer”: ”Originally, Leah had 32 chocolates. Her sister had 42. So in total they had 32 + 42 =
+74. After eating 35, they had 74 - 35 = 39. So the answer is 39.”, ”short answer”: ”39”, },
+{ ”question”: ”Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How
+many lollipops did Jason give to Denny?”, ”answer”: ”Jason started with 20 lollipops. Then he had 12 after giving
+some to Denny. So he gave Denny 20 - 12 = 8. So the answer is 8.”, ”short answer”: ”8”, },
+{ ”question”: ”Shawn has five toys.
+For Christmas, he got two toys each from his mom and dad.
+How
+many toys does he have now?”, ”answer”: ”Shawn started with 5 toys. If he got 2 toys each from his mom and dad,
+then that is 4 more toys. 5 + 4 = 9. So the answer is 9.”, ”short answer”: ”9”, },
+{ ”question”: ”There were nine computers in the server room.
+Five more computers were installed each
+day, from monday to thursday. How many computers are now in the server room?”, ”answer”: ”There were originally
+9 computers. For each of 4 days, 5 more computers were added. So 5 * 4 = 20 computers were added. 9 + 20 is 29.
+So the answer is 29.”, ”short answer”: ”29”, },
+{ ”question”: ”Michael had 58 golf balls.
+On tuesday, he lost 23 golf balls.
+On wednesday, he lost 2
+more. How many golf balls did he have at the end of wednesday?”, ”answer”: ”Michael started with 58 golf balls.
+After losing 23 on tuesday, he had 58 - 23 = 35. After losing 2 more, he had 35 - 2 = 33 golf balls. So the answer is
+33.”, ”short answer”: ”33”, },
+{ ”question”: ”Olivia has $23.
+She bought five bagels for $3 each.
+How much money does she have
+left?”, ”answer”: ”Olivia had 23 dollars. 5 bagels for 3 dollars each will be 5 x 3 = 15 dollars. So she has 23 - 15
+dollars left. 23 - 15 is 8. So the answer is 8.”, ”short answer”: ”8”, },
+]
+examples = [f”Example i+1: ” + f”Question: x[’question’] Answer: x[’answer’] x[’short answer’]” for i,
+x in enumerate(FEWSHOT SOURCES)]
+User message: You are a helpful math assistant.
+Solve the following problem step-by-step and give the
+final answer after ####. + examples
+22
+1210
+1211
+1212
+1213
+1214
+1215
+1216
+1217
+1218
+1219
+1220
+1221
+1222
+1223
+1224
+1225
+1226
+1227
+1228
+1229
+1230
+1231
+1232
+1233
+1234
+1235
+1236
+1237
+1238
+1239
+1240
+1241
+1242
+1243
+1244
+1245
+1246
+1247
+1248
+1249
+1250
+1251
+1252
+1253
+1254
+1255
+1256
+1257
+1258
+1259
+1260
+1261
+1262
+1263
+1264
+Mutual Information Preference Optimization
+D. Appendix: Training details
+- The contrastive datasets used for MIPO training will be made available via a shareable link and we plan to share our code
+after the review period.
+- All results, except for Qwen-7B models, are based on three random seeds and are reported with the mean and standard
+deviation.
+- DPO is trained using the DPO implementation of OpenRLHF (Hu et al., 2024) with the following hyperparameters (we
+additionally selected the best learning rate from sweeping: {1e-6, 5e-7, 1e-7}):
+train batch size 4
+micro train batch size 1
+bf16 enabled
+learning rate 1e-7
+beta 0.1
+- All models are trained with 1 epoch, except on Multi-Bench, we observe that some models achieve low training accuracy
+and training for 2–3 epochs on the same data helps improve performance.
+- SFT is trained using the SFT implementation of OpenRLHF (Hu et al., 2024) with the following hyperparameters (similarly
+as above, we selected the best learning rate from sweeping: {1e-6, 5e-7, 1e-7}):
+train batch size 4
+micro train batch size 1
+bf16 enabled
+learning rate 1e-7
+- RLAIF and RLVR are trained using the PPO implementation of OpenRLHF (Hu et al., 2024) with the following
+hyperparameters:
+micro train batch size 1
+train batch size 4
+micro rollout batch size 2
+rollout batch size 8
+bf16 enabled
+actor learning rate 5e-7
+critic learning rate 9e-6
+init kl coef 0.001
+normalize reward
+23
