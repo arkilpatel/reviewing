@@ -1,0 +1,3298 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+via Adaptive Solvers and Wasserstein-Bounded Timesteps
+Anonymous Authors1
+Abstract
+Diffusion-based generative models have achieved
+remarkable performance across various domains,
+yet their practical deployment is often limited by
+high sampling costs. While prior work focuses
+on training objectives or individual solvers, the
+holistic design of sampling, specifically solver
+selection and scheduling, remains dominated
+by static heuristics.
+In this work, we revisit
+this challenge through a geometric lens, propos-
+ing SDM, a principled framework that aligns
+the numerical solver with the intrinsic proper-
+ties of the diffusion trajectory.
+By analyzing
+the ODE dynamics, we show that efficient low-
+order solvers suffice in early high-noise stages
+while higher-order solvers can be progressively
+deployed to handle the increasing non-linearity
+of later stages. Furthermore, we formalize the
+scheduling by introducing a Wasserstein-bounded
+optimization framework. This method system-
+atically derives adaptive timesteps that explic-
+itly bound the local discretization error, ensur-
+ing the sampling process remains faithful to the
+underlying continuous dynamics. Without requir-
+ing additional training or architectural modifica-
+tions, SDM achieves state-of-the-art performance
+across standard benchmarks, including an FID
+of 1.93 on CIFAR-10, 2.41 on FFHQ, and 1.98
+on AFHQv2, with a reduced number of function
+evaluations compared to existing samplers. Our
+code is available at https://github.com/
+aiimaginglab/sdm.
+1. Introduction
+Diffusion-based generative models have established them-
+selves as the premier framework for high-fidelity synthesis,
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+defining the state-of-the-art in image generation (Ho et al.,
+2020; Song et al., 2020; Rombach et al., 2022), video syn-
+thesis (Ho et al., 2022; Singer et al., 2022), and 3D content
+creation (Poole et al., 2022; Lin et al., 2023). Fundamen-
+tally, these models cast generation as a differential equation
+problem: sampling is equivalent to numerically integrating
+a Probability Flow ODE (PF-ODE) that transports a simple
+prior distribution to the complex data distribution.
+However, this theoretical elegance comes with a practical
+bottleneck. To minimize discretization error, the ODE must
+be simulated with fine-grained steps, leading to prohibitively
+high computational costs (measured in Number of Function
+Evaluations, NFE). While distillation methods (Salimans
+& Ho, 2022; Meng et al., 2023) and Consistency Models
+(Song et al., 2023; Luo et al., 2023; Wang et al., 2024; Kim
+et al., 2023; Yang et al., 2024) offer few-step generation,
+they require expensive retraining or fine-tuning pipelines.
+For the vast majority of pre-trained models, the central
+challenge remains: How can we solve the generative ODE
+as efficiently as possible without modifying the model itself?
+Current approaches to this integration problem are largely
+dominated by static heuristics. Standard solvers (e.g., Euler,
+Heun) and schedules (e.g., linear, log-SNR, EDM (Karras
+et al., 2022)) treat the diffusion trajectory as homogeneous,
+applying the same numerical precision and step-size logic
+from start to finish. This ignores a critical geometric real-
+ity: the stiffness of the diffusion ODE is not constant. As
+we demonstrate in this work, the trajectory evolves from a
+nearly linear flow in high-noise regions (dominated by the
+prior) to a highly non-linear, curved path as it converges onto
+the low-dimensional data manifold. Treating these distinct
+regimes with a uniform strategy is inherently suboptimal.
+In this work, we formalize the sampling design space
+through a geometric lens, proposing SDM, a principled
+framework that adapts the numerical solver and schedule
+to the intrinsic properties of the diffusion trajectory. Our
+contributions are two-fold:
+(i) Curvature Analysis and Solver Allocation. We provide
+a rigorous analysis of the PF-ODE curvature under standard
+parameterizations. As illustrated in Figure 1, the trajec-
+tory curvature is negligible during early sampling stages
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+but spikes significantly near the data manifold (t →0).
+Based on this, we propose a dynamic allocation strategy
+that deploys efficient first-order solvers early and transitions
+to stable higher-order solvers only when geometrically re-
+quired. We provide theoretical justification for this solver
+allocation strategy and empirically validate its effectiveness
+in Section 4.
+(ii) Wasserstein-Bounded Adaptive Scheduling. Moving
+beyond heuristic timestep selection, we introduce an op-
+timization framework grounded in optimal transport. We
+derive an adaptive schedule that explicitly bounds the lo-
+cal Wasserstein distance between the discretized trajectory
+and the true continuous flow. We further introduce an N-
+step resampling procedure that projects this adaptive path
+onto a fixed NFE budget, allowing flexible control over the
+quality-efficiency trade-off.
+Crucially, SDM is a training-free framework. It can be
+plugged into existing pre-trained diffusion models (e.g.,
+EDM, Stable Diffusion) to immediately improve the Pareto
+frontier of quality versus efficiency. We demonstrate that
+SDM achieves state-of-the-art performance across standard
+benchmarks, including an FID of 1.93 on CIFAR-10 and
+1.98 on AFHQv2, surpassing established baselines that rely
+on static heuristics.
+2. Preliminaries
+2.1. Probability Flow ODE
+Diffusion models is a generative model framework that grad-
+ually injects noise into data through a forward process and
+subsequently removes noise through a learned reverse pro-
+cess. The following generative process can be formulated
+as a stochastic differential equation (SDE) parameterized by
+a noise schedule, where s(t) and σ(t) denote the scale and
+noise term, respectively.
+In addition to the stochastic reverse-time SDE, there exists a
+deterministic probability flow ODE that produces the same
+marginal distribution as the reverse SDE (Song et al., 2020):
+dx =
+ ˙s(t)
+s(t)x −s(t)2 ˙σ(t)σ(t)∇x log p
+ x
+s(t); σ(t)
+
+dt.
+(1)
+Sampling from diffusion models is performed by discretiz-
+ing this ODE into a finite number of steps from prior dis-
+tribution at t = T to the data distribution at t = 0 using
+numerical intergration methods.
+2.2. Parameterizations
+Since the introduction of diffusion models, various param-
+eterizations of the model output have been proposed. x-
+prediction and ϵ-prediction formulation has first been in-
+troduced (Ho et al., 2020), where the later expressed as a
+reparameterization of the original training objective. Sal-
+imans and Ho (Salimans & Ho, 2022) further proposed
+v-prediction, where the model predicts a linear combination
+of data and noise, improving stability and sample quality.
+Flow-based generative models (Albergo & Vanden-Eijnden,
+2022; Lipman et al., 2022; Liu et al., 2022) can also be
+interpreted within the v-prediction model framework, and
+recent work has actively explored the connection between
+diffusion models and flow-based formulations (Esser et al.,
+2024; Lipman et al., 2022).
+Despite the popularity of alternative parameterizations, re-
+cent work (Li & He, 2025) has re-emphasized the impor-
+tance of x-prediction, stating that directly predicting the
+clean image is more suitable for modeling low-dimensional
+manifolds embedded in high-dimensional space. This mo-
+tivates us to reconsider the design space of EDM (Karras
+et al., 2022), which establishes a strong baseline by incor-
+porating x-prediction formulation for training and sampling
+with additional pre-conditioning scheme.
+2.3. Numerical Integration and Scheduling
+Solving Equation (1) requires discretizing the time interval
+[0, T] into a sequence {ti}N
+i=0. The sample quality is gov-
+erned by two coupled design choices: numerical solver and
+timestep schedules.
+Numerical Solvers.
+Solvers navigate the trade-off be-
+tween local precision and computational cost (NFE). First-
+order methods (e.g., Euler) are computationally cheap (1
+NFE/step) but incur a local truncation error of O(h2). To im-
+prove precision without increasing steps, high-order solvers
+such as DPM-Solver++ (Lu et al., 2025), UniPC (Zhao et al.,
+2023), and DEIS (Zhang & Chen, 2022) employ higher-
+order Taylor approximations or predictor-corrector schemes.
+While these methods significantly reduce discretization error
+(O(hk) for k ≥2), they typically require complex multi-
+step history or additional evaluations per step, making their
+uniform application across the entire trajectory potentially
+inefficient.
+Timestep Scheduling. Diffusion timesteps {ti}N
+i=0 deter-
+mines the step size hi and the noise levels σ(ti). Early
+works employed heuristic time-based schedules, such as
+linear (Ho et al., 2020) or cosine schedules (Nichol & Dhari-
+wal, 2021). More recently, Karras et al. (Karras et al., 2022)
+proposed a noise-level based polynomial schedule (EDM),
+σi =
+
+σ
+1
+ρ
+max +
+i
+N−1
+
+σ
+1
+ρ
+min −σ
+1
+ρ
+max
+ρ
+, which has become
+a standard baseline due to its empirical robustness. Subse-
+quent studies have explored timestep optimization based on
+various criteria including score-based measures (Williams
+et al., 2024; Xue et al., 2024), KL divergence (Sabour et al.,
+2024; Park et al., 2024; Li et al., 2023), and Wasserstein-
+based error estimates (Hu et al., 2024). However, there
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+Analytical error (Theorem 3.2) 
+bounded by
+Figure 1. Overview of SDM. (Inset) We introduce an adaptive timestep optimization derived from an analytical upper bound on the
+Wasserstein error. Here, ηi serves as a controllable schedule that explicitly governs the allowable error budget at each step, tightening step
+sizes where the flow is most sensitive. (Main) Complementing this, SDM adapts the solver order to the trajectory’s geometry. In the
+early high-noise regime (black), the flow is nearly linear, allowing efficient low-order integration. As the trajectory approaches the data
+manifold (blue), the curvature increases, necessitating high-order solvers. These two strategies act as independent and complementary
+components, jointly improving both sample quality and computational efficiency.
+does not exist a unified framework that integrates solver
+selection and timestep allocation based on the intrinsic ge-
+ometry of the diffusion trajectory. Motivated by this gap,
+we propose a unified sampling design space that character-
+izes both of these dimensions. Both components can be
+optimized independently for pre-trained diffusion models
+without additional training, while their combination yields
+further improvements in sampling efficiency and sample
+quality.
+3. SDM: Sampling via Adaptive Solvers and
+Timestep Schedulers
+We investigate the sampling design space of diffusion-based
+generative models by rigorously formalizing the trade-off
+between numerical precision and computational cost. While
+prior works often rely on static heuristics, we propose a
+geometric framework, SDM, which aligns the numerical
+solver with the intrinsic properties of the diffusion trajectory.
+In Section 3.1, we analyze the local stiffness of the probabil-
+ity flow ODE. While state-of-the-art exponential integrators
+(e.g., DPM-Solver++ (Lu et al., 2025)) achieve efficiency
+by analytically solving the linear component of the dif-
+fusion ODE, they fundamentally rely on the assumption
+that the non-linear residual (the effective score term) varies
+smoothly. Our analysis generalizes this by explicitly quan-
+tifying the curvature of this residual, demonstrating that
+low-order solvers, such as Euler method, are sufficient for
+high-noise regimes, while higher-order corrections become
+necessary only in later stages. In Section 3.2, we introduce
+a Wasserstein-bounded adaptive strategy that optimizes the
+timestep schedule to minimize discretization error under a
+fixed computational budget. We empirically show that this
+leads to consistent improvements in sample quality.
+3.1. Adaptive ODE Solvers
+3.1.1. ANALYSIS OF ODE CURVATURE
+To design an efficient adaptive sampling strategy, we must
+first quantify the geometric properties of the diffusion tra-
+jectory that govern numerical stability. The local truncation
+error (LTE) of any numerical solver is strictly bounded by
+the magnitude of the trajectory’s higher-order derivatives,
+specifically the acceleration ∥¨x∥. This quantity serves as a
+direct proxy for the local stiffness of the probability flow
+ODE (Kr¨amer & Hennig, 2024).
+Exponential integrators mitigate stiffness by explicitly solv-
+ing the linear drift term. However, the discretization error is
+then dominated by the higher-order derivatives of the neural
+network prediction itself (the non-linear noise residual). Our
+curvature analysis focuses on this residual complexity, pro-
+viding a solver-agnostic measure of difficulty that applies
+regardless of the integrator’s baseline order.
+In Theorem 3.1, we derive the closed-form expression of
+∥¨x∥for standard diffusion parameterizations.
+Theorem 3.1. Under EDM/VP/VE parameterizations, the
+second derivative of the probability flow ODE can be ex-
+pressed as follows:
+EDM
+¨x = −1
+σ2 JD(x −Dθ) −1
+σ Dσ,
+(2)
+VP
+¨x =
+1
+4B2 −1
+2βd
+
+x +
+ ¨σ
+σ −B ˙σ
+σ
+
+(x −sDθ)
+−˙σ
+1
+2 B s
+σ3
+
+JD(x −sDθ)
+−˙σ
+s2
+σ
+1
+4B2 −1
+2βd
+
+JDD −˙σ
+ ˙σs
+σ
+
+Dσ,
+(3)
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+VE
+¨x = −1
+4σ4 (I + JD)(x −Dθ) −
+1
+4σ3 Dσ,
+(4)
+where JD and Dσ denote the Jacobian with respect to x
+and the partial derivative with respect to σ, respectively. De-
+tailed proof and closed-form expressions for B(t), ˙σ(t), and
+¨σ(t) under the VP formulation are provided in Appendix A.
+The analytical forms in (2)–(4) imply that the probabil-
+ity flow is nearly linear during the early high-noise stages.
+However, its curvature increases rapidly as the process ap-
+proaches the data manifold (t →0). This theoretical insight
+motivates the use of a mixed-solver strategy that progres-
+sively adapts the solver order to the trajectory’s changing
+stiffness.
+3.1.2. MIXTURE OF EULER/HEUN SOLVERS
+While Theorem 3.1 highlights the varying stiffness across
+the diffusion trajectory, utilizing this insight requires a prac-
+tical metric to allocate solver types efficiently. Computing
+the exact second derivative ∥¨x∥involves Hessian-vector
+products, which are computationally prohibitive to evaluate
+repeatedly. To address this, we introduce efficient discrete
+proxies based on the vector field variation, allowing us to
+construct an optimized solver schedule that adapts to the
+trajectory’s geometry without incurring additional computa-
+tional overhead during inference.
+Given diffusion timesteps {ti}N
+i=0 such that
+t0 > t1 > · · · > tN = 0,
+(5)
+let vi := v(xi, ti) denote the vector field evaluated at the
+(xi, ti). We define the absolute local curvature1 as
+κabs(i) := ∥vi+1 −vi∥
+∆ti
+≈∥¨xi∥,
+(6)
+where ∆ti = ti −ti+1. To provide a scale-invariant mea-
+sure of stiffness relative to the signal magnitude, we further
+introduce the relative local curvature,
+κrel(i) := κabs(i)
+∥vi∥.
+(7)
+Computing κrel(i) directly requires evaluating the vector
+field at both (xi, ti) and (xi+1, ti+1), which increases twice
+the number of function evaluations (NFE), although using
+low-order solvers such as Euler method.
+To avoid this overhead, we hence propose a cache-based cur-
+vature that does not require additional network evaluations.
+1In this work, we use the term ‘curvature’ to refer to the trajec-
+tory non-linearity (acceleration ∥¨x∥) that dictates the truncation
+error of ODE solvers, following the convention in diffusion litera-
+ture (Karras et al., 2022).
+10 2
+10 1
+100
+101
+102
+Noise scale 
+10 4
+10 2
+100
+102
+Relative curvature rel
+CIFAR-10, EDM
+FFHQ, EDM
+AFHQv2, EDM
+CIFAR-10, SDM
+FFHQ, SDM
+AFHQv2, SDM
+Figure 2. Relative curvature ˆκrel as a function of noise level σ for
+standard benchmarks. The curvature exhibits an approximately
+linear correlation with noise levels σ in log scale, consistent with
+the theoretical derivation of second order probability flow ODE.
+Specifically, we define
+bκrel(i) := ∥vi −vi−1∥
+∆ˆti∥vi−1∥.
+(8)
+Since vi−1 is computed at the previous timestep and vi is
+required for the current update, the curvature bκrel(i) can be
+obtained by simply reusing the cached evaluations, resulting
+in NFE = 1 per step. A detailed analysis justifying that
+bκrel(i) provides a consistent approximation of the relative
+local curvature is given in Appendix B.
+We validate the theoretical findings of Theorem 3.1 across
+standard benchmarks by visualizing the log correlation be-
+tween bκrel(i) and noise levels, as shown in Figure 2.
+Motivated by this curvature profile, we introduce a dynamic
+scheduling function Λ(t) ∈[0, 1] that controls the con-
+vex combination of a first-order Euler output xE(t) and a
+second-order Heun output xH(t):
+x(t) = Λ(t)xE(t) + (1 −Λ(t)) xH(t).
+(9)
+We consider step, linear, and cosine (Nichol & Dhariwal,
+2021) scheduling functions for Λ(t). For the step scheduler,
+we introduce threshold τk that determines when to switch
+from Euler to Heun updates based on the curvature measure.
+3.2. Adaptive Timestep Schedulers
+3.2.1. ADAPTIVE STEP SIZE BASED ON WASSERSTEIN
+DISTANCE
+Given two probability distributions µ and ν, the squared
+2-Wasserstein distance is defined as:
+W 2
+2 (µ, ν) :=
+inf
+π∈Π(µ,ν) E(X,Y )∼π[∥X −Y ∥2],
+(10)
+where Π(µ, ν) denotes the set of all couplings between µ
+and ν.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+In diffusion-based generative models, each numerical inte-
+gration step induces a transport between probability distribu-
+tions at adjacent timesteps. Within this framework, the step
+size directly controls the local Wasserstein distance induced
+by the sampler.
+Driven by this insight, we propose an adaptive step size
+scheduling algorithm that explicitly bounds the local Wasser-
+stein distance at each sampling step.
+Theorem 3.2 (Step Size with Local Wasserstein Bound).
+Let ∆t denote the step size at time t. The maximum step
+size that does not exceed the given the upper bound of the
+Wasserstein distance, denoted as η, can be derived as
+∆t ≤
+r
+2η
+St
+,
+(11)
+where
+St =
+ 
+E
+"
+sup
+s∈[t,t+∆t]
+∥d
+dsv(x∗(s), s)∥2
+#!1/2
+.
+(12)
+A detailed proof is provided in Appendix C.1.
+The quantity St can be interpreted as the local variation of
+the velocity field along the true trajectory x∗(s) over [t, t +
+∆t]. Since the following term is intractable, we approximate
+it by computing the velocity field of the intermediate step
+t + ∆ttrial ∈[t, t + ∆t] along the sampling trajectory.
+ˆSt := ∥d
+dt(v(x(t), t))∥= ∥vt+∆ttrial −vt∥
+∆ttrial
+.
+(13)
+We denote the term as ˆSt throughout the paper.
+Theorem 3.3 (Total Wasserstein Distance Bound). Let
+{ti}N
+i=0 be discretized timesteps with step size ∆ti =
+ti −ti+1. Assume the velocity field v(x, t) satisfies local
+Lipschiz conditions. Then, if we follow the adaptive step
+schedule defined in Equation (11), the total Wasserstein
+distance between the true distribution p∗
+t0 and its Euler ap-
+proximation pE
+t0 satisfies
+W2(p∗
+tN , pE
+tN ) ≤eLt0
+N−1
+X
+i=0
+∆t2
+i
+2
+¯
+Mi,
+(14)
+where
+¯
+Mi :=
+sup
+s∈[ti,ti+1]
+Ms,
+Mt :=
+
+d
+dtv(x(t), t)
+ ,
+(15)
+and L denotes the Lipschitz constant of the Euler transport
+map.
+As stated in Theorem 3.3, we further show that taking the fol-
+lowing step size consequently bounds the total Wasserstein
+Algorithm 1 Adaptive Timestep Scheduling
+Input: initial (x0, t0), model vϕ×, error tolerance map η
+i ←0
+v0 ←vϕ×(x0, t0)
+while ti > 0 do
+˜ti+1 ←NEXTTIMESTEP(ti)
+repeat
+˜xi+1 ←xi −(ti −˜ti+1)vi
+˜vi+1 ←vϕ×(˜xi+1, ˜ti+1)
+ˆSti ←∥˜vi+1−vi∥
+˜ti+1−ti
+▷Equation (13)
+˜ti+1 ←LINESEARCH( ˆSti, ˜ti+1, ti)
+until no further change in ˜ti+1
+∆t ←
+q
+2η(ti)
+Sti
+▷Maximum step using Theorem 3.2
+ti+1 ←ti −∆t
+xi+1 ←xi −∆tvi
+vi+1 ←vϕ×(xi+1, ti+1)
+i ←i + 1
+end while
+Output: {ti}
+distance by extending the analytical proof from AdaFlow
+(Hu et al., 2024) to score-based diffusion framework. The
+proof is provided in Appendix C.2.
+Algorithm. The practical realization of our Wasserstein-
+bounded scheduling, summarized in Algorithm 1, adopts
+a computationally efficient predictor-corrector strategy to
+strictly enforce the local error bound derived in Theorem 3.2.
+To mitigate the computational cost of exhaustive search,
+the NEXTTIMESTEP routine initializes the candidate ˜ti+1
+from a pre-defined reference grid, effectively warm-starting
+the search procedure with a value proximal to the optimal
+solution. This candidate is then verified against the the-
+oretical maximum step size derived in Equation (11). If
+the candidate violates this bound or, conversely, proves
+overly conservative, the LINESEARCH routine refines the
+step size using an exponential backoff mechanism. By ex-
+panding or contracting the step size via multiplicative fac-
+tors, this procedure ensures logarithmic convergence com-
+plexity O(log ∆t
+δ ) akin to classical backtracking methods
+like the Armijo-Wolfe conditions (Armijo, 1966; Wolfe,
+1969; 1971).
+η-scheduling. In practice, the difficulty of the sampling
+dynamics varies significantly across noise levels. To account
+for this, we allow the error tolerance term η to depend on
+the current noise level σ as the following:
+ηtarget = (ηmax −ηmin)
+ σ
+σmax
+p
++ ηmin,
+(16)
+where p ≥0 controls how strongly the error budget is con-
+centrated throughout different noise levels. The following
+design assigns a larger tolerance during the early, high-noise
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+stages, while the error bound becomes more restrictive as
+σ →0.
+3.2.2. N-STEP RESAMPLING
+The proposed scheduling method provides a sequence of
+diffusion timesteps where the local Wasserstein distance is
+below a certain threshold value. However, the number of
+produced steps cannot be controlled. Hence, we propose an
+additional algorithm, where we resample given the number
+of steps we would like to take.
+Given a sequence of diffusion timesteps {ti}N
+i=0 and corre-
+sponding noise levels {σi}N
+i=0, defined by scheduler σ such
+that ti = σ−1(σi), we define an incremental cost function
+L(ti, ti+1) and define the total cost and geodesic path length
+as
+L =
+N−1
+X
+i=0
+L(ti, ti+1),
+Γ =
+N−1
+X
+i=0
+p
+L(ti, ti+1).
+(17)
+As shown in prior work (Williams et al., 2024), the schedule
+that minimizes the corresponding energy function traverses
+the diffusion path at constant geodesic speed, i.e.,
+q
+L(t∗
+i , t∗
+i+1) ≈Γ/N,
+i = 0, ..., N −1,
+(18)
+which implies that optimal timesteps can be obatined by
+uniformly discretizing the cumulative geodesic length Γ,
+which motivates our resampling procedure.
+We show that the same conclusion holds and expand the fol-
+lowing resampling procedure under a weighted incremental
+cost setting, as proven in Proposition C.1.
+˜L(ti, ti+1) := w(ti)L(ti, ti+1),
+w(t) ≥0.
+(19)
+Hence, we define our weighted incremental cost function
+using the empirically measured local error proxy ηi as
+˜L(ti, ti+1) := w(ti)ηi,
+(20)
+and correspondingly define the cumulative (weighted)
+geodesic length as
+˜Γ(ti) :=
+i−1
+X
+j=0
+q
+˜L(tj, tj+1) =
+i−1
+X
+j=0
+q
+w(tj)√ηj.
+(21)
+We then obtain an N-step schedule by uniformly discretiz-
+ing ˜Γ by selecting timesteps {t∗
+i }N
+i=0 such that ˜Γ(t∗
+i ) is
+approximately linear in i, which we denote the following
+procedure as the N-step resampling algorithm.
+In our implementation, we define the weighted function in
+terms of the noise level σ as
+g(σ) :=
+
+σ
+σmax
+−q
+,
+w(ti) = g(σi)2,
+(22)
+where parameter q ≥0 controls the degree of emphasis on
+the later steps. Larger values of q allocate a greater fraction
+of the sampling budget to the low-σ regime.
+4. Experiments
+4.1. Implementation Details
+Datasets, Models, and Metrics. We evaluate our proposed
+SDM sampler on CIFAR-10 at 32 × 32 resolution, and
+FFHQ, AFHQv2, and ImageNet 64 × 64 resolution, follow-
+ing the baseline (Karras et al., 2022). We use pretrained
+models from EDM (Karras et al., 2022) with no additional
+training. We use FID and NFE to measure sample quality
+and samping efficency.
+Baselines We follow the baseline timestep discretization
+from EDM schedule, where the noise levels {σi}N
+i=0 are
+defined as
+σi<N =
+
+σmax
+1
+ρ +
+i
+N −1(σmin
+1
+ρ −σmax
+1
+ρ )
+ρ
+, σN = 0.
+(23)
+with ρ = 7. We use a fixed number of timesteps for each
+dataset: 18 steps for CIFAR-10, 40 steps for FFHQ and
+AFHQv2, and 256 steps for ImageNet. We adopt stochastic
+settings with Schurn = 40, Smin = 0.05, Smax = 50, and
+Snoise = 1.003 for ImageNet.
+For baseline comparisions, we evaluate both EDM and Cor-
+rector Optimized Schedules (Williams et al., 2024), which
+we abbreviate as COS throughout the paper. COS schedules
+are computed with batch size of 128.
+ODE Solvers and Timestep Scheduling. For adaptive
+solvers, we experiment with step, linear, and cosine (Nichol
+& Dhariwal, 2021) schedules for our choice of Λ(t). We
+apply adaptive scheduling to both Euler and Heun solvers.
+When using adaptive scheduling, we remove the stochastic
+settings from EDM, and use deterministic configurations for
+ImageNet.
+Hyperparameters.
+We set the threshold term τk for
+step scheduler, Wasserstein error tolerance parameters
+ηmin, ηmax, p, and N-step resampling parameter q as our
+hyperparameters.
+4.2. Results
+Unconditional Generation. Quantitative results for un-
+conditional generation are reported in Table 1.
+Across
+all datasets, solvers, and pre-trained model configurations,
+SDM consistently improves sample quality over prior base-
+lines, demonstrating robust performance under both VP and
+VE parameterizations.
+Under the Euler solver, SDM with adaptive scheduling
+yields substantial gains, achieving FID 6.18 on CIFAR-10,
+4.16 on FFHQ, and 2.71 on AFHQv2 for VP models, com-
+pared to 7.61, 4.59, and 2.93 obtained by the EDM baseline,
+respectively. Similar improvements are observed for VE
+models. With the Heun solver, SDM remains competitive
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+0
+30
+60
+90
+120
+150
+180
+210
+240
+Timestep t
+0.00
+0.02
+0.04
+0.06
+0.08
+Value of t
+EDM, ADM
+SDM, ADM
+Figure 3. Distribution of local Wasserestein error bound ηt over
+diffusion timesteps for ImageNet 64 × 64. EDM schedules exhibit
+an initially increasing trend with a subsequent decay, reaching
+maximum during the intermediate sampling stages. In contrast,
+SDM schedules allocate a larger portion of the error budget to the
+early high-noise stages, resulting in improved sample quality.
+or superior to existing methods, e.g., achieving FID 2.41 on
+FFHQ and 2.13 on AFHQv2.
+Applying the adaptive solver alone surpasses EDM baseline
+with Heun solvers, achieving FID 1.93 on CIFAR-10, 2.58
+on FFHQ, and especially reducing the number of function
+evaluations (NFE) by approximately 15–20% while achiev-
+ing FID 1.98 on AFHQv2. Increasing the threshold τk can
+further reduce NFE, enabling a flexible trade-off between
+sample quality and computational efficiency. Most notably,
+combining both adaptive solver with adaptive scheduling
+yields the best overall performance, reaching FID 1.97 for
+VP and 1.99 for VE configuration on AFHQv2.
+Conditional Generation. Results for conditional genera-
+tion are shown in Table 4. Under the Euler solver, SDM
+with adaptive scheduling achieves strong gains, obtaining
+state-of-the-art FID 6.10 and 5.12 on CIFAR-10 with VP
+and VE based models, respectively, and 2.32 on ImageNet.
+For adaptive solver settings, SDM further improves both
+sample quality and sampling efficiency, achieving FID 1.81
+and 1.77 on CIFAR-10 with VP and VE based models, re-
+spectively, and 1.45 on ImageNet. Adding the adaptive
+solver on top of adaptive scheduling yields further per-
+formance improvements compared to adaptive scheduling
+alone, indicating that the two components are complemen-
+tary and can be effectively combined.
+Further qualitative results are shown in Appendix E.
+4.3. Ablation Studies
+We conduct ablation studies on the following key compo-
+nents of the proposed SDM sampler.
+100
+101
+102
+Threshold k
+1.8
+1.9
+2.0
+2.1
+2.2
+2.3
+2.4
+2.5
+FID
+1.98
+2.10
+1.93
+1.97
+1.81
+1.78
+AFHQv2, Uncond. VP
+AFHQv2, Uncond. VE
+CIFAR-10, Uncond. VP
+CIFAR-10, Uncond. VE
+CIFAR-10, Cond. VP
+CIFAR-10, Cond. VE
+Figure 4. Ablation on threshold τk. FID as a function of the
+curvature threshold τk for CIFAR-10 (32×32, solid) and AFHQv2
+(64 × 64, dashed), evaluated under unconditional and conditional
+settings using the step-scheduler-based adaptive solver. Markers
+denote the selected τk values that yield the best model performance
+for each dataset and training configuration.
+Threshold τk. Under the step scheduling function Λ(t), we
+investigate the effect of the threshold parameter τk, which
+controls the activation of higher order solvers. We evaluate
+FID while varying τk for each dataset, as shown in Figure 4.
+Based on the results, we set τk = 2 × 10−4 for CIFAR-10,
+τk = 1×10−4 for FFHQ and ImageNet, and τk = 1×10−3
+for AFHQv2 under EDM schedules. For SDM schedules,
+we further adjust the threshold on AFHQv2, using τk =
+2 × 10−4 for VP parameterization. Note that as long as
+τk > 0, the number of function evaluation is less than 2 per
+diffusion timestep, i.e., NFE < 2.
+Choice of Λ(t). We compare step, linear, and cosine sched-
+ules for the scheduler function Λ(t). For step schedules,
+FID values are reported based on the optimized τk value
+selected above. Quantitative results are summarized in Ta-
+ble 5. Across all datasets and model configurations, step
+schedule consistently achieves the best FID performance.
+In addition, step schedules require fewer function evalua-
+tions per timestep with NFE < 2, whereas linear and cosine
+schedules require NFE = 2 per timestep.
+Error tolerance and N-step resampling parameters. For
+adaptive scheduling, we perform a grid search over the
+error tolerance and resampling parameters on CIFAR-10, as
+detailed in Table 3. For the remaining datasets, we observe
+that performance is largely insensitive to the parameters.
+Consequently, we set parameters ηmin = 0.02, ηmax = 0.20,
+p = 1.0, and q = 0.25 for FFHQ and AFHQv2, and ηmin =
+0.001, ηmax = 0.01, p = 1.0, and q = 0.25 for ImageNet.
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+Table 1. Quantitative results on unconditional generation for CIFAR-10 32 × 32, FFHQ 64 × 64, and AFHQv2 64 × 64, measured by
+FID and NFE. Results for the adaptive solver are based on the step scheduling function Λ(t) with the optimal threshold parameter τk.
+Adaptive scheduling is applied to Euler, Heun, and SDM-based adaptive solvers. The best-performing configurations compared to the
+corresponding baselines are highlighted in bold, while the overall best results across all methods are highlighted in bold. Overall, the
+proposed SDM sampler achieves superior performance in both sample quality and computational efficiency over all baselines.
+Unconditional
+Unconditional
+Unconditional
+CIFAR-10 32 × 32
+FFHQ 64 × 64
+AFHQv2 64 × 64
+VP
+VE
+VP
+VE
+VP
+VE
+Solver
+Schedule
+Euler
+EDM (ρ = 7)
+7.61
+7.75
+4.59
+4.76
+2.93
+3.21
+COS (Williams et al., 2024)
+7.43
+7.25
+4.29
+4.46
+2.89
+3.10
+SDM (Adaptive Scheduling)
+6.18
+6.48
+4.16
+4.51
+2.71
+2.97
+NFE
+17
+17
+39
+39
+39
+39
+Heun
+EDM (ρ = 7)
+1.96
+1.97
+2.47
+2.59
+2.04
+2.17
+COS (Williams et al., 2024)
+2.08
+2.10
+2.48
+2.61
+2.04
+2.16
+SDM (Adaptive Scheduling)
+2.00
+1.95
+2.41
+2.52
+2.08
+2.13
+NFE
+35
+35
+79
+79
+79
+79
+SDM
+EDM (ρ = 7)
+1.93
+1.97
+2.48
+2.58
+1.98
+2.10
+NFE
+31
+32
+72
+76
+66
+67
+SDM (Adaptive Scheduling)
+1.93
+1.97
+2.47
+2.58
+1.97
+1.99
+NFE
+32
+33
+76
+77
+75
+72
+4.4. Analysis of ηt
+We analyze the evolution of per-step error indicator ηt for
+both SDM schedules and EDM schedules. As shown in
+Figure 3, for EDM schedules, ηt initially increases during
+the early sampling stages and decreases afterwards, indi-
+cating that there exists unnecessary error budget expended
+during the intermediate stages, leaving room for additional
+improvement. In contrast, SDM schedules exhibit a mono-
+tonically decreasing trend in ηt throughout the sampling
+trajectory, suggesting that SDM schedules efficiently allo-
+cates more of the allowable error budget to the early stages
+of sampling, where dynamics are smoother, while enforc-
+ing tighter error control in later stage when the sampling
+trajectory becomes more nonlinear. As a result, SDM sched-
+ules achieve improved sample quality by devoting higher
+precision to the more critical stages of generation.
+5. Conclusion
+In this work, we introduce a sampling design space that
+improves both sample quality and sampling efficiency for
+pretrained diffusion-based generative models. By formu-
+lating the second-order behavior of the optimal sampling
+trajectory from the probability flow ODE, we observe that
+the trajectory curvature remains negligible during the early
+sampling stage, which motivates the use of first-order ODE
+solvers in this regime, while reserving higher-order inte-
+gration for later stages where the dynamics become more
+nonlinear. Based on this observation, we propose an adap-
+tive solver that dynamically selects numerical solvers ac-
+cording to the local behavior of the sampling trajectory. In
+parallel, we introduce an adaptive scheduling method that
+optimizes diffusion timesteps based on a criterion derived
+from a Wasserstein distance upper bound. Across extensive
+experiments, we demonstrate that each component consis-
+tently improves sampling quality and computational cost.
+We believe that our proposed method provides a strong and
+flexible baseline for future research on efficient diffusion
+sampling, and that the underlying principles are broadly
+applicable to other diffusion-based generative models and
+domains.
+Impact Statement
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal
+consequences of our work, none which we feel must be
+specifically highlighted here.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+References
+Albergo, M. S. and Vanden-Eijnden, E. Building normal-
+izing flows with stochastic interpolants. arXiv preprint
+arXiv:2209.15571, 2022.
+Armijo, L. Minimization of functions having Lipschitz
+continuous first partial derivatives. Pacific Journal of
+Mathematics, 16(1):1–3, 1966.
+Esser, P., Kulal, S., Blattmann, A., Entezari, R., M¨uller, J.,
+Saini, H., Levi, Y., Lorenz, D., Sauer, A., Boesel, F., et al.
+Scaling rectified flow transformers for high-resolution
+image synthesis. In Forty-first international conference
+on machine learning, 2024.
+Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-
+bilistic models. Advances in neural information process-
+ing systems, 33:6840–6851, 2020.
+Ho, J., Salimans, T., Gritsenko, A., Chan, W., Norouzi, M.,
+and Fleet, D. J. Video diffusion models. Advances in
+neural information processing systems, 35:8633–8646,
+2022.
+Hu, X., Liu, Q., Liu, X., and Liu, B. Adaflow: Imitation
+learning with variance-adaptive flow-based policies. Ad-
+vances in Neural Information Processing Systems, 37:
+138836–138858, 2024.
+Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating
+the design space of diffusion-based generative models.
+Advances in neural information processing systems, 35:
+26565–26577, 2022.
+Kim, D., Lai, C.-H., Liao, W.-H., Murata, N., Takida, Y.,
+Uesaka, T., He, Y., Mitsufuji, Y., and Ermon, S. Consis-
+tency trajectory models: Learning probability flow ode
+trajectory of diffusion. arXiv preprint arXiv:2310.02279,
+2023.
+Kr¨amer, N. and Hennig, P. Stable implementation of proba-
+bilistic ode solvers. J. Mach. Learn. Res., 25(1), January
+2024. ISSN 1532-4435.
+Li, L., Li, H., Zheng, X., Wu, J., Xiao, X., Wang, R., Zheng,
+M., Pan, X., Chao, F., and Ji, R. Autodiffusion: Training-
+free optimization of time steps and architectures for au-
+tomated diffusion model acceleration. In Proceedings
+of the IEEE/CVF International Conference on Computer
+Vision, pp. 7105–7114, 2023.
+Li, T. and He, K. Back to basics: Let denoising generative
+models denoise. arXiv preprint arXiv:2511.13720, 2025.
+Lin, C.-H., Gao, J., Tang, L., Takikawa, T., Zeng, X.,
+Huang, X., Kreis, K., Fidler, S., Liu, M.-Y., and Lin,
+T.-Y. Magic3d: High-resolution text-to-3d content cre-
+ation. In Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition, pp. 300–309,
+2023.
+Lipman, Y., Chen, R. T., Ben-Hamu, H., Nickel, M., and
+Le, M. Flow matching for generative modeling. arXiv
+preprint arXiv:2210.02747, 2022.
+Liu, X., Gong, C., and Liu, Q.
+Flow straight and fast:
+Learning to generate and transfer data with rectified flow.
+arXiv preprint arXiv:2209.03003, 2022.
+Lu, C., Zhou, Y., Bao, F., Chen, J., Li, C., and Zhu, J. Dpm-
+solver++: Fast solver for guided sampling of diffusion
+probabilistic models. Machine Intelligence Research, pp.
+1–22, 2025.
+Luo, S., Tan, Y., Huang, L., Li, J., and Zhao, H.
+La-
+tent consistency models: Synthesizing high-resolution
+images with few-step inference.
+arXiv preprint
+arXiv:2310.04378, 2023.
+Meng, C., Rombach, R., Gao, R., Kingma, D., Ermon, S.,
+Ho, J., and Salimans, T. On distillation of guided diffu-
+sion models. In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pp. 14297–
+14306, 2023.
+Nichol, A. Q. and Dhariwal, P. Improved denoising diffu-
+sion probabilistic models. In International conference on
+machine learning, pp. 8162–8171. PMLR, 2021.
+Park, Y.-H., Lai, C.-H., Hayakawa, S., Takida, Y., and
+Mitsufuji, Y. Jump your steps: Optimizing sampling
+schedule of discrete diffusion models. arXiv preprint
+arXiv:2410.07761, 2024.
+Poole, B., Jain, A., Barron, J. T., and Mildenhall, B. Dream-
+fusion: Text-to-3d using 2d diffusion. arXiv preprint
+arXiv:2209.14988, 2022.
+Rombach, R., Blattmann, A., Lorenz, D., Esser, P., and
+Ommer, B. High-resolution image synthesis with latent
+diffusion models. In Proceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition, pp.
+10684–10695, 2022.
+Sabour, A., Fidler, S., and Kreis, K. Align your steps: Op-
+timizing sampling schedules in diffusion models. arXiv
+preprint arXiv:2404.14507, 2024.
+Salimans, T. and Ho, J.
+Progressive distillation for
+fast sampling of diffusion models.
+arXiv preprint
+arXiv:2202.00512, 2022.
+Singer, U., Polyak, A., Hayes, T., Yin, X., An, J., Zhang, S.,
+Hu, Q., Yang, H., Ashual, O., Gafni, O., et al. Make-a-
+video: Text-to-video generation without text-video data.
+arXiv preprint arXiv:2209.14792, 2022.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-
+mon, S., and Poole, B. Score-based generative modeling
+through stochastic differential equations. arXiv preprint
+arXiv:2011.13456, 2020.
+Song, Y., Dhariwal, P., Chen, M., and Sutskever, I. Consis-
+tency models. arXiv preprint arXiv:2303.01469, 2023.
+Wang, F.-Y., Huang, Z., Bergman, A., Shen, D., Gao, P.,
+Lingelbach, M., Sun, K., Bian, W., Song, G., Liu, Y.,
+et al. Phased consistency models. Advances in neural
+information processing systems, 37:83951–84009, 2024.
+Williams, C., Campbell, A., Doucet, A., and Syed, S. Score-
+optimal diffusion schedules. Advances in Neural Infor-
+mation Processing Systems, 37:107960–107983, 2024.
+Wolfe, P. Convergence conditions for ascent methods. SIAM
+Review, 11(2):226–235, 1969.
+Wolfe, P. Convergence conditions for ascent methods. ii:
+Some corrections. SIAM Review, 13(2):185–188, 1971.
+Xue, S., Liu, Z., Chen, F., Zhang, S., Hu, T., Xie, E., and
+Li, Z. Accelerating diffusion sampling with optimized
+time steps. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pp. 8292–
+8301, 2024.
+Yang, L., Zhang, Z., Zhang, Z., Liu, X., Xu, M., Zhang,
+W., Meng, C., Ermon, S., and Cui, B. Consistency flow
+matching: Defining straight flows with velocity consis-
+tency. arXiv preprint arXiv:2407.02398, 2024.
+Zhang, Q. and Chen, Y.
+Fast sampling of diffusion
+models with exponential integrator.
+arXiv preprint
+arXiv:2204.13902, 2022.
+Zhao, W., Bai, L., Rao, Y., Zhou, J., and Lu, J. Unipc: A
+unified predictor-corrector framework for fast sampling
+of diffusion models. Advances in Neural Information
+Processing Systems, 36:49842–49869, 2023.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+A. Derivation of ODE curvature
+General PF-ODE second-order derivative. We consider the probability flow ODE (PF-ODE) formulation of diffusion
+models. Following (Song et al., 2020), the PF-ODE can be written as
+dx =
+ ˙s
+sx −s2 ˙σσ∇x log p(x; σ)
+
+dt.
+(24)
+Using the x-prediction formulation, the score function is expressed as
+∇x log p(x; σ) = Dθ(x; σ) −x
+σ2
+,
+(25)
+which yields the equivalent ODE
+˙x = ˙s
+sx + ˙σ
+σ
+
+x −sDθ(x; σ)
+
+.
+(26)
+Defining
+A = ˙s
+s,
+ϵθ := x −sDθ(x; σ)
+σ
+,
+(27)
+we obtain the following
+˙x = Ax + ˙σϵθ.
+(28)
+Derivation of ˙ϵθ. Recall from Equation (27) that
+ϵθ = x −sDθ(x, σ)
+σ
+,
+N := x −sDθ(x, σ),
+(29)
+so that ϵθ = N/σ. Differentiating yields
+˙ϵθ =
+˙Nσ −N ˙σ
+σ2
+=
+˙N
+σ −˙σ
+σ ϵθ.
+(30)
+Next, differentiating N = x −sDθ gives
+˙N = ˙x −˙sDθ −s ˙Dθ
+= ˙x −˙sDθ −s
+ JD ˙x + Dσ ˙σ
+
+= (I −sJD) ˙x −˙sDθ −sDσ ˙σ,
+(31)
+where JD := ∇xDθ(x, σ) and Dσ := ∂σDθ(x, σ). Substituting Equation (31) into Equation (30) yields
+˙ϵθ = (I −sJD) ˙x −˙sDθ −sDσ ˙σ
+σ
+−˙σ
+σ ϵθ.
+(32)
+Using ˙x = ˙s
+sx + ˙σϵθ and the identity
+(I −sJD)x −sDθ = x −sJDx −sDθ = σϵθ −sσJDϵθ −s2JDDθ,
+(33)
+we expand Equation (32) as
+˙ϵθ =
+˙s
+sσ
+
+(I −sJD)x −sDθ
+
++ ˙σ
+σ (I −sJD)ϵθ −˙σ
+σ ϵθ −˙s
+σ Dθ −s ˙σ
+σ Dσ
+= ˙s
+sϵθ −
+
+˙s + ˙σs
+σ
+
+JDϵθ −˙ss
+σ JDDθ −˙σs
+σ Dσ.
+(34)
+Derivation of ¨x. Taking the time derivative yields the second-order ODE
+¨x = ˙Ax + A ˙x + ¨σϵθ + ˙σ ˙ϵθ
+(35)
+= ( ˙A + A2)x + (A ˙σ + ¨σ)ϵθ + ˙σ ˙ϵθ.
+(36)
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+where the first-order derivative term is replaced using Equation (28).
+Using A = ˙s/s, we have
+˙A + A2 = ¨s
+s,
+A ˙σ + ¨σ = ¨σ + ˙σ ˙s
+s.
+(37)
+Substituting all terms, we obtain the general curvature expression
+¨x = ¨s
+sx + (¨σ + 2 ˙σ ˙s
+s)ϵθ −˙σ( ˙s + ˙σs
+σ )JDϵθ −˙σ ˙ss
+σ JDDθ −˙σ ˙σs
+σ Dσ.
+(38)
+A.1. EDM formulation
+For EDM formulation (Karras et al., 2022), we set
+σ(t) = t,
+s(t) = 1.
+(39)
+Note that although EDM discretizes sampling timesteps based on ρ-schedule in the noise domain, the underlying probability
+flow ODE is parameterized directly by the noise level. Hence,
+˙σ = 1,
+¨σ = 0,
+˙s = ¨s = 0.
+(40)
+Substituting into Equation (38), the second derivative simplifies to
+¨x = −1
+σ (JDϵθ + Dσ) = −1
+σ2 JD(x −Dθ) −1
+σ Dσ.
+(41)
+A.2. VP formulation
+For the VP formulation, we use the parameterization
+σ(t) =
+p
+eu(t) −1,
+s(t) =
+1
+p
+1 + σ(t)2 ,
+u(t) = 1
+2βdt2 + βmint.
+(42)
+For simplicity, we define
+B(t) := ˙u(t) = βmin + βdt,
+˙B(t) = βd.
+(43)
+Since 1 + σ(t)2 = eu(t), substituting to Equation (42), we have
+s(t) =
+1
+p
+1 + σ(t)2 = e−u(t)/2.
+(44)
+Derivatives of σ(t). By differentiating σ(t) =
+√
+eu(t) −1, we obtain
+˙σ(t) =
+eu(t) ˙u(t)
+2
+√
+eu(t) −1
+= (1 + σ(t)2)B(t)
+2σ(t)
+= 1
+2B(t)
+
+σ(t) + σ(t)−1
+.
+(45)
+Hence, we derive the second derivative of σ(t) as
+¨σ(t) = 1
+2
+˙B(t)(σ + σ−1) + 1
+2B(t) d
+dt(σ + σ−1)
+= 1
+2βd(σ + σ−1) + 1
+2B(t) ˙σ(t)(1 −σ−2).
+(46)
+Substituting ˙σ from (46) gives
+¨σ(t) = 1
+2βd(σ + σ−1) + 1
+4B(t)2(σ −σ−3).
+(47)
+Derivatives of s(t). Using s(t) = e−u(t)/2, we directly obtain
+˙s(t)
+s(t) = −1
+2 ˙u(t) = −1
+2B(t),
+(48)
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+hence
+˙s(t) = −1
+2B(t)s(t).
+(49)
+Taking the second derivative gives
+¨s(t) = d
+dt
+
+−1
+2B(t)s(t)
+
+= −1
+2
+˙B(t)s(t) −1
+2B(t) ˙s(t)
+= −1
+2βds(t) + 1
+4B(t)2s(t),
+(50)
+In other words,
+¨s(t)
+s(t) = 1
+4B(t)2 −1
+2βd.
+(51)
+Substitution into Equation (38). Substituting Equation (48) to our general PF-ODE second order expression, we obtain the
+following two terms as
+¨σ(t) + 2 ˙σ(t) ˙s(t)
+s(t) = ¨σ(t) −B(t) ˙σ(t),
+(52)
+˙s(t) + ˙σ(t)s(t)
+σ(t)
+= s(t)
+ ˙s(t)
+s(t) + ˙σ(t)
+σ(t)
+
+= 1
+2B(t) s(t)
+σ(t)2 .
+(53)
+As a result, under VP parameterization we get
+¨x =
+1
+4B2 −1
+2βd
+
+x +
+ ¨σ
+σ −B ˙σ
+σ
+
+(x −sDθ)
+−˙σ
+1
+2 B s
+σ3
+
+JD(x −sDθ) −˙σ
+s2
+σ
+1
+4B2 −1
+2βd
+
+JDDθ −˙σ
+ ˙σs
+σ
+
+Dσ,
+(54)
+where B(t) = βmin + βdt and ˙σ, ¨σ are defined in Equation (45), Equation (47), respectively.
+A.3. VE formulation
+For VE formulation,
+σ(t) =
+√
+t,
+s(t) = 1,
+(55)
+Hence,
+˙σ =
+1
+2
+√
+t = 1
+2σ ,
+¨σ = d
+dt( 1
+2σ ) = d
+dσ ( 1
+2σ ) ˙σ = −1
+4σ3 ,
+˙s = ¨s = 0.
+(56)
+Substituting into (38), we obtain
+¨x = −1
+4σ3 (ϵθ + JDϵθ + Dσ) = −1
+4σ4 (I + JD)(x −Dθ) −
+1
+4σ3 Dσ.
+(57)
+B. Justification of the Proxy Curvature Estimator bκrel(i)
+Given the following definition of relative local curvature κrel(i) and its corresponding estimator bκrel(i):
+κrel(i) := ∥vi+1 −vi∥
+∆ti∥vi∥
+,
+bκrel(i) := ∥vi −vi−1∥
+∆ˆti∥vi−1∥,
+(58)
+we would like to prove the following equation
+κrel(i −1) = bκrel(i).
+(59)
+In other words, bκrel(i) is a one-step delayed evaluation of κrel(i), hence being a valid estimator.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+Specifically if we consider the case Schurn = 0 following the notation in (Karras et al., 2022), no intermediate perturbation is
+introduced, hence the sampler evaluates the drift term exactly at the grid points, i.e.,
+ˆxi = xi,
+ˆti = ti.
+(60)
+Note that (ˆxi, ˆti) denotes the actual evaluation point used by the EDM sampler to compute the velocity vi. Hence, the
+corresponding velocity field evaluations are numerically identical:
+v(ˆxi, ˆti) = v(xi, ti) = vi.
+(61)
+Moreover, since
+∆ˆti = ti −ti+1 = ∆ti
+(62)
+the effective step size also remains unchanged, hence the proof.
+C. Additional Proofs
+C.1. Proof of Theorem 3.2
+We provide a detailed proof of Theorem 3.2, which establishes a sufficient condition on step size ∆t such that the Wasserstein
+distance between the true diffusion trajectory and its numerical approximation remains bounded.
+Let x(t) denote the solution of the diffusion ODE driven by the velocity field v(·, ·). For a given time t, the exact state at
+time t + ∆t can be written as
+x(t + ∆t) = x(t) +
+Z t+∆t
+t
+v(x(τ), τ)dτ.
+(63)
+Since the true velocity field along the true trajectory is generally intractable, we approximate the integral using a numerical
+solver. In particular, we consider the first-order Euler method:
+xE(t + ∆t) = x(t) + ∆tv(x(t), t).
+(64)
+The resulting discretization error is therefore
+x(t + ∆t) −xE(t + ∆t) =
+Z t+∆t
+t
+(v(x(τ), τ) −v(x(t), t))dτ.
+(65)
+Meanwhile, we define the auxiliary function
+g(τ) := v(x(τ), τ).
+(66)
+Then, by the fundamental theorem of calculus,
+g(τ) −g(t) =
+Z τ
+t
+g′(s)ds,
+(67)
+which implies the bound
+∥g(τ) −g(t)∥≤(τ −t)
+sup
+s∈[t,t+∆t]
+∥g′(s)∥.
+(68)
+Substituting this bound into Equation (65) yields
+∥x(t + ∆t) −xE(t + ∆t)∥≤
+Z t+∆t
+t
+(τ −t)dτ
+sup
+s∈[t,t+∆t]
+∥d
+ds(v(x(s), s)∥= ∆t2
+2
+sup
+s∈[t,t+∆t]
+∥d
+dsv(x(s), s)∥.
+(69)
+We now derive the discretization error in relation to the 2-Wasserstein distance. Recall the definition of Wasserstein distance
+between two probability measures µ and ν:
+W2(µ, ν)2 =
+inf
+π∈Π(µ,ν) E(X,Y )∼π
+
+∥X −Y ∥2
+.
+(70)
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+Let xt ∼pt denote the random variable following the diffusion trajectory at time t. We then define the coupled random
+variables
+x∗
+t+∆t = Φ∗
+t+∆t(xt),
+xE
+t+∆t = ΦE
+t+∆t(xt).
+(71)
+where x∗
+t+∆t, xE
+t+∆t corresponds to the exact and Euler-integrated flows, respectively.
+Since the Wasserstein distance is upper bounded by the expected squared distance under any coupling, we obtain
+W2(p∗
+t+∆t, pE
+t+∆t) ≤
+ E
+
+∥x∗
+t+∆t −xE
+t+∆t∥21/2 ≤∆t2
+2
+ 
+E
+"
+sup
+s∈[t,t+∆t]
+∥d
+dsv(x∗(s), s)∥2
+#!1/2
+.
+(72)
+Therefore, requiring the Wasserstein distance to be bounded by a specified tolerance η,
+W2(p∗
+t+∆t, pE
+t+∆t) ≤η,
+(73)
+leads to the following sufficient condition on the step size:
+∆t ≤
+r
+2η
+St
+,
+(74)
+where
+St =
+ 
+E
+"
+sup
+s∈[t,t+∆t]
+∥d
+dsv(x∗(s), s)∥2
+#!1/2
+.
+(75)
+Hence, the proof.
+C.2. Proof of Theorem 3.3
+Here, we provide a complete proof of the total Wasserstein distance bound stated in Theorem 3.3.
+Let x(t) denote the solution of the probability flow ODE
+˙x(t) = v(x(t), t).
+(76)
+By the chain rule, the derivative of the velocity field along the trajectory is given by
+d
+dtv(x(t), t) = ∂tv(x, t) + Jxv(x, t) ˙x(t).
+(77)
+Assume the velocity field satisfies the following local Lipschitz conditions:
+sup
+x ∥∂tv(x, t)x∥≤Rt,
+sup
+x ∥Jxv(x, t)∥≤L,
+sup
+x ∥v(x, t)∥≤Vt.
+(78)
+Then, we get
+
+d
+dtv(x(t), t)
+ ≤Rt + L∥v(x(t), t)∥:= Mt.
+(79)
+Let p∗
+t+∆t denote the true distribution at time t + ∆t, and pt+∆t its Euler approximation. By substituting into Equation (72),
+we obtain the local Wasserstein distance bound as
+W2(p∗
+t+∆t, pt+∆t) ≤∆t2
+2
+ 
+E
+"
+sup
+s∈[t,t+∆t]
+∥d
+dsv(x∗(s), s)∥2
+#!1/2
+≤∆t2
+2 Mt.
+(80)
+Let
+µi := p∗
+ti,
+νi := pE
+ti.
+(81)
+Define the exact flow operator Φ∗
+i and Euler flow operator ΦE
+i such that
+µi+1 = Φ∗
+i (µi),
+νi+1 = ΦE
+i (νi).
+(82)
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+We introduce an auxiliary distribution
+˜νi+1 := ΦE
+i (µi),
+(83)
+which corresponds to applying one Euler step starting from the true distribution. Hence, by the triangle inequality,
+W2(µi+1, νi+1) ≤W2(µi+1, ˜νi+1) + W2(˜νi+1, νi+1).
+(84)
+The first term corresponds to the local truncation error:
+δi := W2(Φ∗
+i (µi), ΦE
+i (µi)) ≤∆t2
+2
+¯
+Mi,
+(85)
+where ¯
+Mi := sups∈[ti,ti+1] Ms.
+For the second term, note that the Euler map
+Ti(x) = x + ∆tiv(x, ti),
+(86)
+is (1 + ∆tiL)-Lipschitz. Therefore,
+W2(˜νi+1, νi+1) = W2(ΦE
+i (µi), ΦE
+i (νi)) ≤(1 + ∆tiL)W2(µi, νi).
+(87)
+Combining Equation (84) and Equation (85) yields the recursive inequality
+W2(µi+1, νi+1) ≤W2(Φ∗
+i (µi), ΦE
+i (νi)) + (1 + ∆tiL)W2(µi, νi) = δi + (1 + ∆tiL)W2(µi, νi).
+(88)
+Unrolling the recursion gives
+W2(µN, νN) ≤
+N−1
+X
+i=0
+
+δi
+N−1
+Y
+j=i+1
+(1 + ∆tjL)
+
+.
+(89)
+Using the inequality 1 + x ≤ex,
+N−1
+Y
+j=i+1
+(1 + ∆tjL) ≤
+N−1
+Y
+j=i+1
+exp(∆tjL) ≤exp
+
+L
+N−1
+X
+j=0
+∆tj
+
+≤exp
+
+L
+N−1
+X
+j=0
+∆tj
+
+= eLt0.
+(90)
+Hence, the upper bound of the total Wasserstein distance can be derived as
+W2(µN, νN) = W2(p∗
+tN , pE
+tN ) ≤eLt0
+N−1
+X
+i=0
+δi ≤eLt0
+N−1
+X
+i=0
+∆t2
+i
+2
+¯
+Mi,
+(91)
+which completes the proof.
+C.3. Energy-Optimized Geodesic Path for Weighted Incremental Cost
+Proposition C.1. Assume the incremental cost admits the quadratic form
+L(ti, ti+1) ≈δ(ti)∆t2
+i ,
+∆ti := ti −ti+1,
+(92)
+for some nonnegative function δ(·). Then the weighted cost can be written as
+˜L(ti, ti+1) ≈˜δ(ti)∆t2
+i ,
+˜δ(t) := w(t)δ(t).
+(93)
+Consequently, the optimal schedule for the weighted objective traverses the diffusion path a constant speed with respect to
+the weighted geodesic length
+˜Γ :=
+N−1
+X
+i=0
+q
+˜L(ti, ti+1) =
+N−1
+X
+i=0
+p
+w(ti)
+p
+L(ti, ti+1),
+(94)
+i.e.,
+q
+˜L(ti, ti+1) ≈
+˜Γ
+N .
+(95)
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+Proof. By Equation (19) and Equation (92),
+˜L(ti, ti+1) = w(ti)L(ti, ti+1)
+(96)
+≈w(ti)δ(ti)∆t2
+i = ˜δ(ti)∆t2
+i .
+(97)
+hence, the proof. The remainder follows by applying the same proof with δ replaced by ˜δ (Williams et al., 2024).
+D. Further Implementation Details
+D.1. Hyperparameter Settings
+We provide the search grids for hyperparameters used throughout our experiments. For the step schedule based adaptive
+solver, we vary the curvature threshold τk across datasets and timestep schedules. We observe that VP and VE models
+exhibit similar performance under the same threshold configuration on standard benchmarks, with the exception of AFHQv2,
+and therefore share the same τk values. For AFHQv2, we select τk = 2 × 10−4 for VP parameterization and τk = 1 × 10−3
+for VE parameterization, which yields the best FID performance.
+Table 2. Parameter search grid for threshold τk for step schedule based adaptive solver selection.
+Timestep Schedule
+CIFAR-10
+FFHQ
+AFHQv2
+ImageNet
+Grid search
+EDM
+2 × 10−4
+1 × 10−4
+1 × 10−3
+1 × 10−4
+{2, 5, 10, 20, 50, 100} × 10−5
+SDM (Adaptive Scheduling)
+2 × 10−4
+1 × 10−4
+2 × 10−4(VP)
+1 × 10−4
+{2, 5, 10, 20, 50, 100} × 10−5
+1 × 10−3(VE)
+For adaptive timestep scheduling, we tune four hyperparameters, ηmin, ηmax, p, and q, which jointly control the overall
+Wasserstein error tolerance and its allocation across diffusion timesteps. We find that CIFAR-10 is relatively sensitive to the
+choice of these parameters, necessitating explicit tuning across different training configurations. In contrast, the remaining
+benchmarks (FFHQ, AFHQv2, and ImageNet) demonstrate robust performance across the hyperparameter grid.
+Table 3. Parameter search grid for Wasserstein error tolerance and N-step resampling parameters for CIFAR-10.
+Parameter
+CIFAR-10
+Grid search
+Uncond. VP
+Uncond. VE
+Cond. VP
+Cond. VE
+ηmin
+0.01
+0.01
+0.01
+0.02
+0.01, 0.02, 0.03, 0.04, 0.05
+ηmax
+0.40
+0.40
+0.40
+0.10
+0.10, 0.20, 0.30, 0.40, 0.50
+p
+1.0
+1.0
+1.0
+1.0
+0.8, 1.0, 1.2
+q
+0.1
+0.25
+0.1
+0.25
+0.1, 0.25
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+E. Additional Results
+In this section, we provide additional results for our proposed SDM sampler.
+E.1. Quantitative Results for Conditional Generation
+Table 4. Quantitative results on conditional generation for CIFAR-10 32 × 32 and ImageNet 64 × 64, measured by FID and NFE. Results
+for the adaptive solver are based on the step scheduling function Λ(t) with the optimal threshold parameter τk. Adaptive scheduling is
+applied to Euler, Heun, and SDM-based adaptive solvers. The best-performing configurations compared to the corresponding baselines
+are highlighted in bold, while the overall best results across all methods are highlighted in bold. Overall, the proposed SDM sampler
+achieves superior performance in both sample quality and computational efficiency over all baselines.
+Conditional
+Conditional
+CIFAR-10 32 × 32
+ImageNet 64 × 64
+VP
+VE
+ADM
+Solver
+Schedule
+Euler
+EDM (ρ = 7)
+7.09
+6.75
+3.48
+COS (Williams et al., 2024)
+7.05
+6.66
+3.74
+SDM (Adaptive Scheduling)
+6.10
+5.12
+2.32
+NFE
+17
+17
+255
+Heun
+EDM (ρ = 7)
+1.82
+1.78
+1.45
+COS (Williams et al., 2024)
+1.92
+1.87
+1.40
+SDM (Adaptive Scheduling)
+1.92
+1.92
+2.25
+NFE
+35
+35
+511
+SDM
+EDM (ρ = 7)
+1.81
+1.77
+1.45
+NFE
+30
+32
+476
+SDM (Adaptive Scheduling)
+1.81
+1.77
+2.25
+NFE
+32
+33
+503
+E.2. Ablation Studies on Λ(t)
+We provide a quantitative comparison among different choices of the scheduler function Λ(t) when used with the proposed
+adaptive solver. As shown in Table 5, the step scheduler consistently achieves the best FID across all datasets and training
+configurations, while additionally requiring fewer function evaluations (NFE < 2) per diffusion timestep compared to
+linear and cosine schedules (NFE = 2). Based on these results, we adopt the step scheduler as the default choice in all
+experiments.
+Table 5. Ablation Studies on scheduler function Λ(t) for adaptive solvers. Step schedule consistently achieves the best FID across all
+datasets and model configurations, while additionally requiring lower NFE per diffusion timestep compared to other schedules.
+CIFAR-10 32 × 32
+FFHQ 64 × 64
+AFHQv2 64 × 64
+ImageNet 64 × 64
+Unconditional
+Conditional
+Unconditional
+Unconditional
+Conditional
+Λ(t)
+VP
+VE
+VP
+VE
+VP
+VE
+VP
+VE
+ADM
+Step
+1.93
+1.97
+1.81
+1.77
+2.48
+2.58
+1.98
+2.17
+1.45
+Linear
+2.73
+2.90
+2.61
+2.46
+3.13
+3.35
+2.21
+2.39
+1.69
+Cosine
+2.74
+3.00
+2.57
+2.45
+3.16
+3.39
+2.20
+2.37
+1.61
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+E.3. Qualitative Results
+We present qualitative comparisons between the proposed SDM sampler and the baseline EDM sampler (Karras et al., 2022)
+across different datasets and training parameterizations.
+EDM (Heun), VP
+FID=2.04, NFE=79
+EDM (Heun), VE
+FID=2.17, NFE=79
+SDM (Adaptive Solver), VP
+FID=1.98, NFE=66
+SDM (Adaptive Solver), VE
+FID=2.10, NFE=67
+SDM (Adaptive Scheduling), VP
+FID=2.08, NFE=79
+SDM (Adaptive Scheduling), VE
+FID=2.13, NFE=79
+SDM (Adaptive Solver + Scheduling), VP
+FID=1.97, NFE=75
+SDM (Adaptive Solver + Scheduling), VE
+FID=1.99, NFE=72
+Figure 5. Qualitative comparison on AFHQv2 (64 × 64) across VP (left) and VE (right) parameterizations. From top to
+bottom: EDM (Heun), SDM (adaptive solver), SDM (adaptive scheduling), and SDM (adaptive solver + scheduling). Each
+panel shows a 3 × 5 grid of generated samples; corresponding FID and NFE are reported below.
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+EDM (Heun), VP
+FID=2.47, NFE=79
+EDM (Heun), VE
+FID=2.59, NFE=79
+SDM (Adaptive Solver), VP
+FID=2.48, NFE=72
+SDM (Adaptive Solver), VE
+FID=2.58, NFE=76
+SDM (Adaptive Scheduling), VP
+FID=2.41, NFE=79
+SDM (Adaptive Scheduling), VE
+FID=2.52, NFE=79
+SDM (Adaptive Solver + Scheduling), VP
+FID=2.47, NFE=76
+SDM (Adaptive Solver + Scheduling), VE
+FID=2.58, NFE=77
+Figure 6. Qualitative comparison on FFHQ (64 × 64) across VP (left) and VE (right) parameterizations. From top to bottom:
+EDM (Heun), SDM (adaptive solver), SDM (adaptive scheduling), and SDM (adaptive solver + scheduling). Each panel
+shows a 3 × 5 grid of generated samples; corresponding FID and NFE are reported below.
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+EDM (Heun), VP
+FID=1.96, NFE=35
+EDM (Heun), VE
+FID=1.97, NFE=35
+SDM (Adaptive Solver), VP
+FID=1.93, NFE=31
+SDM (Adaptive Solver), VE
+FID=1.97, NFE=32
+SDM (Adaptive Scheduling), VP
+FID=2.00, NFE=35
+SDM (Adaptive Scheduling), VE
+FID=1.95, NFE=35
+SDM (Adaptive Solver + Scheduling), VP
+FID=1.93, NFE=32
+SDM (Adaptive Solver + Scheduling), VE
+FID=1.97, NFE=33
+Figure 7. Qualitative comparison on unconditional generation for CIFAR-10 (32 × 32) across VP (left) and VE (right)
+parameterizations. From top to bottom: EDM (Heun), SDM (adaptive solver), SDM (adaptive scheduling), and SDM
+(adaptive solver + scheduling). Each panel shows a 5 × 8 grid of generated samples; corresponding FID and NFE are
+reported below.
+21
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+EDM (Heun), VP
+FID=1.82, NFE=35
+EDM (Heun), VE
+FID=1.78, NFE=35
+SDM (Adaptive Solver), VP
+FID=1.81, NFE=30
+SDM (Adaptive Solver), VE
+FID=1.77, NFE=32
+SDM (Adaptive Scheduling), VP
+FID=1.92, NFE=35
+SDM (Adaptive Scheduling), VE
+FID=1.92, NFE=35
+SDM (Adaptive Solver + Scheduling), VP
+FID=1.81, NFE=32
+SDM (Adaptive Solver + Scheduling), VE
+FID=1.77, NFE=33
+Figure 8. Qualitative comparison on conditional generation for CIFAR-10 (32 × 32) across VP (left) and VE (right)
+parameterizations. From top to bottom: EDM (Heun), SDM (adaptive solver), SDM (adaptive scheduling), and SDM
+(adaptive solver + scheduling). Each panel shows a 5 × 8 grid of generated samples; corresponding FID and NFE are
+reported below.
+22
+1210
+1211
+1212
+1213
+1214
+1215
+1216
+1217
+1218
+1219
+1220
+1221
+1222
+1223
+1224
+1225
+1226
+1227
+1228
+1229
+1230
+1231
+1232
+1233
+1234
+1235
+1236
+1237
+1238
+1239
+1240
+1241
+1242
+1243
+1244
+1245
+1246
+1247
+1248
+1249
+1250
+1251
+1252
+1253
+1254
+1255
+1256
+1257
+1258
+1259
+1260
+1261
+1262
+1263
+1264
+Formalizing the Sampling Design Space of Diffusion-Based Generative Models
+EDM (Euler), ADM
+FID=3.48, NFE=255
+SDM (Adaptive Scheduling), ADM
+FID=2.32, NFE=255
+SDM (Adaptive Solver), ADM
+FID=1.45, NFE=476
+SDM ((Adaptive Solver + Scheduling),
+ADM
+FID=2.25, NFE=503
+Figure 9. Qualitative comparison on ImageNet (64 × 64) under ADM parameterizations. From top left to bottom right:
+EDM (Heun), SDM (adaptive scheduling), SDM (adaptive solver), and SDM (adaptive solver + scheduling). Each panel
+shows a 3 × 5 grid of generated samples; corresponding FID and NFE are reported below.
+23
