@@ -1,0 +1,3722 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Anonymous Authors1
+Abstract
+Current deep learning models for Multispectral
+and Hyperspectral Image Fusion (MS/HS fusion)
+are typically designed for fixed spectral bands
+and spatial scales, which limits their transferabil-
+ity across diverse sensors. To address this, we
+propose SSA, a universal framework for MS/HS
+fusion with spectral-band and fusion-scale agnos-
+ticism. Specifically, we introduce Matryoshka
+Kernel (MK), a novel operator that enables a sin-
+gle model to adapt to arbitrary numbers of spectral
+channels. Meanwhile, we build SSA upon an Im-
+plicit Neural Representation (INR) backbone that
+models the HS signal as a continuous function,
+enabling reconstruction at arbitrary spatial resolu-
+tions. Together, these two forms of agnosticism
+enable a single MS/HS fusion model that gener-
+alizes effectively to unseen sensors and spatial
+scales. Extensive experiments demonstrate that
+our single model achieves state-of-the-art perfor-
+mance while generalizing well to unseen sensors
+and scales, paving the way toward future HS foun-
+dation models.
+1. Introduction
+Hyperspectral imaging (HSI) (Amigo, 2019) provides rich
+spectral information across hundreds of narrow bands, mak-
+ing it invaluable in domains like medical diagnostics (Fauvel
+et al., 2013), remote sensing, and target detection (Uzair
+et al., 2013; Cheng et al., 2025). However, a fundamental
+trade-off in optical systems means this rich spectral detail
+often comes at the cost of low spatial resolution, hampering
+downstream tasks such as classification (He et al., 2017)
+and object tracking (Chen et al., 2021a). To overcome this,
+Multispectral and Hyperspectral Image Fusion (MS/HS Fu-
+sion) has emerged as a key solution, aiming to reconstruct a
+high-resolution HSI by fusing a low-resolution HSI with a
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+(1)  Architectural Rigidity
+Model 1
+Model 2
+Model 3
+31 bands
+103 bands
+191 bands
+ Exsting: One model per Dataset
+Our Approach: A Single, Universal Model
+31 bands
+103 bands
+191 bands
+Universal
+Model
+(2)  Data Scaraity Dilemma
+ Exsting: Training on Isolated, Small Data
+Our Approach: Joint Training on Combined Data
+Dataset A
+(small)
+Dataset B
+(small)
+Dataset C
+(small)
+Dataset A
+(small)
+Dataset B
+(small)
+Dataset C
+(small)
+Combined Data
+(Large & Diverse)
+(3)  Fixed Spatial Scale
+ Exsting: Scale-Specific Training
+Our Approach: Arbitrary-Scale Inference
+Trained 
+for 2x Scale
+Trained 
+for 2x Scale
+Query: 4x
+?
+Continuous 
+Representation
+2x
+3.2x
+4x
+Figure 1. Existing paradigms v.s. our universal approach for
+hyperspectral image fusion. Our method can suit different spectral
+bands joint training and can inference on arbitrary-scale fusion.
+high-resolution multispectral image of the same scene. In
+recent years, with the rapid development of deep learning,
+DL-based methods (Masi et al., 2016; Yang et al., 2017;
+Dian et al., 2018) have gradually become the mainstream
+for MS/HS Fusion. These methods can automatically learn
+complex nonlinear relationships, exhibiting immense poten-
+tial in HSI fusion tasks.
+Despite this significant progress, the real-world applicabil-
+ity of DL-based methods is hampered by the deep-rooted
+challenge of sensor diversity (Hong et al., 2025). Datasets
+captured by different sensors, such as AVIRIS (224 bands)
+or Pavia University (103 bands), vary drastically in their
+number of spectral bands, which exposes a fundamental
+lack of generality in current models. As illustrated in Fig. 1,
+this limitation manifests in three primary ways: (1) Archi-
+tectural Rigidity: Most deep neural networks are designed
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+with hard-coded channel dimensions, forcing researchers to
+either train independent models for each sensor (Deng et al.,
+2023b; Wu et al., 2025) or resort to costly fine-tuning (Gon-
+zalez et al., 2025). Some even manually select band sub-
+sets (Suryanarayana et al., 2025), which sacrifices valuable
+spectral information. (2) The Dilemma of Data Scarcity and
+Model Scale: HSI datasets are typically small. Training on
+such isolated, small-scale data constrains model capacity
+and hinders the learning of generalizable features, leading
+to a high risk of overfitting (Hoffmann et al., 2022; Yan
+et al., 2025). (3) Fixed Spatial Scaling Factor: Current
+models (Deng et al., 2023a; Hu et al., 2022) are trained for
+a fixed integer upscaling factor (e.g., 4×, 8×). They learn a
+discrete grid-to-grid mapping, failing to handle the arbitrary
+or non-integer scales required in many applications.
+To dismantle these barriers, we introduce SSA, a unified
+framework that addresses the above challenges through two
+technical innovations. To tackle spectral rigidity (1) and
+its impact on data scarcity (2), since hard-coded architec-
+tures prevent pooling data across sensors for large-scale
+training, we propose the Matryoshka Kernel (MK). Inspired
+by Matryoshka Representation Learning (MRL) (Kusupati
+et al., 2022), MK allows a single model to process vari-
+able numbers of spectral bands, enabling joint training on
+heterogeneous datasets. Concurrently, to resolve spatial
+rigidity (3), we build our framework upon an Implicit Neu-
+ral Representation (INR) backbone, which models signals
+as continuous functions and supports reconstruction at arbi-
+trary (including non-integer) scaling factors. In this work,
+we integrate these concepts into a cohesive MS/HS fusion
+model as a single unified framework. Our contributions are
+threefold:
+• We introduce Matryoshka Kernels (MK), a novel archi-
+tectural principle realized through adaptive convolution
+layers. This allows our model to natively process arbi-
+trary numbers of spectral bands, enabling spectral-band
+agnosticism.
+• By building our framework upon an Implicit Neural
+Representation (INR), we replace discrete scaling with
+a continuous function, enabling reconstruction at arbi-
+trary spatial scales.
+• Extensive experiments show that SSA achieves state-of-
+the-art performance while generalizing well to unseen
+sensors and scaling factors, substantially reducing the
+need for per-sensor retraining.
+2. Related Works
+2.1. Deep Learning for MS/HS Image Fusion
+Following PanNet (Yang et al., 2017), which introduced
+deep learning to hyperspectral and multispectral (MS/HS)
+image fusion, the research paradigm has shifted from tra-
+ditional methods, such as matrix factorization (Kawakami
+et al., 2011; Huang et al., 2013) and sparse coding (Nezhad
+et al., 2016), to data-driven deep learning. Current research
+largely focuses on designing novel network architectures,
+for instance, by incorporating attention mechanisms and
+Transformers (Fang et al., 2024; Wu et al., 2025; Cao et al.,
+2025) or adopting popular paradigms like GANs (Shang
+et al., 2024; Zhou et al., 2022) and diffusion models (Cao
+et al., 2024). However, these highly specialized architec-
+tures are often deeply coupled with specific data specifica-
+tions (e.g., the number of spectral bands), leading to a severe
+lack of universality and transferability.
+Recently, several works (Zhang et al., 2022; Chen et al.,
+2023) have begun to apply Implicit Neural Representation
+(INR) to HSI data, modeling the image as a continuous func-
+tion of coordinates. This approach enables reconstruction
+at arbitrary scales, neatly addressing the spatial rigidity of
+conventional models. Subsequent research has explored
+various extensions, such as integrating low-rank proper-
+ties (Wang et al., 2025b), performing fusion in the fre-
+quency domain (Liang et al., 2024), or using adaptive sam-
+pling (Deng et al., 2025). However, despite solving spatial
+rigidity, these methods face two key limitations: First, they
+lack spectral flexibility, as models must be re-engineered
+for datasets with different numbers of bands. Second, as
+data-driven approaches, achieving strong generalization can
+be difficult given the limited volume of available HSI data.
+2.2. Matryoshka Representation Learning and Flexible
+Model Design
+Our solution is philosophically inspired by the broader trend
+in machine learning towards building more adaptive and
+general-purpose models. From the perspective of represen-
+tation granularity adaptation, Matryoshka Representation
+Learning (MRL) (Kusupati et al., 2022; Hojjat et al., 2025;
+Cappellazzo et al., 2025) was proposed to explore model
+flexibility. The core idea of MRL is to train a single, high-
+dimensional feature vector z ∈Rd that encodes information
+at different granularities in a nested fashion, such that its
+shorter prefixes also serve as valid representations. This
+paradigm provides flexible representations for downstream
+tasks with varying computational demands.
+Formally, a nested representation z obtained by a deep neu-
+ral network z := F(·, θF ) : X →Rd contains different
+granularities representations: z1:m ∈Rm, where m is the
+desired dimension and (r : s) means one sub-representation
+choosing algorithm. The Matryoshka representation is ac-
+quired to minimize the empirical risk (that is, a valid repre-
+sentation). Under the classification context and parameter-
+izing the nested z as the classifier weights W(m) ∈RN,m,
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+MK
+MK
+MK
+Implicit Neural 
+Fusion
+Upsample
+nearest neighbor Sampling
+ 
+ 
+ 
+ 
+ 
+MLP
+Backbone
+Figure 2. The overall architecture of our proposed SSA framework. This end-to-end model realizes the universal mapping function F,
+which takes an LR-HSI and an HR-MSI from various sensors as input and reconstructs a high-fidelity HR-HSI at arbitrary scales.
+the expirical risk can be supervised using cross-entropy loss:
+min
+θF ,
+{W(m)}m∈M,
+m≤d
+1
+N
+X
+m∈M
+L
+
+W(m) · F(x, θF )1:m; y
+
+, (1)
+where
+M
+is
+a
+nested
+chosen
+list
+(e.g,
+M
+:=
+{m1, . . . , mi, d}, m1 ≤mi ≤d), N is the total classifica-
+tion number, (x, y) is the data/label pair. In the MRL paper,
+the sub-representation choosing algorithm is designed as
+dim-slicing, where r is fixed to 1 and s = m.
+Different from the MRL, which aims at learning flexible
+valid representation, and inference with different size model
+dimension (Lin et al., 2024; Wang et al., 2024b), we bring
+the nested principle into the hyperspectral data fusion ker-
+nels to handle various input image channels, termed as Ma-
+tryoshka Kernels (MK, see §3.2). This convertion elimi-
+nates previous two key drawbacks: architectural rigidity,
+data scarity, and model scale.
+3. Method
+3.1. Problem Formulation and Model Overview
+Given a low-resolution HSI (LR-HSI), YLR ∈Rh×w×C,
+and a high-resolution multispectral image (HR-MSI),
+ZHR ∈RH×W ×c (c ≪C), the objective of MS/HS fusion
+is to learn a mapping function Fθ : (YLR, ZHR) →b
+XHR
+that reconstructs a high-resolution hyperspectral image (HR-
+HSI), XHR ∈RH×W ×C, where θ represents the learnable
+parameters of the model.
+A key challenge in building a universal fusion model is sen-
+sor heterogeneity. For different sensors and optical cameras,
+the number of spectral bands C and the spatial scaling fac-
+tor s can vary. This means our training data comes from
+a collection of datasets D = {D1, · · · , DN}, and for any
+image pair (Y(i)
+LR, Z(i)
+HR) sampled from the i-th dataset, it
+has a corresponding number of spectral bands C(i) and a
+scaling factor r(i). This requires the universal fusion model
+should acquire the spectral and spatial agnosticism.
+To realize such a universal F, we propose the SSA frame-
+work, with its overall architecture depicted in Fig. 2.
+Our model is designed as an end-to-end, continuous
+representation-based fusion pipeline. First, the model per-
+forms spectral unification given data pair. As shown, any in-
+put YLR, regardless of its original band count C, is mapped
+by a Matryoshka Kernel Layer (MKL) K(C)
+inp(·) to a fixed,
+predefined feature dimension (see §3.2). Concurrently, the
+HR-MSI ZHR is concatenated with the spatial upsampled
+LR-HSI YHR ∈RH×W ×c, and this combined tensor is
+processed by a similar layer.
+Subsequently, those two feature maps are fed into the con-
+tinuous representation fusion backbone (see §3.3). The core
+of this module is to model an implicit function, parameter-
+ized by an MLP, which is responsible for the deep fusion
+of spectral and spatial information. The continuous fea-
+ture output by the fusion backbone is then fed to an output
+MKL K(C)
+outp(·) to the pixel space with original band count
+C. Finally, inspired by residual learning in (He et al., 2016),
+the output b
+X res is added with the upsampled LR-HSI to
+produce the final high-fidelity HR-HSI.
+3.2. Matryoshka Kernels: Spectral Agnosticism
+To deal with the drawbacks mentioned § 1, particularly
+when dealing with inputs of varying channels, we intro-
+duce the Matryoshka Kernel Layer (MKL) formulated as
+K(C)
+⋆
+, ⋆∈{inp, outp}, which acts as input and output lay-
+ers. Each MKL contains one Matryoshka-style nested ker-
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+nel, see Fig. 3. This approach avoids the need for separate
+layers for each possible channel configuration. For the input
+MKL, given a hyperspectral cube X with C bands, it aims
+to embed the input into the feature Y with D-embedding
+dimension. For the output MKL, it’s vice versa.
+Specifically, each MKL internally maintains an MK as the
+learnable weight. Taking the input MKL weight as example,
+the MK’s weight is as Wnested ∈RD×Cmax×k×k, where D is
+the fixed number of output channels, Cmax is the predefined
+maximum number of input channels the layer can support
+(Cin ≤Cmax), and k × k is the kernel size. A corresponding
+bias vector b ∈RD is also maintained. During the forward
+pass, a valid kernel is generated from the nested kernel,
+Wvalid ∈RD×Cin×k×k, using a slice-based approach:
+Wvalid = Wnested[:, : Cin, :, :],
+(2)
+where operation [ : ] follows Numpy array slice, which se-
+lects the first Cin items along the input channel dimension
+of Wnested to form the kernel for the current computation.
+Using the current valid kernel, the final output feature map
+can be produced by applying a standard 2D convolution:
+Y = Conv2D(X, Wvalid, b, stride, padding).
+(3)
+For each element in the d-th output channel, the computation
+is formally expressed as:
+Yd,i,j = bd+
+Cin−1
+X
+c=0
+k−1
+X
+m=0
+k−1
+X
+n=0
+Xc,i·s+m,j·s+n·(Wvalid)d,c,m,n,
+where s denotes the stride and the indices d, c, m, and
+n refer to the output channel, input channel, and spatial
+dimensions of the kernel, respectively.
+A similar nested philosophy is applied to the output MKL
+of the model, enabling it to dynamically generate an out-
+put that matches the original band count C of the input
+sample. During the forward pass, a desired output channel
+count, Cout (Cout ≤Cmax), is specified. The valid kernel
+Wvalid ∈RCout×D×k×k and bias bcomp ∈RCout are gener-
+ated by slicing the superset parameters along the output
+channel dimension:
+Wvalid = Wnested[: Cout, :, :, :],
+(4)
+bvalid = bnested[: Cout].
+(5)
+Through this mechanism of a nested kernel and dynamic
+subset slicing, our SSA model achieves true spectral ag-
+nosticism, allowing it to seamlessly process heterogeneous
+data from any sensor within a universal architecture. The
+detailed input and output MKL algorithms are shown in
+App.§ A.
+...
+1
+C
+2
+C
+3
+C
+max
+C
+W
+H 
+...
+1
+C
+2
+C
+3
+C
+max
+C
+k
+k 
+D
+
+...
+W
+H 
+✱
+=
+D
+...
+...
+Pxiels
+Features
+Nested MK
+...
+1
+C
+2
+C
+3
+C
+max
+C
+...
+✱
+=
+...
+W
+H 
+k
+k 
+W
+H 
+Input MKL
+Output MKL
+D
+1
+C
+2
+C
+3
+C
+max
+C
+D
+Figure 3. Illustration of the MKL’s encoding and decoding.
+3.3. Arbitrary-Scale Image Fusion as Continuous
+Function
+The implementation of our target HR-HSI as a continuous
+function through the implicit fusion backbone Γ is what
+grants our model true spatial flexibility. It allows the model
+to be queried on any coordinate grid, enabling the generation
+of an output at any desired resolution.
+As illustrated in Fig. 2 (b), our model first maps the embed-
+ded features after MK into a latent space via two parallel
+encoders ϕα, ψβ. This process can be represented as:
+(
+Epe = ϕα(K(C)
+inp(YLR)),
+Epa = ψβ
+
+K(C)
+inp([YHR; ZHR])
+
+,
+where [·; ·] stands for channel concatenation. These latent
+codes, Epe and Epa, provide both the spectral and spatial se-
+mantic information necessary for the subsequent continuous
+function modeling.
+To predict the spectral vector for any continuous coordinate
+p in the target HR-HSI space, our fusion module performs
+a local, query-based process. For a given pixel, we use its
+center to represent its coordinate and map the HR coordi-
+nates to a normalized square grid Ω= [−1, 1]2. The integer
+coordinates (i, j) of a pixel in the H × W source grid are
+then mapped to a query coordinate p(i,j) ∈Ω⊂R2 using
+the following transformation:
+p(i,j) =
+
+2i
+H −1 −1,
+2j
+W −1 −1
+
+.
+(6)
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Table 1. The average and standard deviation calculated for all the compared approaches on 10 CAVE examples and 2 the PaviaC dataset
+examples simulating ×4 (in-distribution) and ×8, ×16, ×32 (out-of-distribution). Results are highlighted as best and second best .
+Metric
+CAVE Dataset
+PaviaC Dataset
+DSPNet
+MIMO-SST
+DCINN
+DCFormer
+PSTUN
+LRTN
+Ours
+DSPNet
+MIMO-SST
+DCINN
+DCFormer
+PSTUN
+LRTN
+Ours
+In-Dist.
+×4
+PSNR(↑)
+40.37 ± 3.25
+45.35 ± 3.35
+43.75 ± 3.77
+45.81 ± 5.56 40.57 ± 3.72
+41.13 ± 3.24
+45.96 ± 4.69
+43.89 ± 1.78
+42.04 ± 0.78
+44.79 ± 1.99
+42.61 ± 1.19
+44.94 ± 1.50
+45.13 ± 1.01
+45.92 ± 1.75
+SAM(↓)
+2.72 ± 0.89
+2.74 ± 0.86
+2.72 ± 0.81
+2.70 ± 1.03
+2.94 ± 0.89
+2.92 ± 1.38
+2.55 ± 1.00
+3.15 ± 0.43
+3.29 ± 0.45
+2.59 ± 0.41
+3.55 ± 0.43
+2.95 ± 0.46
+3.18 ± 0.45
+2.02 ± 0.30
+ERGAS(↓) 2.51 ± 0.71
+2.08 ± 0.68
+2.37 ± 0.95
+2.01 ± 1.82
+2.70 ± 0.89
+2.38 ± 0.82
+1.72 ± 1.13
+1.58 ± 0.10
+1.73 ± 0.02
+1.34 ± 0.12
+1.82 ± 0.05
+1.47 ± 0.07
+1.48 ± 0.01
+1.07 ± 0.11
+SSIM(↑)
+0.993 ± 0.005 0.994 ± 0.005 0.992 ± 0.004 0.993 ± 0.004 0.992 ± 0.005 0.992 ± 0.006 0.994 ± 0.005 0.988 ± 0.000 0.986 ± 0.000 0.992 ± 0.000 0.983 ± 0.000 0.990 ± 0.000 0.988 ± 0.000 0.996 ± 0.000
+Out-of-Dist.
+×8
+PSNR(↑)
+36.92 ± 3.47
+29.73 ± 3.21
+33.72 ± 3.39
+41.46 ± 4.98 34.69 ± 3.17
+33.40 ± 3.13
+38.80 ± 3.79
+38.03 ± 0.80
+34.45 ± 0.55
+32.82 ± 0.58
+36.57 ± 0.88
+37.27 ± 0.93
+33.57 ± 0.40
+38.59 ± 0.67
+SAM(↓)
+3.82 ± 1.59
+5.55 ± 2.66
+4.33 ± 1.94
+3.65 ± 1.65
+4.30 ± 1.59
+4.55 ± 2.03
+3.70 ± 1.45
+5.66 ± 0.25
+6.70 ± 0.14
+6.09 ± 0.19
+5.49 ± 0.26
+5.48 ± 0.20
+6.67 ± 0.15
+4.74 ± 0.06
+ERGAS(↓) 3.91 ± 1.44
+9.91 ± 4.03
+6.24 ± 2.62
+3.08 ± 2.21
+5.13 ± 1.93
+6.00 ± 2.03
+3.46 ± 1.57
+4.05 ± 0.05
+4.53 ± 0.07
+4.53 ± 0.09
+3.79 ± 0.06
+3.60 ± 0.06
+4.51 ± 0.05
+3.47 ± 0.05
+SSIM(↑)
+0.980 ± 0.015 0.904 ± 0.099 0.958 ± 0.029 0.985 ± 0.014 0.964 ± 0.022 0.956 ± 0.030 0.982 ± 0.013 0.947 ± 0.004 0.923 ± 0.006 0.929 ± 0.005 0.948 ± 0.004 0.953 ± 0.003 0.931 ± 0.006 0.960 ± 0.004
+×16
+PSNR(↑)
+30.87 ± 3.46
+24.76 ± 2.93
+27.65 ± 3.43
+-
+29.47 ± 3.16
+27.53 ± 2.97
+31.84 ± 3.47
+32.92 ± 0.43
+31.49 ± 0.20
+28.74 ± 0.05
+-
+34.28 ± 0.39
+28.65 ± 0.11
+35.00 ± 0.02
+SAM(↓)
+6.51 ± 2.83
+8.36 ± 4.48
+6.93 ± 3.48
+-
+6.68 ± 2.44
+6.73 ± 3.08
+5.93 ± 2.42
+8.43 ± 0.39
+8.94 ± 0.13
+8.72 ± 0.18
+-
+7.48 ± 0.30
+9.64 ± 0.10
+6.89 ± 0.08
+ERGAS(↓) 7.58 ± 2.66
+16.69 ± 6.56
+12.19 ± 4.99
+-
+8.85 ± 2.80
+11.44 ± 4.40
+7.30 ± 2.88
+6.79 ± 0.05
+6.25 ± 0.07
+6.78 ± 0.17
+-
+5.04 ± 0.04
+7.39 ± 0.30
+5.16 ± 0.07
+SSIM(↑)
+0.947 ± 0.032 0.834 ± 0.102 0.901 ± 0.061
+-
+0.926 ± 0.037 0.905 ± 0.057 0.953 ± 0.029 0.910 ± 0.001 0.898 ± 0.003 0.880 ± 0.002
+-
+0.932 ± 0.001 0.883 ± 0.005 0.935 ± 0.002
+×32
+PSNR(↑)
+27.91 ± 2.95
+21.85 ± 2.56
+23.96 ± 2.77
+-
+27.55 ± 2.75
+24.48 ± 2.69
+28.06 ± 2.64
+30.51 ± 0.21
+29.91 ± 0.02
+26.51 ± 0.17
+-
+32.63 ± 0.46
+26.53 ± 0.41
+32.79 ± 0.26
+SAM(↓)
+10.03 ± 3.94
+12.26 ± 5.90
+10.34 ± 4.73
+-
+9.43 ± 3.28
+9.64 ± 3.96
+8.64 ± 3.17
+10.26 ± 0.51
+10.69 ± 0.33
+10.93 ± 0.47
+-
+9.16 ± 0.66
+11.89 ± 0.43
+8.49 ± 0.19
+ERGAS(↓) 11.12 ± 3.90
+23.54 ± 8.22
+18.98 ± 4.18
+-
+12.35 ± 3.30
+16.80 ± 5.97
+11.40 ± 6.69
+8.62 ± 0.57
+7.39 ± 0.33
+8.44 ± 0.50
+-
+6.00 ± 0.32
+9.26 ± 0.85
+6.24 ± 0.30
+SSIM(↑)
+0.912 ± 0.036 0.774 ± 0.099 0.843 ± 0.066
+-
+0.896 ± 0.034 0.860 ± 0.061 0.918 ± 0.032 0.893 ± 0.002 0.887 ± 0.000 0.853 ± 0.003
+-
+0.919 ± 0.004 0.856 ± 0.001 0.922 ± 0.001
+Using the query coordinate p as a pivot, we sample a pre-
+cise local spatial feature from the spatial latent code Epa.
+Concurrently, we identify the nearest neighbor q(i,j) ∈Ω
+corresponding to p(i,j) in the low-resolution spectral latent
+code Epe and sample the features of this neighbor.
+For the sampled local spectral features, we feed the previous
+spectral, spatial codes and the relative coordinates p −q
+that describe the fine-grained position into a shared MLP
+decoder:
+b
+X res(p) = MLP(Epe(p), Epa(q), p −q),
+(7)
+where p is the normalized coordinates of each query pixel in
+the HR domain. The output of the MLP is then fed into the
+output MK layer. Leveraging the MK, this layer dynamically
+maps the MLP feature back to the original spectral band
+count C of the current sample, generating the final predicted
+residual components K(C)
+outp( b
+X res(p)). The complete fused
+image is finally obtained by adding the predicted residual to
+the bicubic-interpolated base image:
+b
+XHR(p) = YHR(p) + K(C)
+outp( b
+X res(p)).
+(8)
+Additionally, to ensure spatial continuity when crossing grid
+boundaries, we follow the practice of LIIF (Chen et al.,
+2021b). We identify the four-nearest neighbor grid points
+qi, i ∈{1, . . . 4} in the low-resolution feature map. During
+decoding, we predict a candidate spectral residual b
+X res
+i
+(p)
+and a scalar weight wi for each neighbor qi. The final resid-
+ual vector is then obtained by a softmax weighted fusion of
+all candidate residuals:
+b
+X res(p) =
+4
+X
+i=1
+exp(wi)
+P4
+j=1 exp(wj)
+b
+X res
+i
+(p).
+(9)
+True scale agnosticism is achieved through this coordinate-
+based approach. By modeling the HR-HSI as a continuous
+function, our architecture avoids fixed upsampling layers,
+granting it the ability to generate outputs at any resolution.
+3.4. Cross-Sensor Joint Training Strategy
+The conventional “one dataset, one model” paradigm is
+not only inefficient but also prone to being easily overfit-
+ting (Yan et al., 2025), especially given the small scale of
+HSI datasets. Training a universal model within various
+hyperspectral data usually faces a challenge that different
+bands and spatial sizes can not be batched together to enable
+joint training.
+Our training pipeline is designed to handle N heterogeneous
+datasets, denoted as D = {D1, . . . , DN}. We first partition
+all training samples into distinct buckets, where each bucket
+Di contains data from a single source dataset, thus sharing
+identical spatial dimensions and number of spectral bands.
+At each training step, we construct a mini-batch by a two-
+stage sampling process. First, a bucket Di is selected from
+D following a uniform random distribution. Then, a batch
+of samples is drawn exclusively from the chosen bucket.
+This strategy ensures that all samples within a single mini-
+batch are structurally homogeneous, while samples across
+different mini-batches can be heterogeneous. It is precisely
+this batch-to-batch heterogeneity that our model is designed
+for. Crucially, all samples are processed by a universal
+model parameters θ, which are optimized via a unified hy-
+brid reconstruction loss function. Following Eq. (1), the
+reconstruction loss can be written in the MRL style:
+min
+θ, C∈Dim(Di),
+(YLR,ZHR)∈Di
+1
+N
+N
+X
+i=1
+Ltotal [Fθ(YLR, ZHR); XHR] ,
+where Fθ is the model (i.e., Fθ := K(C)
+outp ◦Γ ◦K(C)
+inp and ◦
+means the network composition), Dim(·) denotes the bands
+numbers in the data bucket. Our total loss, Ltotal, is a
+weighted sum of the L1 loss and the Structural Similarity
+(SSIM) loss, defined as:
+Ltotal = E(YLR,ZHR,XHR)∼Di [L1 + λLSSIM] ,
+L1 = ∥Fθ(YLR, ZHR) −XHR∥1,
+LSSIM = 1 −SSIM(Fθ(YLR, ZHR), XHR),
+(10)
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Figure 4. Quantitative comparison of PSNR (dB) across multiple scaling factors on all seven datasets.
+where λ is a weighting coefficient, ∥· ∥is the ℓ1 norm, and
+SSIM(·, ·) is the structural similarity index measure.
+Through this joint training strategy, our SSA model is forced
+to learn a universal fusion mapping rather than memorizing
+the specifics of a particular dataset. This approach endows
+the model with remarkable generalization capabilities to
+unseen sensors (see § 4.4.2).
+4. Experiments
+4.1. Datasets
+To evaluate our model’s performance and generalization, a
+diverse suite of seven public hyperspectral datasets are con-
+ducted, covering indoor, outdoor, and remote sensing sce-
+narios. Information of dataset are summarized in Tab. B.1.
+Our setup deliberately embraces heterogeneity, with spectral
+bands ranging from 31 (CAVE) to 191 (Washington DC),
+and substantially differing spatial resolutions and spectral
+ranges from sensors like ROSIS and Hyperion. This diver-
+sity provides the perfect testbed for validating the spectral
+agnosticism of our SSA framework. We followed standard
+train/test splits for each dataset, using appropriate patch
+sizes as detailed in the table.
+4.2. Implementation Details
+Our SSA model and all experiments were implemented us-
+ing the PyTorch framework (Paszke et al., 2019). All train-
+ing and inference were conducted on a single NVIDIA RTX
+4090 GPU. For the training process, we use the AdamW op-
+timizer (Loshchilov & Hutter, 2017) and trained the model
+for 2000 epochs with a batch size of 4. The learning rate
+was managed by a cosine annealing learning rate scheduler,
+starting from 2e-4 and annealing to 1e-5. To enable the
+spectral agnosticism of MK, the crucial hyperparameter for
+the maximum channel, Cmax, was set to 194. Both encoders
+are based on the EDSR architecture (Lim et al., 2017).
+4.3. Main Results
+To highlight the fundamental difference between our pro-
+posed model and existing methods, for each dataset (at a
+4× ratio), we trained a dedicated model independently for
+all SOTA methods to be compared, and evaluated them on
+the test sets with ratios of 4×, 8×, 16×, and 32×. For
+our method, we trained only a single, unified model, with
+the training set composed of a mixture of training samples
+from the seven datasets. The evaluation on the test set
+was conducted in the same manner as before. Addition-
+ally, we adopted four widely used quality metrics, namely
+Peak Signal-to-Noise Ratio (PSNR), Spectral Angle Map-
+per (SAM), Erreur Relative Globale Adimensionnelle de
+Synth`ese (ERGAS), and the Structural Similarity (SSIM).
+The calculation formulas for the above indicators can be
+found in the App.§ B.3.
+4.3.1. QUANTITATIVE COMPARISON
+Tab. 1 presents the quantitative comparison of all methods on
+the CAVE and PaviaC datasets, under both in-distribution
+(the ×4 training scale) and out-of-distribution (×8, ×16,
+and ×32 scales) settings. The data in the table indicates
+that our method achieves SOTA performance across all in-
+distribution metrics. In the out-of-distribution evaluation,
+our model secures the best or second-best results on nearly
+all out-of-distribution metrics. Although methods like DC-
+Former (Wu et al., 2025), DSPNet (Sun et al., 2023), and
+PSTUN (Wang et al., 2025a) also achieve strong second-
+best results in some specific cases, they suffer from the
+inability to handle all scales and exhibit inconsistent perfor-
+mance. The quantitative comparison results for the other
+five datasets can be found in App.§ B.6. To provide a com-
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+(b) Ours
+(a) GT
+(d)PSTUN
+(e) DCFormer
+(f) DCINN
+(g) MIMO-SST
+(h) DSPNet
+(c) LRTN
+0.00
+0.20
+0.04
+0.08
+0.12
+0.16
+Figure 5. The upper and lower parts respectively showcase the fused images and error maps from the CAVE and PaviaC datasets. Red
+rectangles depict some close-up shots.
+Table 2. Ablation study of MK on the PaviaC dataset (See §4.4.1).
+Model
+PSNR(↑)
+SAM(↓)
+ERGAS(↓)
+SSIM(↑)
+×4
+w/o MK
+45.85 ± 1.80
+2.01 ± 0.29
+1.06 ± 0.11
+0.995 ± 0.001
+Ours
+45.92 ± 1.75
+2.02 ± 0.30
+1.07 ± 0.11
+0.996 ± 0.000
+×8
+w/o MK
+38.62 ± 0.65
+4.75 ± 0.07
+3.49 ± 0.06
+0.959 ± 0.004
+Ours
+38.59 ± 0.67
+4.74 ± 0.06
+3.47 ± 0.05
+0.960 ± 0.004
+×16
+w/o MK
+34.95 ± 0.03
+6.92 ± 0.08
+5.18 ± 0.07
+0.936 ± 0.002
+Ours
+35.00 ± 0.02
+6.89 ± 0.08
+5.16 ± 0.07
+0.935 ± 0.002
+×32
+w/o MK
+32.81 ± 0.25
+8.51 ± 0.20
+6.25 ± 0.29
+0.921 ± 0.001
+Ours
+32.79 ± 0.26
+8.49 ± 0.19
+6.24 ± 0.30
+0.922 ± 0.001
+prehensive view of the performance across all datasets, we
+plot the PSNR metrics of all methods in a line chart (see
+Fig. 4). It can be observed that our model does not compro-
+mise on reconstruction quality; its performance can even
+surpass that of specialized models that were individually
+trained for each specific dataset. Our method provides the
+best in-distribution accuracy and demonstrates robust gener-
+alization to unseen scales.
+4.3.2. QUALITATIVE COMPARISON
+To illustrate the advantages of our method, we provide a vi-
+sual comparison in Fig. 5 with SOTA approaches, including
+close-ups and error maps to highlight specific details. Visu-
+ally, the results generated by our SSA model are markedly
+superior and most faithful to the GT. Visually, our SSA
+model yields results most faithful to the ground truth. The
+close-up views reveal that our method effectively recov-
+ers fine details, such as the texture of the stuffed toy and
+crisp lines on the chart, while competitors often suffer from
+blurriness and artifacts. Similarly, it reconstructs clearer
+architectural structures in the remote sensing scene. This
+superiority is corroborated by the error maps: while ours
+remain predominantly dark blue (indicating minimal residu-
+als), SOTA methods display significant high-energy areas
+(yellow/red) along object boundaries, demonstrating the
+robust accuracy of our unified approach.
+4.4. Ablation Studies
+4.4.1. THE NECESSITY OF MATRYOSHKA KERNELS
+To validate the role of MK, we validated an w/o MK vari-
+ant by replacing our MKLs with standard fixed-channel
+convolutions and trained it independently on each dataset.
+Tab. 2 compares this individually trained variant against
+our single, jointly trained model.
+The results show
+that the performance between the two models is highly
+comparable across all scales. While the ‘w/o MK’ variant
+occasionally performs marginally better, our unified model
+with MK often matches or exceeds its performance. This
+demonstrates that our model, achieves performance that is
+on par with specialized models.
+4.4.2. UNSEEN BANDS AND FRACTIONAL SCALES
+We further evaluate the generalization of our pretrained
+model under two challenging settings: unseen datasets with
+different spectral bands and unseen fractional scales.
+Unseen datasets (unseen bands). We first test on two
+datasets whose spectral configurations are not observed dur-
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Table 3. Generalization to Unseen Bands and Fractional Scales.
+Top: generalization on unseen datasets at ×4 scale, including
+Houston and Loukia. Bottom: generalization on unseen scales on
+CAVE (trained at ×4 ratio). Results of DCFormer/PSTUN/LRTN
+are obtained by bicubic resizing based on ×4 ratio.
+Model
+PSNR(↑)
+SAM(↓)
+ERGAS(↓)
+SSIM(↑)
+Unseen Dataset — Houston (48 bands, ×4 scale)
+DCFormer
+38.55
+3.21
+4.09
+0.972
+PSTUN
+38.52
+3.15
+3.98
+0.975
+LRTN
+38.65
+3.12
+3.91
+0.980
+Ours
+38.71
+3.09
+3.85
+0.978
+Unseen Dataset — Loukia (176 bands, ×4 scale)
+DCFormer
+36.25
+3.88
+3.65
+0.958
+PSTUN
+35.80
+4.12
+3.82
+0.952
+LRTN
+35.92
+4.05
+3.78
+0.955
+Ours
+36.42
+3.95
+3.55
+0.962
+Fractional Scales — CAVE (trained only at ×4) ×3.2 scale
+Bicubic
+38.50
+5.12
+4.85
+0.945
+DCFormer
+44.65
+2.45
+1.95
+0.990
+PSTUN
+43.90
+2.62
+2.25
+0.985
+LRTN
+44.35
+2.58
+2.08
+0.988
+Ours (direct)
+45.02
+2.48
+1.81
+0.993
+Fractional Scales — CAVE (trained only at ×4) ×5.7 scale
+Bicubic
+32.20
+6.85
+6.10
+0.895
+DCFormer
+42.95
+3.02
+2.45
+0.984
+PSTUN
+41.25
+3.25
+2.72
+0.980
+LRTN
+42.80
+2.88
+2.55
+0.982
+Ours (direct)
+43.49
+2.91
+2.17
+0.991
+ing training: Houston with 48 bands and Loukia with 176
+bands, both evaluated at the ×4 scale. As shown in Tab. 3,
+our method, finetuned for only 500 iterations, consistently
+achieves top-tier performance across metrics. On Houston,
+our model obtains the best PSNR/SAM/ERGAS (38.71 dB
+/ 3.09 / 3.85) and remains competitive in SSIM (0.978),
+demonstrating robust generalization to a different band
+setup. On Loukia, our method again delivers the best recon-
+struction quality, achieving the highest PSNR (36.42 dB),
+the lowest ERGAS (3.55), and the highest SSIM (0.962),
+while remaining competitive in SAM. These results indicate
+that our learned spectral representation transfers well across
+datasets with varying band numbers and distributions.
+Unseen fractional scales. We further evaluate scale gen-
+eralization by testing on CAVE at fractional scales ×3.2
+and ×5.7, while training is performed only at the integer
+scale ×4. For methods without native continuous scaling,
+we follow a strong baseline protocol: generate the ×4 out-
+put and then resize to the target fractional scale via Bicu-
+bic interpolation (×4 →Bicubic). Tab. 3 shows that our
+method directly predicts fractional scales and achieves the
+best PSNR at both scales (45.02 dB at ×3.2 and 43.49 dB at
+×5.7), together with the lowest ERGAS (1.81 and 2.17) and
+the highest SSIM (0.993 and 0.991). Overall, these results
+confirm that our continuous representation provides genuine
+Figure 6. UMAP (McInnes et al., 2018) visualization of the learned
+MK weights, which form a smooth manifold that reveals the
+model’s encoding of spectral continuity, key to its generalization.
+scale-agnostic capability, generalizing effectively beyond
+the discrete scale seen during training and outperforming
+strong ×4→Bicubic baselines.
+4.4.3. ANALYSIS OF LEARNED KERNEL STRUCTURES
+To investigate the internal working mechanisms of our MKs,
+we visualized the weight structures of both the input and out-
+put kernels using UMAP (McInnes et al., 2018), as shown
+in Fig. 6. Each point in the visualizations corresponds to
+a spectral channel, colored by its index. As can be seen,
+the projected points form smooth and continuous manifolds
+rather than a randomly scattered cloud. This indicates that
+the learning process of the kernels has formed a meaningful,
+layered manifold structure, where the network actively cap-
+tures the high correlation between adjacent spectral bands.
+This learned internal structure is key to our model’s ability
+to generalize effectively across different sensors.
+4.5. Efficiency Analysis
+We conducted efficiency analyses on all the comparison
+models and ablation experiments on our model scaling,
+which are detailed in App.§ B.4 and App.§ B.5.
+5. Conclusion
+In this work, we addressed the prevalent rigidity in MS/HS
+fusion models by proposing SSA, a universal framework
+containing Matryoshka Kernels (MK) and an Implicit Neu-
+ral Representation (INR) backbone overcomes the trilemma
+of architectural rigidity, data scarcity, and fixed spatial scal-
+ing. Our experiments demonstrate that a single, jointly
+trained SSA model can reach the SOTA performance, ef-
+fectively generalizes to unseen sensors and scales in a zero-
+shot manner, and learns meaningful internal representations.
+While acknowledging the computational cost of INR as a
+potential limitation, we believe our model lays a robust foun-
+dation for the development of general-purpose foundation
+models in hyperspectral analysis.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Impact Statement
+This paper presents work whose goal is to advance the field
+of machine learning. There are many potential societal
+consequences of our work, none of which we feel must be
+specifically highlighted here.
+References
+Amigo, J. M. Hyperspectral imaging, volume 32. Elsevier,
+Amsterdam, 2019.
+Cao, Z., Cao, S., Deng, L.-J., Wu, X., Hou, J., and Vivone,
+G. Diffusion model with disentangled modulations for
+sharpening multispectral and hyperspectral images. Inf.
+Fusion, 104:102–158, 2024.
+Cao, Z.-H., Liang, Y.-J., Deng, L.-J., and Vivone, G. An effi-
+cient image fusion network exploiting unifying language
+and mask guidance. IEEE TPAMI, 2025.
+Cappellazzo, U., Kim, M., Ma, P., Chen, H., Liu, X.,
+Petridis, S., and Pantic, M.
+MoME: Mixture of ma-
+tryoshka experts for audio-visual speech recognition.
+arXiv preprint arXiv:2510.04136, 2025.
+Chen, H., Zhao, W., Xu, T., Shi, G., Zhou, S., Liu, P., and
+Li, J. Spectral-wise implicit neural representation for
+hyperspectral image reconstruction. IEEE Trans. Circuits
+Syst. Video Technol., 34(5):3714–3727, 2023.
+Chen, L., Zhao, Y., Yao, J., Chen, J., Li, N., Chan, J. C.-W.,
+and Kong, S. G. Object tracking in hyperspectral-oriented
+video with fast spatial-spectral features. Remote Sens.
+(Basel), 13(10):1922, 2021a.
+Chen, Y., Liu, S., and Wang, X. Learning continuous image
+representation with local implicit image function. In
+CVPR, pp. 8628–8638, 2021b.
+Cheng, M.-F., Mukundan, A., Karmakar, R., Valappil, M.
+A. E., Jouhar, J., and Wang, H.-C.
+Modern trends
+and recent applications of hyperspectral imaging: A re-
+view. Technologies, 13(5):170, 2025. ISSN 2227-7080.
+URL https://www.mdpi.com/2227-7080/13/
+5/170.
+Deng, S., Deng, L.-J., Wu, X., Ran, R., and Wen, R. Bidi-
+rectional dilation transformer for multispectral and hyper-
+spectral image fusion. In IJCAI, 2023a.
+Deng, S., Ma, J., Deng, L.-J., and Wei, P. OTIAS: Octree im-
+plicit adaptive sampling for multispectral and hyperspec-
+tral image fusion. In AAAI, volume 39, pp. 2708–2716,
+2025.
+Deng, S.-Q., Deng, L.-J., Wu, X., Ran, R., Hong, D., and
+Vivone, G. PSRT: Pyramid shuffle-and-reshuffle trans-
+former for multispectral and hyperspectral image fusion.
+IEEE Trans. Geosci. Remote Sens., 61:1–15, 2023b.
+Dian, R., Li, S., Guo, A., and Fang, L. Deep hyperspectral
+image sharpening. IEEE Trans. Neural Netw. Learn. Syst.,
+29(11):5345–5355, 2018.
+Fang, J., Yang, J., Khader, A., and Xiao, L. MIMO-SST:
+Multi-input multi-output spatial-spectral transformer for
+hyperspectral and multispectral image fusion.
+IEEE
+Trans. Geosci. Remote Sens., 62:1–20, 2024.
+Fauvel, M., Tarabalka, Y., Benediktsson, J. A., Chanussot,
+J., and Tilton, J. C. Advances in spectral-spatial clas-
+sification of hyperspectral images. Proc. IEEE, 101(3):
+652–675, 2013.
+Gonzalez, R., Albrecht, C. M., Braham, N. A. A., Lambhate,
+D., Almeida, J. L. d. S., Fraccaro, P., Blumenstiel, B.,
+Brunschwiler, T., and Bangalore, R. Multispectral to
+hyperspectral using pretrained foundational model. arXiv
+preprint arXiv:2502.19451, 2025.
+He, K., Zhang, X., Ren, S., and Sun, J. Deep residual
+learning for image recognition. In CVPR, pp. 770–778,
+2016.
+He, L., Li, J., Liu, C., and Li, S. Recent advances on spectral–
+spatial hyperspectral image classification: An overview
+and new guidelines. IEEE Trans. Geosci. Remote Sens.,
+56(3):1579–1597, 2017.
+Hoffmann, J., Borgeaud, S., Mensch, A., Buchatskaya, E.,
+Cai, T., Rutherford, E., Casas, D. d. L., Hendricks, L. A.,
+Welbl, J., Clark, A., et al. Training compute-optimal
+large language models. arXiv preprint arXiv:2203.15556,
+2022.
+Hojjat, A., Haberer, J., Pirk, S., and Landsiedel, O. Think-
+ingViT: Nested thinking vision transformer for elastic
+inference. In ES-FoMo III: 3rd Workshop on Efficient
+Systems for Foundation Models, 2025. URL https:
+//openreview.net/forum?id=mFQRyJkFys.
+Hong, D., Li, C., Yokoya, N., Zhang, B., Jia, X., Plaza,
+A., Gamba, P., Benediktsson, J. A., and Chanussot, J.
+Hyperspectral imaging. arXiv preprint arXiv:2508.08107,
+2025.
+Hu, J., Huang, T., Deng, L., Dou, H., Hong, D., and Vivone,
+G. Fusformer: A transformer-based fusion network for
+hyperspectral image super-resolution. IEEE Geosci. Re-
+mote Sens. Lett., 19:1–5, 2022.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Huang, B., Song, H., Cui, H., Peng, J., and Xu, Z. Spa-
+tial and spectral image fusion using sparse matrix fac-
+torization. IEEE Trans. Geosci. Remote Sens., 52(3):
+1693–1704, 2013.
+Kawakami, R., Matsushita, Y., Wright, J., Ben-Ezra, M.,
+Tai, Y.-W., and Ikeuchi, K. High-resolution hyperspectral
+imaging via matrix factorization. In CVPR, pp. 2329–
+2336. IEEE, 2011.
+Kusupati, A., Bhatt, G., Rege, A., Wallingford, M., Sinha,
+A., Ramanujan, V., Howard-Snyder, W., Chen, K.,
+Kakade, S., Jain, P., et al. Matryoshka representation
+learning. NeurIPS, 35:30233–30249, 2022.
+Liang, Y., Cao, Z., Deng, S., Dou, H.-X., and Deng, L.-
+J. Fourier-enhanced implicit neural fusion network for
+multispectral and hyperspectral image fusion. NeurIPS,
+37:63441–63465, 2024.
+Lim, B., Son, S., Kim, H., Nah, S., and Lee, K. M. Enhanced
+deep residual networks for single image super-resolution.
+In CVPRW, pp. 136–144, 2017.
+Lin, B., Zeng, Z., Xiao, Z., Kou, S., Hou, T., Gao, X.,
+Zhang, H., and Deng, Z. Matryoshkakv: Adaptive kv
+compression via trainable orthogonal projection. arXiv
+preprint arXiv:2410.14731, 2024.
+Liu, Y., Dian, R., and Li, S. Low-rank transformer for high-
+resolution hyperspectral computational imaging. IJCV,
+133(2):809–824, 2025.
+Loshchilov, I. and Hutter, F. Decoupled weight decay regu-
+larization. arXiv preprint arXiv:1711.05101, 2017.
+Masi, G., Cozzolino, D., Verdoliva, L., and Scarpa, G. Pan-
+sharpening by convolutional neural networks. Remote
+Sens. (Basel), 8(7):594, 2016.
+McInnes, L., Healy, J., and Melville, J. UMAP: Uniform
+manifold approximation and projection for dimension
+reduction. arXiv preprint arXiv:1802.03426, 2018.
+Nezhad, Z. H., Karami, A., Heylen, R., and Scheunders, P.
+Fusion of hyperspectral and multispectral images using
+spectral unmixing and sparse coding. IEEE J. Sel. Top.
+Appl. Earth Obs. Remote Sens., 9(6):2377–2389, 2016.
+Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J.,
+Chanan, G., Killeen, T., Lin, Z., Gimelshein, N., Antiga,
+L., Desmaison, A., Kopf, A., Yang, E., DeVito, Z., Raison,
+M., Tejani, A., Chilamkurthy, S., Steiner, B., Fang, L.,
+Bai, J., and Chintala, S. Pytorch: An imperative style,
+high-performance deep learning library. In NeurIPS, pp.
+8024–8035. Curran Associates, Inc., 2019.
+Shang, Y., Liu, J., Zhang, J., and Wu, Z. MFT-GAN: A
+multiscale feature-guided transformer network for un-
+supervised hyperspectral pansharpening. IEEE Trans.
+Geosci. Remote Sens., 62:1–16, 2024.
+Sun, Y., Xu, H., Ma, Y., Wu, M., Mei, X., Huang, J.,
+and Ma, J. Dual spatial–spectral pyramid network with
+transformer for hyperspectral image fusion. IEEE Trans.
+Geosci. Remote Sens., 61:1–16, 2023.
+Suryanarayana, G., Ramtej, K. S., Reddy, D. S., Prasad,
+P. K., Prasad, A., and Srikanth, K.
+Deep interpola-
+tion based hyperspectral-multispectral image fusion via
+anisotropic dependent principal component analysis. Mul-
+timedia Tools Appl., 84(4):1649–1669, 2025.
+Uzair, M., Mahmood, A., and Mian, A. S. Hyperspectral
+face recognition using 3d-dct and partial least squares. In
+BMVC, volume 1, pp. 10, 2013.
+Wald, L. Quality of high resolution synthesised images: Is
+there a simple criterion? In Proc. Int. Conf. Fusion Earth
+Data, pp. 99–103, 2000.
+Wang, B., Xiong, X., Lian, Y., Cao, X., Zhou, H., Yu,
+K., and Liu, Z. Perceptive spectral transformer unfolding
+network with multiscale mixed training for arbitrary-scale
+hyperspectral and multispectral image fusion. Inf. Fusion,
+122:103166, 2025a.
+Wang, T., Yan, Z., Li, J., Zhao, X., Wang, C., and Ng, M.
+Hyperspectral and multispectral image fusion with arbi-
+trary resolution through self-supervised representations.
+IJCV, pp. 1–21, 2025b.
+Wang, W., Deng, L.-J., Ran, R., and Vivone, G. A gen-
+eral paradigm with detail-preserving conditional invert-
+ible network for image fusion. IJCV, 132(4):1029–1054,
+2024a.
+Wang, Y., Yue, Z., Zeng, H., Wang, D., and McAuley, J.
+Train once, deploy anywhere: Matryoshka representation
+learning for multimodal recommendation. arXiv preprint
+arXiv:2409.16627, 2024b.
+Wu, X., Cao, Z.-H., Huang, T.-Z., Deng, L.-J., Chanussot,
+J., and Vivone, G. Fully-connected transformer for multi-
+source image fusion. IEEE TPAMI, 47(3):2071–2088,
+2025.
+Yan, H.-F., Zhao, Y.-Q., Chan, J. C.-W., Kong, S. G., EI-
+Bendary, N., and Reda, M. Hyperspectral and multispec-
+tral image fusion: When model-driven meet data-driven
+strategies. Inf. Fusion, 116:102803, 2025.
+Yang, J., Fu, X., Hu, Y., Huang, Y., Ding, X., and Paisley, J.
+PanNet: A deep network architecture for pan-sharpening.
+In ICCV, pp. 5449–5457, 2017.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Zhang, K., Zhu, D., Min, X., and Zhai, G. Implicit neural
+representation learning for hyperspectral image super-
+resolution. IEEE Trans. Geosci. Remote Sens., 61:1–12,
+2022.
+Zhou, H., Liu, Q., Weng, D., and Wang, Y. Unsupervised
+cycle-consistent generative adversarial networks for pan
+sharpening. IEEE Trans. Geosci. Remote Sens., 60:1–14,
+2022.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+A. Matryoshka Kernel Layer Algorithms
+The pseudocode for our proposed Matryoshka Kernel Layer (MKL), as detailed in §3.2, is presented in Algo. 1 and Algo. 2.
+In our SSA model, both the Matryoshka Kernel Input and Output Layers utilize a 3 × 3 convolution kernel. The stride,
+dilation, and groups are all set to 1. Consequently, the spatial dimensions of the input and output feature maps remain
+unchanged across the MKL operations.
+Algorithm 1 Matryoshka Kernel Input Layer Forward Pass
+Require:
+input X ∈RN×Cin×H×W
+input Nested convolution weight Wnested ∈RD×Cmax×k×k
+input Convolution bias b ∈RD (optional)
+input Convolution parameters: stride s, padding p, dilation d, groups g
+Ensure:
+output Y ∈RN×D×H′×W ′
+1: function Forward(X, Wnested, b)
+2:
+if Cin = Cmax then
+3:
+Y ←Conv2d(X, Wnested, b, s, p, d, g) {Use full weights}
+4:
+else
+5:
+Wvalid ←Wnested[:, : Cin, :, :] {Slice weights for input channels Cin}
+6:
+Y ←Conv2d(X, Wvalid, b, s, p, d, g)
+7:
+end if
+8:
+return Y
+9: end function
+Algorithm 2 Matryoshka Kernel Output Layer Forward Pass
+Require:
+input Y ∈RN×D×H′×W ′
+input Target output channels Cout
+input Pre-defined convolution weight Wnested ∈RCmax×D×k×k
+input Pre-defined convolution bias bnested ∈RCmax (optional)
+input Convolution parameters: stride s, padding p, dilation d, groups g
+Ensure:
+output X ∈RN×Cout×H×W
+1: function Forward(Y, Cout, Wnested, bnested)
+2:
+if Cout = Cmax then
+3:
+X ←Conv2d(Y, Wnested, bnested, s, p, d, g)
+4:
+else
+5:
+Wvalid ←Wnested[: Cout, :, :, :] {Slice weights for output channels Cout}
+6:
+bvalid ←None
+7:
+if bnested ̸= None then
+8:
+bvalid ←bnested[: Cout] {Slice the bias}
+9:
+end if
+10:
+X ←Conv2d(Y, Wvalid, bvalid, s, p, d, g)
+11:
+end if
+12:
+return X
+13: end function
+B. Additional Experiments Details
+B.1. Information of Datasets
+In this section, we provide the information of used dataset, detailed in Tab. B.1.
+1
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Table B.1. Detailed meta information and train/test splits of the experimental datasets.
+Property
+CAVE
+Harvard
+PaviaC
+PaviaU
+Chikusei
+Botswana
+WashingtonDC
+Bands
+31
+31
+102
+103
+128
+145
+191
+Pixel Resolution (m)
+0.001
+0.001
+1.3
+1.3
+2.5
+30
+2.5
+Spectral Range (nm)
+400–700
+420–720
+430–860
+430–860
+363–1018
+400–2500
+400–2500
+Sensors
+Cooled CCD
+Nuance FX
+ROSIS
+ROSIS
+Headwall Hyperspec-VNIR-C
+Hyperion
+Hydice
+Size
+512×512
+1040×1392
+1096×715
+610×340
+2517×2335
+1476×256
+1208×307
+Train/Test Patch Size
+128×128/
+512×512
+128×128/
+1024×1024
+128×128/
+256×256
+128×128/
+512×512
+128×128/
+1024×1024
+128×128/
+256×256
+128×128/
+256×256
+Train/Test Splits
+3718/10
+5360/10
+2257/2
+434/2
+5175/4
+765/5
+876/5
+B.2. Data Simulation
+To comprehensively evaluate the effectiveness of our proposed method, we conducted experiments on seven public
+hyperspectral datasets, including two indoor/outdoor datasets, CAVE1 and Harvard2, and five remote sensing datasets:
+PaviaC3, PaviaU4, Chikusei5, Botswana6, and WashingtonDC7. All data simulation procedures strictly comply with Wald’s
+Protocol (Wald, 2000). Detailed parameters for each dataset are summarized in Tab. B.1. The corresponding test sets were
+constructed from non-overlapping image blocks, specifically four 512×512 blocks for Chikusei and 256×256 blocks for
+the other four remote sensing datasets. For all training sets, we generated 128×128 image patches with a fixed stride. The
+low-resolution hyperspectral images (LR-HSIs) were synthesized by downsampling the original HSI by a factor of s using
+an anti-aliasing filter, while the corresponding high-resolution multispectral images (HR-MSIs) were simulated using the
+spectral response functions of sensors such as ROSIS and Landsat-8.
+B.3. Quality Indexes
+To quantitatively assess the performance of hyperspectral image reconstruction, we adopt four widely used quality indexes:
+PSNR, SAM, SSIM, and ERGAS. These metrics jointly evaluate the spatial fidelity, spectral accuracy, structural similarity,
+and global reconstruction consistency.
+PEAK SIGNAL-TO-NOISE RATIO (PSNR)
+PSNR is a spatial metric that measures the ratio between the maximum possible power of a signal and the power of noise
+corrupting its representation. It provides an effective way to evaluate the spatial quality of reconstructed HSIs. For a
+reconstructed image b
+XHR and ground truth XHR, PSNR is defined as:
+PSNR( b
+XHR, XHR) = 20 log
+ 
+255
+RMSE( b
+XHR, XHR)
+!
+,
+where RMSE denotes the root mean squared error:
+RMSE( b
+XHR, XHR) = ∥b
+XHR −XHR∥F
+√b · ml
+,
+(11)
+in which b is the number of spectral bands, and ml is the spatial pixel count. A higher PSNR value indicates a more accurate
+reconstruction.
+1https://cave.cs.columbia.edu/repository/Multispectral
+2http://vision.seas.harvard.edu/hyperspec/index.html
+3https://www.ehu.eus/ccwintco/index.php/Hyperspectral_Remote_Sensing_Scenes#Pavia_
+Centre_scene
+4https://www.ehu.eus/ccwintco/index.php/Hyperspectral_Remote_Sensing_Scenes#Pavia_
+University_scene
+5https://www.sal.t.u-tokyo.ac.jp/hyperdata/
+6https://www.ehu.eus/ccwintco/index.php/Hyperspectral_Remote_Sensing_Scenes#Botswana
+7https://engineering.purdue.edu/˜biehl/MultiSpec/hyperspectral.html
+2
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+SPECTRAL ANGLE MAPPER (SAM)
+SAM is a spectral metric that computes the angle between two spectral vectors. It is commonly used to assess spectral
+preservation, ensuring that the spectral shape is well retained during reconstruction. SAM is formulated as:
+SAM( b
+XHR, XHR) = 1
+b
+b
+X
+j=1
+arccos
+ ⟨bxj, xj⟩
+∥bxj∥∥xj∥
+
+,
+where bxj and xj denote the reconstructed and GT spectral vectors of the j-th band.
+STRUCTURAL SIMILARITY INDEX MEASURE (SSIM)
+SSIM evaluates the structural similarity between the reconstructed image and the ground truth. It jointly considers luminance,
+contrast, and structural information, and is widely adopted for perceptual image quality assessment. For each band, SSIM is
+defined as:
+SSIM(bx, x) =
+(2µbxµx + C1)(2σbxx + C2)
+(µ2
+bx + µ2x + C1)(σ2
+bx + σ2x + C2),
+where µ and σ denote the mean and variance, σbxx is the covariance, and C1, C2 are constants preventing instability. A
+higher SSIM value (maximum 1) indicates better structural similarity.
+ERREUR RELATIVE GLOBALE ADIMENSIONNELLE DE SYNTH`ESE (ERGAS)
+ERGAS is a global index that measures the relative reconstruction error across all spectral bands. Lower ERGAS values
+indicate better overall reconstruction performance. ERGAS is defined as:
+ERGAS( b
+XHR, XHR) = 100 · 1
+s
+v
+u
+u
+t1
+b
+b
+X
+j=1
+RMSEj
+µj
+2
+,
+where s is the scale factor, RMSEj is the per-band RMSE (eq. 11) between b
+XHR and XHR, and µj is the mean of the GT
+band.
+B.4. Efficiency Analysis
+Tab. B.2 summarizes the model complexity and practical inference efficiency of representative fusion methods. For data-
+driven deep learning–based hyperspectral fusion, increasing model capacity is often natural, and sometimes necessary, to
+effectively leverage large-scale heterogeneous training data and to improve generalization. Accordingly, we intentionally
+scale up the network to enhance its fitting ability. Even so, our model still contains fewer parameters than PSTUN (Wang
+et al., 2025a) while achieving higher reconstruction accuracy.
+From the complexity perspective, Tab. B.2 together with Tab. 1 suggests a consistent trend: methods with larger computa-
+tional budgets generally deliver stronger reconstruction quality both in-distribution and out-of-distribution, whereas very
+lightweight models (e.g., DCFormer (Wu et al., 2025)) tend to suffer from noticeable quality degradation due to limited
+capacity.
+Importantly, the increased capacity does not translate into prohibitive runtime. Although our method involves higher
+theoretical FLOPs, it remains efficient in practice on modern GPUs: at ×4 and 512 × 512 input, our model runs in 83.4 ms
+per image (3.1 MPix/s) with a peak memory footprint of 2.46 GB. This runtime is comparable to (or faster than) several
+strong baselines with similar or smaller capacity (e.g., PSTUN and LRTN), while being orders of magnitude faster than
+query-based baselines such as DCINN (Wang et al., 2024a). Overall, these results indicate that scaling the model is an
+effective way to improve accuracy and robustness, without sacrificing practical inference efficiency.
+B.5. Ablation on Model Scaling
+To systematically study how model capacity influences the final reconstruction quality, we conduct an ablation analysis by
+progressively scaling the depth of the spatial/spectral encoders. These structural changes adjust the total parameter count
+from 2.735M to 18.65M and FLOPs from 58.873G to 0.202T.
+3
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Table B.2. Model complexity and inference efficiency on RTX 4090. Time/VRAM/MPix/s are measured at ×4 with batch size 1
+and input size 512 × 512 (C = 191). We report the mean runtime over 50 iterations after 20 warm-up runs using each method’s
+validation forward entrypoint. AMP (FP16) is enabled when supported; otherwise FP32 is used. Peak VRAM is the maximum
+cuda.max memory allocated during inference. Throughput is computed as (HW/106)/(time in seconds).
+Method
+Params (M)↓
+FLOPs (G)↓
+Time (ms)↓
+Peak VRAM (GB)↓
+Throughput MPix/s↑
+DSPNet (Sun et al., 2023)
+6.056
+27.279
+38.7
+1.52
+6.8
+MIMO-SST (Fang et al., 2024)
+4.983
+6.164
+14.4
+1.22
+18.2
+DCINN (Wang et al., 2024a)
+2.417
+51.531
+860.9
+2.25
+0.3
+DCFormer (Wu et al., 2025)
+0.082
+0.579
+40.2
+1.00
+6.5
+PSTUN (Wang et al., 2025a)
+29.948
+102.400
+102.4
+1.58
+2.6
+LRTN (Liu et al., 2025)
+3.691
+8.396
+153.7
+3.32
+1.7
+Ours
+18.654
+206.848
+83.4
+2.46
+3.1
+Table B.3. Ablation on model scaling. Espe and Espa denote spatial and spectral encoder depths.
+(Espe, Espa) Params (M) FLOPs
+PSNR(↑)
+SAM(↓) ERGAS(↓)
+SSIM(↑)
+(1, 1)
+2.735
+58.873G 42.45±3.24 5.32±1.20 3.92±2.05 0.985±0.004
+(2, 2)
+9.213
+0.120T 44.15±3.12 3.94±1.05 2.88±1.50 0.988±0.003
+(4, 4)
+13.934
+0.161T 44.72±3.04 3.05±0.95 2.11±1.28 0.991±0.002
+(6, 6)
+18.654
+0.202T 45.96±4.69 2.55±1.00 1.72±1.13 0.994±0.005
+As explicitly shown in Tab. B.3, deploying deeper encoders consistently improves reconstruction accuracy across all
+metrics; for instance, the PSNR increases by over 3.5 dB from the smallest to the largest configuration. This clear trend
+indicates that larger models provide significantly stronger spatial–spectral representation capabilities, allowing them to
+better capture fine-grained features and fit the complex, high-dimensional distributions of hyperspectral data. Although
+this expansion naturally increases model size and computational cost, such scaling is expected and, as our results suggest,
+often necessary for data-driven fusion frameworks to achieve state-of-the-art performance when handling large-scale,
+heterogeneous hyperspectral signals.
+B.6. More Main Results
+To comprehensively evaluate the universality and robustness of our proposed SSA framework, we extend our experiments to
+five additional benchmarks: Harvard, PaviaU, Chikusei, Botswana, and WashingtonDC. These datasets encompass a wide
+variety of sensor characteristics, with spectral bands ranging from 31 to 191. As presented in Tabs. B.4 through B.8, our
+unified model consistently achieves state-of-the-art performance across these diverse scenarios. Remarkably, even though
+our universal model is trained jointly on heterogeneous datasets, it outperforms specialized approaches like LRTN (Liu
+et al., 2025) and PSTUN (Wang et al., 2025a) that are trained individually for each specific dataset. For instance, in the
+in-distribution setting (×4 scale) on the WashingtonDC dataset (Tab. B.8), our method surpasses the second-best approach
+by approximately 1.0 dB in PSNR. This result strongly validates that our Matryoshka Kernel design effectively mitigates
+the interference typically associated with multi-dataset training, allowing a single network to adapt to varying spectral
+distributions without architectural modification.
+We further corroborate these quantitative findings with comprehensive visual comparisons provided in Figs. B.1 through
+B.6. To explicitly demonstrate the scale generalization capability of our method, we structured the visualizations for the
+five additional datasets (Figs. B.3–B.6) to display the training scale (×4, top two rows) and the extreme unseen scale (×32,
+bottom two rows) side-by-side. For the CAVE and PaviaC datasets, we specifically showcase the challenging ×32 results
+in Fig. B.1. As observed, while most competitive methods maintain reasonable quality at the ×4 scale, their performance
+degrades significantly at ×32. Methods with fixed upsampling modules, such as DCFormer (Wu et al., 2025), completely
+fail to generate valid outputs at this unseen resolution (indicated by crossed-out boxes), and others exhibit severe blurring or
+grid-like artifacts. In contrast, leveraging the continuous modeling capability of our INR backbone, SSA maintains high
+reconstruction fidelity with predominantly dark blue error maps across all scales. Notably, in the Harvard dataset (Fig. B.2),
+our model successfully recovers legible text (e.g., “30th EDITION”) even at the ×32 scale, whereas other methods suffer
+from heavy distortions.
+4
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Table B.4. Quantitative comparison on the Harvard dataset across four scales. Values are mean ± std in a single cell.
+Metric
+Harvard Dataset
+DSPNet
+MIMO-SST
+DCINN
+DCFormer
+PSTUN
+LRTN
+Ours
+In-Dist.
+×4
+PSNR(↑)
+43.97 ± 5.99
+43.65 ± 6.85
+42.06 ± 4.55
+42.87 ± 5.30
+44.30 ± 4.59
+41.91 ± 5.33
+44.81 ± 5.21
+SAM(↓)
+2.70 ± 0.83
+2.98 ± 0.86
+2.96 ± 0.85
+3.19 ± 0.91
+3.59 ± 0.98
+4.58 ± 1.54
+2.73 ± 0.89
+ERGAS(↓)
+4.30 ± 2.29
+5.11 ± 2.08
+5.46 ± 0.90
+5.12 ± 2.46
+4.54 ± 1.80
+5.78 ± 1.38
+4.41 ± 2.63
+SSIM(↑)
+0.983 ± 0.001
+0.983 ± 0.007
+0.983 ± 0.003
+0.982 ± 0.009
+0.983 ± 0.008
+0.975 ± 0.008
+0.984 ± 0.010
+Out-of-Dist.
+×8
+PSNR(↑)
+42.25 ± 6.20
+38.62 ± 6.74
+40.61 ± 6.23
+42.37 ± 5.25
+41.79 ± 4.04
+41.33 ± 5.63
+42.73 ± 5.09
+SAM(↓)
+2.99 ± 0.90
+3.26 ± 0.98
+3.33 ± 0.90
+3.51 ± 0.93
+4.00 ± 0.99
+4.82 ± 1.63
+3.02 ± 0.92
+ERGAS(↓)
+5.19 ± 2.69
+6.68 ± 2.43
+5.69 ± 2.51
+5.30 ± 2.15
+5.62 ± 1.84
+5.98 ± 1.23
+4.92 ± 2.08
+SSIM(↑)
+0.976 ± 0.012
+0.944 ± 0.047
+0.974 ± 0.012
+0.980 ± 0.012
+0.977 ± 0.008
+0.972 ± 0.013
+0.978 ± 0.013
+×16
+PSNR(↑)
+37.31 ± 6.99
+34.36 ± 7.28
+35.94 ± 6.79
+–
+37.46 ± 5.23
+38.10 ± 6.48
+38.73 ± 6.00
+SAM(↓)
+3.60 ± 1.15
+4.01 ± 1.25
+3.95 ± 1.11
+–
+4.89 ± 1.24
+5.05 ± 1.56
+3.85 ± 1.00
+ERGAS(↓)
+7.53 ± 4.48
+10.74 ± 4.12
+8.90 ± 2.98
+–
+9.40 ± 5.05
+8.56 ± 4.39
+7.68 ± 5.21
+SSIM(↑)
+0.956 ± 0.031
+0.903 ± 0.069
+0.950 ± 0.024
+–
+0.951 ± 0.036
+0.952 ± 0.036
+0.960 ± 0.037
+×32
+PSNR(↑)
+36.73 ± 6.72
+31.39 ± 7.65
+31.78 ± 7.14
+–
+35.78 ± 4.84
+36.97 ± 6.37
+37.34 ± 6.49
+SAM(↓)
+4.28 ± 1.38
+5.63 ± 1.56
+4.99 ± 1.27
+–
+5.94 ± 1.81
+5.68 ± 1.91
+4.66 ± 1.57
+ERGAS(↓)
+9.21 ± 5.44
+13.41 ± 5.37
+12.46 ± 4.68
+–
+11.57 ± 5.72
+9.50 ± 4.14
+8.70 ± 4.79
+SSIM(↑)
+0.942 ± 0.044
+0.863 ± 0.090
+0.902 ± 0.053
+–
+0.941 ± 0.033
+0.945 ± 0.038
+0.949 ± 0.045
+(b) Ours
+(a) GT
+(d)PSTUN
+(e) DCFormer
+(f) DCINN
+(g) MIMO-SST
+(h) DSPNet
+(c) LRTN
+0.00
+0.30
+0.06
+0.12
+0.18
+0.24
+0.00
+0.60
+0.12
+0.24
+0.36
+0.48
+Figure B.1. Qualitative comparison on the CAVE (top rows) and PaviaC (bottom rows) datasets at the unseen ×32 scale. The red boxes
+highlight close-up details, and the even rows display the corresponding error maps. Our SSA model exhibits superior detail recovery and
+minimal reconstruction error compared to SOTA methods, which suffer from significant blurriness at this extreme scale.
+5
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Table B.5. Quantitative comparison on the PaviaU dataset across four scales. Values are mean ± std.
+Metric
+PaviaU Dataset
+DSPNet
+MIMO-SST
+DCINN
+DCFormer
+PSTUN
+LRTN
+Ours
+In-Dist.
+×4
+PSNR(↑)
+37.51 ± 0.15
+40.28 ± 0.15
+40.31 ± 0.42
+39.05 ± 0.25
+39.46 ± 0.17
+40.09 ± 0.63
+40.44 ± 0.15
+SAM(↓)
+2.27 ± 0.12
+3.46 ± 0.11
+1.96 ± 0.07
+2.60 ± 0.17
+2.54 ± 0.02
+2.05 ± 0.14
+1.95 ± 0.07
+ERGAS(↓)
+1.99 ± 0.07
+1.85 ± 0.11
+1.53 ± 0.02
+1.77 ± 0.07
+1.58 ± 0.02
+1.55 ± 0.00
+1.56 ± 0.06
+SSIM(↑)
+0.981 ± 0.001
+0.977 ± 0.002
+0.988 ± 0.001
+0.977 ± 0.000
+0.981 ± 0.000
+0.987 ± 0.001
+0.988 ± 0.001
+Out-of-Dist.
+×8
+PSNR(↑)
+35.76 ± 0.50
+31.43 ± 0.55
+28.91 ± 0.44
+30.56 ± 1.74
+36.01 ± 0.26
+36.18 ± 0.03
+36.68 ± 0.26
+SAM(↓)
+5.57 ± 0.06
+5.83 ± 0.17
+5.36 ± 0.26
+5.39 ± 0.24
+4.79 ± 0.27
+5.16 ± 0.20
+4.97 ± 0.30
+ERGAS(↓)
+4.64 ± 0.01
+4.47 ± 0.12
+4.89 ± 0.19
+4.06 ± 0.56
+3.50 ± 0.15
+4.01 ± 0.14
+3.03 ± 0.06
+SSIM(↑)
+0.917 ± 0.001
+0.895 ± 0.001
+0.884 ± 0.003
+0.927 ± 0.004
+0.959 ± 0.002
+0.940 ± 0.001
+0.960 ± 0.002
+×16
+PSNR(↑)
+32.76 ± 0.79
+27.29 ± 1.12
+26.47 ± 0.56
+–
+33.66 ± 0.49
+33.26 ± 0.00
+35.48 ± 0.16
+SAM(↓)
+7.63 ± 0.31
+9.18 ± 0.16
+8.37 ± 0.34
+–
+6.35 ± 0.14
+6.38 ± 0.23
+6.26 ± 0.34
+ERGAS(↓)
+5.72 ± 0.47
+7.01 ± 0.78
+6.51 ± 0.25
+–
+5.62 ± 0.01
+5.03 ± 0.15
+4.40 ± 0.06
+SSIM(↑)
+0.873 ± 0.004
+0.844 ± 0.005
+0.833 ± 0.005
+–
+0.840 ± 0.003
+0.879 ± 0.003
+0.912 ± 0.000
+×32
+PSNR(↑)
+30.50 ± 1.66
+24.39 ± 1.25
+24.25 ± 0.21
+–
+31.49 ± 0.64
+30.44 ± 0.18
+34.35 ± 0.14
+SAM(↓)
+10.50 ± 0.16
+12.63 ± 0.87
+11.47 ± 0.49
+–
+9.17 ± 0.08
+8.81 ± 0.06
+8.43 ± 0.04
+ERGAS(↓)
+7.90 ± 1.16
+9.98 ± 1.69
+8.38 ± 0.10
+–
+6.60 ± 0.21
+6.02 ± 0.47
+5.74 ± 0.13
+SSIM(↑)
+0.849 ± 0.014
+0.802 ± 0.018
+0.809 ± 0.003
+–
+0.829 ± 0.005
+0.872 ± 0.006
+0.898 ± 0.000
+Table B.6. Quantitative comparison on the Chikusei dataset across four scales. Values are mean ± std.
+Metric
+Chikusei Dataset
+DSPNet
+MIMO-SST
+DCINN
+DCFormer
+PSTUN
+LRTN
+Ours
+In-Dist.
+×4
+PSNR(↑)
+37.21 ± 3.89
+36.54 ± 4.12
+38.05 ± 3.76
+36.92 ± 3.55
+38.62 ± 4.26
+37.88 ± 3.91
+39.35 ± 4.59
+SAM(↓)
+2.87 ± 0.62
+3.05 ± 0.58
+2.53 ± 0.47
+2.91 ± 0.54
+2.22 ± 0.50
+2.18 ± 0.49
+2.12 ± 0.46
+ERGAS(↓)
+5.28 ± 1.47
+5.63 ± 1.52
+4.89 ± 1.39
+5.35 ± 1.41
+4.54 ± 1.35
+4.97 ± 1.43
+4.50 ± 1.42
+SSIM(↑)
+0.951 ± 0.018
+0.947 ± 0.021
+0.958 ± 0.016
+0.949 ± 0.019
+0.965 ± 0.014
+0.976 ± 0.015
+0.972 ± 0.016
+Out-of-Dist.
+×8
+PSNR(↑)
+31.05 ± 2.67
+30.42 ± 2.79
+31.58 ± 2.53
+32.90 ± 2.81
+30.87 ± 2.48
+31.22 ± 2.64
+33.76 ± 1.92
+SAM(↓)
+4.68 ± 0.91
+4.92 ± 0.87
+3.85 ± 0.83
+3.87 ± 0.84
+4.75 ± 0.89
+3.21 ± 0.86
+3.25 ± 0.78
+ERGAS(↓)
+7.65 ± 1.02
+7.98 ± 0.97
+7.32 ± 0.99
+6.89 ± 0.94
+7.72 ± 1.01
+7.41 ± 0.96
+6.23 ± 0.51
+SSIM(↑)
+0.862 ± 0.024
+0.855 ± 0.027
+0.871 ± 0.023
+0.892 ± 0.022
+0.888 ± 0.021
+0.867 ± 0.024
+0.905 ± 0.015
+×16
+PSNR(↑)
+28.14 ± 2.19
+27.56 ± 2.33
+28.62 ± 2.08
+–
+29.29 ± 2.31
+28.45 ± 2.15
+30.16 ± 2.94
+SAM(↓)
+7.24 ± 1.38
+7.59 ± 1.42
+6.93 ± 1.31
+–
+6.56 ± 1.25
+7.08 ± 1.34
+5.42 ± 1.09
+ERGAS(↓)
+10.87 ± 0.89
+11.23 ± 0.95
+10.54 ± 0.92
+–
+10.09 ± 0.94
+10.62 ± 0.91
+8.70 ± 1.07
+SSIM(↑)
+0.795 ± 0.034
+0.788 ± 0.037
+0.802 ± 0.032
+–
+0.818 ± 0.031
+0.836 ± 0.031
+0.832 ± 0.033
+×32
+PSNR(↑)
+26.37 ± 1.05
+25.89 ± 1.18
+26.74 ± 1.02
+–
+27.49 ± 0.99
+26.58 ± 1.07
+28.46 ± 1.61
+SAM(↓)
+9.15 ± 1.62
+9.53 ± 1.71
+8.87 ± 1.58
+–
+8.49 ± 1.55
+8.96 ± 1.60
+6.64 ± 1.23
+ERGAS(↓)
+12.68 ± 0.81
+13.05 ± 0.87
+12.34 ± 0.79
+–
+11.90 ± 0.75
+12.47 ± 0.82
+9.92 ± 0.25
+SSIM(↑)
+0.761 ± 0.011
+0.753 ± 0.014
+0.768 ± 0.010
+–
+0.783 ± 0.007
+0.765 ± 0.012
+0.803 ± 0.018
+6
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+Table B.7. Quantitative comparison on the Botswana dataset across four scales. Values are mean ± std.
+Metric
+Botswana Dataset
+DSPNet
+MIMO-SST
+DCINN
+DCFormer
+PSTUN
+LRTN
+Ours
+In-Dist.
+×4
+PSNR(↑)
+42.60 ± 2.32
+42.97 ± 3.98
+45.16 ± 3.42
+41.35 ± 2.81
+44.94 ± 3.98
+45.23 ± 4.47
+45.31 ± 4.30
+SAM(↓)
+1.42 ± 0.21
+1.28 ± 0.19
+0.99 ± 0.11
+1.47 ± 0.26
+1.01 ± 0.11
+0.97 ± 0.10
+0.80 ± 0.04
+ERGAS(↓)
+2.01 ± 0.51
+1.91 ± 0.62
+1.61 ± 0.49
+2.14 ± 0.54
+1.75 ± 0.58
+1.72 ± 0.60
+1.55 ± 0.66
+SSIM(↑)
+0.975 ± 0.005
+0.980 ± 0.004
+0.990 ± 0.003
+0.972 ± 0.005
+0.989 ± 0.004
+0.989 ± 0.004
+0.992 ± 0.004
+Out-of-Dist.
+×8
+PSNR(↑)
+38.85 ± 2.38
+36.60 ± 2.49
+36.96 ± 2.44
+39.37 ± 1.72
+37.21 ± 2.59
+39.55 ± 2.51
+39.89 ± 2.36
+SAM(↓)
+2.15 ± 0.61
+2.67 ± 1.10
+2.45 ± 0.93
+1.96 ± 0.50
+2.52 ± 0.97
+2.09 ± 0.82
+2.13 ± 0.83
+ERGAS(↓)
+2.87 ± 0.52
+3.37 ± 0.87
+2.95 ± 0.67
+2.60 ± 0.43
+3.12 ± 0.58
+2.47 ± 0.52
+2.49 ± 0.54
+SSIM(↑)
+0.956 ± 0.004
+0.926 ± 0.020
+0.940 ± 0.012
+0.960 ± 0.003
+0.946 ± 0.013
+0.964 ± 0.009
+0.965 ± 0.008
+×16
+PSNR(↑)
+36.52 ± 2.39
+34.15 ± 2.76
+33.70 ± 2.28
+–
+34.30 ± 2.47
+36.67 ± 2.26
+36.85 ± 2.24
+SAM(↓)
+2.90 ± 1.39
+3.51 ± 1.67
+3.26 ± 1.52
+–
+3.40 ± 1.55
+2.89 ± 1.07
+2.78 ± 1.27
+ERGAS(↓)
+3.71 ± 0.81
+4.34 ± 1.41
+4.02 ± 1.00
+–
+4.25 ± 0.93
+3.21 ± 0.73
+3.28 ± 0.83
+SSIM(↑)
+0.945 ± 0.009
+0.906 ± 0.035
+0.922 ± 0.024
+–
+0.928 ± 0.023
+0.950 ± 0.017
+0.951 ± 0.017
+×32
+PSNR(↑)
+32.60 ± 2.09
+32.43 ± 2.76
+32.07 ± 2.27
+–
+31.46 ± 2.44
+34.72 ± 2.15
+35.35 ± 2.22
+SAM(↓)
+4.23 ± 2.08
+4.30 ± 2.15
+4.09 ± 2.07
+–
+4.34 ± 1.68
+3.79 ± 1.67
+3.64 ± 1.89
+ERGAS(↓)
+4.89 ± 1.30
+5.07 ± 1.76
+4.75 ± 1.42
+–
+4.91 ± 1.16
+4.23 ± 0.94
+3.97 ± 1.22
+SSIM(↑)
+0.918 ± 0.031
+0.896 ± 0.044
+0.909 ± 0.034
+–
+0.938 ± 0.025
+0.939 ± 0.014
+0.942 ± 0.024
+Table B.8. Quantitative comparison on the WashingtonDC dataset across four scales. Values are mean ± std.
+Metric
+WashingtonDC Dataset
+DSPNet
+MIMO-SST
+DCINN
+DCFormer
+PSTUN
+LRTN
+Ours
+In-Dist.
+×4
+PSNR(↑)
+47.64 ± 2.23
+47.68 ± 2.39
+47.55 ± 1.78
+47.18 ± 1.66
+48.20 ± 1.61
+47.95 ± 3.07
+48.91 ± 3.46
+SAM(↓)
+1.01 ± 0.12
+1.04 ± 0.16
+1.04 ± 0.08
+1.25 ± 0.20
+1.06 ± 0.16
+0.86 ± 0.13
+0.76 ± 0.09
+ERGAS(↓)
+2.15 ± 0.37
+2.15 ± 0.44
+2.24 ± 0.21
+2.41 ± 0.31
+1.99 ± 0.28
+2.48 ± 0.50
+1.92 ± 0.58
+SSIM(↑)
+0.995 ± 0.001
+0.994 ± 0.002
+0.994 ± 0.000
+0.994 ± 0.000
+0.996 ± 0.001
+0.994 ± 0.001
+0.996 ± 0.002
+Out-of-Dist.
+×8
+PSNR(↑)
+38.65 ± 1.59
+37.36 ± 1.48
+40.36 ± 2.18
+44.74 ± 1.36
+42.56 ± 2.60
+41.46 ± 2.60
+45.08 ± 1.42
+SAM(↓)
+4.46 ± 0.60
+5.29 ± 0.82
+3.24 ± 0.51
+1.99 ± 0.23
+2.03 ± 0.37
+1.86 ± 0.25
+1.80 ± 0.23
+ERGAS(↓)
+5.49 ± 0.75
+6.37 ± 0.72
+4.86 ± 1.01
+3.28 ± 0.36
+3.78 ± 0.73
+4.44 ± 0.96
+3.32 ± 0.45
+SSIM(↑)
+0.957 ± 0.007
+0.938 ± 0.009
+0.974 ± 0.008
+0.989 ± 0.001
+0.983 ± 0.004
+0.981 ± 0.005
+0.990 ± 0.000
+×16
+PSNR(↑)
+33.73 ± 1.60
+32.99 ± 1.70
+35.07 ± 2.12
+–
+39.17 ± 4.13
+37.32 ± 2.24
+39.27 ± 2.49
+SAM(↓)
+7.96 ± 0.78
+8.69 ± 0.98
+6.22 ± 0.74
+–
+3.02 ± 0.57
+3.04 ± 0.42
+2.97 ± 0.74
+ERGAS(↓)
+8.94 ± 0.85
+9.43 ± 1.06
+8.12 ± 1.09
+–
+5.68 ± 1.68
+6.44 ± 1.03
+5.35 ± 1.00
+SSIM(↑)
+0.912 ± 0.012
+0.896 ± 0.018
+0.939 ± 0.014
+–
+0.968 ± 0.025
+0.961 ± 0.010
+0.969 ± 0.007
+×32
+PSNR(↑)
+31.96 ± 1.17
+31.57 ± 1.42
+32.45 ± 1.70
+–
+36.54 ± 4.39
+34.99 ± 1.95
+37.00 ± 2.02
+SAM(↓)
+10.35 ± 1.07
+11.13 ± 1.28
+8.74 ± 0.96
+–
+3.99 ± 1.17
+3.94 ± 0.50
+3.54 ± 0.54
+ERGAS(↓)
+11.66 ± 0.97
+11.61 ± 1.05
+10.99 ± 1.11
+–
+7.13 ± 1.89
+8.31 ± 1.18
+6.95 ± 1.31
+SSIM(↑)
+0.887 ± 0.009
+0.880 ± 0.010
+0.910 ± 0.012
+–
+0.951 ± 0.033
+0.945 ± 0.011
+0.958 ± 0.009
+7
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+(b) Ours
+(a) GT
+(d)PSTUN
+(e) DCFormer
+(f) DCINN
+(g) MIMO-SST
+(h) DSPNet
+(c) LRTN
+0.00
+0.40
+0.08
+0.16
+0.24
+0.32
+0.00
+0.15
+0.03
+0.06
+0.09
+0.12
+Figure B.2. Visual comparison on the Harvard dataset. The top two rows correspond to the in-distribution ×4 scale, and the bottom two
+rows correspond to the unseen ×32 scale. Our method preserves sharp textual details (see zoom-in) even at large magnification factors.
+(b) Ours
+(a) GT
+(d)PSTUN
+(e) DCFormer
+(f) DCINN
+(g) MIMO-SST
+(h) DSPNet
+(c) LRTN
+0.00
+7.50
+1.50
+3.00
+4.50
+6.00
+0.00
+6.50
+1.30
+2.60
+3.90
+5.20
+Figure B.3. Visual comparison on the PaviaU dataset across varying scales. The top two rows show the results at the training scale (×4),
+while the bottom two rows display the out-of-distribution scale (×32). For each scale, we present the fused image and its corresponding
+error map. Note that DCFormer (Wu et al., 2025) fails to support the arbitrary ×32 scale (indicated by crossed boxes).
+8
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+(b) Ours
+(a) GT
+(d)PSTUN
+(e) DCFormer
+(f) DCINN
+(g) MIMO-SST
+(h) DSPNet
+(c) LRTN
+0.000
+1.500
+0.300
+0.600
+0.900
+1.200
+0.000
+0.200
+0.040
+0.080
+0.120
+0.160
+Figure B.4. Visual comparison on the Chikusei dataset. Top two rows: ×4 scale; Bottom two rows: ×32 scale. The error maps (blue
+indicates low error) demonstrate that our model generalizes well to large-scale remote sensing scenes with varying spatial resolutions.
+(b) Ours
+(a) GT
+(d)PSTUN
+(e) DCFormer
+(f) DCINN
+(g) MIMO-SST
+(h) DSPNet
+(c) LRTN
+0.000
+0.040
+0.008
+0.016
+0.024
+0.032
+0.000
+0.200
+0.040
+0.080
+0.120
+0.160
+Figure B.5. Visual comparison on the Botswana dataset. Top two rows: ×4 scale; Bottom two rows: ×32 scale. Our approach maintains
+spectral and spatial consistency better than comparison methods, which often show high-energy residuals (red/yellow) at large upscaling
+factors.
+9
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Hyperspectral Image Fusion with Spectral-Band and Fusion-Scale Agnosticism
+(b) Ours
+(a) GT
+(d)PSTUN
+(e) DCFormer
+(f) DCINN
+(g) MIMO-SST
+(h) DSPNet
+(c) LRTN
+0.000
+0.040
+0.008
+0.016
+0.024
+0.032
+0.000
+0.650
+0.130
+0.260
+0.390
+0.420
+Figure B.6. Visual comparison on the WashingtonDC dataset. Top two rows: ×4 scale; Bottom two rows: ×32 scale. Despite the high
+band count (191 bands), our unified model robustly reconstructs spatial details across different scaling factors without model retraining.
+10
