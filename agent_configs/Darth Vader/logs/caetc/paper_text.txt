@@ -1,0 +1,4404 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+CAETC: Causal Autoencoding and Treatment Conditioning
+for Counterfactual Estimation over Time
+Anonymous Authors1
+Abstract
+Counterfactual estimation over time is impor-
+tant in various applications, such as personalized
+medicine. However, time-dependent confound-
+ing bias in observational data still poses a sig-
+nificant challenge in achieving accurate and ef-
+ficient estimation. We introduce causal autoen-
+coding and treatment conditioning (CAETC), a
+novel method for this problem. Built on adver-
+sarial representation learning, our method lever-
+ages an autoencoding architecture to learn a par-
+tially invertible and treatment-invariant represen-
+tation, where the outcome prediction task is cast
+as applying a treatment-specific conditioning on
+the representation. Our design is independent of
+the underlying sequence model and can be ap-
+plied to existing architectures such as long short-
+term memories (LSTMs) or temporal convolu-
+tion networks (TCNs). We conduct extensive ex-
+periments on synthetic, semi-synthetic, and real-
+world data to demonstrate that CAETC yields
+significant improvement in counterfactual esti-
+mation over existing methods.
+1. Introduction
+Personalized medicine requires knowledge about individu-
+alized responses to potential treatments for effective treat-
+ment planning (Kent et al., 2018; Feuerriegel et al., 2024).
+While randomized controlled trials (RCTs) are the gold
+standard for treatment effect estimation, RCTs in practice
+are often costly and difficult to implement. Digitization en-
+ables more healthcare data to be recorded, especially via
+electronic health records (EHRs). Combining large data
+volumes with appropriate modeling can enable accurate es-
+timation of counterfactual outcomes and treatment effects,
+forming the basis for individualized decision making in
+1Anonymous Institution, Anonymous City, Anonymous Re-
+gion, Anonymous Country. Correspondence to: Anonymous Au-
+thor <anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+health care (Bareinboim & Pearl, 2016) and other domains.
+Modern
+counterfactual
+estimation
+methods
+integrate
+frameworks from causal inference and deep learning for
+counterfactual estimation over time (Lim et al., 2018; Bica
+et al., 2019; Melnychuk et al., 2022; Bouchattaoui et al.,
+2024; Wang et al., 2024). However, counterfactual estima-
+tion over time is difficult due to time-dependent confound-
+ing bias, where covariates that affect treatment choices
+evolve dynamically and are themselves influenced by prior
+treatments (Robins et al., 2000). This results in system-
+atic differences in the distribution of confounders between
+treatment regimes, violating key identification assumptions
+and complicating the estimation of unbiased causal effects.
+Conventional time-series models lack the capacity to adjust
+for this bias, relying on advanced methods to disentangle
+confounders from treatment assignment.
+Learning to balance or disentangle time-dependent con-
+founders is crucial for unbiased counterfactual estimation
+over time. Modern methods leverage sequence architec-
+tures like recurrent neural networks, transformers, or state-
+space models, with de-confounding mechanisms, like in-
+verse probability of treatment weighting or adversarial bal-
+ancing, to mitigate time-varying confounding bias, en-
+abling better long-term treatment effect prediction in com-
+plex, sequential decision-making settings (Lim et al., 2018;
+Bica et al., 2019; Melnychuk et al., 2022; Bouchattaoui
+et al., 2024; Wang et al., 2024). For instance, recurrent
+marginal structure network (RMSN) (Lim et al., 2018) uses
+an LSTM architecture with inverse probability of treatment
+weighting (IPTW). Alternatively, counterfactual recurrent
+network (CRN) (Bica et al., 2019) uses LSTM architecture
+with a gradient reversal layer, whereas causal transformer
+(CT) (Melnychuk et al., 2022) has a transformer architec-
+ture with domain confusion loss to learn explicit treatment-
+invariant representation.
+Despite these remarkable advances, several key limitations
+persist.
+First, existing methods (CRN, CT) suffer from
+the loss of covariate information due to adversarial training
+(Huang et al., 2024). Achieving treatment invariance with
+an expressive, invertible representation that encodes suffi-
+cient information on history for identification of causal ef-
+fects remains a challenge. Consequently, models risk learn-
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Causal Autoencoding and Treatment Conditioning
+ing shortcuts that limit their ability to recover individual-
+level causal responses or suffer from loss of heterogene-
+ity (Melnychuk et al., 2023). More recent methods, such
+as causal contrastive predictive coding (CCPC) (Bouchat-
+taoui et al., 2024), tackle the problem implicitly by us-
+ing the InfoMax principle to encourage representation in-
+vertibility. Conversely, Mamba-CDSP (Wang et al., 2024)
+uses an architecture-specific loss to decorrelate history with
+planned treatment to circumvent adversarial training. Sec-
+ond, existing methods put little emphasis on modeling the
+interaction between the planned treatment and the balanced
+representation to decode future outcomes. While the rep-
+resentation balancing stage yields a theoretically valid rep-
+resentation, the interaction between the representation and
+planned treatment directly affects the future outcome pre-
+diction (see Fig. 2A). By making this interaction explicit,
+we intuitively and simultaneously encourage representation
+invertibility and predict future outcomes without excessive
+architecture changes or complex training procedures.
+Inspired by these recent methods and their constraints, we
+present an architecture-agnostic method called causal au-
+toencoding and treatment conditioning (CAETC) for coun-
+terfactual estimation over time. Our methodological con-
+tributions are the following:
+• We design a model-agnostic method for counterfac-
+tual estimation over time that encourages a partially
+invertible representation via autoencoding and pre-
+dicts future outcomes via treatment conditioning. We
+further encourage the conditioning layer to learn a
+treatment-specific transformation to improve counter-
+factual estimation performance.
+We apply the pro-
+posed design on long-short term memory (LSTM) and
+temporal convolution network (TCN).
+• We propose an entropy maximization adversarial
+game that yields theoretically balanced representation
+across all treatment regimes. The adversarial game
+is equivalent to minimizing a generalized Jensen-
+Shannon divergence between treatment-conditional
+representation distributions. We further demonstrate
+that under certain assumptions and distributional con-
+ditions, the outcome estimation error is bounded by
+the aforementioned Jensen-Shannon divergence term.
+• We empirically validate CAETC on synthetic, semi-
+synthetic, and real-world datasets to demonstrate that
+our method achieves strong improvement over exist-
+ing counterfactual estimation baselines.
+2. Related Works
+Counterfactual estimation has received great attention in
+both static and temporal settings.
+Here, we describe prior methods in the temporal domain.
+2.1. Counterfactual estimation over time
+Methods that control for time-dependent confounding were
+originally developed in epidemiology for longitudinal stud-
+ies, such as the structural nested model (SNM) (Robins,
+1994) and marginal structural model (MSM) (Robins et al.,
+2000).
+However, these methods have traditionally been
+implemented using simple parametric estimators with lim-
+ited capacity to deal with complex, high-dimensional data.
+RMSN improves over MSM by incorporating LSTM to
+handle nonlinearities in the data. However, RMSN still re-
+lies on IPTW and suffers from the same problems, such
+as high variance.
+Alternatively, G-Net (Li et al., 2021)
+adapts g-computation (Robins, 1986; 1987) to sequence
+model. A class of recent methods, such as CRN and CT
+(Bica et al., 2019; Melnychuk et al., 2022), uses domain
+adversarial training to learn a treatment-invariant represen-
+tation, removing the systematic differences between treat-
+ment regimes. Further progress has been made toward dif-
+ferent approaches to handle time-dependent confounding,
+such as adapting ODE discovery to treatment effect esti-
+mation (Kacprzyk et al., 2023).
+2.2. Learning treatment-invariant representation
+Recent approaches adopt adversarial treatment-invariant
+representation learning (Bica et al., 2019; Melnychuk et al.,
+2022; Bouchattaoui et al., 2024) as a foundational building
+block to balance between treatment groups. More specifi-
+cally, CRN (Bica et al., 2019) uses a gradient reversal layer
+(GRL) (Ganin et al., 2016) between an LSTM representa-
+tion network and a treatment balancing head. The treatment
+balancing head is optimized to predict the treatment do-
+main from the representation, whereas the GRL encourages
+a treatment-invariant representation, forming an adversarial
+game. Similarly, CT (Melnychuk et al., 2022) replaces the
+LSTM backbone with a combination of three transformer
+sub-networks to capture long-range dependencies and pro-
+poses an adversarial game based on the domain confusion
+loss. However, an empirical study by Huang et al. (2024)
+demonstrates that adversarial training results in a signifi-
+cant loss of covariate information, which affects the out-
+come prediction performance of CRN and CT. Represen-
+tation invertibility is used as a theoretical tool to ensure a
+valid representation (Shalit et al., 2017; Johansson et al.,
+2022; Melnychuk et al., 2023), which can help improve
+counterfactual estimation performance. CCPC (Bouchat-
+taoui et al., 2024) implicitly encourages reconstructable
+representation by maximizing mutual information between
+the input and representation following the InfoMax princi-
+ple. Alternatively, Mamba-CDSP (Wang et al., 2024) pro-
+poses an architecture-specific decorrelation loss to avoid
+the over-balancing problem of adversarial training. How-
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Causal Autoencoding and Treatment Conditioning
+ever, instead of matching the treatment conditional distri-
+bution, Mamba-CDSP is only equivalent to first-order mo-
+ment matching of treatment regimes.
+3. Problem Formulation
+3.1. Outcome forecasting
+...
+...
+Figure 1. Causal graph for time-dependent confounding over Ht.
+Our method is designed in the context of the potential out-
+come framework (Rubin, 2005). Further details on assump-
+tions for causal identification are in Section A. Consider a
+longitudinal dataset D =
+n
+{Ai,t, Yi,t, Xi,t}T
+t=1 , Vi
+oN
+i=1
+of N units and T time steps with categorical treatments
+Ai,t, vector of continuous outcomes of interest Yi,t, vec-
+tor of continuous time-varying covariates Xi,t, and vector
+of static covariates Vi. Note that Yi,t and Xi,t are dis-
+joint covariates. Let Zi,t = [Xi,t, Yi,t] be the vector of
+all considered time-varying covariates. Since Xi,t may not
+be present for every dataset D, Zi,t is simply Yi,t in that
+case. The history of a unit i up to time T0 is defined as
+Hi,T0 =
+n
+{Ai,t, Zi,t}T0
+t=1, Vi
+o
+. The treatment Ai,t affects
+the time-varying covariates Zi,t. 1 For simplicity, we omit
+the unit index i in the remainder of this article.
+Consider the discrete treatment At ∈{a(1), ..., a(K)} with
+K possible values and denote the potential outcome under
+treatment a(k) as Yt[a(k)]. Let the sequence of treatments
+from time t + 1 to time t + τ as At+1:t+τ. The task of
+interest is to estimate or forecast the outcome of the next τ
+time steps (prediction horizons) given the history up to time
+T0 and the non-random sequence of treatment aT0+1:T0+τ:
+E[YT0+τ[aT0+1:T0+τ] | HT0].
+(1)
+Practically, using a neural network, the history Ht can be
+encoded into a latent space by a representation network Φ
+before being decoded into estimated outcomes by an out-
+come head FY , similar to prior works (Shalit et al., 2017;
+Bica et al., 2019; Melnychuk et al., 2022; Bouchattaoui
+1In several works, the treatment Ai,t−1 is denoted to affect the
+covariates Zi,t. We depart from this notation to ensure the history
+Hi,t has the same number of time steps for both the treatment
+A and covariates Z. This change helps simplify the notation in
+several places while also easing implementation.
+et al., 2024). Using the autoregressive decoding strategy,
+the estimation quantity can be expressed as:
+F Y (Φ(Ht), At+1) ≈E[Yt+1 | Φ(Ht), At+1].
+(2)
+The existence of backdoor paths from static covariates V
+and current time-varying covariates Zt to future treatment
+At+1, and the fact that current treatment At also affects cur-
+rent time-varying covariates Zt creates the time-dependent
+confounding. The confounding paths are shown in Fig. 1
+in red. Under time-dependent confounding, the estimation
+of future outcomes is biased (Robins & Hern´an, 2008).
+4. Method
+4.1. Architecture overview
+Similarly to prior works, we parametrize the representa-
+tion layer Φ by a sequential network such as LSTM (CRN)
+or transformer (CT). After the representation layer Φ, we
+make an intuitive but important distinction in the architec-
+ture. In prior works, the learned representation is then for-
+warded to the respective treatment balancer F B, or is con-
+catenated with the next planned treatment At+1 to decode
+the next outcome Yt+1, as in Fig. 2A. In this case, if Φ(Ht)
+is high-dimensional, then the influence of At+1 is signifi-
+cantly reduced (Shalit et al., 2017).
+Instead of the treatment At+1 being concatenated with
+Φ(Ht) at the outcome decoder F Y , we consider the treat-
+ment as conditioning information that transforms the repre-
+sentation at the F C layer, as in Fig. 2D. By explicitly mod-
+eling the treatment as conditioning information, more com-
+plex F C can be designed to modulate the representation
+while also enabling more flexible interactions that serve as
+building blocks for the rest of our method. Details on F C
+are deferred to Section 4.3.
+4.2. Input autoencoding
+We start with a base autoencoding network to satisfy
+the representation invertibility as in Fig. 2B. At time
+step T0, we encourage the decoding of current covariates
+{AT0, ZT0}.
+Let F H be the time step decoding head,
+which includes three sub-heads: the treatment decoding
+head F A, the outcome of interest decoding head F Y , and
+the time-varying covariate decoding head F X if Xt exists
+in the dataset. Note that while we encourage the decod-
+ing of the current time step T0 for simplicity and efficiency,
+more decoding heads F H can be added to decode the last
+ν time steps. However, existing architectures for sequence
+have built-in mechanisms to selectively remove irrelevant
+information from the history, i.e., the forget gate in LSTM
+or the attention in transformer. Therefore, forcing decod-
+ing of many past inputs requires the network to remember
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Causal Autoencoding and Treatment Conditioning
+...
+...
+...
+...
+A. Prior works
+B. Partial autoencoding
+C. Treatment-invariant representation
+D. Next outcome estimation via treatment conditioning
+E. Treatment-specific conditioning
+...
+...
+...
+...
+Figure 2. A. Prior works concatenate the representation Φ(Ht) with treatment At+1 to predict next outcomes at F Y . We make a
+distinction to model treatment At+1 as a transformation on the representation before being forwarded to respective heads. B. The
+history Ht is encoded into representation Φ(Ht) before being forwarded to respective heads for decoding. The treatment, outcome, and
+time-varying covariates estimators F A, F Y and F X reconstruct At, Yt and Xt. C. Simultaneously, balancing is applied to Φ(Ht) by
+maximizing the entropy of the treatment balancer F B. D. At+1-specific transformation is applied to the Φ(Ht) before being decoded
+to the next outcomes by F Y . E. The conditioning layer F C is encouraged to learn treatment-specific transformations of Φ(Ht).
+those steps, which impairs the powerful learning ability of
+these mechanisms and can negatively impact performance
+(MacKay et al., 2018).
+We define the reconstruction loss for categorical treatments
+At as the cross-entropy, and for continuous outcomes of
+interest Yt and continuous time-varying covariates X as
+the mean squared error. For Ht, At, Yt, Xt, ∼D, we have:
+LRA
+t
+(θF A, θΦ) = −
+K
+X
+j=1
+I[At=a(j)] log F A
+j (Φ(Ht))
+(3)
+LRY
+t
+(θF Y , θΦ) =
+F Y (Φ(Ht)) −Yt
+
+2
+2
+(4)
+LRX
+t
+(θF X , θΦ) =
+F X(Φ(Ht)) −Xt
+
+2
+2
+(5)
+where IC is the indicator function for condition C.
+θF A, θF Y , θF X, θΦ are the parameters of F A, F Y , F X,
+and Φ, accordingly.
+The total reconstruction loss is then simply a combination
+of the above objectives with hyperparameters δA and δX.
+If Xt is not present in the dataset, then δX = 0.
+LR
+t (θF A, θF Y , θF X , θΦ) = LRY
+t
+(θF Y , θΦ)
++ δALRA
+t
+(θF A, θΦ)
++ δXLRX
+t
+(θF X , θΦ).
+(6)
+Prior empirical work by Huang et al. (2024) demonstrates
+that adversarial training (introduced in Section 4.4) is un-
+stable and may cause the model to lose covariate informa-
+tion. Hence, the model risks violating representation in-
+vertibility (Shalit et al., 2017; Zhang et al., 2020; Johans-
+son et al., 2022) and suffers loss of heterogeneity (Melny-
+chuk et al., 2023). Despite being an important property to
+ensure causal identification, representation invertibility, in
+the context of longitudinal data, has rarely been enforced in
+practice (CRN - Bica et al. (2019); CT - Melnychuk et al.
+(2022)) or only been enforced implicitly (CCPC - Bouchat-
+taoui et al. (2024)). Our design starts from explicit partial
+invertibility as a foundational building block instead.
+4.3. Outcomes prediction via treatment conditioning
+The task of interest is predicting the outcome for the next
+time step, which can be cast as applying a treatment-
+specific transformation on the representation Φ(Ht) that
+corresponds to the future outcomes.
+This conditioning
+mechanism may be considered as an inductive bias, i.e, the
+changes in Zt+1 are caused by applying At+1.
+More specifically, we apply an element-wise affine trans-
+formation to the representation, also known as the feature-
+wise linear modulation (FiLM) (Perez et al., 2018). For
+each treatment At+1 = a(i), FiLM learns a scaling vector
+ξ(i) = Rξ(a(i)) and bias vector β(i) = Rβ(a(i)), where
+Rξ, Rβ are the generators that produce the corresponding
+vectors. The conditioning layer F C can then be defined as:
+F C(Φ(Ht), a(i)) = Φ(Ht) ⊙ξ(i) ⊕β(i)
+(7)
+where ⊙and ⊕are element-wise multiplication and addi-
+tion, respectively. Implementation-wise, Rξ and Rβ can
+be parameterized by a bag of embeddings for categorical
+treatment or a linear projection for continuous treatment.
+Reusing the outcome regressor F Y , we define the next out-
+come prediction loss for Ht, At+1, Yt+1 ∼D as:
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Causal Autoencoding and Treatment Conditioning
+LY
+t (θF A, θF C, θΦ) =
+F Y (F C(Φ(Ht), At+1)) −Yt+1
+
+2
+2(8)
+Prior works combine the treatment At+1 with the represen-
+tation Φ(Ht) via concatenation (Bica et al., 2019; Melny-
+chuk et al., 2022; Bouchattaoui et al., 2024). After the next
+linear layer, this combination can be considered FiLM’s
+special case, which is a learnable bias vector. However, this
+prior approach is limited in the expressiveness of the con-
+ditioning mechanism. Note that while we use an efficient
+FiLM mechanism, a more complex F C can be used.
+4.4. Treatment-invariant representation learning
+Leveraging adversarial domain adaptation, recent methods
+learn a treatment-invariant representation Φ(Ht), breaking
+the association of history Ht and planned treatment At+1.
+Let P Φ
+(j) be the distribution of Φ(Ht) conditioned on a spe-
+cific treatment At+1 = a(j) for a fixed time step t, then
+recent methods aim to satisfy:
+P Φ
+(1) = P Φ
+(2) = · · · = P Φ
+(K).
+(9)
+This aspect has been thoroughly explored in the literature.
+Let P A
+(j) be the marginal distribution of At+1 = a(j) for a
+fixed time step t, the simplified optimization objective for
+each method is equivalent to:
+min
+Φ
+K
+X
+j=1
+1
+K KL
+ 
+P Φ
+(j) || 1
+K
+K
+X
+k=1
+P Φ
+(k)
+!
+CRN (Bica et al., 2019, Appendix D)
+(10)
+min
+Φ
+K
+X
+j=1
+1
+K KL
+ K
+X
+k=1
+P A
+(k)P Φ
+(k) || P Φ
+(j)
+!
+CT (Melnychuk et al., 2022, Appendix F)
+(11)
+min
+Φ
+K
+X
+j=1
+P A
+(j) KL
+ 
+P Φ
+(j) ||
+K
+X
+k=1
+P A
+(k)P Φ
+(k)
+!
++ D
+CCPC (Bouchattaoui et al., 2024, Appendix G.6)
+(12)
+where (10) is equivalent to minimizing a multi-distribution
+Jensen-Shannon divergence with equal weights and (12)
+with weighting factors P A
+(1), ..., P A
+(K) (Lin, 1991) plus an
+additional expected divergence term D. The minima for
+(10), (11), and (12) satisfy (9).
+Adversarial entropy maximization. Similar to existing
+works, we aim to learn a representation that satisfies (9).
+Consider the balancing head F B, define the treatment clas-
+sification loss as the cross-entropy for Ht, At+1 ∼D:
+LB
+t (θF B) = −
+K
+X
+j=1
+I[At+1=a(j)] log F B
+j (Φ(Ht)).
+(13)
+While the balancing head F B predicts the confounded
+planned treatment At+1, the representation Φ(Ht) con-
+fuses the balancing head by removing such information.
+To learn a treatment-invariant representation, we propose
+to maximize the prediction entropy of F B for Ht ∼D:
+LE
+t (θΦ) =
+K
+X
+j=1
+F B
+j (Φ(Ht)) log F B
+j (Φ(Ht)).
+(14)
+Minimizing LE
+t is equivalent to maximizing the prediction
+entropy. For a fixed time step t, let H = Ht, we define the
+adversarial game as:
+arg min
+F B
+−
+K
+X
+j=1
+EΦ(H)|A=a(j)
+h
+log F B
+j (Φ(H))
+i
+P A
+(j)
+arg max
+Φ
+−
+K
+X
+j=1
+EΦ(H)
+h
+F B
+j (Φ(H)) log F B
+j (Φ(H))
+i
+subject to
+K
+X
+j=1
+F B
+j (Φ(H)) = 1.
+(15)
+Next, we show that the equilibrium of (15) satisfies (9). In
+other words, the representation is treatment-invariant.
+Theorem 4.1. For a fixed t, there exists a pair Φ and F B
+that satisfies the equilibrium in (15). The equilibrium holds
+if and only if Φ satisfies (9).
+We also obtained the simplified optimization objective for
+Eq. (15) as:
+min
+Φ
+K
+X
+j=1
+P A
+(j) KL
+ 
+P Φ
+(j) ||
+K
+X
+k=1
+P A
+(k)P Φ
+(k)
+!
+.
+(16)
+This is similar to the objective of CCPC in Eq. (12) but with
+a parsimonious and efficient implementation as entropy
+maximization instead of minimizing the CLUB (Cheng
+et al., 2020) mutual information upper bound.
+Ideally, achieving the equilibrium condition of (9) and sat-
+isfying representation invertibility results in a neural net-
+work with low estimation error for counterfactual out-
+comes. However, achieving the equilibrium of the adver-
+sarial game can be difficult in practice.
+Bound on prediction error. Considering binary treatment
+A ∈{0, 1}, we can further show that the prediction er-
+ror, under some assumptions, is bounded by the generalized
+Jensen-Shannon divergence between distributions inspired
+by the results from Shalit et al. (2017). Let GY = F Y ◦F C.
+The expected factual, counterfactual, treated, and control
+losses for the loss function L are defined as:
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Causal Autoencoding and Treatment Conditioning
+ϵF(GY , Φ) = EH,Y ,A
+h
+L(GY (Φ(H), A), Y [A])
+i
+(17)
+ϵCF(GY , Φ) = EH,Y ,A
+h
+L(GY (Φ(H), 1 −A), Y [1 −A])
+i
+(18)
+ϵF
+(1)(GY , Φ) = EH,Y |A=1
+h
+L(GY (Φ(H), 1), Y [1])
+i
+(19)
+ϵF
+(0)(GY , Φ) = EH,Y |A=0
+h
+L(GY (Φ(H), 0), Y [0])
+i
+.
+(20)
+Theorem
+4.2.
+Let
+Φ
+be
+an
+invertible
+representa-
+tion function and GY
+be a hypothesis.
+Let S
+=
+supH,A
+EY |H=h,A=a
+
+(L
+ GY (Φ(h), a), Y [a]
+ . Con-
+sider the weights π(0), π(1) > 0 where π(0) + π(1) = 1, let
+W = 2S/(
+√
+π(0)π(1) + π(0)√
+π(1)), we then have:
+ϵF(GY , Φ) + ϵCF(GY , Φ) ≤ϵF
+(0)(GY , Φ) + ϵF
+(1)(GY , Φ)
++ W
+r
+JSπ(0),π(1)
+
+P Φ
+(0) || P Φ
+(1)
+
+.
+(21)
+It can be difficult to bound S without additional assump-
+tions. The first option is bounded loss functions. Alterna-
+tively, if we assume the domain of V and Z is bounded,
+then S is bounded. In many applications, such as health
+care, we can typically assume naturally bounded distribu-
+tions (e.g., heart rates, etc.).
+4.5. Treatment-specific conditioning
+By design, the conditioning layer F C should learn a
+treatment-specific transformation of the representation
+Φ(Ht). However, during training, only the observable out-
+come corresponding to the factual treatment At+1 = a(k)
+is optimized. Since the counterfactual outcomes cannot be
+observed, the conditioning with respect to remaining treat-
+ments At+1 ̸= a(k) does not receive any training signal.
+However, by leveraging the same strategy for next out-
+come prediction, we synthetically applied the condition-
+ing on the representation Φ(Ht) for all remaining treat-
+ments. Reusing the treatment classifier F A, for treatment
+a(c) ̸= a(k), we optimize:
+LC
+t,(c)(θF A, θF C, θΦ)
+= −
+K
+X
+j=1
+I[a(c)=a(j)] log F A
+j (F C(Φ(Ht), a(c))).
+(22)
+The final treatment-conditioning loss is simply the average
+of cross-entropy over all counterfactual treatments:
+LC
+t (θF A, θF C, θΦ) =
+1
+K −1
+X
+c̸=k
+LC
+t,(c)(θF A, θF C, θΦ). (23)
+Combining the treatment-conditioning loss LC
+t
+with the
+next outcome prediction loss LY
+t , for every sample in ev-
+ery time step, all possible configurations of the condition-
+ing layer F C are optimized. While the LC
+t loss is easier
+to optimize compared to the LY
+t loss, we observe that the
+additional training signal helps improve counterfactual es-
+timation. Further, during training, to prevent overfitting to
+the treatment-conditioning loss, it is beneficial to add label
+smoothing (M¨uller et al., 2019), which is equivalent to re-
+placing I[a(c)=a(j)] with I[a(c)=a(j)](1 −α) + I[a(c)̸=a(j)]
+α
+K
+in (22) for some hyperparameter α.
+4.6. Autoregressive decoding
+seq model
+...
+...
+seq model
+...
+...
+Figure 3.
+To handle input mismatch of the history HT0
+=
+{V , At, Yt, Xt}T0
+t=1 and autoregressively decoded sequences
+{V , At, Yt}T0+τ
+t=T0+1, we replace the future time-varying covari-
+ates {X}T0+τ
+T0+1 with a learnable vector M.
+At inference time, the predicted outcomes ˆYt+1 are autore-
+gressively reused to predict the next outcomes. However, if
+the dataset includes time-varying covariates Xt, the net-
+work has a mismatched input dimension for future time
+steps as Xt+1 is not available. For certain types of data,
+a straightforward solution is also learning to decode Xt+1.
+However, one of the potential problems with decoding Xt
+is that it can be difficult for many scenarios.
+Forcing
+the neural network to decode Xt+1 in those cases may
+waste capacity on a less useful task. Existing works han-
+dle the problem by either using an encoder-decoder archi-
+tecture (Lim et al., 2018; Bica et al., 2019; Bouchattaoui
+et al., 2024) or masking the corresponding attention of the
+decoder-only transformer (Melnychuk et al., 2022). We
+introduce a dropout-like model-agnostic approach called
+temporal cutoff that can be applied to a decoder-only model
+as an alternative to the encoder-decoder architecture in
+prior works.
+Temporal cutoff.
+For each training data point, during
+training, all timesteps t ≥Tcut ∼Uniform(1, T) are
+dropped. To represent the value of the dropped timesteps, a
+learnable missingness vector M is used. We apply the tem-
+poral cutoff to only X if it exists. To allow more capacity
+to represent missingness, we first linearly project Xt ∈Ru
+to a larger dimension using ωX so that ωX(Xt) ∈Rv
+where v > u. For non-cutoff time steps, ωX(Xt) ∈Rv
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Causal Autoencoding and Treatment Conditioning
+LSTM
+CRN
+RMSN
+CT
+CAETC-LSTM
+CAETC-TCN
+0
+5
+10
+15
+20
+25
+30
+35
+40
+RMSE
+6.33
+±
+0.32
+7.68
+±
+0.69
+8.22
+±
+0.77
+8.33
+±
+0.77
+8.08
+±
+0.78
+6.34
+±
+0.3
+7.72
+±
+0.64
+8.24
+±
+0.7
+8.31
+±
+0.63
+7.99
+±
+0.58
+6.46
+±
+0.34
+7.76
+±
+0.65
+8.32
+±
+0.78
+8.43
+±
+0.76
+8.13
+±
+0.8
+6.46
+±
+0.47
+8.01
+±
+0.6
+8.61
+±
+0.61
+8.67
+±
+0.58
+8.3
+±
+0.58
+6.46
+±
+0.34
+7.76
+±
+0.65
+8.32
+±
+0.78
+8.43
+±
+0.75
+8.13
+±
+0.79
+6.43
+±
+0.37
+7.7
+±
+0.64
+8.18
+±
+0.75
+8.23
+±
+0.76
+7.91
+±
+0.75
+γ=0
+LSTM
+CRN
+RMSN
+CT
+CAETC-LSTM
+CAETC-TCN
+5.78
+±
+0.52
+6.77
+±
+0.54
+7.0
+±
+0.5
+6.87
+±
+0.41
+6.48
+±
+0.32
+5.89
+±
+0.41
+6.94
+±
+0.35
+7.15
+±
+0.37
+7.0
+±
+0.27
+6.57
+±
+0.2
+5.88
+±
+0.53
+6.76
+±
+0.53
+6.89
+±
+0.5
+6.73
+±
+0.45
+6.34
+±
+0.4
+6.04
+±
+0.53
+7.04
+±
+0.47
+7.26
+±
+0.42
+7.1
+±
+0.36
+6.67
+±
+0.31
+5.88
+±
+0.52
+6.73
+±
+0.55
+6.87
+±
+0.51
+6.68
+±
+0.46
+6.26
+±
+0.39
+5.94
+±
+0.52
+6.87
+±
+0.52
+7.03
+±
+0.51
+6.88
+±
+0.47
+6.45
+±
+0.38
+γ=2
+LSTM
+CRN
+RMSN
+CT
+CAETC-LSTM
+CAETC-TCN
+5.66
+±
+0.5
+6.31
+±
+0.5
+6.31
+±
+0.47
+6.08
+±
+0.45
+5.62
+±
+0.4
+5.62
+±
+0.45
+6.14
+±
+0.35
+6.07
+±
+0.28
+5.82
+±
+0.26
+5.39
+±
+0.24
+5.71
+±
+0.53
+6.39
+±
+0.36
+6.41
+±
+0.31
+6.1
+±
+0.37
+5.64
+±
+0.4
+6.1
+±
+0.5
+6.79
+±
+0.34
+6.81
+±
+0.38
+6.46
+±
+0.41
+5.92
+±
+0.43
+5.73
+±
+0.54
+6.41
+±
+0.42
+6.47
+±
+0.39
+6.21
+±
+0.47
+5.73
+±
+0.48
+5.73
+±
+0.51
+6.31
+±
+0.36
+6.24
+±
+0.22
+5.89
+±
+0.21
+5.36
+±
+0.23
+γ=4
+LSTM
+CRN
+RMSN
+CT
+CAETC-LSTM
+CAETC-TCN
+5.74
+±
+0.47
+6.23
+±
+0.48
+6.05
+±
+0.41
+5.74
+±
+0.45
+5.29
+±
+0.43
+5.71
+±
+0.45
+6.13
+±
+0.37
+5.92
+±
+0.3
+5.59
+±
+0.32
+5.13
+±
+0.25
+6.07
+±
+0.54
+6.51
+±
+0.65
+6.29
+±
+0.61
+5.92
+±
+0.54
+5.48
+±
+0.46
+6.11
+±
+0.53
+6.66
+±
+0.38
+6.5
+±
+0.27
+6.11
+±
+0.15
+5.62
+±
+0.07
+5.92
+±
+0.59
+6.49
+±
+0.58
+6.24
+±
+0.53
+5.77
+±
+0.46
+5.28
+±
+0.39
+5.95
+±
+0.51
+6.74
+±
+0.32
+6.49
+±
+0.2
+5.95
+±
+0.12
+5.35
+±
+0.07
+γ=8
+1
+2
+3
+4
+5
+τ
+Figure 4. RMSEs for NSCLC fully synthetic data on random trajectories with increasing levels of time-dependent confounding on the
+training dataset. Each bar represents the RMSE for 5-step-ahead predictions. Lower is better.
+LSTM
+CRN
+RMSN
+CT
+CAETC-LSTM
+CAETC-TCN
+0
+5
+10
+15
+20
+25
+30
+35
+40
+45
+50
+55
+RMSE
+7.46
+±
+0.42
+8.61
+±
+1.11
+8.83
+±
+1.11
+8.59
+±
+1.06
+7.92
+±
+1.03
+7.47
+±
+0.4
+8.67
+±
+1.06
+8.87
+±
+1.07
+8.54
+±
+0.95
+7.81
+±
+0.82
+7.59
+±
+0.41
+8.75
+±
+1.02
+9.01
+±
+1.14
+8.75
+±
+1.15
+8.06
+±
+1.18
+7.57
+±
+0.64
+8.95
+±
+1.1
+9.22
+±
+1.11
+8.89
+±
+1.03
+8.19
+±
+0.84
+7.59
+±
+0.41
+8.75
+±
+1.02
+9.01
+±
+1.14
+8.74
+±
+1.14
+8.06
+±
+1.18
+7.57
+±
+0.43
+8.66
+±
+1.01
+8.86
+±
+1.11
+8.56
+±
+1.15
+7.84
+±
+1.06
+γ=0
+LSTM
+CRN
+RMSN
+CT
+CAETC-LSTM
+CAETC-TCN
+7.42
+±
+0.46
+8.64
+±
+1.04
+8.94
+±
+1.01
+8.74
+±
+0.96
+8.12
+±
+0.84
+7.55
+±
+0.35
+8.86
+±
+0.9
+9.14
+±
+0.98
+8.9
+±
+0.93
+8.21
+±
+0.88
+7.57
+±
+0.54
+8.72
+±
+1.04
+8.87
+±
+0.92
+8.57
+±
+0.87
+7.84
+±
+0.73
+7.95
+±
+0.57
+9.24
+±
+1.14
+9.49
+±
+1.1
+9.12
+±
+1.03
+8.42
+±
+0.89
+7.57
+±
+0.52
+8.65
+±
+1.06
+8.83
+±
+0.95
+8.53
+±
+0.94
+7.78
+±
+0.86
+7.71
+±
+0.4
+8.99
+±
+0.97
+9.3
+±
+1.02
+9.1
+±
+1.04
+8.4
+±
+0.86
+γ=2
+LSTM
+CRN
+RMSN
+CT
+CAETC-LSTM
+CAETC-TCN
+7.64
+±
+0.41
+9.1
+±
+0.83
+9.57
+±
+0.71
+9.46
+±
+0.67
+8.96
+±
+0.63
+7.56
+±
+0.41
+8.79
+±
+0.91
+9.03
+±
+0.95
+8.78
+±
+1.01
+8.09
+±
+0.98
+7.9
+±
+0.41
+9.87
+±
+0.4
+10.2
+±
+0.44
+9.7
+±
+0.27
+8.87
+±
+0.18
+8.99
+±
+0.37
+10.55
+±
+0.77
+10.99
+±
+1.25
+10.78
+±
+1.79
+10.49
+±
+2.39
+7.93
+±
+0.5
+9.93
+±
+0.51
+10.39
+±
+0.62
+9.99
+±
+0.56
+9.18
+±
+0.47
+7.96
+±
+0.55
+9.57
+±
+0.78
+9.85
+±
+0.38
+9.44
+±
+0.38
+8.64
+±
+0.34
+γ=4
+LSTM
+CRN
+RMSN
+CT
+CAETC-LSTM
+CAETC-TCN
+7.74
+±
+0.57
+9.01
+±
+0.84
+9.28
+±
+0.78
+9.09
+±
+0.8
+8.42
+±
+0.72
+7.72
+±
+0.74
+9.0
+±
+1.13
+9.31
+±
+1.06
+9.15
+±
+1.0
+8.47
+±
+0.81
+9.31
+±
+1.16
+10.7
+±
+1.59
+10.31
+±
+0.99
+9.71
+±
+0.9
+8.96
+±
+0.81
+10.07
+±
+1.41
+11.61
+±
+1.32
+11.55
+±
+0.62
+11.1
+±
+0.59
+10.58
+±
+0.94
+8.96
+±
+1.44
+11.07
+±
+1.43
+10.64
+±
+0.78
+9.81
+±
+0.49
+8.86
+±
+0.31
+9.19
+±
+1.17
+12.17
+±
+1.06
+11.68
+±
+0.37
+10.66
+±
+0.62
+9.54
+±
+0.81
+γ=8
+1
+2
+3
+4
+5
+τ
+Figure 5. RMSEs for NSCLC fully synthetic data on no-confounding test set (γ = 0) with increasing levels of time-dependent con-
+founding on the training dataset. Training on γ = 0 and testing on γ = 0 represents the performance upper bound for each method. Due
+to time-dependent confounding, training on γ ̸= 0 and testing on γ = 0 is expected to reduce performance. Lower is better.
+is used, while for cutoff time steps, the missingness vector
+M ∈Rv is used as the input to the sequence model as in
+Fig. 3. We also linearly project [V , A, Y ] using ωV,A,Y
+so that ωX(Xt) do not dominate the input dimension. For
+simplicity, we let ωX and ωV,A,Y projects to the same di-
+mension, i.e., ωV,A,Y ([X, A, Y ]) ∈Rv.
+4.7. Overall training objective
+The overall training objective is:
+min δELB
+t (θF B)
+(24)
+min LR
+t (θF A, θF Y , θF X , θΦ) + δELE
+t (θΦ)
++LY
+t (θF Y , θF C, θΦ) + δALC
+t (θF A, θF C, θΦ)
+(25)
+with additional hyperparameters δE. Note that we reuse the
+hyperparameters δA from Eq. (6) to reduce hyperparameter
+search efforts.
+5. Experiments
+5.1. Baselines
+We evaluate the performance of CAETC against state-of-
+the-art methods for counterfactual estimation over time, in-
+cluding RMSN (Lim et al., 2018), CRN (Bica et al., 2019),
+and CT (Melnychuk et al., 2022).
+Since our method is
+model-agnostic, we implement two variants of CAETC us-
+ing LSTM (Hochreiter & Schmidhuber, 1997) and TCN
+(Bai et al., 2018), which we refer to as CAETC-LSTM and
+CAETC-TCN, respectively. We also provide a baseline us-
+ing classical LSTM without balancing, which is equivalent
+to CRN with no adversarial training. Effective methods
+for counterfactual estimations should demonstrate perfor-
+mance improvement over classical LSTM.
+5.2. Datasets
+A challenge in evaluating counterfactual estimation meth-
+ods is the lack of counterfactual outcomes in real-world
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Causal Autoencoding and Treatment Conditioning
+Table 1. RMSEs on MIMIC-III semi-synthetic data with counterfactual random trajectories. Lower is better.
+τ = 1
+τ = 2
+τ = 3
+τ = 4
+τ = 5
+τ = 6
+τ = 7
+τ = 8
+τ = 9
+τ = 10
+Avg
+LSTM
+.363±.028
+.417±.025
+.463±.021
+.506±.020
+.546±.017
+.581±.016
+.615±.016
+.649±.015
+.682±.016
+.715±.017
+.554
+RMSN
+.408±.029
+.471±.032
+.530±.030
+.587±.030
+.641±.030
+.690±.030
+.737±.028
+.782±.025
+.825±.022
+.867±.023
+.654
+CRN
+.365±.028
+.424±.027
+.476±.023
+.524±.021
+.569±.019
+.608±.018
+.647±.018
+.685±.018
+.723±.020
+.760±.022
+.578
+CT
+.324±.017
+.411±.024
+.499±.035
+.582±.040
+.660±.041
+.733±.043
+.808±.046
+.882±.046
+.941±.048
+.999±.053
+.684
+CAETC
+LSTM
+.330±.021
+.393±.019
+.442±.014
+.487±.009
+.528±.006
+.564±.007
+.600±.011
+.634±.014
+.668±.017
+.702±.020
+.535
+CAETC
+TCN
+.322±.016
+.391±.019
+.447±.023
+.495±.027
+.540±.029
+.582±.030
+.621±.032
+.657±.032
+.692±.032
+.726±.032
+.547
+datasets. Therefore, we use synthetic data to obtain coun-
+terfactual ground truths. To ensure comprehensive eval-
+uation, we benchmark the performance against standard
+benchmarks used in prior works (Lim et al., 2018; Bica
+et al., 2019; Melnychuk et al., 2022), including fully syn-
+thetic data based on non-small cell lung cancer simulation
+(Geng et al., 2017) and semi-synthetic data derived from
+the MIMIC-III dataset (Johnson et al., 2016). We also eval-
+uate CAETC on factual outcomes of real-world data from
+the MIMIC-III dataset to demonstrate the performance in
+practical usage. More details are available in the Appendix.
+5.3. Experiment with synthetic data
+The fully synthetic data is built upon the pharmacokinetics-
+pharmacodynamics model of non-small cell lung cancer
+(NSCLC) (Geng et al., 2017) under chemotherapy and ra-
+diotherapy treatment. Details of the simulation are in Sec-
+tion D. We inject different levels of confounding during
+simulation, ranging from no confounding γ = 0 to strong
+confounding γ = 8. We set the maximum trajectory length
+T to 60 and the prediction horizon τ to 5. We trained all
+methods on the trajectories of 10000 patients with a sep-
+arate validation set of 1000 patients to select the best hy-
+perparameters. All methods are evaluated under two sce-
+narios: random trajectories and no-confounding. Further
+details on the test setting are available in the Section D.
+Random trajectories. At every time step, there are K pos-
+sible outcomes. Therefore, at prediction horizon τ, there
+are an exponential Kτ outcomes, making simulating ev-
+ery outcome prohibitively expensive. We randomly sample
+a fixed subset of k outcomes for evaluation. The setting
+shares similarities with Melnychuk et al. (2022). We set
+k = 1 and simulate for 1000 patients, resulting in 1000 test
+horizons per time step t.
+No confounding. As γ can be controlled, we evaluate the
+model on a non-confounded (γ = 0) test set to investigate
+whether the model has learned unbiased estimation. This
+setting is more difficult than random trajectories, as not
+only do the prediction horizons not follow the confounded
+trajectories, but the input history also does not resemble the
+confounded training set. The setting is similar to Lim et al.
+(2018). We use the trajectories of 1000 patients.
+Results. CAETC-LSTM and CAETC-TCN demonstrate
+strong performance with increasing time-dependent con-
+founding as in Fig. 4 and Fig. 5. For all methods, training
+and testing on non-confounded datasets γ = 0 in Fig. 5
+results in a very small difference in performance, which is
+desirable. Due to the limited amount of data, similar to
+real-world scenarios, LSTM and TCN architectures exhibit
+good performance compared to the transformer architec-
+ture. For small confounding, regular LSTM is more stable
+and demonstrates strong performance compared to coun-
+terfactual methods. However, as the confounding factor
+increases, only CAETC-LSTM and CAETC-TCN exhibit
+stable counterfactual estimation performance. Prior works
+(CRN, CT) do not outperform a vanilla LSTM with em-
+pirical risk minimization due to covariate information loss
+(CRN, CT), which is consistent with prior literature (Huang
+et al., 2024). Our method uses a partial-autoencoding ar-
+chitecture, which is less likely to suffer from the same is-
+sues. Furthermore, it can be observed that under the more
+challenging setting of Fig. 5, CAETC demonstrate strong
+improvement over existing works.
+5.4. Experiment with semi-synthetic data
+We employ a semi-synthetic dataset generated based on
+the MIMIC-III (Johnson et al., 2016) intensive care units
+dataset. Details of the simulation are in Section E. We set
+the maximum trajectory length T to 100 and the predic-
+tion horizon τ to 10. All methods are trained and validated
+on 2000 and 200 trajectories, respectively. We evaluate
+the method on random trajectories (k = 1) similar to Sec-
+tion 5.3, which includes 200 patients, resulting in 200 test
+horizons per time step t.
+Results.
+Similar to the synthetic experiment, CAETC-
+LSTM and CAETC-TCN demonstrate strong improvement
+across all time steps as in Table 1.
+5.5. Experiment with real-world data
+We further evaluate CAETC on real-world data based on
+the MIMIC-III dataset (Johnson et al., 2016). However,
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Causal Autoencoding and Treatment Conditioning
+for real-world data, counterfactual outcomes are not avail-
+able. Nonetheless, based on Theorem 4.2, we can expect
+that a smaller sum of treated and control error indicates a
+tighter error bound. Therefore, the performance on observ-
+able outcomes is still a useful evaluation metric. We set the
+maximum trajectory length T to 60 and the prediction hori-
+zon τ to 5. All methods are trained, validated, and tested on
+5000, 500, and 500 trajectories sampled from the dataset,
+respectively.
+Results. Similar to previous experiments, CAETC-LSTM
+and CAETC-TCN achieve strong improvement compared
+to existing methods as in Table 2.
+Table 2. RMSEs on MIMIC-III real-world data. Lower is better.
+τ = 1
+τ = 2
+τ = 3
+τ = 4
+τ = 5
+Avg
+LSTM
+6.80±0.02
+7.32±0.05
+7.61±0.05
+7.82±0.05
+7.99±0.07
+7.51
+RMSN
+7.29±0.07
+7.80±0.07
+8.10±0.10
+8.33±0.16
+8.54±0.21
+8.01
+CRN
+6.81±0.04
+7.35±0.05
+7.64±0.06
+7.86±0.07
+8.04±0.10
+7.54
+CT
+6.70±0.04
+7.37±0.06
+7.71±0.07
+7.93±0.07
+8.10±0.04
+7.56
+CAETC
+LSTM
+6.72±0.05
+7.27±0.05
+7.56±0.06
+7.76±0.06
+7.91±0.08
+7.45
+CAETC
+TCN
+6.69±0.06
+7.24±0.05
+7.53±0.04
+7.72±0.03
+7.88±0.06
+7.41
+5.6. Ablation
+We further examined the performance contribution of each
+component in CAETC using an LSTM backbone. We con-
+sider the following variations: (1) CAETC-LSTM, which
+achieves state-of-the-art performance; (2) CAETC-LSTM
+(δC = 0), which removes treatment conditioning loss LC
+(Section 4.5); and (3) CAETC-LSTM (δC = δE = 0),
+which further removes adversarial entropy maximization
+(Section 4.4). Variation (3) is the basic version, which is
+only a partial-autoencoding network with treatment condi-
+tioning.
+Results. Observe that each loss contributes to the overall
+performance. CAETC-LSTM (δC = δE = 0) is more bi-
+ased over the prediction horizon compared to adversarially-
+trained CAETC-LSTM (δC = 0).
+Due to the partial-
+autoencoding, CAETC can balance the representation with
+less covariate information loss.
+Table 3. Ablation with the same setting of Fig. 5 with γ = 8.
+CAETC
+LSTM
+τ = 1
+τ = 2
+τ = 3
+τ = 4
+τ = 5
+Avg
+Full
+7.74±0.57
+9.01±0.84
+9.28±0.78
+9.09±0.8
+8.42±0.72
+8.71
+δC = 0
+7.75±0.57
+9.09±0.86
+9.45±0.87
+9.37±0.98
+8.79±1.04
+8.89
+δC = 0
+δE = 0
+8.01±0.91
+9.58±1.31
+10.06±1.44
+10.05±1.61
+9.45±1.49
+9.43
+6. Conclusion
+We introduced a novel method for counterfactual estima-
+tion over time called causal autoencoding and treatment
+conditioning. CAETC utilizes a partial autoencoding ar-
+chitecture for representation invertibility and casts outcome
+prediction as treatment conditioning on the adversarially
+balanced representation. Extensive empirical experiments
+show that CAETC improves significantly over baselines.
+Impact Statement
+This paper proposes a novel method for counterfactual es-
+timation over time, which can be beneficial for sequential
+decision-making systems in domains such as healthcare,
+economics, or public policy. Improved counterfactual and
+treatment effect estimation can reduce the bias when learn-
+ing from observational data. However, misuse or incor-
+rect estimates can result in potentially harmful outcomes,
+so careful evaluation is required in sensitive applications.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Causal Autoencoding and Treatment Conditioning
+References
+Bai, S., Kolter, J. Z., and Koltun, V. An empirical evalua-
+tion of generic convolutional and recurrent networks for
+sequence modeling. arXiv:1803.01271, April 2018.
+Bareinboim, E. and Pearl, J. Causal inference and the data-
+fusion problem. Proceedings of the National Academy of
+Sciences, 113(27):7345–7352, July 2016. doi: 10.1073/
+pnas.1510507113.
+Bica, I., Alaa, A. M., Jordon, J., and van der Schaar, M.
+Estimating counterfactual treatment outcomes over time
+through adversarially balanced representations. In Pro-
+ceedings of the International Conference on Learning
+Representations, September 2019.
+Bouchattaoui, M. E., Tami, M., Lepetit, B., and Courn`ede,
+P.-H. Causal contrastive learning for counterfactual re-
+gression over time. In Advances in Neural Information
+Processing Systems, volume 37, pp. 1333–1369, 2024.
+Cheng, P., Hao, W., Dai, S., Liu, J., Gan, Z., and Carin, L.
+CLUB: A contrastive log-ratio upper bound of mutual
+information. In Proceedings of the 37th International
+Conference on Machine Learning, pp. 1779–1788, July
+2020.
+Detterbeck, F. C. and Gibson, C. J. Turning gray: The natu-
+ral history of lung cancer over time. Journal of Thoracic
+Oncology, 3(7):781–792, July 2008. doi: 10.1097/JTO.
+0b013e31817c9230.
+Feuerriegel, S., Frauen, D., Melnychuk, V., Schweisthal,
+J., Hess, K., Curth, A., Bauer, S., Kilbertus, N., Ko-
+hane, I. S., and van der Schaar, M.
+Causal machine
+learning for predicting treatment outcomes.
+Nature
+Medicine, 30(4):958–968, April 2024.
+doi: 10.1038/
+s41591-024-02902-1.
+Ganin,
+Y.,
+Ustinova,
+E.,
+Ajakan,
+H.,
+Germain,
+P.,
+Larochelle, H., Laviolette, F., March, M., and Lempit-
+sky, V. Domain-adversarial training of neural networks.
+Journal of Machine Learning Research, 17(59):1–35,
+2016.
+Geng, C., Paganetti, H., and Grassberger, C. Prediction of
+treatment response for combined chemo- and radiation
+therapy for non-small cell lung cancer patients using a
+bio-mathematical model. Scientific Reports, 7(1):13542,
+October 2017. doi: 10.1038/s41598-017-13646-z.
+Hensman, J., Durrande, N., and Solin, A.
+Variational
+Fourier features for Gaussian processes. Journal of Ma-
+chine Learning Research, 18(151):1–52, 2018.
+Hochreiter, S. and Schmidhuber, J. Long short-term mem-
+ory. Neural Computation, 9(8):1735–1780, November
+1997. doi: 10.1162/neco.1997.9.8.1735.
+Huang, Q., Meng, C., Cao, D., Huang, B., Chang, Y., and
+Liu, Y. An empirical examination of balancing strategy
+for counterfactual estimation on time series. In Proceed-
+ings of the 41st International Conference on Machine
+Learning, pp. 20043–20062, June 2024.
+Johansson, F. D., Shalit, U., Kallus, N., and Sontag,
+D.
+Generalization bounds and representation learning
+for estimation of potential outcomes and causal effects.
+Journal of Machine Learning Research, 23(166):1–50,
+2022.
+Johnson, A. E. W., Pollard, T. J., Shen, L., Lehman, L.-
+w. H., Feng, M., Ghassemi, M., Moody, B., Szolovits,
+P., Anthony Celi, L., and Mark, R. G.
+MIMIC-III, a
+freely accessible critical care database. Scientific Data,
+3(1):160035, May 2016. doi: 10.1038/sdata.2016.35.
+Kacprzyk, K., Holt, S., Berrevoets, J., Qian, Z., and van der
+Schaar, M. ODE discovery for longitudinal heteroge-
+neous treatment effects inference. In Proceedings of the
+12th International Conference on Learning Representa-
+tions, October 2023.
+Kent, D. M., Steyerberg, E., and van Klaveren, D. Person-
+alized evidence based medicine: Predictive approaches
+to heterogeneous treatment effects.
+BMJ, 363:k4245,
+December 2018. doi: 10.1136/bmj.k4245.
+Kingma, D. P. and Ba, J. Adam: A method for stochastic
+optimization. arXiv:1412.6980, January 2017.
+Li, R., Hu, S., Lu, M., Utsumi, Y., Chakraborty, P., Sow,
+D. M., Madan, P., Li, J., Ghalwash, M., Shahn, Z., and
+Lehman, L.-w. H. G-Net: A recurrent network approach
+to G-computation for counterfactual prediction under a
+dynamic treatment regime. In Proceedings of Machine
+Learning for Health, pp. 282–299, November 2021.
+Lim, B., Alaa, A., and van der Schaar, M.
+Forecasting
+treatment responses over time using recurrent marginal
+structural networks. In Advances in Neural Information
+Processing Systems, volume 31, pp. 7483–7493, 2018.
+Lin, J. Divergence measures based on the Shannon entropy.
+IEEE Transactions on Information Theory, 37(1):145–
+151, January 1991. doi: 10.1109/18.61115.
+MacKay, M., Vicol, P., Ba, J., and Grosse, R. B. Reversible
+recurrent neural networks. In Advances in Neural Infor-
+mation Processing Systems, volume 31, pp. 9043–9054,
+2018.
+Melnychuk, V., Frauen, D., and Feuerriegel, S.
+Causal
+transformer for estimating counterfactual outcomes. In
+Proceedings of the 39th International Conference on
+Machine Learning, pp. 15293–15329, June 2022.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Causal Autoencoding and Treatment Conditioning
+Melnychuk, V., Frauen, D., and Feuerriegel, S. Bounds on
+representation-induced confounding bias for treatment
+effect estimation. In Proceedings of the 12th Interna-
+tional Conference on Learning Representations, October
+2023.
+M¨uller, R., Kornblith, S., and Hinton, G. E. When does la-
+bel smoothing help? In Advances in Neural Information
+Processing Systems, volume 32, pp. 4694–4703, 2019.
+Perez, E., Strub, F., de Vries, H., Dumoulin, V., and
+Courville, A.
+FiLM: Visual reasoning with a general
+conditioning layer. In Proceedings of the Thirty-Second
+AAAI Conference on Artificial Intelligence and Thirtieth
+Innovative Applications of Artificial Intelligence Confer-
+ence and Eighth AAAI Symposium on Educational Ad-
+vances in Artificial Intelligence, pp. 3942–3951, Febru-
+ary 2018.
+Robins, J. A new approach to causal inference in mortality
+studies with a sustained exposure period—application to
+control of the healthy worker survivor effect.
+Mathe-
+matical Modelling, 7(9):1393–1512, January 1986. doi:
+10.1016/0270-0255(86)90088-6.
+Robins, J. A graphical approach to the identification and
+estimation of causal parameters in mortality studies with
+sustained exposure periods.
+Journal of Chronic Dis-
+eases, 40:139S–161S, January 1987.
+doi: 10.1016/
+S0021-9681(87)80018-8.
+Robins, J. M.
+Correcting for non-compliance in ran-
+domized trials using structural nested mean mod-
+els. Communications in Statistics - Theory and Meth-
+ods, 23(8):2379–2412, January 1994.
+doi: 10.1080/
+03610929408831393.
+Robins, J. M. and Hern´an, M. A. Estimation of the causal
+effects of time-varying exposures. In Fitzmaurice, G.,
+Davidian, M., Verbeke, G., and Molenberghs, G. (eds.),
+Longitudinal Data Analysis. CRC Press, 2008.
+Robins, J. M., Hern´an, M. ´A., and Brumback, B. Marginal
+structural models and causal inference in epidemiology.
+Epidemiology, 11(5):550, September 2000.
+Rubin, D. B. Causal inference using potential outcomes:
+Design, modeling, decisions. Journal of the American
+Statistical Association, 100(469):322–331, March 2005.
+doi: 10.1198/016214504000001880.
+Shalit, U., Johansson, F. D., and Sontag, D. Estimating
+individual treatment effect: Generalization bounds and
+algorithms.
+In Proceedings of the 34th International
+Conference on Machine Learning, pp. 3076–3085, July
+2017.
+Tsybakov, A. B. Lower bounds on the minimax risk. In
+Tsybakov, A. B. (ed.), Introduction to Nonparametric
+Estimation, pp. 77–135. Springer, New York, NY, 2009.
+doi: 10.1007/978-0-387-79052-7 2.
+Wang, H., Li, H., Zou, H., Chi, H., Lan, L., Huang, W., and
+Yang, W. Effective and efficient time-varying counter-
+factual prediction with state-space models. In Proceed-
+ings of the 13th International Conference on Learning
+Representations, October 2024.
+Wang, S., McDermott, M. B. A., Chauhan, G., Ghas-
+semi, M., Hughes, M. C., and Naumann, T. MIMIC-
+Extract: A data extraction, preprocessing, and repre-
+sentation pipeline for MIMIC-III.
+In Proceedings of
+the ACM Conference on Health, Inference, and Learn-
+ing, pp. 222–235, April 2020. doi: 10.1145/3368555.
+3384469.
+Williams, R. J. and Zipser, D.
+A learning algorithm
+for continually running fully recurrent neural networks.
+Neural Computation, 1(2):270–280, June 1989.
+doi:
+10.1162/neco.1989.1.2.270.
+Zhang, Y., Bellot, A., and Schaar, M. Learning overlapping
+representations for the estimation of individualized treat-
+ment effects. In Proceedings of the 23rd International
+Conference on Artificial Intelligence and Statistics, pp.
+1005–1014, June 2020.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Causal Autoencoding and Treatment Conditioning
+A. Assumptions for causal identification
+A.1. Assumptions
+We make the standard assumptions for causal identification (Robins & Hern´an, 2008) that are also used in related methods
+(Bica et al., 2019; Melnychuk et al., 2022; Bouchattaoui et al., 2024).
+Consistency: If A≤t = a≤t is a sequence of treatments for a given unit, then the potential outcome is equivalent to the
+observed outcome or Yt[a≤t] = Yt.
+Sequential Positivity: For every time step, there is a strictly positive probability to observe any treatment level, given a
+realization of the history. Formally, if P(Ht = ht) > 0, then 0 < P(At+1 = at+1|Ht = ht) for all at+1.
+Sequential Ignorability: For every time step, the treatment assignment At+1 is independent of potential outcomes, con-
+ditioned on the history, or Y≥t+1[a≥t+1] ⊥At+1|Ht for all a≥t+1.
+B. Proof of Theorem 4.1
+The following proofs are adapted from CRN (Bica et al., 2019) and CT (Melnychuk et al., 2022).
+Lemma B.1. For a fixed representation network Φ, let R = Φ(H), then the optimal predictor F B is:
+F B∗
+j
+(R) =
+P A
+(j)P Φ
+(j)(R)
+PK
+k=1 P A
+(k)P Φ
+(k)(R)
+.
+(26)
+Proof. The objective for the predictor F B in (15) is:
+F B∗= arg min
+F B −
+K
+X
+j=1
+Z
+log
+
+F B
+j (r)
+
+P Φ
+(j)(r)P A
+(j)dr
+subject to
+K
+X
+j=1
+F B
+j (r) = 1.
+(27)
+Minimizing the objective point-wise and applying the Lagrange multiplier:
+F B∗= arg min
+F B −
+K
+X
+j=1
+log
+
+F B
+j (r)
+
+P Φ
+(j)(r)P A
+(j) + λ
+ K
+X
+j=1
+F B
+j (r) −1
+!
+.
+(28)
+Taking the derivative with respect to F B
+j (r) and setting to 0:
+F B∗
+j
+(r) =
+P A
+(j)P Φ
+(j)(r)
+λ
+.
+(29)
+Solve for λ by the constraint PK
+j=1 F B
+j (r) = 1 to obtain (26).
+Theorem 4.1. For a fixed t, there exists a pair Φ and F B that satisfies the equilibrium in (15). The equilibrium holds if
+and only if Φ satisfies (9).
+Proof. The objective for representation network Φ in (15) with P Φ(r) = P(Φ(h)) is
+Φ∗= arg min
+Φ
+K
+X
+j=1
+Z
+F B
+j (r) log
+
+F B
+j (r)
+
+P Φ(r)dr.
+(30)
+Use the optimal predictor obtained from Lemma B.1 and P Φ(r) = PK
+j=1 P A
+(j)P Φ
+(j)(r):
+Φ∗= arg min
+Φ
+K
+X
+j=1
+Z
+P A
+(j)P Φ
+(j)(r)
+PK
+k=1 P A
+(k)P Φ
+(k)(r)
+log
+ 
+P A
+(j)P Φ
+(j)(r)
+PK
+k=1 P A
+(k)P Φ
+(k)(r)
+!
+K
+X
+k=1
+P A
+(k)P Φ
+(k)(r)dr
+(31)
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Causal Autoencoding and Treatment Conditioning
+= arg min
+Φ
+K
+X
+j=1
+Z
+P A
+(j)P Φ
+(j)(r) log
+P A
+(j)P Φ
+(j)(r)
+PK
+k=1 P A
+(k)P Φ
+(k)(r)
+dr
+(32)
+= arg min
+Φ
+ K
+X
+j=1
+Z
+P A
+(j)P Φ
+(j)(r) log
+P Φ
+(j)(r)
+PK
+k=1 P A
+(k)P Φ
+(k)(r)
+dr +
+K
+X
+j=1
+Z
+P A
+(j)P Φ
+(j)(r) log P A
+(j)dr
+!
+(33)
+= arg min
+Φ
+
+
+
+
+
+
+
+
+
+K
+X
+j=1
+P A
+(j)
+Z
+P Φ
+(j)(r) log
+P Φ
+(j)(r)
+PK
+k=1 P A
+(k)P Φ
+(k)(r)
+dr +
+K
+X
+j=1
+P A
+(j) log P A
+(j)
+Z
+P Φ
+(j)(r)dr
+|
+{z
+}
+=1
+|
+{z
+}
+=C
+
+
+
+
+
+
+
+
+
+(34)
+= arg min
+Φ
+K
+X
+j=1
+P A
+(j)
+Z
+P Φ
+(j)(r) log
+P Φ
+(j)(r)
+PK
+k=1 P A
+(k)P Φ
+(k)(r)
+dr
+(35)
+= arg min
+Φ
+K
+X
+j=1
+P A
+(j) KL
+ 
+P Φ
+(j) ||
+K
+X
+k=1
+P A
+(k)P Φ
+(k)
+!
+(36)
+= arg min
+Φ JSP A
+(0),...,P A
+(k)
+
+P Φ
+(0), ..., P Φ
+(k)
+
+(37)
+where JSP A
+0 ,...,P A
+(k)
+
+P Φ
+(0), ..., P Φ
+(k)
+
+is the generalized Jensen-Shannon divergence with weight P A
+(0), ..., P A
+(k) for distribu-
+tions P Φ
+(0), ..., P Φ
+(k). The divergence is non-negative and equals zero if and only if all distributions are identical, which
+satisfy (9).
+C. Proof of Theorem 4.2
+We restate Shalit et al. (2017, Lemma A4) with a specific IPM metric, which is the total variation distance between two
+distributions P and Q, denoted as TV (P || Q) = 1
+2
+R
+|P(x) −Q(x)|dx.
+Lemma C.1. Let Φ
+:
+dom (H)
+→
+dom (R) be an invertible representation.
+Consider the supremum S
+=
+supH,A
+EY |H=h,A=a
+
+(L(GY (Φ(h), a), Y [a])
+ , let u = P A
+(1), we then have:
+ϵCF(GY , Φ) ≤(1 −u)ϵF
+(1)(GY , Φ) + uϵF
+(0)(GY , Φ) + 2S · TV
+
+P Φ
+(0) || P Φ
+(1)
+
+.
+(38)
+Proof. Let:
+ϵCF
+(1)(GY , Φ) = EH,Y |A=1
+h
+L(GY (Φ(H), 0), Y [0])
+i
+and
+ϵCF
+(0)(GY , Φ) = EH,Y |A=0
+h
+L(GY (Φ(H), 1), Y [1])
+i
+.
+(39)
+From Shalit et al. (2017, Lemma A3), then
+ϵF(GY , Φ) = uϵF
+(1)(GY , Φ) + (1 −u)ϵF
+(0)(GY , Φ)
+and
+ϵCF(GY , Φ) = (1 −u)ϵCF
+(1)(GY , Φ) + uϵCF
+(0)(GY , Φ).
+(40)
+Let P(a)(h) = P(h|A = a) and ¯LGY ,Φ(h, a) = EY |H=h,A=a[L(GY (Φ(h), a), Y [a])].
+We also have that S =
+supH,A
+ ¯LGY ,Φ(h, a)
+. Then:
+ϵCF(GY , Φ) −
+
+(1 −u)ϵF
+(1)(GY , Φ) + uϵF
+(0)(GY , Φ)
+
+(41)
+=
+
+(1 −u)ϵCF
+(1)(GY , Φ) + uϵCF
+(0)(GY , Φ)
+
+−
+
+(1 −u)ϵF
+(1)(GY , Φ) + uϵF
+(0)(GY , Φ)
+
+(42)
+=(1 −u)
+
+ϵCF
+(1)(GY , Φ) −ϵF
+(1)(GY , Φ)
+
++ u
+
+ϵCF
+(0)(GY , Φ) −ϵF
+(0)(GY , Φ)
+
+(43)
+=(1 −u)
+Z
+dom(H)
+¯LGY ,Φ(h, 1)
+ P(0)(h) −P(1)(h)
+
+dh + u
+Z
+dom(H)
+¯LGY ,Φ(h, 0)
+ P(1)(h) −P(0)(h)
+
+dh
+(44)
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Causal Autoencoding and Treatment Conditioning
+≤(1 −u) sup
+H
+ ¯LGY ,Φ(h, 1)
+
+Z
+dom(H)
+P(0)(h) −P(1)(h)
+dh + u sup
+H
+ ¯LGY ,Φ(h, 0)
+
+Z
+dom(H)
+P(1)(h) −P(0)(h)
+dh
+(45)
+≤(1 −u)S
+Z
+dom(H)
+P(0)(h) −P(1)(h)
+dh + uS
+Z
+dom(H)
+P(1)(h) −P(0)(h)
+dh
+(46)
+=S
+Z
+dom(H)
+P(0)(h) −P(1)(h)
+dh
+(47)
+=S
+Z
+dom(R)
+P Φ
+(0)(r) −P Φ
+(1)(r)
+dr
+(48)
+=2S TV
+
+P Φ
+(0) || P Φ
+(1)
+
+(49)
+where (45) is by the H¨older’s inequality and (48) is by the change of variables formula.
+Lemma C.2. Consider the generalized Jensen-Shannon divergence between two distributions P and Q with weighting
+factors πP , πQ > 0 so that πP + πQ = 1, then:
+TV (P || Q) ≤
+q
+JSπP ,πQ (P || Q)
+√
+πP πQ + πP √
+πQ .
+(50)
+Proof.
+TV
+
+P || πP P + πQQ
+
+= 1
+2
+Z
+|P(x) −πP P(x) −πQQ(x)|dx
+(51)
+= 1
+2
+Z
+|πQP(x) −πQQ(x)|dx
+(52)
+= πQ 1
+2
+Z
+|P(x) −Q(x)|dx
+(53)
+= πQ TV (P || Q) .
+(54)
+Similarly, we also have TV
+ Q || πP P + πQQ
+
+= πP TV (P || Q). Then
+√
+πP πQ TV (P || Q) + πP √
+πQ TV (P || Q) =
+√
+πP TV
+
+P || πP P + πQQ
+
++
+√
+πQ TV
+
+Q || πP P + πQQ
+
+.
+(55)
+Using Pinsker’s inequality (Tsybakov, 2009), TV (P || Q) ≤
+p
+KL (P || Q) /2 and the inequality a + b ≤
+√
+2a2 + 2b2:
+√
+πP TV
+
+P || πP P + πQQ
+
++
+√
+πQ TV
+
+Q || πP P + πQQ
+
+(56)
+≤
+√
+πP
+r
+1
+2 KL (P || πP P + πQQ) +
+√
+πQ
+r
+1
+2 KL (Q || πP P + πQQ)
+(57)
+≤
+r
+2πP 1
+2 KL (P || πP P + πQQ) + 2πQ 1
+2 KL (Q || πP P + πQQ)
+(58)
+=
+p
+πP KL (P || πP P + πQQ) + πQ KL (Q || πP P + πQQ)
+(59)
+=
+q
+JSπP ,πQ (P || Q).
+(60)
+It follows that
+TV (P || Q) ≤
+q
+JSπP ,πQ (P || Q)
+√
+πP πQ + πP √
+πQ .
+(61)
+Equality occurs when P and Q are identical.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Causal Autoencoding and Treatment Conditioning
+Theorem
+4.2.
+Let
+Φ
+be
+an
+invertible
+representation
+function
+and
+GY
+be
+a
+hypothesis.
+Let
+S
+=
+supH,A
+EY |H=h,A=a
+
+(L
+ GY (Φ(h), a), Y [a]
+ . Consider the weights π(0), π(1) > 0 where π(0) + π(1) = 1, let
+W = 2S/(
+√
+π(0)π(1) + π(0)√
+π(1)), we then have:
+ϵF(GY , Φ) + ϵCF(GY , Φ) ≤ϵF
+(0)(GY , Φ) + ϵF
+(1)(GY , Φ)
++W
+r
+JSπ(0),π(1)
+
+P Φ
+(0) || P Φ
+(1)
+
+.
+(21)
+Proof. By applying Lemma A3 of Shalit et al. (2017), Lemma C.1, and Lemma C.2:
+ϵF(GY , Φ) + ϵCF(GY , Φ)
+(62)
+≤uϵF
+(1)(GY , Φ) + (1 −u)ϵF
+(0)(GY , Φ) + (1 −u)ϵF
+(1)(GY , Φ) + uϵF
+(0)(GY , Φ) + 2S · TV
+
+P Φ
+(0) || P Φ
+(1)
+
+(63)
+= ϵF
+(0)(GY , Φ) + ϵF
+(1)(GY , Φ) + 2S · TV
+
+P Φ
+(0) || P Φ
+(1)
+
+(64)
+≤ϵF
+(0)(GY , Φ) + ϵF
+(1)(GY , Φ) + 2S
+q
+JSπ(0),π(1) (P || Q)
+√
+π(0)π(1) + π(0)√
+π(1) .
+(65)
+D. Non-small Cell Lung Cancer PK-PD Simulation
+D.1. Simulation details
+Similar to prior works (Lim et al., 2018; Bica et al., 2019; Melnychuk et al., 2022), we evaluate CAETC on a
+pharmacokinetics-pharmacodynamics model of non-small cell lung cancer (Geng et al., 2017).
+The model simulates the tumor volume over time under chemotherapy and radiotherapy. Parameters in the form of ζparam
+are either given or sampled from the distribution in Geng et al. (2017). Consider the discrete-time model of volume of the
+tumor Yt, the chemotherapy drug concentration Ct, and the radiotherapy dose Dt:
+Yt+1 =
+
+
+
+
+1 + ζρ log ζK
+Yt
+|
+{z
+}
+tumor growth
++ ϵt
+|{z}
+noise
+−ζβcCt+1
+|
+{z
+}
+chemotherapy
+−
+
+ζαDt+1 + ζβD2
+t+1
+
+|
+{z
+}
+radiotherapy
+
+
+
+
+Yt
+(66)
+where one unit of time is one day. A noise term ϵt ∼Normal(0, 0.012) is added to account for randomness in tumor
+growth. The tumor is assumed to be spherical.
+The chemotherapy concentration is modeled as an exponential decay with a half-life of one day as Ct = ˜Ct +Ct−1/2. The
+dosage if used of chemotherapy ˜Ct and radiotherapy Dt are 5.0 mg/m3 of Vinblastine and 2.0 Gy fractions, respectively.
+Heterogeneous static features V are generated by augmenting the prior means of ζα, ζβ. The patients are divided into three
+groups V ∼Uniform{1, 2, 3}. The augmented prior means ζµα, ζµβC are then defined as:
+ζµ′
+βC =
+
+1.1ζµβC
+if V = 3
+ζµβC
+otherwise
+ζµ′
+α =
+(
+1.1ζµ′
+α
+if V = 1
+ζµ′
+α
+otherwise
+(67)
+Time-varying confounding is introduced by modeling treatment assignment as a Bernoulli variable:
+Achemo
+t+1
+, Aradio
+t+1
+∼Bernoulli
+
+σ
+
+γ
+diam(Ymax)
+
+diam(Y>t−15) −diam(Ymax)
+2
+
+(68)
+where σ is the sigmoid function, diam(Ymax) is the maximum tumor diameter (13 cm), diam(Y>t−15) is the average
+tumor diameter over the last 15 days. The value of γ directly affects the strength of time-dependent confounding, i.e., the
+larger the value of γ, the larger the time-dependent confounding.
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Causal Autoencoding and Treatment Conditioning
+Each tumor has an initial stage proportional to the value in Detterbeck & Gibson (2008). Given the initial stage, the initial
+volume Y1 is correspondingly sampled from the stage distribution as in Geng et al. (2017). For treatment initial value,
+C1 = ˜C1 = 0 mg/m3 and D1 = 0 Gy fractions.
+Trajectories are measured until one of the following conditions happens: 1) The tumor diameter reaches diam(Ymax) = 13
+cm. 2) Patient recovers with probability exp(−Ytζη) where ζη is the tumor cell density as specified in Geng et al. (2017).
+3) Termination after reaching the maximum time step T = 60 days.
+D.2. Experimental details
+We generate 10000, 1000, and 1000 patients for training, validation, and testing. For training and testing, we simulate the
+full factual trajectories. All methods are tested on two settings: random trajectories and no confounding. We set τ = 5,
+i.e., 5-step ahead prediction.
+Random trajectories. At every time step t, we evaluate the methods by predicting potential horizons given the history
+Ht. Therefore, for each t, we need to simulate an exponential of Kτ outcomes for a prediction horizon of τ, which is
+prohibitively expensive. We can randomly sample a fixed subset of k outcomes for evaluation, which includes both factual
+and counterfactual outcomes. This setting is similar to the setting in Melnychuk et al. (2022). We set k = 1 and simulate
+1000 patients, resulting in 1000 test horizons per time step t. Since T = 60 and τ = 5, we obtain 55 steps for history,
+resulting in 55 × 1000 = 55000 test horizons.
+No confounding. At every time step t, we evaluate the methods by predicting factual horizons given the history Ht. As the
+parameter γ can be controlled, we evaluate the model on a non-confounded (γ = 0) test set. This setting is more difficult
+than random trajectories. In the random trajectories, the input history resembles the confounded training set distribution,
+while the test horizons do not. In the no-confounding setting, neither the history nor the test horizon resembles the training
+set distribution. For this strategy, we would only need to generate the factual outcomes for testing. The setting is similar to
+Lim et al. (2018). We use the trajectories of 1000 patients.
+E. MIMIC-III Dataset
+Table 4.
+Selected time-varying co-
+variates and static covariates from the
+MIMIC-Extract processed data.
+Time-varying covariates
+heart rate
+red blood cell count
+sodium
+mean blood pressure
+systemic vascular resistance
+glucose
+chloride urine
+glascow coma scale total
+hematocrit
+positive end-expiratory pressure set
+respiratory rate
+prothrombin time pt
+cholesterol
+hemoglobin
+creatinine
+blood urea nitrogen
+bicarbonate
+calcium ionized
+partial pressure of carbon dioxide
+magnesium
+anion gap
+phosphorous
+venous pvo2
+platelets
+calcium urine
+Static covariates
+gender
+ethinicity
+age
+We generate semi-synthetic data based on the MIMIC-III dataset (Johnson et al.,
+2016) using a similar protocol to Melnychuk et al. (2022) with some minor modifica-
+tions to simplify the simulation. Similarly, the real-world data selection also follows
+Melnychuk et al. (2022). We used the MIMIC-Extract preprocessing pipeline (Wang
+et al., 2020) to obtain the hourly aggregated data for the intensive care unit (ICU).
+All continuous time-varying covariates are further processed using forward filling,
+backward filling, and normalization.
+From the hourly data, we extract 25 time-varying covariates Xt and 3 static covari-
+ates V as in Table 4. The static covariates are one-hot encoded into a 44-dimensional
+feature vector. Patients with less than 20 hours of ICU stay are removed.
+E.1. Semi-synthetic simulation details
+The ICU maximum stay is cut off at 100 hours, creating time-varying covariates Xt
+with a maximum time step of T = 100.
+We generate N Y = 2 outcomes. For an outcome m, denoted as Y (m)
+i,t , the simula-
+tion first creates a non-treated outcomes ˜Y (m)
+i,t . The non-treated outcome consists of
+an endogenous dependency by a combination of B-spline and Gaussian process. For
+every outcome simulated, we randomly sampled a subset of 10 time-varying covari-
+ates X(m)
+i,t
+to be the exogenous dependency. Assuming the outcome m is affected by
+a set of treatments A(m)
+i,t
+with treatment effects E(m)
+i,t
+(defined later), we then have:
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Causal Autoencoding and Treatment Conditioning
+˜Y (m)
+i,t
+=
+u(m)
+i
+|{z}
+initial value
++ αbbi(t) + αgg(m)
+i
+(t)
+|
+{z
+}
+endogeneous
++ αff (m)(X(m)
+i,t )
+|
+{z
+}
+exogeneous
++ ϵ(m)
+i,t
+|{z}
+noise
+(69)
+Y (m)
+i,t
+= ˜Y (m)
+i,t
++ E(m)⊺
+i,t
+1
+(70)
+where αb, αg, and αf are weight for each component. Each component is defined as follows. The initial value is defined as
+u(m)
+i
+∼Uniform(−0.5, 0.5) The spline b(·) ∼Uniform{bstable(·), bfast decline(·), bslow decline(·), bfast increase(·), bslow increase(·)}
+is a cubic spline sampled uniformly from a set of five cubic splines representing different global trends. The Gaussian
+process instance gm
+i (t) ∼GP(0, Maternν=2.5) represent smooth local trend. Exogenous dependency is introduced by
+a non-linear function of the selected covariates, constructed by random Fourier features approximating an RBF kernel
+f (m)(X(m)
+i,t ) = ϕ(X(m)
+i,t )⊺w as in (Hensman et al., 2018) with w ∼Normal(0, σ2
+wI). A noise term is added to account
+for randomness ϵ(m)
+i,t
+∼Normal(0, 0.052).
+We generate N A = 3 treatments. The confounded treatment l, denoted A(l)
+i,t and its treatment effect E(l)
+i,t , is generated as:
+P (l)
+i,t+1 = σ
+
+γY Y (l)
+i,>t−w(l) + γXf (l)(Xi,t)
+
+(71)
+A(l)
+i,t ∼Bernoulli(P (l)
+i,t )
+(72)
+E(l)
+i,t =
+ω(l)−1
+X
+v=0
+P (l)
+i,t−vA(l)
+i,t−vb
+2−v/2
+(73)
+where γY and γX are confounding parameters. Y (l)
+i,>t−w(l) is the average outcomes over the last w(l) hours. Note that Y (l)
+i,t
+is a subset of treated outcomes that confound with the treatment. Similar to the synthetic outcome, we also sampled a subset
+of 10 time-varying covariates X(l)
+i,t to be the confounding covariates for each treatment. f (l) is a non-linear function similar
+to f (m). The treatment assignment A(l) is modeled as a Bernoulli random variable with probability P (l)
+i,t . The treatment
+effect E(l)
+i,t s just the sum of all treatments used within ω(l) hours with scaling factor b. All treatment has maximum effect
+right after use but decay exponentially with a half-life of 2 hours.
+We can observe that each outcome Y (m)
+i,t
+is affected by multiple treatment A(m)
+i,t
+and each treatment A(l)
+i,t is confounded
+with multiple outcomes Y (l)
+i,t , creating a complex dynamic.
+E.2. Semi-synthetic experiment details
+We simulate 2000 and 200 patients for training and validation. For training and testing, we simulate the full factual
+trajectories. For testing, we use the random trajectories strategy similar to Section D.2. We set τ = 10, i.e., 10-step ahead
+prediction. Note that while the semi-synthetic MIMIC-III simulation also has a confounding parameter γY and γX, the
+treatment mechanism is different for different values of γY and γX. Therefore, we do not apply the no-confounding setting
+test to this simulation.
+E.3. Real-world data details
+For real-world data, we extract two binary treatments, including vaso (vasopressor Avaso
+t
+) and vent (mechanical ven-
+tilation Avent
+t
+), and two outcomes Yt, including diastolic blood pressure and oxygen saturation. The ICU
+maximum stay is cut off at 60 hours, creating trajectories with a maximum time step of T = 60.
+E.4. Real-world experiment details
+We select a subset of 5000 and 500 patients for training and validation. At every time step, we evaluate the methods by
+predicting the factual horizon τ given the history Ht. We select a different subset of 500 patients for testing. We set τ = 5,
+i.e., 5-step ahead prediction.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Causal Autoencoding and Treatment Conditioning
+F. Baseline Methods
+F.1. Common structure
+To ensure a fair comparison for all methods, we use a common structure including several components similar to Fig. 2A.
+All methods include a representation function Φ and an outcome prediction head F Y (Table 5a). For adversarial-based
+methods like CAETC, CRN, and CT, an additional balancing head F B is added (Table 5b). F Y and F B share the same
+architectures for all methods, with the only potential difference being the input size for F Y and F B. All methods are
+trained with Adam optimizers (Kingma & Ba, 2017) and the teacher forcing technique (Williams & Zipser, 1989). The
+dimension of Φ(Ht) is referred to as # hidden units in the hyperparameter search table in Section G. # hidden units are
+selected so that all methods have roughly the same total parameter range.
+Table 5
+(a) Architecture for F Y
+Input: [Φ(H)t, At+1]
+or Φ(H)t or F C(Φ(H)t, At+1)
+Linear Layer
+ELU Activation
+Linear Layer
+Output: ˆYt+1 or ˆYt
+(b) Architecture for F B
+Input: Φ(H)t
+Linear
+ELU
+Linear
+Softmax
+Output: ˆAt+1
+F.2. CAETC
+Architecture. CAETC uses a decoder-only architecture. The representation network Φ for CAETC is parametrized by
+either LSTM cells (Hochreiter & Schmidhuber, 1997) layers or TCN residual blocks (Bai et al., 2018). We refer to both as
+layers. Since TCN is composed of dilated causal convolutions with an exponential receptive field as a function of depth,
+TCN requires more layers to cover the entire history. The architecture for Φ is in Table 6c. The output dimension for both
+projection layers is set to # hidden units.
+Table 6
+(a) Architecture for ωX,A,Y
+Input: [V , At, Yt]
+Linear Layer
+Output: ωX,A,Y ([V , At, Yt])
+(b) Architecture for ωX
+Input: Xt
+Linear Layer
+Output: ωX(Xt)
+(c) Architecture for Φ (CAETC)
+Input: Ht
+ωX,A,Y and ωX
+LSTM (# layers) or TCN (# layers)
+Linear Layer
+ELU Activation
+Output: Φ(H)t
+For CAETC, two additional heads F A (Table 7a) and F X (Table 7b) and a conditioning layer F C (Table 7c) are added.
+Table 7
+(a) Architecture for F A
+Input: or Φ(H)t or F C(Φ(H)t, At+1)
+Linear Layer
+ELU Activation
+Linear Layer
+Softmax
+Output: ˆAt or ˆAt+1
+(b) Architecture for F X
+Input: Φ(H)t
+Linear Layer
+ELU Activation
+Linear Layer
+Output: ˆ
+Xt
+(c) Architecture for F C
+Input: Φ(Ht) and a(k)
+2x Embedding for Rξ and Rβ
+Output: Φ(Ht) ⊙ξ(k) ⊕β(k)
+Training. The training process is in Algorithm 1. We set δA = 0.1, δX = 0.1 and δB = 0.0001 for all experiments.
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Causal Autoencoding and Treatment Conditioning
+Algorithm 1 Training algorithm for CAETC
+Input: Dataset D =
+n
+{Ai,t, Yi,t, Xi,t}T
+t=1 , Vi
+oN
+i=1, hyperparameters δA, δX, δE
+for epoch ej = 1 to emax do
+Compute loss L(θF A, θF Y , θFX, θF C, θΦ)
+=
+
+LRY (θF Y , θΦ)+LY (θF Y , θF C, θΦ)
+
++δA
+LRA(θF A, θΦ)+LC(θF A, θF C, θΦ)
+
++δXLRX(θF X, θΦ)+δELE(θΦ)
+Compute gradient ∇θF A,θF Y ,θFX ,θF C ,θΦ[L(θF A, θF Y , θF X, θF C, θΦ)]
+Compute loss δELB(θF B)
+Compute gradient ∇θF B [δELB(θF B)]
+Update parameters θF A, θF Y , θF X, θF C, θΦ by gradient ∇θF A,θF Y ,θFX ,θF C ,θΦ[L(θF A, θF Y , θF X, θF C, θΦ))]
+Update parameters θF B by gradient ∇θF B [δELB(θF B)]
+end for
+F.3. RMSN
+Table 8. Architecture for Φ (RMSN)
+Input: {At′}t
+t′=1 or Ht
+LSTM (# layers)
+Linear Layer
+ELU Activation
+Output: Φ({At′}t
+t′=1) or Φ(Ht)
+RMSN requires the estimation of P(At+1|At) and P(At+1|Ht) for IPTW, each
+of which is parametrized by an LSTM. They are referred to as the propensity-
+treatment network and the propensity-history network. RMSN uses an encoder-
+decoder architecture. The propensity-treatment network and propensity-history
+network are both composed of a representation function Φ and a treatment classi-
+fication head, for which we reuse the architecture of F B (Table 5b). The encoder
+and decoder are both composed of a representation function Φ and an outcome
+prediction head F Y (Table 5a). The architecture of Φ is similar for the propensity-
+treatment network, the propensity-history network, the encoder, and the decoder
+as in Table 8. In total, RMSN requires four different individual networks for
+training.
+F.4. CRN
+Table 9. Architecture for Φ (CRN)
+Input: Ht
+LSTM (# layers)
+Linear Layer
+ELU Activation
+Output: Φ(H)t
+CRN uses an encoder-decoder architecture with a gradient reversal layer for ad-
+versarial training. Both the encoder and decoder are composed of a representation
+function Φ (Table 9), an outcome prediction head F Y (Table 5a), and a treatment
+balancing head F B (Table 5b). CRN requires a hyperparameter for adversarial
+training, which is similar to our δB. We set CRN’s δB = 0.1.
+F.5. CT
+Table 10. Architecture for Φ (CT)
+Input: Ht
+3x Transformers (# layers)
+Output: Φ(H)t
+CT uses a decoder-only architecture and domain confusion loss for adversarial
+training. The decoder is composed of a representation function Φ (Table 10),
+an outcome prediction head F Y (Table 5a), and a treatment balancing head F B
+(Table 5b). CT also requires an exponential moving average (EMA) copy of the
+decoder. We reuse original hyperparameters in CT for the EMA copy. CT requires
+a hyperparameter for adversarial training, which is similar to our δB. We set CT’s
+δB = 0.01.
+F.6. Adversarial weight δB
+For all methods that use δB, we perform an exponential increase in the value of δB
+e as a function of the epoch until we
+reach δB.
+δB
+ej = δB
+
+2
+1 + exp(−10 × ej/emax) −1
+
+(74)
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Causal Autoencoding and Treatment Conditioning
+G. Hyperparameter Search
+Table 11. Hyperparameter search range for every method & dataset. If multiple components
+(e.g., encoder & decoder) are in the same cell, the hyperparameter is shared for those components
+(e.g., encoder and decoder have the same number of layers) for the same run. Otherwise, the
+hyperparameter is component-specific for the same run. We run a random grid search with 10
+combinations for every method for fair comparison. The final results reported are averaged over
+3 random seeds.
+Method
+Components
+Hyperparameters
+NSCLC range
+MIMIC III range
+(semi-synthetic & real)
+LSTM
+& CRN
+Encoder
+& Decoder
+# layers
+1
+1,2
+# hidden units
+16, 32, 48
+32, 48, 64
+Dropout rate
+0.0, 0.1
+Encoder
+# epochs
+100
+150
+Learning rate
+0.001, 0.0001
+Batch size
+64, 128
+Decoder
+# epochs
+50
+100
+Learning rate
+0.001, 0.0001
+Batch size
+512, 1024
+RMSN
+Propensity 1
+& Encoder
+& Decoder
+# layers
+1
+1,2
+# hidden units
+16, 32, 48
+32, 48, 64
+Dropout rate
+0.0, 0.1
+Propensity1
+& Encoder
+# epochs
+100
+150
+Learning rate
+0.001, 0.0001
+Decoder
+# epochs
+50
+100
+Learning rate
+0.001, 0.0001
+CT
+# layers
+1
+1,2
+# hidden units
+16, 24, 32
+18, 24, 36
+# attention heads
+2
+2,3
+Max positional encoding
+15
+30
+# epochs
+150
+250
+Dropout rate
+0.0, 0.1
+Learning rate
+0.001, 0.0001
+Batch size
+64, 128
+CAETC
+LSTM
+# layers
+1
+1,2
+# hidden units
+16, 32, 48
+32, 48, 64
+# epochs
+150
+250
+Dropout rate
+0.0, 0.1
+Learning rate
+0.001, 0.0001
+Batch size
+64, 128
+CAETC
+TCN
+# layers
+3,4, 5
+4,5, 6
+# hidden units
+16, 24, 32
+24, 32, 40
+Kernel size
+3, 5
+Dilation factor
+2
+# epochs
+150
+250
+Dropout rate
+0.0, 0.1
+Learning rate
+0.001, 0.0001
+Batch size
+64, 128
+1 Both the propensity-treatment & propensity-history networks are referred to as “propensity”.
+20
