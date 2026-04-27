@@ -1,0 +1,2514 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Mitigating Error Accumulation in Continuous Navigation
+via Memory-Augmented Kalman Filtering
+Anonymous Authors1
+Abstract
+Continuous navigation in complex environments
+is critical for Unmanned Aerial Vehicle (UAV).
+However, the existing Vision-Language Naviga-
+tion (VLN) models follow the dead-reckoning,
+which iteratively updates its position for the next
+waypoint prediction, and subsequently construct
+the complete trajectory. Then, such stepwise man-
+ner will inevitably lead to accumulated errors of
+position over time, resulting in misalignment be-
+tween internal belief and objective coordinates,
+which is known as “state drift” and ultimately
+compromises the full trajectory prediction. Draw-
+ing inspiration from classical control theory, we
+propose to correct for errors by formulating such
+sequential prediction as a recursive Bayesian
+state estimation problem. In this paper, we de-
+sign NeuroKalman, a novel framework that de-
+couples navigation into two complementary pro-
+cesses: a Prior Prediction, based on motion dy-
+namics and a Likelihood Correction, from histori-
+cal observation. We first mathematically associate
+Kernel Density Estimation of the measurement
+likelihood with the attention-based retrieval mech-
+anism, which then allows the system to rectify the
+latent representation using retrieved historical an-
+chors without gradient updates. Comprehensive
+experiments on TravelUAV benchmark demon-
+strate that, with only 10% of the training data fine-
+tuning, our method clearly outperforms strong
+baselines and regulates drift accumulation.
+1. Introduction
+Continuous navigation is fundamental to achieving full au-
+tomation in Unmanned Aerial Vehicles (UAVs) (Liu et al.,
+2023; Lee et al., 2025). Recent advance has been made to
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Target
+⭐
+State Drift to Collision
+Memory Bank
+Current View
+Instruction: The swimming pool is located in a backyard behind a house with a dark grey roof, near a
+paved deck area and manicured hedges, situated in a residential area that features similar suburban
+homes, surrounded by intersecting paved streets and abundant greenery along the property lines.
+Effective Correction
+------ GT Trajectory
+NeuroKalman(Ours)
+Existing Methods
+Figure 1. Illustration of state drift mitigation. Given a global
+instruction, existing models ignore the history but make prediction
+only from current inputs, and thus suffer from accumulated error
+and state drift to collision (orange line). Instead, our NeuroKalman
+framework introduces a Kalman correction mechanism by fusing
+historic measurement as anchors for prediction to rectify the tra-
+jectory prediction (blue line).
+utilize Vision-Language Navigation (VLN) models, which
+follow a global natural language instruction and the local
+visual observation at the current step, to predict the next
+waypoint (Fan et al., 2023; Wang et al., 2024b; Gao et al.,
+2025). By incrementally updating the position from past
+estimates for the next forecasting, the model predicts the full
+trajectory for UAV navigation step-by-step, which draws a
+parallel to the concept of dead-reckoning in control theory.
+Nevertheless, such mechanisms are sensitive to individual
+outlier predictions (Wang et al., 2024b;a; Cai et al., 2025)
+and will accumulative error over time. As illustrated in
+Figure 1, without a dedicated correction mechanism, the
+disparity between the UAV position and the expected tra-
+jectory intensifies. As the linguistic instruction remains
+unchanged throughout the navigation (Liu et al., 2023), it
+is then assumed to already indicate a global plan implicitly
+from the initial position to the target destination. Then, the
+disparity, between the objective UAV coordinates and the
+expected (internal) positional belief, a concrete instantiation
+to the concept of “state drift”, will cause a fundamental
+misalignment in the latent space between current visual ob-
+servation and the initial language instruction for subsequent
+waypoints prediction, which further magnify the error in
+navigation and hurts model generalization (Krantz et al.,
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+2020; Georgakis et al., 2022; Chen et al., 2022).
+Draw inspiration from classical Bayesian state estima-
+tion (S¨arkk¨a & Svensson, 2023), we consider a recursive
+feedback loop where the historical measurements are used
+to periodically correct internal predictions. In detail, it con-
+sists of two complementary phases: a Prediction step that
+generates a prior estimate based on motion dynamics, and
+an Update step that rectifies this belief using the likelihood
+of historical measurements. We note that this diverges from
+existing models (Wang et al., 2024b; Lin et al., 2025) which
+primarily focus on generating strong prior estimation while
+overlooking an explicit mechanism to calibrate these predic-
+tions (Kloss et al., 2021; Revach et al., 2022).
+To this end, we propose NeuroKalman, which directly mod-
+els the Bayesian prediction-update cycle among the latent
+representations, and decomposes the navigation into two
+streams. For the Prediction, we employ a Recurrent Neu-
+ral Network (RNN) to model the motion dynamics for ini-
+tial forecasting. Then, with the mathematical association
+between Kernel Density Estimator (KDE) over the mea-
+surement likelihood (Katharopoulos et al., 2020) and the
+attention mechanism (Vaswani et al., 2017), we introduce
+an Memory Bank to integrate historical observation in the
+Update, which can be jointly used to estimate Kalman Gain
+to refine the prediction and consequently mitigate the accu-
+mulated errors in navigation.
+Compared with conventional navigation models (Chen et al.,
+2021; 2022), our prediction–update NeuroKalman archi-
+tecture offers a unique advantage in preventing overfit-
+ting. Existing models typically requires massive datasets to
+learn a generalized transition function, which are still prone
+to overfitting when data diversity is limited. In contrast, Neu-
+roKalman retrieves relevant historical visual observations.
+This allows it to effectively utilize the necessary information
+to regularize VLN model training by enforcing temporal
+smoothness. In this way, we align the semantics of multi-
+ple local observations with global instructions, improving
+the next waypoint prediction. Experiments on TravelUAV
+benchmark (Wang et al., 2024b) show that NeuroKalman,
+fine-tuned on only 10% of the training data, significantly
+outperforms the initial model and the naive finetuning base-
+lines. Our contributions can be summarized as follows:
+• We point out the accumulation of error in continuous UAV
+navigation, and investigates a correction mechanism based
+on historical content and temporal smoothness for robust
+VLN model prediction & generalization.
+• We formulate the navigation as a recursive Bayesian state
+estimation problem and propose the corresponding Neu-
+roKalman framework. With the mathematical associa-
+tion between KDE of the likelihood function and the
+attention-based memory retrieval, we model the Bayesian
+prediction-update cycle and integrate the selected mem-
+ory of historical observation to correct the prediction and
+mitigate state drift in continuous environments.
+• With a randomly sampled subset of training data for model
+finetuning, our method clearly improve the model perfor-
+mance on the TravelUAV benchmark with a clear margin.
+This also verifies its effectiveness in mitigating overfitting
+when finetuning over limited data.
+2. Related Works
+Vision-and-Language Navigation (VLN). VLN research
+has evolved significantly from indoor environments to large-
+scale aerial scenarios (Anderson et al., 2018; Jain et al.,
+2019). Early approaches like AerialVLN (Liu et al., 2023)
+and CMA (Anderson et al., 2018) operated on discrete
+graphs, selecting actions from pre-defined steps (Krantz
+et al., 2020). Some methods rely on large-scale pre-training
+or data augmentation to improve generalization (Guhur et al.,
+2021; Chen et al., 2021). However, this setting is overly
+simplified and fails to match realistic UAV dynamics. Re-
+cent works, such as CityNav (Lee et al., 2025) and Trav-
+elUAV (Wang et al., 2024b), have shifted to continuous
+environments to better simulate real-world flights. Open-
+VLN (Lin et al., 2025) introduces a data-efficient approach
+for continuous control, while NavFoM (Zhang et al., 2025a)
+proposes a unified foundation model capable of processing
+multimodal inputs across varying horizons. Despite these
+advancements, existing methods typically rely on static net-
+works with fixed weights. They lack the ability to correct
+accumulated errors during long flights, leading to the state
+drift problem.
+Temporal Context Modeling. Temporal context modeling
+is crucial for long-horizon navigation, where the agent needs
+to incorporate historical context for trajectory planning to
+avoid getting lost. Early methods used recurrent networks
+like LSTMs (Anderson et al., 2018) or GRUs (Chung et al.,
+2014) to encode history, but they suffer from information
+loss over long horizons (Fried et al., 2018). Later works
+introduced explicit memory structures to extend the con-
+text window. For example, MapNet (Henriques & Vedaldi,
+2018) and Transformer-XL (Dai et al., 2019) store historical
+states, while recent methods like SkyVLN (Li et al., 2025),
+OpenFly (Gao et al., 2025), and CityNavAgent (Zhang et al.,
+2025b) utilize topological maps or key-frames to assist rea-
+soning. However, these approaches typically treat memory
+as a passive buffer, simply aggregating historical features
+with current observations. In contrast, we adopt a “retrieve-
+to-correct” paradigm (Khandelwal et al., 2019; Borgeaud
+et al., 2022). Instead of simple feature concatenation, we
+use retrieved memory as probabilistic evidence to explic-
+itly rectify the agent’s belief state through Bayesian fusion,
+actively correcting potential drift.
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Deep Bayesian Filtering & State Estimation. Addressing
+the distribution shift in deployment environments has re-
+cently popularized Test-Time Adaptation (TTA) techniques
+in embodied AI (Wang et al., 2020; Kumar et al., 2021). Re-
+cent methods like FEEDTTA (Kim et al.) and FSTTA (Gao
+et al., 2023) attempt to mitigate drift via feedback-based
+reinforcement learning or online gradient updates. How-
+ever, in UAV-VLN, the lack of reliable supervision often
+causes these methods to reinforce existing errors (Niu et al.,
+2022). Alternatively, Deep Bayesian Filtering combines neu-
+ral networks with probabilistic models (Kloss et al., 2021;
+Revach et al., 2022). While effective at learning transition
+prior dynamics, these approaches struggle to define a ro-
+bust likelihood for high-dimensional visual inputs, often
+reverting to parametric models that are themselves prone
+to drift (Haarnoja et al., 2016; Becker et al., 2019). In con-
+trast, NeuroKalman addresses this by framing navigation as
+Recursive Bayesian Estimation. Instead of updating model
+weights like TTA, we correct the belief state. By deriving
+the likelihood directly from memory retrieval, our frame-
+work offers a stable solution to state drift.
+3. Method
+To address the error accumulation inherent in dead-
+reckoning (Hong et al., 2021; Chen et al., 2021), we depart
+from the conventional paradigm that treats navigation purely
+as a sequential prediction task (Anderson et al., 2018; Fan
+et al., 2023), but instead reframe it as a recursive Bayesian
+state estimation problem. As illustrated in Figure 2, this for-
+mulation enables us to structurally decouple the Prediction
+Block, for initial prior estimation, from the Update Block
+for refinement from historical measurements, transforming
+navigation from a blind rollout into a reliable inference pro-
+cess. Accordingly, we posit that robust navigation relies
+on maintaining a probabilistic belief over the state space.
+This is achieved by fusing the motion dynamics prior with
+reliable measurements via the Kalman Correction to obtain
+a rectified posterior that prevents drift.
+3.1. Problem Formulation: Navigation as Filtering
+Formally, we consider a UAV operating in a continuous 3D
+environment (Krantz et al., 2020; Wang et al., 2024b). At
+each time step t, the model receives an observation tuple
+ot = {vt, pt, l}, comprising multi-view visual inputs vt (i.e.,
+front, back, down, left, right), current 3D coordinates pt, and
+the global natural language instruction l. The model predicts
+a next waypoint wt for UAV’s execution. Central to our for-
+mulation is the high-dimensional latent belief state zt ∈Rd.
+Unlike simple waypoint coordinates, zt encodes a semantic
+understanding of the UAV’s position and environmental con-
+text from time step t. Our core objective is to estimate the
+posterior distribution of this state, P(zt|o1:t, w1:t−1), given
+the entire history of observations and waypoints. Under
+the standard Markov assumption, this posterior estimation
+decomposes into a recursive prediction-update cycle, known
+as the Bayes filter (S¨arkk¨a & Svensson, 2023):
+P(zt|o1:t, w1:t−1)
+|
+{z
+}
+Posterior
+∝P(ot|zt)
+|
+{z
+}
+Likelihood
+× P(zt|zt−1, wt−1)
+|
+{z
+}
+Prior
+(1)
+Since these distributions are intractable in high-dimensional
+visual spaces, we propose NeuroKalman to structurally in-
+stantiate this logic within a neural architecture (Kloss et al.,
+2021; Haarnoja et al., 2016). As detailed in the following
+sections, we decouple Eq. 1 into three learnable modules:
+• Predictive Prior (Section 3.2): A RNN-based predictor
+that models the transition P(zt|zt−1, wt−1), serving as
+the dead-reckoning mechanism.
+• Measurement Likelihood (Section 3.3): An MLLM that
+encodes multi-modal inputs with historical memory to
+parameterize the likelihood P(ot|zt), providing retrieved
+evidence as corrective anchors.
+• The Kalman Correction (Section 3.4): A gating mecha-
+nism that dynamically fuses the Prior and Likelihood to
+compute the rectified Posterior P(zt|o1:t, w1:t−1).
+3.2. The Prediction Step: Predictive Prior
+The Prediction step is to primarily estimate the a prior belief
+of the current state, functioning as an internal motion model,
+based solely on learned transition dynamics. This step ef-
+fectively serving as a dead-reckoning mechanism for the
+Bayesian filter, and we design an RNN with Gated Recur-
+rent Unit (GRU) to parameterize the transition distribution
+P(zt|zt−1, wt−1).
+Formally, at time step t, this module processes three inputs:
+the previous posterior zt−1, which serves as the rectified
+belief state implicitly encoding the UAV’s optimal position
+at t −1; the previous waypoint wt−1, defined as the UAV’s
+displacement vector in the body coordinate system from
+t −1 to t; and the hidden state ht−1, which encodes the
+historical motion dynamics accumulated from the initial
+step up to t −1. To initialize the recursive process at t = 0,
+we set the initial state z0 to the measurement output of the
+MLLM at the initial position (denoted as r0). The initial
+hidden state h0 is then obtained by mapping z0 through a
+MLP layer with a Tanh activation to align with the GRU’s
+latent space. Based on these inputs, the GRU updates its
+internal hidden state and projects the prior estimate ˜zt as
+follows:
+ht = GRU([zt−1, wt−1], ht−1)
+(2)
+˜zt = MLPprior(ht)
+(3)
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Trainable Module
+Frozen Module
+Well-defined Formula
+Multi-view
+Images (𝜐!)
+Memory 
+Bank
+Vision 
+Encoder
+Context-Enhanced 
+Feature Fusion
+MLLM
+LoRA
+Tokenizer
+Tokenizer
+shared
+Task Instruction(ℓ)
+“There is a target in left of
+UAV, ... , Please control the
+drone and find the target.”
+Position (𝓅!)
+𝑥!, 𝑦!, 𝑧!
+𝑓"(⋅)
+𝑓#(⋅)
+𝜎!
+(conf.)
+𝑟!
+(meas.)
+Kalman Gain
+(𝐾!) Predictor
+𝑓$(⋅)
+/𝑧!
+GRU
+ℎ!%&
+recurrent
+Prediction Block
+ℎ!
+Update Block
+Kalman
+Correction
+𝑧!: = 𝐾!𝑟! + 1 −𝐾! /𝑧!
+𝑧!%&
+𝑤!%&
+Figure 2. NeuroKalman framework aims to leverage temporal context to enhance next step prediction in navigation. Specifically, we
+follow the logic in classic Kalman filtering (S¨arkk¨a & Svensson, 2023), and consider the Prediction and Update steps (Kalman, 1960), i.e.,
+the former one makes initial estimation while the latter one estimates measurement representation rt for core Kalman correction. In detail,
+the Prediction Block employs a GRU to roughly model the motion dynamics to predict the prior state ˜zt with updated hidden state ht,
+according to the posterior state zt−1 in the last step. Then, with the confidence scalar σt predicted by the Update Block, the Kalman Gain
+Kt is estimated on the representation space for correction. The waypoint prediction ϕ(zt) is omitted for the clarity of illustration while
+the variables rt, ˜zt can be both fed in ϕ(·) for augmented supervision.
+Here, ˜zt denotes the prior prediction st time step t. Crucially,
+this prediction is a “blind” process: it is derived purely
+from dead-reckoning logic without accessing the current
+visual observation vt (Banino et al., 2018). While the GRU
+effectively captures temporal dependencies and smooths the
+trajectory, it remains a purely parametric model governed by
+fixed weights. In unseen scenarios during training or data-
+scarce regimes, reliance on this motion dynamic prediction
+˜zt inevitably leads to error accumulation, causing the latent
+belief to drift from the true manifold. This necessitates
+the subsequent likelihood correction step (Liu et al., 2023;
+Wang et al., 2024b).
+3.3. The Update Step: Measurement Likelihood
+As the Prediction step primarily uses motion dynamics for
+prior estimation, we implement the Update Block to fuse the
+historical memory functioning as external information, with
+the current observations and correspondingly implement a
+Multimodal Large Language Model (MLLM) to parameter-
+ize the measurement likelihood. At each time step t, we first
+augment the current visual input vt with relevant historical
+context retrieved from the episodic memory bank M. The
+MLLM then jointly processes the memory-augmented vi-
+sual features, the global instruction l, and the position of the
+UAV pt to output the latent measurement rt along with a
+confidence score σt ∈[0, 1] representing the measurement
+uncertainty. This rt serves as the measurement likelihood
+for the subsequent Kalman correction.
+Memory Construction. To facilitate the likelihood esti-
+mation, the memory bank M is constructed incrementally
+to store high-fidelity historical visual anchors. We adopt
+a post-correction storage strategy (Yang et al., 2024; Shi
+et al., 2025): the visual representation corresponding to the
+waypoint localization decoded from the rectified posterior
+state is appended to M only if the system’s confidence
+score exceeds a reliability threshold (i.e., σt > 0.5). For-
+mally, the bank is defined as M = {(ki, vi)}N
+i=1, where
+ki = vi encodes the fixed visual features of selected snap-
+shots. This selective storage mechanism ensures that the
+MLLM always attends to “validated anchors” (Chen et al.,
+2022), preventing the accumulation of noisy or ambiguous
+measurements.
+Retrieval as Kernel Density Estimation. We rigorously
+formulate the memory retrieval process not merely as fea-
+ture matching, but as Kernel Density Estimation (KDE) over
+the visual feature manifold. Given that our retrieval oper-
+ates purely within the visual domain, where the query is
+the current visual feature ft and the memory stores histor-
+ical visual features {fi}N
+i=1, our goal is to derive a refined
+visual evidence ˆzevi. From a statistical perspective, we
+treat the historical features as empirical samples drawn from
+the underlying observation distribution. We employ the
+Nadaraya-Watson kernel regression estimator to approxi-
+mate the expected canonical feature E[f|ot] on the visual
+manifold (Nadaraya, 1964; Watson, 1964):
+ˆzevi =
+PN
+i=1 K(ft, fi) · fi
+PN
+j=1 K(ft, fj)
+(4)
+where ft serves as the query, fi serves as both key and
+value, and K(·, ·) is a kernel function measuring visual sim-
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+ilarity. In our NeuroKalman architecture, we utilize the
+scaled dot-product attention mechanism. Defining the ker-
+nel as K(x, y) = exp( x⊤y
+√
+d ), Eq. 4 becomes mathematically
+equivalent to the Softmax Attention operation (Katharopou-
+los et al., 2020; Choromanski et al., 2020):
+αi = Softmax
+f ⊤
+t fi
+√
+d
+
+,
+ˆzevi =
+N
+X
+i=1
+αifi
+(5)
+Through this derivation, the retrieved vector ˆzevi functions
+as a measurement correction. The term αi represents the
+posterior probability P(fi|ft) that the current visual obser-
+vation belongs to the same local manifold as history i. Con-
+sequently, ˆzevi aggregates historical anchors to mitigate
+high-frequency visual noise before state estimation. Unlike
+the GRU prior which propagates uncertainty blindly, ˆzevi
+leverages observational evidence to stabilize the likelihood
+term, ensuring robustness in out-of-distribution scenarios.
+3.4. The Kalman Correction: Fusion as Gain
+The final step fuses the potentially drifting prior estimate
+˜zt (from Section 3.2) with the encoded measurement rt
+(from Section 3.3) to obtain the final corrected posterior zt.
+We design a fusion mechanism that structurally mirrors the
+classic Kalman Filter update equation (Kalman, 1960):
+zpost = zprior + Kt(yt −Hzprior)
+(6)
+In our NeuroKalman framework, the measurement yt cor-
+responds to the encoded measurement rt. zprior and zpost
+correspond to the prior estimate ˜zt and final corrected pos-
+terior zt, respectively. We assume an identity measurement
+matrix H = I since both the prior and measurement are
+mapped into the same aligned latent feature space (Haarnoja
+et al., 2016).
+Learnable Kalman Gain. The core of this correction is the
+optimal weighting between prior and measurement. Con-
+sidering the intractability of explicitly estimating noise co-
+variances (i.e., Q and R) of traditional Kalman Filtering in
+high-dimensional latent space, we formulate a learnable gat-
+ing network to approximate the Kalman Gain Kt (Revach
+et al., 2022). It dynamically computes the element-wise
+uncertainty based on the current context:
+Kt = Sigmoid (Wg[(rt −˜zt) ; ϕ(σt)] + bg)
+(7)
+where [· ; ·] denotes concatenation, ϕ(·) is a learnable MLP
+projection mapping the confidence score σt to the feature di-
+mension, and Sigmoid(·) is the activation function ensuring
+the gain Kt ∈(0, 1)d.
+Bayesian Update. Using the computed gain, the system
+updates the belief state. The fusion equation is defined as:
+zt = (1 −Kt) ⊙˜zt + Kt ⊙rt
+(8)
+= ˜zt + Kt ⊙(rt −˜zt)
+(9)
+Figure 3.
+Demonstration of trajectory rectification.
+The
+TravelUAV-FT relies solely on parametric predictions to estimate
+its trajectory, resulting in obvious trajectory drift. NeuroKalman
+rectifies its position by integrating Kalman correction.
+Equation 9 is algebraically identical to the standard Kalman
+correction form (Eq. 6), where (rt −˜zt) represents the
+residual—the difference between the external measurement
+and the predicted prior.
+Dynamic Uncertainty Regulation. The learnable Kalman
+Gain Kt functions as an adaptive regulator. When the mea-
+surement is confident, the system heavily weighs the inno-
+vation to pull the state towards the validated measurement.
+Conversely, when the measurement is ambiguous, it relies
+more on the smooth internal dynamics of the Prior. This
+mechanism ensures that the final posterior zt remains an-
+chored to the true trajectory manifold, effectively cancelling
+the state drift. Finally, zt is passed to the waypoint predic-
+tor to predict the next waypoint and fed back into the next
+prediction step as zt−1. As visualized in Figure 3, this cor-
+rection mechanism actively performs micro-adjustments to
+re-align the belief state with the ground truth, effectively pre-
+venting the trajectory drift characteristic of the uncorrected
+baseline (TravelUAV-FT).
+4. Experiments
+In this section, we empirically validate the effectiveness of
+NeuroKalman on the challenging TravelUAV benchmark,
+with a specific focus on data efficiency and generalization.
+We first describe the experimental setup and evaluation pro-
+tocol, then present main results, ablation studies, and a
+detailed analysis of state drift problem.
+4.1. Experimental Setup
+We evaluate our framework on the TravelUAV bench-
+mark (Wang et al., 2024b), focusing on robust performance
+under data constraints. We detail the dataset, baselines,
+metrics, and our specific implementation protocols below.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Table 1. Experimental results on the UAV-Need-Help test seen set, grouped by assistant levels (L1-L3). Bold indicates the best performance
+among all methods within each assistant level.
+Assistant Methods
+Full
+Easy
+Hard
+NE ↓
+SR ↑OSR ↑SPL ↑NE ↓
+SR ↑OSR ↑SPL ↑NE ↓
+SR ↑OSR ↑SPL ↑
+L1
+Random Action
+222.20 0.14
+0.21
+0.07
+142.07 0.26
+0.39
+0.13
+320.12 0.00
+0.00
+0.00
+Fixed Action
+188.61 2.27
+8.16
+1.40
+121.36 3.48
+11.48
+2.14
+270.69 0.79
+4.09
+0.49
+CMA (Anderson et al., 2018)
+135.73 8.37
+18.72
+7.90
+84.89 11.48 24.52 10.68 197.77 4.57
+11.65
+4.51
+TravelUAV (Wang et al., 2024b)
+106.28 16.10 44.26 14.30
+68.78 18.84 47.61 16.39 152.04 12.76 40.16 11.76
+TravelUAV-FT (Wang et al., 2024b) 99.79 17.56 41.89 14.71
+64.10 20.69 45.98 16.79 143.85 13.70 36.85 12.15
+OpenVLN (Lin et al., 2025)
+125.97 14.39 28.03 12.94
+87.96 15.22 30.64 13.31 175.54 13.32 24.62 12.55
+NeuroKalman (Ours)
+71.56 25.86 58.73 22.43
+42.70 30.52 62.70 25.86 105.07 20.11 53.90 18.21
+L2
+CMA (Anderson et al., 2018)
+141.55 7.02
+15.39
+6.54
+87.77
+9.55
+19.87
+8.74
+207.18 3.94
+9.92
+3.94
+TravelUAV (Wang et al., 2024b)
+120.57 12.98 37.38 11.30
+76.89 17.55 43.48 15.01 186.22 7.40
+29.92
+6.76
+TravelUAV-FT (Wang et al., 2024b) 112.20 14.05 35.50 11.70
+72.50 18.80 42.00 15.50 178.00 8.20
+27.50
+7.50
+OpenVLN (Lin et al., 2025)
+129.68 13.83 25.97 12.18
+82.80 17.30 31.41 14.70 178.32 10.24 20.31
+9.57
+NeuroKalman (Ours)
+87.11 22.32 53.68 19.40
+46.50 27.60 59.50 23.00 138.00 15.80 46.50 14.50
+L3
+CMA (Anderson et al., 2018)
+140.93 4.89
+11.56
+4.41
+83.58
+7.35
+17.81
+6.53
+210.91 1.89
+3.94
+1.83
+TravelUAV (Wang et al., 2024b)
+146.32 6.31
+15.39
+5.10
+93.15
+9.55
+21.94
+7.32
+215.85 2.36
+7.40
+2.17
+TravelUAV-FT (Wang et al., 2024b) 135.00 4.51
+12.06
+3.70
+89.00
+6.00
+17.11
+4.70
+198.78 2.68
+5.83
+2.47
+OpenVLN (Lin et al., 2025)
+146.42 2.70
+6.96
+2.19
+92.90
+4.86
+11.38
+3.89
+201.96 0.47
+2.36
+0.43
+NeuroKalman (Ours)
+107.55 8.89
+17.28
+7.01
+83.00 11.24 23.63 10.65 179.07 5.98
+9.45
+4.89
+Dataset & Simulation Environment. We adopt the Trav-
+elUAV benchmark and its UAV-Need-Help dataset (Wang
+et al., 2024b), simulated in the high-fidelity AirSim envi-
+ronment (Shah et al., 2017) which provides realistic physics
+and diverse outdoor conditions (urban, snowy, meadow, etc).
+The dataset contains 12,149 human-operated trajectories
+annotated with 89 object categories. Following the official
+protocol, the data is split as follows: the Training set con-
+tains 9,152 trajectories across 20 scenes; the Test-Seen set
+has 1,410 trajectories from training scenes; the Test-Unseen-
+Map set comprises 958 trajectories from 2 entirely novel
+scenes; and the Test-Unseen-Object set contains 629 trajec-
+tories targeting novel objects. Trajectories are categorized
+by length: “Easy” (< 250m) and “Hard” (≥250m), with
+target distances ranging from 50 to 400 meters.
+Baselines. We compare NeuroKalman against a compre-
+hensive set of baselines: (1) Random/Fixed Action: Naive
+models that select random poses or map instructions to fixed
+movements; (2) CMA (Anderson et al., 2018): A standard
+bi-directional LSTM model using cross-modal attention;
+(3) TravelUAV baseline (Wang et al., 2024b): The offi-
+cial strong baseline provided by the benchmark; (4) Open-
+VLN (Lin et al., 2025) and NavFoM (Zhang et al., 2025a):
+State-of-the-art approaches for continuous UAV navigation
+and multimodal foundation models. Note that for the Trav-
+elUAV baseline, we report results under two settings: trained
+on full data (denoted as TravelUAV) and fine-tuned on 10%
+training data (denoted as TravelUAV-FT).
+Metrics. We report four standard metrics (Anderson et al.,
+2018): Navigation Error (NE), the average distance between
+the UAV’s final position and the target; Success Rate (SR),
+the percentage of episodes where the agent stops within 20
+meters of the target; Oracle Success Rate (OSR), the success
+rate by accounting for the minimum distance to the target
+achieved at any point during the navigation trajectory; and
+Success weighted by Path Length (SPL), which balances
+success with trajectory efficiency.
+Implementation Details. We implement our model using
+PyTorch on 4×NVIDIA RTX A6000 GPUs. We freeze the
+MLLM backbone (EVA-CLIP (Sun et al., 2023) as the vi-
+sual encoder and Vicuna-7B (Chiang et al., 2023) as the lan-
+guage backbone) and only compute gradients for the visual
+projector, waypoint predictor, and LoRA (Hu et al., 2022)
+layers using the Adam optimizer (Learning Rate=5e −5,
+Batch Size=16). We also use an additional L1 loss to si-
+multaneously supervise both the predictive prior (˜zt) and
+measurement (rt), with a coefficient factor of 0.2. We adopt
+limited data fine-tuning for robustness evaluation. Specifi-
+cally, both NeuroKalman and the TravelUAV are initialized
+with weights pre-trained on the full data, yet are subse-
+quently fine-tuned using only a fixed random 10% subset of
+the training data.
+4.2. Main Results
+We conduct a comprehensive evaluation of NeuroKalman on
+the TravelUAV benchmark. Accordingly, we compare our
+method against several state-of-the-art baselines across two
+aspects: (1) Data Efficiency on the Test-Seen split, under-
+scoring the model’s robustness in long-horizon navigation;
+and (2) Generalization on the Test-Unseen splits (across
+both maps and objects), highlighting the model’s capability
+to handle distribution shifts in unknown scenarios.
+Data Efficiency on the Test-Seen Split. Table 1 summa-
+rizes the results on the Test-Seen split to highlight the su-
+perior data efficiency of our framework. First, we compare
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Table 2. Experimental results with the L1 assistant on the UAV-Need-Help test unseen set. Bold indicates best results.
+Split Methods
+Full
+Easy
+Hard
+NE ↓
+SR ↑OSR ↑SPL ↑NE ↓
+SR ↑OSR ↑SPL ↑NE ↓
+SR ↑OSR ↑SPL ↑
+UO
+Random Action
+260.14 0.16
+0.16
+0.16
+174.10 0.48
+0.48
+0.48
+302.96 0.00
+0.00
+0.00
+Fixed Action
+212.84 3.66
+9.54
+2.16
+151.66 6.70
+13.88
+3.72
+243.29 2.14
+7.38
+1.38
+CMA (Anderson et al., 2018)
+155.79 9.06
+16.06
+8.68
+102.92 14.83 22.49 13.90 182.09 6.19
+12.86
+6.08
+TravelUAV (Wang et al., 2024b)
+118.11 22.42 46.90 20.51
+86.12 24.40 49.28 22.03 134.03 21.43 45.71 19.75
+TravelUAV-FT (Wang et al., 2024b) 112.01 23.53 42.13 20.29
+64.80 34.45 54.07 28.97 135.51 18.10 36.19 15.97
+NavFoM (Zhang et al., 2025a)
+108.04 29.83 47.99 27.20
+70.51 32.54 50.72 29.54 133.01 28.03 46.18 25.64
+NeuroKalman (Ours)
+71.01 32.48 60.82 28.50
+44.50 42.50 66.50 37.37
+84.50 27.50 58.00 24.50
+UM
+Random Action
+202.98 0.00
+0.00
+0.00
+158.46 0.00
+0.00
+0.00
+265.88 0.00
+0.00
+0.00
+Fixed Action
+180.47 0.52
+2.61
+0.39
+132.89 0.89
+4.28
+0.67
+247.72 0.00
+0.25
+0.00
+CMA (Anderson et al., 2018)
+141.68 2.30
+10.02
+2.16
+102.29 3.57
+14.26
+3.33
+197.35 0.50
+4.03
+0.50
+TravelUAV (Wang et al., 2024b)
+138.80 4.18
+20.77
+3.84
+102.94 4.63
+22.82
+4.24
+189.46 3.53
+17.88
+3.28
+TravelUAV-FT (Wang et al., 2024b) 117.84 4.68
+19.03
+3.17
+87.50
+5.13
+21.39
+5.06
+160.79 4.05
+15.69
+3.32
+NavFoM (Zhang et al., 2025a)
+125.10 6.30
+18.95
+5.68
+102.41 6.77
+20.07
+6.04
+170.58 5.36
+15.71
+4.97
+NeuroKalman (Ours)
+100.32 8.34
+34.15
+7.12
+69.50
+9.15
+38.50
+7.50
+140.00 7.20
+28.00
+6.50
+Table 3. Effectiveness of fusion mechanism. All methods are implemented with the L1 assistant on the UAV-Need-Help test seen set.
+Bold indicates the best results among all methods.
+Methods
+Full
+Easy
+Hard
+NE↓
+SR↑
+OSR↑
+SPL↑
+NE↓
+SR↑
+OSR↑
+SPL↑
+NE↓
+SR↑
+OSR↑
+SPL↑
+Kt = 0.1
+217.09
+0.00
+0.00
+0.00
+132.81
+0.00
+0.00
+0.00
+302.56
+0.00
+0.00
+0.00
+Kt = 0.5
+83.14
+24.12
+53.74
+19.40
+46.50
+27.60
+59.51
+23.00
+138.00
+19.84
+46.61
+17.30
+Kt = 0.9
+100.96
+18.05
+44.15
+15.35
+58.18
+19.92
+52.11
+18.43
+154.50
+15.80
+34.33
+14.50
+Learnable
+71.56
+25.86
+58.73
+22.43
+42.70
+30.52
+62.70
+25.86
+105.07
+20.11
+53.90
+18.21
+our method with the parametric baseline, TravelUAV-FT,
+under the same 10% data fine-tuning regime. NeuroKalman
+achieves a significant performance lead across all metrics.
+For example, in the L1 Full split, our method attains a SR
+of 25.86%, surpassing TravelUAV-FT (17.56%) by a clear
+margin. This advantage is even more pronounced in the
+Hard split (> 250m), where we improve the OSR from
+36.85% (TravelUAV-FT) to 53.90% (Ours). This indicates
+that while the parametric TravelUAV-FT exhibits signs of
+overfitting and struggles to maintain trajectory consistency
+when starved of data, our method effectively mitigates this
+by integrating Kalman correction. By anchoring the in-
+ternal belief state to retrieved historical evidence, Neu-
+roKalman prevents the progressive error accumulation.
+Furthermore, our model consistently delivers superior per-
+formance when compared to TravelUAV. Notably, despite
+using only 10% of the training data, NeuroKalman outper-
+forms the TravelUAV on the L1 Hard split, reducing the NE
+from 152.04 to 105.07. This further demonstrates the robust-
+ness of NeuroKalman, validating that decoupling prediction
+and correction enables precise navigation.
+Generalization on the Test-Unseen Split. We further evalu-
+ate the model’s generalization by testing on the Test-Unseen-
+Object and Test-Unseen-Map splits. As summarized in
+Table 2, NeuroKalman consistently outperforms baseline
+methods (Anderson et al., 2018; Wang et al., 2024b) in
+these novel settings on the Full split. For example, on the
+Unseen Objects (UO) split, our method achieves a SR of
+32.48% and an OSR of 60.82%, significantly surpassing
+the strong NavFoM baseline (SR: 29.83%, OSR: 47.99%).
+The performance gap is even more evident in the challeng-
+ing Unseen Maps (UM) split, where NeuroKalman nearly
+doubles the SR of TravelUAV (8.34% vs. 4.18%). While
+NavFoM achieves a slight advantage in SR and SPL on the
+Hard split of unseen objects due to its large-scale data pre-
+training, NeuroKalman maintains a considerably lower NE
+(84.50 vs. 133.01) and a higher OSR (58.00% vs. 46.18%).
+These results highlight the limitation of purely parametric
+baselines, which suffer from performance degradation due
+to error accumulation caused by state drift when facing un-
+known topologies or objects. In contrast, the generalization
+of NeuroKalman validates the efficacy of Bayesian fusion
+mechanism. By adaptively regulating the reliance be-
+tween the GRU’s kinematic prior and the measurement
+likelihood, our framework successfully utilizes retrieval-
+based anchors to correct accumulated errors.
+4.3. Ablation Study
+Effectiveness of Fusion Mechanism. Next, we investi-
+gate whether a learnable Kalman Gain is superior to fixed
+scalar values in balancing the motion prior and measure-
+ment evidence. As presented in Table 3, fixed strategies
+fail to achieve optimal navigation results. A strong bias
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Table 4. Impact of memory history length. All methods are implemented with the L1 assistant on the UAV-Need-Help test seen set. Bold
+indicates the best results among all methods.
+Methods
+Full
+Easy
+Hard
+NE↓
+SR↑
+OSR↑
+SPL↑
+NE↓
+SR↑
+OSR↑
+SPL↑
+NE↓
+SR↑
+OSR↑
+SPL↑
+M = 5
+84.39
+21.23
+53.46
+18.18
+51.56
+25.03
+56.96
+21.21
+125.00
+16.54
+49.13
+15.09
+M = 10
+71.56
+25.86
+58.73
+22.43
+42.70
+30.52
+62.70
+25.86
+105.07
+20.11
+53.90
+18.21
+M = 15
+77.17
+23.77
+56.42
+20.16
+47.75
+28.10
+60.15
+23.33
+116.21
+18.43
+51.81
+17.39
+Figure 4. Visualization of L2 position error over time. The
+baselines (orange and red dashed lines) show a continuous error
+increase on long trajectories. Conversely, NeuroKalman (blue
+solid line) keeps the error stable and prevents it from growing
+rapidly via effective Kalman correction.
+towards the Prior (Kt = 0.1) leads to catastrophic failure.
+Conversely, relying heavily on the Measurement (Kt = 0.9)
+also yields suboptimal performance, with the SR dropping
+to 18.05% on the Full split compared to the balanced set-
+ting. Even the best fixed strategy (Kt = 0.5) is inferior to
+our approach. In contrast, our learnable gating mechanism
+consistently achieves superior performance across all met-
+rics, reaching the highest SR of 25.86% and the lowest NE
+of 71.56. We think that the failure at Kt = 0.1 confirms
+that without sufficient external correction, the model suffers
+from unbounded state drift. Meanwhile, the degradation
+at Kt = 0.9 suggests that ignoring temporal smoothness
+makes the model vulnerable to noisy retrievals. Our learn-
+able gating network effectively acts as an uncertainty
+switch, which dynamically integrates internal dynamics
+and external measurements to maintain robust estima-
+tion across diverse noise regimes.
+Impact of Memory History Length. We also investigate
+the impact of memory history length M to determine the
+optimal temporal context for our retrieval mechanism. As
+shown in Table 4, deviations from our design choice lead
+to distinct performance drops. A short history (M = 5)
+yields suboptimal results, with a higher NE of 84.39 on the
+Full split. Interestingly, extending the history excessively
+(M = 15) does not help but rather degrades performance,
+increasing the NE to 77.17. Our setting (M = 10) achieves
+the best performance with the lowest NE of 71.56. We think
+that a limited temporal window lacks sufficient historical
+anchors to recover from accumulated drift, whereas an ex-
+cessive length introduces outdated visual features that act
+as noise, distracting the attention mechanism from relevant
+evidence. This indicates that appropriate memory length
+ensures sufficient context for effective re-localization
+without introducing spurious correlations.
+4.4. Drift Analysis
+Finally, we analyze the state drift problem by visualizing the
+average L2 position error over time in Figure 4. Intuitively,
+the baseline curves (TravelUAV and TravelUAV-FT) termi-
+nate earlier than NeuroKalman because baseline models are
+more prone to premature collisions or severe drift on long
+trajectories. In detail, their localization errors accumulate
+over time and become especially evident after 100 steps.
+In contrast, the error of NeuroKalman stops growing and
+stays stable (around 30–40 meters) after a small initial rise.
+This demonstrates that our Kalman correction mechanism
+successfully leverages retrieved memory anchors to periodi-
+cally rectify the internal belief, ultimately constraining error
+accumulation in long-horizon navigation.
+5. Conclusion
+In this work, we reframe the continuous navigation task as
+a Recursive Bayesian State Estimation problem to address
+the fundamental challenge of state drift inherent in open-
+loop parametric inference. We propose NeuroKalman, a
+framework that decouples navigation into prior prediction
+via motion dynamics and likelihood correction via memory
+anchors, while mathematically establishing the equivalence
+between attention-based retrieval and Kernel Density Esti-
+mation (KDE). Comprehensive experiments on TravelUAV
+benchmark demonstrate that our method achieves remark-
+able data efficiency and generalization, clearly outperform-
+ing strong baselines and regulating drift accumulation.
+Limitation. The current implementation of the prediction
+prior utilizes a GRU-based RNN as baseline, which may be
+subject to information decay over exceptionally long hori-
+zons. However, the primary contribution of NeuroKalman is
+recursive Bayesian correction mechanism and we can easily
+apply another architecture to enhance the overall robustness.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Impact Statement
+This work advances robust UAV navigation in GPS-denied
+environments, with potential for search-and-rescue and dis-
+aster relief. Although effective, rigorous verification pro-
+cesses and safety protocols are strictly necessary prior to
+integrating it into real-world embodied systems.
+References
+Anderson, P., Wu, Q., Teney, D., Bruce, J., Johnson, M.,
+S¨underhauf, N., Reid, I., Gould, S., and Van Den Hengel,
+A. Vision-and-language navigation: Interpreting visually-
+grounded navigation instructions in real environments. In
+Proceedings of the IEEE conference on computer vision
+and pattern recognition, pp. 3674–3683, 2018.
+Banino, A., Barry, C., Uria, B., Blundell, C., Lillicrap, T.,
+Mirowski, P., Pritzel, A., Chadwick, M. J., Degris, T.,
+Modayil, J., et al. Vector-based navigation using grid-like
+representations in artificial agents. Nature, 557(7705):
+429–433, 2018.
+Becker, P., Pandya, H., Gebhardt, G., Zhao, C., Taylor,
+C. J., and Neumann, G. Recurrent kalman networks:
+Factorized inference in high-dimensional deep feature
+spaces. In International conference on machine learning,
+pp. 544–552. PMLR, 2019.
+Bishop, C. M. and Nasrabadi, N. M. Pattern recognition
+and machine learning, volume 4. Springer, 2006.
+Borgeaud, S., Mensch, A., Hoffmann, J., Cai, T., Rutherford,
+E., Millican, K., Van Den Driessche, G. B., Lespiau, J.-B.,
+Damoc, B., Clark, A., et al. Improving language models
+by retrieving from trillions of tokens. In International
+conference on machine learning, pp. 2206–2240. PMLR,
+2022.
+Cai, H., Dong, J., Tan, J., Deng, J., Li, S., Gao, Z., Wang, H.,
+Su, Z., Sumalee, A., and Zhong, R. Flightgpt: Towards
+generalizable and interpretable uav vision-and-language
+navigation with vision-language models. arXiv preprint
+arXiv:2505.12835, 2025.
+Chen, S., Guhur, P.-L., Schmid, C., and Laptev, I. History
+aware multimodal transformer for vision-and-language
+navigation. Advances in neural information processing
+systems, 34:5834–5847, 2021.
+Chen, S., Guhur, P.-L., Tapaswi, M., Schmid, C., and Laptev,
+I. Think global, act local: Dual-scale graph transformer
+for vision-and-language navigation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pp. 16537–16547, 2022.
+Chiang, W.-L., Li, Z., Lin, Z., Sheng, Y., Wu, Z., Zhang,
+H., Zheng, L., Zhuang, S., Zhuang, Y., Gonzalez, J. E.,
+et al. Vicuna: An open-source chatbot impressing gpt-4
+with 90%* chatgpt quality. See https://vicuna. lmsys. org
+(accessed 14 April 2023), 2(3):6, 2023.
+Choromanski, K., Likhosherstov, V., Dohan, D., Song, X.,
+Gane, A., Sarlos, T., Hawkins, P., Davis, J., Mohiuddin,
+A., Kaiser, L., et al. Rethinking attention with performers.
+arXiv preprint arXiv:2009.14794, 2020.
+Chung, J., Gulcehre, C., Cho, K., and Bengio, Y. Empirical
+evaluation of gated recurrent neural networks on sequence
+modeling. arXiv preprint arXiv:1412.3555, 2014.
+Dai, Z., Yang, Z., Yang, Y., Carbonell, J. G., Le, Q., and
+Salakhutdinov, R. Transformer-xl: Attentive language
+models beyond a fixed-length context. In Proceedings of
+the 57th annual meeting of the association for computa-
+tional linguistics, pp. 2978–2988, 2019.
+Fan, Y., Chen, W., Jiang, T., Zhou, C., Zhang, Y., and Wang,
+X. Aerial vision-and-dialog navigation. In Findings of the
+Association for Computational Linguistics: ACL 2023,
+pp. 3043–3061, 2023.
+Fried, D., Hu, R., Cirik, V., Rohrbach, A., Andreas, J.,
+Morency, L.-P., Berg-Kirkpatrick, T., Saenko, K., Klein,
+D., and Darrell, T. Speaker-follower models for vision-
+and-language navigation. Advances in neural information
+processing systems, 31, 2018.
+Gao, J., Yao, X., and Xu, C. Fast-slow test-time adaptation
+for online vision-and-language navigation. arXiv preprint
+arXiv:2311.13209, 2023.
+Gao, Y., Li, C., You, Z., Liu, J., Li, Z., Chen, P., Chen, Q.,
+Tang, Z., Wang, L., Yang, P., et al. Openfly: A compre-
+hensive platform for aerial vision-language navigation.
+arXiv preprint arXiv:2502.18041, 2025.
+Georgakis, G., Schmeckpeper, K., Wanchoo, K., Dan, S.,
+Miltsakaki, E., Roth, D., and Daniilidis, K. Cross-modal
+map learning for vision and language navigation.
+In
+Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pp. 15460–15470, 2022.
+Guhur, P.-L., Tapaswi, M., Chen, S., Laptev, I., and
+Schmid, C. Airbert: In-domain pretraining for vision-and-
+language navigation. In Proceedings of the IEEE/CVF
+international conference on computer vision, pp. 1634–
+1643, 2021.
+Guu, K., Lee, K., Tung, Z., Pasupat, P., and Chang, M.
+Retrieval augmented language model pre-training. In
+International conference on machine learning, pp. 3929–
+3938. PMLR, 2020.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Haarnoja, T., Ajay, A., Levine, S., and Abbeel, P. Backprop
+kf: Learning discriminative deterministic state estimators.
+Advances in neural information processing systems, 29,
+2016.
+Henriques, J. F. and Vedaldi, A. Mapnet: An allocentric spa-
+tial memory for mapping environments. In proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition, pp. 8476–8484, 2018.
+Hong, Y., Wu, Q., Qi, Y., Rodriguez-Opazo, C., and Gould,
+S. Vln bert: A recurrent vision-and-language bert for
+navigation. In Proceedings of the IEEE/CVF conference
+on Computer Vision and Pattern Recognition, pp. 1643–
+1653, 2021.
+Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang,
+S., Wang, L., Chen, W., et al. Lora: Low-rank adaptation
+of large language models. ICLR, 1(2):3, 2022.
+Jain, V., Magalhaes, G., Ku, A., Vaswani, A., Ie, E.,
+and Baldridge, J.
+Stay on the path: Instruction fi-
+delity in vision-and-language navigation. arXiv preprint
+arXiv:1905.12255, 2019.
+Kalman, R. E. A new approach to linear filtering and pre-
+diction problems. 1960.
+Katharopoulos, A., Vyas, A., Pappas, N., and Fleuret, F.
+Transformers are rnns: Fast autoregressive transformers
+with linear attention. In International conference on ma-
+chine learning, pp. 5156–5165. PMLR, 2020.
+Khandelwal, U., Levy, O., Jurafsky, D., Zettlemoyer, L.,
+and Lewis, M. Generalization through memorization:
+Nearest neighbor language models.
+arXiv preprint
+arXiv:1911.00172, 2019.
+Kim, S., Oh, G., Ko, H., Ji, D., Lee, D., Lee, B.-J., Jang,
+S., and Kim, S. Test-time adaptation for online vision-
+language navigation with feedback-based reinforcement
+learning. In Forty-second International Conference on
+Machine Learning.
+Kloss, A., Martius, G., and Bohg, J. How to train your
+differentiable filter. Autonomous Robots, 45(4):561–578,
+2021.
+Krantz, J., Wijmans, E., Majumdar, A., Batra, D., and Lee, S.
+Beyond the nav-graph: Vision-and-language navigation
+in continuous environments. In European Conference on
+Computer Vision, pp. 104–120. Springer, 2020.
+Kumar, A., Fu, Z., Pathak, D., and Malik, J. Rma: Rapid
+motor adaptation for legged robots.
+arXiv preprint
+arXiv:2107.04034, 2021.
+Lee, J., Miyanishi, T., Kurita, S., Sakamoto, K., Azuma, D.,
+Matsuo, Y., and Inoue, N. Citynav: A large-scale dataset
+for real-world aerial navigation. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+pp. 5912–5922, 2025.
+Li, T., Huai, T., Li, Z., Gao, Y., Li, H., and Zheng, X.
+Skyvln: Vision-and-language navigation and nmpc con-
+trol for uavs in urban environments. In 2025 IEEE/RSJ
+International Conference on Intelligent Robots and Sys-
+tems (IROS), pp. 17199–17206. IEEE, 2025.
+Lin, P., Sun, G., Liu, C., Li, F., Ren, W., and Cong, Y.
+Openvln: Open-world aerial vision-language navigation.
+arXiv preprint arXiv:2511.06182, 2025.
+Liu, S., Zhang, H., Qi, Y., Wang, P., Zhang, Y., and Wu, Q.
+Aerialvln: Vision-and-language navigation for uavs. In
+Proceedings of the IEEE/CVF International Conference
+on Computer Vision, pp. 15384–15394, 2023.
+Miller, J. and Hardt, M. Stable recurrent models. arXiv
+preprint arXiv:1805.10369, 2018.
+Nadaraya, E. A. On estimating regression. Theory of Prob-
+ability & Its Applications, 9(1):141–142, 1964.
+Niu, S., Wu, J., Zhang, Y., Chen, Y., Zheng, S., Zhao, P.,
+and Tan, M. Efficient test-time model adaptation with-
+out forgetting. In International conference on machine
+learning, pp. 16888–16905. PMLR, 2022.
+Revach, G., Shlezinger, N., Ni, X., Escoriza, A. L.,
+Van Sloun, R. J., and Eldar, Y. C. Kalmannet: Neu-
+ral network aided kalman filtering for partially known
+dynamics. IEEE Transactions on Signal Processing, 70:
+1532–1547, 2022.
+S¨arkk¨a, S. and Svensson, L. Bayesian filtering and smooth-
+ing, volume 17. Cambridge university press, 2023.
+Savinov, N., Dosovitskiy, A., and Koltun, V.
+Semi-
+parametric topological memory for navigation. arXiv
+preprint arXiv:1803.00653, 2018.
+Shah, S., Dey, D., Lovett, C., and Kapoor, A. Airsim: High-
+fidelity visual and physical simulation for autonomous
+vehicles. In Field and service robotics: Results of the 11th
+international conference, pp. 621–635. Springer, 2017.
+Shi, H., Xie, B., Liu, Y., Sun, L., Liu, F., Wang, T.,
+Zhou, E., Fan, H., Zhang, X., and Huang, G. Memo-
+ryvla: Perceptual-cognitive memory in vision-language-
+action models for robotic manipulation. arXiv preprint
+arXiv:2508.19236, 2025.
+Sun, Q., Fang, Y., Wu, L., Wang, X., and Cao, Y. Eva-
+clip: Improved training techniques for clip at scale. arXiv
+preprint arXiv:2303.15389, 2023.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-
+tention is all you need. Advances in neural information
+processing systems, 30, 2017.
+Wang, D., Shelhamer, E., Liu, S., Olshausen, B., and Darrell,
+T. Tent: Fully test-time adaptation by entropy minimiza-
+tion. arXiv preprint arXiv:2006.10726, 2020.
+Wang, L., He, Z., Dang, R., Shen, M., Liu, C., and Chen, Q.
+Vision-and-language navigation via causal learning. In
+Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pp. 13139–13150, 2024a.
+Wang, X., Yang, D., Wang, Z., Kwan, H., Chen, J., Wu,
+W., Li, H., Liao, Y., and Liu, S. Towards realistic uav
+vision-language navigation: Platform, benchmark, and
+methodology. arXiv preprint arXiv:2410.07087, 2024b.
+Watson, G. S. Smooth regression analysis. Sankhy¯a: The
+Indian Journal of Statistics, Series A, pp. 359–372, 1964.
+Yang, C.-Y., Huang, H.-W., Chai, W., Jiang, Z., and Hwang,
+J.-N. Samurai: Adapting segment anything model for
+zero-shot visual tracking with motion-aware memory.
+arXiv preprint arXiv:2411.11922, 2024.
+Zhang, J., Li, A., Qi, Y., Li, M., Liu, J., Wang, S., Liu,
+H., Zhou, G., Wu, Y., Li, X., et al. Embodied naviga-
+tion foundation model. arXiv preprint arXiv:2509.12129,
+2025a.
+Zhang, W., Gao, C., Yu, S., Peng, R., Zhao, B., Zhang,
+Q., Cui, J., Chen, X., and Li, Y. Citynavagent: Aerial
+vision-and-language navigation with hierarchical se-
+mantic planning and global memory.
+arXiv preprint
+arXiv:2505.05622, 2025b.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+A. Appendix
+This supplementary material provides a comprehensive analysis of the NeuroKalman framework, substantiating its effective-
+ness through theoretical rigor, architectural ablation, and qualitative visualization. First, we formalize the navigation error
+dynamics, providing a mathematical proof of how the Kalman correction mechanism guarantees error contraction and serves
+as an implicit anchor regularization. Second, we present extended ablation studies to empirically validate the necessity
+of Bayesian structural decoupling and extra supervision signals. Finally, we offer intuitive visualizations of trajectory
+rectification, corroborating the model’s ability to correct accumulated drift in long-horizon scenarios.
+A.1. Theoretical Justification
+In this section, we provide a theoretical analysis of why the NeuroKalman framework effectively mitigates navigational drift
+and achieves high sample efficiency, even when fine-tuned on limited data. We analyze the error dynamics of the fusion
+mechanism and interpret the retrieval process as an implicit regularization.
+A.1.1. DRIFT CANCELLATION VIA ERROR CONTRACTION
+Navigation drift can be formalized as the accumulation of error in the latent space over time. Let z∗
+t be the ground-truth
+state on the manifold, and let ϵt = ∥zt −z∗
+t ∥be the estimation error at step t. In a standard recurrent baseline (e.g., vanilla
+GRU), the error dynamics are governed by the Lipschitz constant (Miller & Hardt, 2018) of the transition function λgru:
+ϵgru
+t
+≤λgru · ϵt−1 + δnoise
+(10)
+Since navigation environments are complex, locally expanding dynamics typically imply λgru > 1. Consequently, the error
+grows exponentially with time (ϵt ∝λt
+gru), leading to inevitable drift. In our framework, the Kalman correction modifies
+these dynamics. Substituting the fusion Eq. 11 into the error term:
+zt = (1 −Kt) ⊙˜zt + Kt ⊙rt
+(11)
+and assuming the encoded measurement rt serves as a bounded approximation of the ground truth (∥rt −z∗
+t ∥≤ξ), the
+posterior error becomes:
+ϵkalman
+t
+= ∥(I −Kt)(˜zt −z∗
+t ) + Kt(rt −z∗
+t )∥
+(12)
+Applying the triangle inequality:
+ϵkalman
+t
+≤∥I −Kt∥· λgruϵt−1
+|
+{z
+}
+Prior Error
++∥Kt∥·
+ξ
+|{z}
+Retrieval Noise
+(13)
+Here, the term (I −Kt) acts as a contraction matrix. As long as the gating network learns to assign non-zero gain (Kt > 0)
+when the prior uncertainty is high, the spectral radius ρ(I −Kt) becomes strictly less than 1. Thus, the Kalman Gain
+actively dampens the propagation of historical error. Even if the GRU prior drifts (λgru > 1), the fusion mechanism ensures
+the error remains bounded, technically proving the drift cancellation property.
+A.1.2. IMPLICIT ANCHOR REGULARIZATION
+Why does the model generalize well with only 10% fine-tuning data? We further argue that the fusion mechanism introduces
+an inductive bias equivalent to Anchor Regularization. The classic Kalman update can be derived as the analytical solution
+to the following optimization problem (Bishop & Nasrabadi, 2006):
+zt = argmin
+z
+
+
+
+
+1
+2∥z −˜zt∥2
+Σ−1
+prior
+|
+{z
+}
+Trust Prediction
++ 1
+2∥z −rt∥2
+Σ−1
+obs
+|
+{z
+}
+Trust Evidence
+
+
+
+
+(14)
+This formulation reveals that incorporating rt is mathematically equivalent to adding a regularization term to the loss
+landscape. The retrieved state rt acts as a high-level semantic anchor, penalizing the model whenever the optimization
+variable z deviates from the evidence. During backpropagation, this anchor prevents the GRU parameters θ from overfitting
+to spurious trajectories. Instead of forcing θ to memorize the entire global map (which requires massive data), the parameters
+only need to learn the local smoothing function between anchors (Savinov et al., 2018; Guu et al., 2020). The global
+consistency is offloaded to the memory bank M, thereby significantly reducing the sample complexity required to learn θ.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Table 5. Experimental results of structural decoupling architecture. All experiments are conducted using the L1 assistant setting.
+Methods
+Full
+Easy
+Hard
+NE↓
+SR↑
+OSR↑
+SPL↑
+NE↓
+SR↑
+OSR↑
+SPL↑
+NE↓
+SR↑
+OSR↑
+SPL↑
+Test Seen Set
+MBGRU
+75.35
+24.68
+54.87
+20.43
+48.80
+29.37
+60.41
+23.66
+108.05
+18.90
+48.03
+16.44
+NeuroKalman
+71.56
+25.86
+58.73
+22.43
+42.70
+30.52
+62.70
+25.86
+105.07
+20.11
+53.90
+18.21
+Test UnSeen Map Set
+MBGRU
+104.04
+7.52
+31.21
+6.42
+75.90
+8.20
+36.36
+6.87
+143.83
+6.55
+23.93
+5.79
+NeuroKalman
+100.32
+8.34
+34.15
+7.12
+69.50
+9.15
+38.50
+7.50
+140.00
+7.20
+28.00
+6.50
+Test UnSeen Object Set
+MBGRU
+75.16
+31.00
+56.28
+26.68
+50.40
+41.15
+63.64
+34.88
+87.49
+25.95
+52.62
+22.60
+NeuroKalman
+71.01
+32.48
+60.82
+28.50
+44.50
+42.50
+66.50
+37.37
+84.50
+27.50
+58.00
+24.50
+Table 6. Auxiliary loss supervision. All methods are implemented with the L1 assistant on the UAV-Need-Help test seen set.
+Methods
+Full
+Easy
+Hard
+NE↓
+SR↑
+OSR↑
+SPL↑
+NE↓
+SR↑
+OSR↑
+SPL↑
+NE↓
+SR↑
+OSR↑
+SPL↑
+w/o Aux Loss
+80.56 25.39
+53.17
+21.67
+51.70
+30.52
+56.70
+25.86
+119.17
+19.06
+48.82
+17.17
+w/ Aux Loss
+71.56
+25.86
+58.73
+22.43
+42.70
+30.52
+62.70
+25.86
+105.07 20.11
+53.90
+18.21
+A.2. Additional Results
+Our core hypothesis is that the Bayesian structural decoupling is prerequisites for solving state drift. For this, we provide
+additional experiments about architecture topology. Furthermore, we validate that the augmented supervision is beneficial
+for waypoint prediction.
+Effect of Structural Decoupling Architecture. We validate the structural advantage of our Bayesian formulation by
+comparing it with a coupled temporal modeling baseline (MBGRU), where memory-enhanced features are directly fed into
+the GRU for waypoint prediction. As shown in Table 5, this baseline suffers a substantial performance drop on the Hard
+split. This indicates that without explicit separation, the network treats memory only as context, not as a corrective anchor.
+As a result, the GRU over-relies on its motion dynamic prediction, leading to severe drift over long horizons.
+Auxiliary Loss Supervision. We also analyze the impact of applying additional loss supervision to the intermediate Prior
+(˜zt) and Measurement Likelihood (rt). As shown in Table 6, we observe that removing these auxiliary regression losses
+leads to a notable increase in NE (80.56 vs. 71.56) and OSR (53.17% vs. 58.73%). This suggests that explicit supervision is
+crucial to prevent module collapse; it forces the GRU to strictly learn transition dynamics and the measurement to learn
+grounding, thereby ensuring the interpretability and robustness of the Kalman correction against structural degradation.
+A.3. Qualitative Trajectory Visualization
+We further analyze a specific long-range navigation scenario in Figure 5 (Top-down view) and Figure 6 (Front view) to
+diagnose the failure modes of the baseline. From the Top-Down perspective (Fig. 5), the TravelUAV-FT suffers from severe
+disorientation. Due to accumulated state drift, it fails to register the spatial relationship between its position and the key
+landmarks, ultimately losing its bearing and failing to locate the target.
+The Front-View sequence (Fig. 6) offers a complementary explanation for this failure. While TravelUAV-FT initially adheres
+to the planned route, it exhibits rigid maneuverability. Even when visual landmarks are visible, the model lacks the dynamic
+flexibility to adjust its flight trajectory in time. Consequently, it overshoots the critical turning point, progressively drifts
+away from the target as time elapses, and eventually collides with obstacles. In contrast, NeuroKalman successfully anchors
+its state estimate to visual landmarks. By dynamically correcting its belief state, our model makes a clear turn at the decision
+point, which stops small errors from accumulating over time and allows the UAV to reach the target safely.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Instruction: The black dog is located on a green lawn1 near a curved pathway and is surrounded by tall, evenly spaced coniferous trees2; nearby features include
+a house with a stone facade and columns3 in one direction and additional residential structures with roads on another side, visible under overcast skies.
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+TravelUAV-FT
+GT Trajectory
+black dog 
+NeuroKalman
+black dog 
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+✅
+❌
+1
+2
+3
+3
+1
+2
+Figure 5. Navigation example comparison between the TravelUAV-FT and our NeuroKalman (Top-Down View). Due to severe state
+drift, TravelUAV-FT fails to recognize key landmarks and loses its orientation, resulting in a failed search. In contrast, NeuroKalman
+successfully anchors its position against structural features, maintaining the correct heading towards the target.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Mitigating Error Accumulation in Continuous Navigation via Memory-Augmented Kalman Filtering
+Instruction: The woman is standing near the corner of a multi-story beige building1 with glass balconies, surrounded by a spacious checkered pavement2 area
+with a beige path nearby, located at a road intersection featuring several lanes and surrounded by trees and fencing3.
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+...
+1
+3
+2
+1
+3
+2
+1
+TravelUAV-FT ❌
+NeuroKalman ✅
+GT Trajectory
+woman
+woman
+Figure 6. Navigation example comparison between the TravelUAV-FT and our NeuroKalman (Front View). TravelUAV-FT lacks the
+maneuverability to adjust its trajectory upon detecting landmarks, eventually missing the target and drifting into a collision. Conversely,
+NeuroKalman leverages memory-augmented updates to execute precise turning maneuvers.
+15
