@@ -1,0 +1,3323 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Enabling Progressive Whole-slide Image Analysis with Multi-scale Pyramidal
+Network
+Anonymous Authors1
+Abstract
+Multiple-instance Learning (MIL) is commonly
+used to undertake computational pathology
+(CPath) tasks, and the use of multi-scale patches
+allows diverse features across scales to be learned.
+Previous studies using multi-scale features in clin-
+ical applications rely on multiple inputs across
+magnifications with late feature fusion, which
+does not retain the link between features across
+scales while the inputs are dependent on arbitrary,
+manufacturer-defined magnifications, being in-
+flexible and computationally expensive. In this
+paper, we propose the Multi-scale Pyramidal
+Network (MSPN), which is plug-and-play over
+attention-based MIL that introduces progressive
+multi-scale analysis on WSI. Our MSPN consists
+of (1) grid-based remapping that uses high magni-
+fication features to derive coarse features and (2)
+the coarse guidance network (CGN) that learns
+coarse contexts. We benchmark MSPN as an
+add-on module to 4 attention-based frameworks
+using 4 clinically relevant tasks across 3 types of
+foundation model, as well as the pre-trained MIL
+framework. We show that MSPN consistently im-
+proves MIL across the compared configurations
+and tasks, while being lightweight and easy-to-
+use.
+1. Introduction
+Multiple-instance learning (MIL) is the standard formula-
+tion to solve computational pathology (CPath) problems in
+a weakly-supervised manner. MIL overcomes high com-
+putational costs imposed by gigapixel whole-slide images
+(WSIs) by identifying the most salient instances (Ilse et al.,
+2018). Typically, WSIs are background removed and tiled
+into patches, each patch is encoded with a feature encoder,
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+and then these patch-level encodings are concatenated to
+form slide-level features. MIL is recently used to solve
+challenging tasks such as classification of biomarkers and
+mutational signatures (Gao et al., 2024; El Nahhas et al.,
+2025; Myles et al., 2025), and prognosis prediction (Chen
+et al., 2022c; Wang et al., 2024; Jiang et al., 2024; Zhang
+et al., 2024).
+WSIs are usually pyramidal files in which images acquired
+at multiple rigid resolutions defined by slide scanner hard-
+ware are stored. Pathologists assess tissue using non-oil
+immersion objective lenses of varying magnification from
+1.25× to 40×, allowing them to appreciate differing but
+equally important features (Randell et al., 2012); high mag-
+nifications allow fine cellular features to be resolved whilst
+lower magnifications allow essential global tissue architec-
+ture to provide context (Skrede et al., 2020; Chen et al.,
+2022a). In CPath, most studies that use single-scale images
+tile patches at a high magnification equivalent to objective
+lenses of 20× or 40× (Lu et al., 2021; Chen et al., 2022c;b;
+Liang et al., 2023), while the combined utilisation of the
+images at 5× and 10× magnification occurs in multi-scale
+studies.
+However, current multi-scale approaches fail to leverage
+the full informational value of pyramidal images and being
+inefficient. Our work seeks to address these deficiencies.
+Attention-based methods typically handle multi-scale data
+through concatenation (Figure 1a, Marini et al. 2021; Zhang
+et al. 2022; Liu-Swetz et al. 2025) or cross-scale attention
+(Figure 1b, Hashimoto et al. 2020; Deng et al. 2024). This
+necessitates separate feature extraction for each resolution
+as rigidly and arbitrarily defined by scanner hardware. Sim-
+ilarly, transformer-based approaches like HAG-MIL (Xiong
+et al., 2023) employ multiple integrated attention transform-
+ers (IATs) to integrate representations for each resolution,
+with associated high computational cost. Thus, the ability
+of models to use information provided at additional and
+user-defined scales in the manner a pathologist does is re-
+stricted. Further, even when information from the limited
+manufacturer-predetermined scales is available, there is no
+assurance that all scales contribute to model performance
+nor that the link between features evident at different scales
+is retained, which differs from a pathologist that usually as-
+sess cases using diverse lens range available to ensure safe
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Submission and Formatting Instructions for ICML 2026
+Figure 1. Different schemes for multi-scale MIL. (a), (b) Ei-
+ther concatenation or cross-scale attention rely on multiple in-
+puts (Deng et al., 2024), and magnifications are fixed in prepro-
+cessing. (c) The proposed MSPN consists of multiple CGNs that
+derive coarser guidances with adjustable scales from high magnifi-
+cation features.
+practice. Finally, these existing methods results in either in-
+flexibility of multiple rigid inputs or complex and expensive
+architecture that such inefficiencies do not fit the current
+state where foundation models (FMs) already provide good
+feature representations to boost lightweight models (Wang
+et al., 2021; Chen et al., 2024; Vorontsov et al., 2024; Xu
+et al., 2024; Lu et al., 2024; Campanella et al., 2025).
+We conceptualise a method to address these limitations by
+omitting predetermined multi-scale inputs at different mag-
+nifications, instead deriving multi-scale information at user-
+defined magnifications using only the high magnification
+input. In previous studies, knowledge distillation has been
+used to pre-train/fine-tune foundation models and align the
+features extracted from high magnification patches with low
+magnification patches (Chen et al., 2022a; Tan et al., 2025).
+Going further, we explore if the use of high magnification
+features from foundation models can be directly aggregated
+to represent low magnification features, to the improve per-
+formance of MIL downstream tasks without distillation and
+extra supervision.
+In this paper, we introduce the Multi-scale Pyramidal Net-
+work (MSPN), a lightweight add-on module for attention-
+based MIL frameworks that allows flexible and progressive
+multi-scale training (Figure 1c, 2). The MSPN consists of a
+sequence of residual connected Coarse Guidance Networks
+(CGNs) where each CGN serves the following functions:
+(1) creation of coarse-grids using high magnification coordi-
+nates, (2) remapping the patch-level features into each grid,
+(3) aggregation of features in each grid, and (4) generation
+of coarse guidances using convolution. The magnification
+of coarse guidances can be flexibly determined by modi-
+fying the grid size in each CGN. We demonstrate the effi-
+cacy of MSPN using 4 attention-based frameworks as main
+baselines, namely ABMIL (Ilse et al., 2018), DSMIL (Li
+et al., 2021), CLAM-SB, and CLAM-MB (Lu et al., 2021),
+by comparing different implementations: their original im-
+plementations, multi-scale with concatenation, multi-scale
+with cross-scale attention (Deng et al., 2024), and multi-
+scale with MSPN. ABMIL pre-trained on FEATHER-24K
+is further compared (Shao et al., 2025), also following the
+above settings. Performance is benchmarked on 4 tasks (3
+biomarker predictions and 1 prognosis prediction) across
+2 high quality real-world datasets using features from 3
+different pre-trained foundation models.
+We show that
+MSPN introduces consistent performance improvements by
+an average of 2.5% under the diverse combinations of MIL
+frameworks, foundation models, and multi-scale methods
+while staying lightweight compared to the current multi-
+scale methods.
+Our main contributions are: (1) introducing grid-based
+remapping, which leverages the high magnification features
+to create coarse feature map that retains spatial information;
+(2) proposing CGN for coarse guidance generation using
+the created coarse features maps and MSPN as a plug-and-
+play module that consists of multiple CGNs under different
+scales for progressive multi-scale WSI analysis; and (3)
+evaluating our method in various settings that demonstrate
+its robustness with respect to different foundation models
+and the pre-trained MIL models whilst being lightweight
+and easy-to-use.
+2. Related Work
+2.1. MIL in CPath
+MIL is the typical formulation to solve current CPath chal-
+lenges. With the emergence of pre-trained specialised foun-
+dation models, the overall performance of light weight mod-
+els (Ilse et al., 2018; Li et al., 2021; Lu et al., 2021) has im-
+proved considerably (Campanella et al., 2025). Meanwhile,
+a previous study has shown that MIL is transferable (Shao
+et al., 2025), demonstrating the potential for applying a pre-
+trained MIL on downstream tasks. However, many of the
+current MIL frameworks accept input from only one magni-
+fication which causes inflexibility when multi-scale input is
+demanded for greatest informational yield. A generalisable
+multi-scale module for MIL in the foundation model and
+transferable MIL era has not yet been explored.
+2.2. Multi-scale MIL in CPath
+The leveraging of multi-scale information was explored
+before MIL became the typical formulation for CPath, with
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Submission and Formatting Instructions for ICML 2026
+multiple convolutional neural networks (CNNs) used to
+process input from different scales (Campanella et al., 2019;
+Barbano et al., 2021). This demonstrated that information
+from different magnifications provided diverse and useful
+feature representations.
+Despite its early exploration, the usage of multi-scale learn-
+ing is still little examined in recent CPath studies, especially
+those using MIL (Deng et al., 2024; Liu-Swetz et al., 2025).
+In MIL, multi-scale CPath is designed mainly under two
+schemes, either (1) concatenating multi-scale features or (2)
+cross-scale attention. The concatenation variation is used as
+an easy method of late fusion due to its technical simplic-
+ity (Marini et al., 2021; Liu-Swetz et al., 2025); similar to
+the application of multi-scale learning under CNN, a sepa-
+rate module is required to process features under different
+magnifications. Alternatively, cross-scale attention repre-
+sents another way of earlier feature fusion (Figure1b) that
+maintains separate MIL networks for encoding and then ap-
+plies attention to weight importance among the scales (Deng
+et al., 2024). HAG-MIL (Xiong et al., 2023) adopted a simi-
+lar scheme but uses multiple integrated attention transform-
+ers (IATs) to integrate instance representations into a bag
+representation for each resolution. However, these methods
+require multiple inputs or multiple transformers, resulting
+in much higher computational costs.
+TransMIL (Shao et al., 2021) applied the pyramid position
+encoding generator (PPEG) to encode features under dif-
+ferent granularities by processing the reshaped slide-level
+features with multi-size kernels. Although this provides
+features under different receptive fields, it improves the
+adaptability of positional encoding (Islam et al., 2020; Shao
+et al., 2021; Chu et al., 2023) when the number of patch
+tokens vary between different WSIs rather than providing
+a multi-scale design allowing coarse-level feature represen-
+tations to be explicitly learned and interpreted (Deng et al.,
+2024). Moreover, the PPEG restores features into a square
+map for convolution, distorting the architectural relation-
+ships present in the tissue. As such, TransMIL technically
+learns features with multi-kernels but does not represent a
+multi-scale architecture.
+To address these limitations, we propose a plug-and-play
+module that requires only the highest magnification input,
+the same data used for training any MIL, to derive spatially
+reasonable coarse feature maps that enable simple convo-
+lutional operation to reduce complexity, while the number
+of scales and the field-of-view of each scale can be flexibly
+chosen, and notably learns from coarser scale to finer scale
+in a progressive manner.
+3. Methodology
+3.1. Formulation of MIL
+MIL is commonly formulated as a binary classification
+problem.
+Given a bag with N instances that X
+=
+{x1, x2, ..., xN}, MIL is trained to predict the bag-level
+label Y ∈{0, 1} with instance-level labels {y1, y2, ...yN}
+unknown.
+Y =
+(
+0,
+iff P
+n yn = 0,
+1,
+otherwise.
+(1)
+Practically, MIL can further be extended to perform multi-
+class classification in tasks such as subtyping (Shao et al.,
+2021; Javed et al., 2022) and prognosis prediction (Chen
+et al., 2022b;c).
+The current CPath pipeline typically includes two steps: (1)
+frozen feature extraction and (2) downstream task train-
+ing.
+During feature extraction, a foundation model g
+is used to extract features hn for each instance, where
+hn = g(xn) ∈R1×D with D denotes the feature dimen-
+sion. The instance-level features are concatenated to form
+the bag-level feature H = {h1, h2, ...hn} ∈RN×D. In
+downstream task training, MIL is applied by aggregating
+the bag-level features into a bag representation for classifi-
+cation that φ(f(H)), where f denotes the MIL aggregator
+and φ is a classifier with fully connected layers. Our key
+innovation is to enable flexible and progressive multi-scale
+learning, by adding our multi-scale proposal network be-
+tween these two steps to create the multi-scale bag-level
+feature representation.
+3.2. Grid-based Remapping
+The aim for grid-based remapping is to avoid the need of
+multi-inputs, and instead utilise the high magnification fea-
+tures H to derive a coarse feature map that retains the spatial
+and contextual information. The height and width of the
+WSI and the patch coordinates are used to create coarser
+grids and the features inside the grids are aggregated to form
+coarse-level representations. For a WSI in height and width
+of H and W containing a bag of patches with coordinates
+c = (x, y) ∈RN×2 and xn ∈[0, W], yn ∈[0, H], grid-
+based remapping is applied to create coarse feature maps
+using the high magnification bag-level feature H and the
+normalised patch coordinates c′ = (x′, y′) ∈RN×2 that
+x′
+n, y′
+n ∈[0, 1]. Firstly, a field-of-view (FOV) s is selected
+to create the pseudo grid. For example, an s = 1024 mimics
+the coarser tile size of 1024×1024, and a grid with H′×W ′
+where H′ = ⌈H
+s ⌉and W ′ = ⌈W
+s ⌉is created, preserving
+the WSI’s aspect ratio. The grid coordinates are denoted as
+(xg, yg), xg
+n ∈[0, W ′], yg
+n ∈[0, H′]. Subsequently, each
+hn is remapped into the grid according to their coordinates.
+In this step, we index the grid region in a row-major or-
+der, which builds a sequence of idx ∈RN that maps each
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Submission and Formatting Instructions for ICML 2026
+Figure 2. Overview of the Multi-scale Pyramidal Network (MSPN) in the universal MIL pipeline. (1) The MSPN consists of k
+coarse guidance networks (CGN) with residual connections and each CGN serves to generate guidances at different coarser scales. (2)
+The coarse grids for guidances are determined by the selected field-of-view (FOV) using coordinates in the original high magnification,
+retaining the aspect ratio. No extra pre-processing is needed since grid-based remapping is used for mapping high magnification features
+into the proper coarse grids. (3) Features in each grid are aggregated to form a coarse feature map for the CGN, and a sigmoid gate is
+learned to score the high magnification patches using the coarse feature map.
+high magnification patch to its related coarser grid. Next,
+intra-grid aggregation is applied to obtain the coarse feature
+map M ∈R1×D×H′×W ′. The pseudo code of grid-based
+remapping is described in Appendix A.1.
+The theoretical soundness is derived from the formulation
+of MIL. Given the simplest scenario that meanpooling is
+adopted as the MIL aggregator, the bag-level representation
+b can be written as b = fmean(H) ∈R1×D. Considering
+the mth grid as a small bag X′
+m = {x1, x2, ..., xJ} where
+J denotes the number of instances in the grid and J <
+N, the features in the grid are H′
+m = {h1, h2, ..., hJ} ∈
+RJ×D. Hence, the representation of the small bag over
+meanpooling is b′
+m = fmean(H′
+m). Following this, the
+coarse representation of the whole bag can be rewritten as
+Hc = {b′
+1, b′
+2, ..., b′
+M} ∈RM×D, where M = H′ × W ′.
+Therefore, the grid-based remapping maintains the MIL
+formulation, but downsampled the bag-level features into a
+coarser scale that enables convolutional operation.
+3.3. Coarse Guidance Network (CGN)
+Next, we design CGN, a lightweight convolutional network
+for coarser-level feature learning that aims to provide guid-
+ance over the interested coarse areas at selected scale, while
+also avoiding the high complexity of transformer and self-
+attention. The CGN processes the coarse feature map M
+with convolutional layers and outputs the coarse guidance
+P ∈R1×1×H′×W ′. We compose CGN with three convolu-
+tional layers, where the first two use Conv3×3 with padding
+of 1 followed by a ReLU activation and the last one uses
+Conv1×1 followed by a Sigmoid activation, and the hidden
+channel D′ is set to 64 in the implementation to limit com-
+putational complexity. The computational complexity is
+analyised in Appendix B.
+The guidance P is then used to generate a patch-wise at-
+tention map MA ∈R1×N by assigning the grid value in P
+to each included patch, according to the patch index from
+the previous step of grid-based remapping. This functions
+to generates a coarse guidance for the whole high magnifi-
+cation slide. Next, element-wise multiplication is applied
+to score the slide-level features, obtaining the scored fea-
+tures Hk that k denotes the features is output by the kth
+CGN. The implementation of a single CGN is shown in
+Appendix 2.
+3.4. Multi-scale Pyramidal Network (MSPN)
+To enable the flexible multi-scale learning and also share in-
+formation across the scales, we design an MSPN that simply
+integrates multiple CGNs using residual connection, and the
+overview of MSPN is shown in Figure 2. The MSPN is built
+with k blocks of CGNs, where coarse guidances are gener-
+ated progressively from large to small FOV. Subsequently,
+the multi-scale aggregated output Hmspn can directly be
+used by any attention-based MIL framework as an input for
+downstream tasks. The pseudo-code of the forward process
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Submission and Formatting Instructions for ICML 2026
+of MSPN is described in Appendix 3. Denoting ˆY as the pre-
+diction and s as selected FOVs, an example of ABMIL (Ilse
+et al., 2018) with MSPN plugged-in is written as:
+ˆY = ABMIL(MSPN(H, (x, y), s))
+(2)
+Under such a scheme, MSPN is designed to be optimised
+along with the task-specific loss to ensure the generalisabil-
+ity to fit with different tasks and architectures.
+4. Experiments and Results
+The efficacy of MSPN is evaluated on 4 tasks across 2
+high quality real-world datasets using 3 different foundation
+models (CONCH (Lu et al., 2024), UNI2 (Chen et al., 2024),
+and GigaPath (Xu et al., 2024)) as well as the pre-trained
+MIL model (Shao et al., 2025).
+4.1. Datasets
+NIHR BioResource Breast Cancer Dataset1.
+This
+dataset is publicly available on NIHR BioResource. The
+receptor status of estrogen receptor (ER), progesterone re-
+ceptor (PR), and human epidermal growth factor receptor 2
+(HER2) are crucial biomarkers that inform treatment deci-
+sion making in breast cancer. The prediction is challenging
+since not all tumour cells in a sample are guaranteed to be of
+the same receptor status due to tumour cell hormone receptor
+heterogeneity. We perform breast cancer biomarker predic-
+tion, regarding each as a binary classification task over 491
+biopsy cases reported by expert consultant breast pathol-
+ogists. Note that instead of simply formularising HER2
+prediction as a multi-class problem, we train the model to
+directly differentiate borderline cases that would require
+laboratory work using Fluorescence In Situ Hybridisation
+(FISH) testing to ensure greater clinical meaningfulness.
+The annotation protocol of ER, PR, and HER2 are described
+in Appendix C.1, C.2.
+SurGen (Myles et al., 2025).
+SurGen is a publicly avail-
+able dataset containing H&E-stained whole-slide images
+(WSIs) from 843 colorectal cancer (CRC) resection cases.
+We take 425 cases that have follow-up survival data for
+prognosis prediction, formularised based on a four-class
+classification. The annotation protocol of prognosis predic-
+tion is described in Appendix C.3.
+4.2. Baselines
+To rigorously benchmark the contribution of MSPN, we take
+ABMIL (Ilse et al., 2018), DSMIL (Li et al., 2021), CLAM-
+SB, and CLAM-MB (Lu et al., 2021) as the attention-based
+platforms, and studied three different types of multi-scale
+1https://www.bioresource.nihr.ac.uk/
+learning on them, including (1) concatenation, (2) cross-
+scale attention (Deng et al., 2024) and (3) MSPN. Further-
+more, we also compare the aforementioned frameworks with
+MSPN installed with the basic maxpooling and meanpool-
+ing methods, TransMIL that uses self-attention and PPEG
+for pyramid positional encoding (Shao et al., 2021) and
+HAG-MIL (Xiong et al., 2023) that uses integrated attention
+transformers.
+Furthermore, since MIL models were recently demonstrated
+to be transferable (Shao et al., 2025), we also apply MSPN
+on the FEATHER-24K pre-trained ABMIL to examine if
+MSPN works with the pre-trained MIL framework.
+4.3. Implementations
+Preprocessing.
+The preprocessing protocol is consistent
+across all dataset, without data curation and normalisation.
+WSIs are all standardised to 0.2631 microns per pixel (MPP).
+Patches from three scales of each dataset is obtained, un-
+der the magnification of 20×, 10× and 5×, where 20×
+is the high magnification while the other two are lower
+magnifications. We remove background and tile patches in
+non-overlapping size of 256 × 256 pixels, using the CLAM
+toolkit (Lu et al., 2021) and OpenSlide (Goode et al., 2013).
+Feature extraction.
+We evaluated our method on three
+specialised foundation models to show robustness. CONCH
+outputs instance features in the size of 1 × 512, while the
+instance feature size is 1 × 1536 for UNI2 and GigaPath.
+Experiment settings.
+For evaluation metrics, we use the
+area under the curve (AUC) to measure the classification
+performance, while the concordance-index (C-index) is used
+to measure prognosis prediction performance. We employ
+five-fold cross-validation, with train:val:test ratio of 3:1:1,
+for training across all tasks.
+Training details.
+All experiments are undertaken on an
+NVIDIA RTX 3060 GPU, except HAG-MIL is trained with
+an NVIDIA A100 GPU. We used cross-entropy loss to op-
+timise biomarker prediction, while NLLSurvLoss is used
+for prognosis prediction following the previous implemen-
+tations (Zadeh & Schmid, 2021; Chen et al., 2022c), as
+described in Appendix D. Training is performed at 150 max-
+imum epochs with a learning rate of 2 × 10−4, while the
+AdamW optimiser and cosine decay scheduler are used for
+optimisation, and early stopping is set for patience in 10
+epochs. Notably, since multi-scale MILs are usually im-
+plemented with three scales (i.e., 5×, 10× and 20×), we
+build the MSPN with three FOVs (i.e., 1536, 2048 and
+3072) for fair comparison. For CLAM-SB and CLAM-MB,
+the instance-level supervision with pseudo-labels is enabled.
+For TransMIL, the Lookahead optimiser (Zhang et al., 2019)
+is adopted, also following the original design.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Submission and Formatting Instructions for ICML 2026
+Table 1. Performance comparison across different tasks and foundation models. The performance of three multi-scale method,
+namely concatenation, cross-scale attention (CSA) and our MSPN are compared, using ABMIL, DSMIL CLAM-SB and CLAM-MB as
+the base framework. Performance on other baselines are also compared. For ER, PR and HER2 biomarker prediction AUC score is used
+as metric, while for prognosis prediction (CRC Surv) C-index is used as metric. The avg. ∆is reported as the average performance gap of
+MSPN versus other variants on the same base framework.
+Model
+Multi-scale
+Param
+FLOPs
+CONCH
+GigaPath
+UNI2
+ER
+PR
+HER2
+CRC Surv
+ER
+PR
+HER2
+CRC Surv
+ER
+PR
+HER2
+CRC Surv
+Maxpool
+w/o
+3.07K
+3.07K
+76.20
+71.68
+61.74
+52.96
+84.96
+78.78
+73.28
+52.52
+88.30
+90.96
+72.46
+49.06
+Meanpool
+w/o
+3.07K
+3.07K
+83.22
+78.90
+77.30
+62.40
+88.80
+83.38
+82.48
+64.68
+89.50
+80.60
+78.94
+65.66
+TransMIL
+w/o
+2.93M
+84.01G
+84.98
+81.74
+78.12
+66.72
+87.06
+82.80
+73.12
+67.24
+89.54
+83.10
+81.96
+66.74
+HAG-MIL
+IAT
+85.83M
+503.30G
+90.64
+85.16
+81.00
+64.72
+89.92
+81.30
+81.84
+65.26
+92.56
+84.04
+82.24
+66.88
+ABMIL
+w/o
+919.43K
+13.77G
+87.22
+84.14
+80.06
+63.52
+90.48
+84.52
+81.84
+63.08
+92.46
+83.90
+80.06
+66.06
+Concat
+2.61M
+38.37G
+86.62
+83.08
+78.20
+65.84
+90.14
+84.18
+83.58
+66.12
+92.26
+84.86
+80.12
+66.08
+CSA
+2.61M
+38.37G
+84.64
+82.34
+78.18
+65.62
+91.58
+83.98
+79.80
+64.58
+90.70
+84.66
+79.80
+64.40
+MSPN (Ours)
+2.18M
+17.71G
+89.76
+85.24
+82.86
+65.90
+92.09
+85.20
+82.36
+66.92
+93.00
+85.60
+81.48
+67.94
+avg. ∆
++3.60
++2.05
++4.05
++0.91
++1.36
++0.97
++0.62
++2.33
++1.19
++1.13
++1.49
++2.43
+DSMIL
+w/o
+872.20K
+13.06G
+86.12
+83.66
+76.36
+65.65
+90.42
+82.64
+80.24
+66.86
+90.96
+83.12
+80.80
+66.46
+Concat
+903.75K
+32.65G
+87.20
+83.40
+77.88
+66.26
+89.28
+84.22
+81.50
+65.36
+87.54
+82.02
+81.92
+66.58
+CSA
+921.99K
+32.65G
+84.10
+83.94
+77.50
+65.26
+87.64
+83.94
+82.48
+66.52
+89.66
+84.36
+81.56
+66.80
+MSPN (Ours)
+1.87M
+13.08G
+88.60
+84.04
+81.98
+66.52
+91.30
+84.50
+85.76
+67.24
+93.92
+86.18
+81.96
+67.88
+avg. ∆
++2.79
++0.37
++4.73
++0.80
++2.19
++0.90
++4.35
++0.99
++4.53
++3.01
++0.53
++1.27
+CLAM-SB
+w/o
+1.05M
+15.74G
+86.48
+82.82
+79.00
+66.56
+89.36
+84.68
+81.86
+66.00
+90.52
+83.74
+78.42
+65.70
+Concat
+3.19M
+39.35G
+84.00
+81.86
+75.92
+58.64
+90.50
+84.14
+79.36
+66.16
+87.80
+82.02
+79.36
+63.80
+CSA
+3.21M
+39.35G
+81.96
+80.46
+76.40
+64.90
+85.24
+82.40
+76.62
+64.34
+86.34
+80.10
+76.42
+64.90
+MSPN (Ours)
+2.31M
+19.67G
+88.88
+84.92
+84.34
+67.48
+90.98
+84.82
+83.14
+67.60
+92.56
+85.92
+81.36
+66.66
+avg. ∆
++4.73
++3.21
++7.23
++4.11
++2.61
++1.08
++3.86
++2.10
++4.34
++3.97
++3.29
++1.86
+CLAM-MB
+w/o
+1.05M
+15.75G
+84.10
+82.88
+77.54
+64.52
+89.20
+84.14
+82.10
+63.60
+89.18
+82.72
+77.76
+65.68
+Concat
+3.19M
+39.38G
+84.18
+81.22
+78.18
+65.12
+89.66
+83.48
+79.14
+66.16
+87.58
+81.78
+80.12
+66.02
+CSA
+3.21M
+39.38G
+82.18
+74.14
+75.90
+65.04
+86.34
+82.48
+75.92
+64.42
+87.32
+80.62
+75.34
+65.52
+MSPN (Ours)
+2.31M
+19.69G
+89.38
+84.74
+81.86
+65.96
+91.92
+84.80
+84.20
+65.52
+92.94
+84.96
+80.84
+66.82
+avg. ∆
++3.64
++4.47
++3.30
++0.76
++3.02
++0.83
++2.66
++1.83
++2.01
++1.70
++3.93
++0.82
+4.4. Results
+Performance comparison is detailed in Table 1 and the stan-
+dard deviations determined by 2000 bootstrap trials are
+reported in Appendix E. On the four attention-based frame-
+works, MSPN introduced consistent performance improve-
+ments across the various foundation models and benchmark-
+ing tasks, demonstrating its generalisability. While DSMIL,
+CLAM-SB, and CLAM-MB were originally designed with
+pseudo instance learning, and CLAM-MB specifically fea-
+tures multi-branch attention, our experiments show that
+MSPN seamlessly integrates with these designs without re-
+quiring architectural changes. Across the benchmarking
+tasks, MSPN introduces benefits particularly for the pre-
+diction of HER2 status, reaching average improvements
+of 4.83%, 2.87%, and 2.31% on CONCH, GigaPath, and
+UNI2 features, respectively. In terms of framework families,
+MSPN improves CLAM-SB the most, with an average im-
+provement of 3.53% across all tasks and foundation models,
+while the improvements on the families of ABMIL, DSMIL,
+and CLAM-MB are 1.84%, 2.21% and 2.41%, respectively.
+In comparison with traditional multi-scale methods, it is
+observed that simply introducing multi-scale inputs (as seen
+with concatenation and CSA) does not guarantee better per-
+formance. In several instances, for example CLAM-SB
+with CSA, performance actually degrades compared with
+the single-scale baseline. This suggests that the relationship
+between scales in these methods is not properly utilised. In
+contrast, MSPN processes coarse features from each scale
+in a residually connected pattern, ensuring features from
+different scales are effectively incorporated and related. To
+validate this behaviour, we performed SHAP (Lundberg &
+Lee, 2017) analysis on the 5-fold cross-validation models of
+ABMIL+Concat and ABMIL+MSPN over the HER2 predic-
+tion task in Appendix G. It is revealed that multi-scale fea-
+tures in ABMIL+Concat are not sufficiently utilised, often
+one or two dominating, whereas each scale contributed more
+consistently in the ABMIL+MSPN, showing that MSPN
+incorporated each scale, instead of only depending on a spe-
+cific scale. Moreover, the ABMIL+MSPN witnesses much
+higher SHAP values (an average of 0.873 versus the average
+of 0.188 against the concatenation method), indicating it
+provides stronger signals for the prediction.
+Meanwhile, MSPN introduces a favourable accuracy and
+compute trade-off when the concatenation and CSA vari-
+ants are more expensive. A similar pattern is witnessed
+with TransMIL, where self-attention and PPEG convolution
+introduces a high computational burden, often with lim-
+ited performance gains. Although HAG-MIL outperforms
+TransMIL across the tasks, it requires large parameters for
+multiple IATs whereas the performance shows limited su-
+periority compared to the very low cost attention-based
+models. In contrast, MSPN remains lightweight and easy-
+to-use, operating close to the original parameter size, while
+delivering consistent improvements across tasks and foun-
+dation models. We empirically compare the runtime based
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Submission and Formatting Instructions for ICML 2026
+on several widely adopted feature dimensions in current
+foundation models. It is shown in Figure 3 that MSPN intro-
+duces more efficiency when the feature dimension scales up,
+which fits in the current state that larger foundation models
+are emerging. The full comparison is in Appendix F.
+To further validate the adaptability of our method, we ap-
+plied MSPN to the pre-trained MIL framework. As detailed
+in Table 2, we utilised an ABMIL model pre-trained on the
+FEATHER-24K dataset using UNI2 features and compared
+it against the same pre-trained configuration with MSPN
+added on. The results demonstrate that MSPN consistently
+boosts performance across all evaluated tasks and founda-
+tion models. These findings confirm that MSPN can be
+effectively integrated into pre-trained pipelines as a modular
+enhancement, unlocking further performance gains when
+fine-tuning with MSPN.
+512
+1024
+1536
+2048
+0
+8
+16
+24
+32
+Runtime (ms)
+(a) ABMIL
+512
+1024
+1536
+2048
+0
+8
+16
+24
+32
+(b) DSMIL
+512
+1024
+1536
+2048
+Feature Dim.
+0
+10
+20
+30
+40
+Runtime (ms)
+(c) CLAM-SB
+512
+1024
+1536
+2048
+Feature Dim.
+0
+10
+20
+30
+40
+(d) CLAM-MB
+w/o
+Concat
+CSA
+MSPN
+Figure 3. Runtime comparison under features in different
+dimensions. MSPN is more efficient when feature dimension
+scales up.
+4.5. Ablation Study
+We next assessed how the number of CGNs and the corre-
+sponding FOV settings affect the performance of MSPN.
+Table 3 presents a comparison across five MSPN configura-
+tions, ranging from a single CGN to five CGNs. The mini-
+mum FOV was set to 1024 that contains 16 patches with size
+256 × 256, considering an even smaller FOV would deviate
+from the intuition of generating coarse guidances. The re-
+sults indicate that increasing the number of CGNs generally
+yields better performance, particularly for the prediction of
+ER and HER2 biomarkers where the five-scale configuration
+(1024 to 3072) achieved peak AUCs of 91.42% and 84.62%
+for ER and HER2, respectively. In terms of computational
+Table 2. Applying MSPN on the MIL framework pre-trained
+with FEATHER-24K dataset in UNI2 features (Shao et al.,
+2025). The performance of three multi-scale method, namely
+concatenation, cross-scale attention (CSA) and our MSPN are
+compared. For ER, PR and HER2 biomarker prediction AUC
+score is used as metric, while for prognosis prediction (CRC Surv)
+C-index is used as metric. The standard deviation is determined
+with 2000 bootstrap trails.
+FM
+Task
+ABMIL (FEATHER-24K Pre-trained)
+w/o
+CSA
+Concat
+MSPN (Ours)
+CONCH
+ER
+87.84±2.43
+87.78±2.37
+88.34±2.09
+88.80±2.35
+PR
+83.28±2.14
+83.70±3.90
+83.82±3.74
+84.08±2.03
+HER2
+80.88±3.69
+78.16±3.84
+79.96±3.91
+81.80±2.61
+Surv
+65.76±2.24
+64.58±2.40
+62.22±2.43
+66.38±2.37
+GigaPath
+ER
+90.56±1.67
+91.42±1.81
+92.60±1.65
+91.80±1.97
+PR
+83.28±2.06
+83.58±3.68
+83.24±3.48
+84.08±2.29
+HER2
+81.92±2.75
+83.48±3.67
+85.04±3.69
+84.02±3.25
+Surv
+64.78±2.35
+64.72±2.45
+65.84±2.42
+66.12±2.47
+UNI2
+ER
+92.54±1.30
+92.80±1.82
+92.50±1.55
+93.02±1.89
+PR
+85.70±2.08
+85.90±3.64
+86.02±3.61
+86.92±1.77
+HER2
+81.74±2.78
+81.38±3.69
+81.32±3.78
+82.38±3.18
+Surv
+67.84±2.42
+65.14±2.19
+66.80±2.25
+68.68±2.32
+cost, although adding more CGNs inevitably results in larger
+models, the increase of parameters and FLOPs are well con-
+trolled. Consequently, even with multiple scales, MSPN
+remains a worth accuracy-cost trade-of compared to the con-
+catenation and cross-scale attention variants, TransMIL and
+HAG-MIL. The training runtime per slide is compared in
+Appendix F under different input feature dimensions, show-
+ing MSPN to be more efficient versus the transformer-based
+frameworks.
+5. Interpretability
+To further study the interpretability of MSPN, we visualised
+the attention heatmaps for prognosis prediction, as illus-
+trated in Figure 4. A clear pattern of progressive refinement
+is observable, where the largest FOV of 3072 effectively
+captures broad, global regions of interest, creating a con-
+textual map that guides the model. As the FOV decreases
+to 2048 and 1536, the attention progressively focuses on
+the more detailed morphological structures. This guided
+approach stands in contrast to the ABMIL baseline which
+exhibits more dispersed and fragmented attention patterns.
+For instance, in Case 3, the ABMIL baseline produces scat-
+tered attention across the tissue whereas the counterpart
+with MSPN guided by the coarse guidances generates a
+more coherent heatmap that precisely delineates the tumor
+mass. The spatial alignment between the coarse guidances
+and the high-magnification features confirms that MSPN
+successfully learns from multi-scale contexts.
+6. Conclusion
+In this paper, we proposed the Multi-Scale Pyramidal Net-
+work (MSPN), a plug-and-play module for attention-based
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Submission and Formatting Instructions for ICML 2026
+Table 3. Comparing the performance of ABMIL under various field-of-view settings of MSPN. The compared models are trained
+with CONCH features. The standard deviation is determined with 2000 bootstrap trails.
+Model
+Multi-scale
+Scales/FOV
+Param
+FLOPs
+ER
+PR
+HER2
+CRC Surv
+TransMIL
+w/o
+w/o
+2.93M
+84.01G
+84.98±2.80
+81.74±2.27
+78.12±3.47
+66.72±2.19
+HAG-MIL
+IAT
+5×, 10×, 20×
+85.83M
+503.30G
+90.64±2.18
+85.16±3.60
+81.00±3.71
+64.72±2.11
+ABMIL
+Concat
+5×, 10×, 20×
+2.61M
+38.37G
+86.62±2.59
+83.08±2.29
+78.20±3.65
+65.84±2.21
+ABMIL
+CSA
+5×, 10×, 20×
+2.61M
+38.37G
+84.64±2.80
+82.34±2.39
+78.18±2.88
+65.62±2.22
+ABMIL
+MSPN (Ours)
+1536
+1.51M
+17.70G
+88.92±2.11
+84.76±2.11
+80.84±2.75
+63.82±2.17
+1536, 2048
+1.85M
+17.70G
+88.74±2.44
+85.06±2.11
+82.24±2.46
+64.36±2.13
+1536, 2048, 3072
+2.18M
+17.71G
+89.76±1.80
+85.24±2.19
+82.86±2.65
+65.90±2.29
+1536, 2048, 2560, 3072
+2.51M
+17.71G
+90.34±1.85
+84.82±2.38
+81.92±2.74
+66.20±2.16
+1024, 1536, 2048, 2560, 3072
+2.84M
+17.71G
+91.42±2.10
+84.18±2.14
+84.62±3.30
+66.78±2.05
+WSI
+ABMIL + MSPN
+FOV=3072
+FOV=2048
+FOV=1536
+HighMag
+ABMIL
+Case 2
+Case 3
+Case 1
+Figure 4. Examples of heatmap visualisations on prognosis prediction. The coarse guidances from CGNs with FOV of 3072, 2048,
+and 1536 are separately shown, indicating a pattern of progressive focus on the important areas. The suggested area of coarse guidance
+aligns with the heatmaps from high magnification features.
+MIL frameworks. MSPN enables progressive multi-scale
+training relying solely on high-magnification features by
+incorporating grid-based remapping and residually con-
+nected Coarse Guidance Networks (CGNs). Specifically,
+grid-based remapping constructs coarse feature maps based
+on a specified field-of-view, while CGNs generate coarse
+guidances by applying convolutional operations to these
+maps. The residual connections between CGNs facilitate
+the progressive sharing and integration of information across
+different scales. The efficacy of MSPN was evaluated on
+high-quality real-world datasets, spanning 4 clinically rel-
+evant tasks and utilising features from 3 commonly used
+foundation models. MSPN demonstrated consistent im-
+provements across popular attention-based MIL frameworks
+including ABMIL (both trained from scratch and pre-trained
+on FEATHER-24K), DSMIL, CLAM-SB, and CLAM-MB.
+Furthermore, it outperformed multi-scale variants such as
+concatenation, cross-scale attention, and HAG-MIL in both
+predictive performance and computational complexity. By
+introducing MSPN, we demonstrate that training that ex-
+plcitly leverages multi-scale information in CPath can be
+achieved in a lightweight manner. This approach aligns well
+with the contemporary trend for favouring efficient down-
+stream models, particularly when specialised foundation
+models already provide robust feature representations.
+Limitations.
+Although MSPN is primarily designed for
+attention-based frameworks with an emphasis on the
+lightweight design, previous works such as PEG (Islam
+et al., 2020) and PPEG (Shao et al., 2021) have demon-
+strated that convolutional neural networks are effective for
+encoding positional information. Consequently, it would be
+interesting to investigate whether the multi-scale positional
+features generated by MSPN can enhance transformer-based
+frameworks, thereby potentially broadening the method’s
+applicability.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Submission and Formatting Instructions for ICML 2026
+Impact Statement
+This paper aims to advance the application of Machine
+Learning in computational pathology by introducing an
+efficient approach for multi-scale multiple-instance learn-
+ing (MIL) model training. We demonstrate the viability
+of implementing multi-scale MIL relying solely on high-
+magnification features, achieved by deriving coarser-level
+context through grid-based remapping where the number
+of scales and field-of-view can be flexibly selected. This
+design operates as a plug-and-play module that integrates
+seamlessly with standard MIL pipelines. By making our
+code publicly available, we aim to facilitate the widespread
+adoption of this method in future clinical research and appli-
+cations, offering a solution that delivers robust performance
+improvements with well-controlled computational cost.
+References
+Barbano, C. A., Perlo, D., Tartaglione, E., Fiandrotti, A.,
+Bertero, L., Cassoni, P., and Grangetto, M. Unitopatho,
+a labeled histopathological dataset for colorectal polyps
+classification and adenoma dysplasia grading. In 2021
+IEEE International Conference on Image Processing
+(ICIP), pp. 76–80, 2021.
+Bioptimus.
+H-optimus-1, 2025.
+URL https://
+huggingface.co/bioptimus/H-optimus-1.
+Campanella, G., Hanna, M. G., Geneslaw, L., Miraflor,
+A., Silva, V. W. K., Busam, K. J., Brogi, E., Reuter,
+V. E., Klimstra, D. S., and Fuchs, T. J. Data-efficient and
+weakly supervised computational pathology on whole-
+slide images. Nature Biomedical Engineering, 25:1301–
+1309, 2019.
+Campanella, G., Chen, S., Singh, M., Verma, R., Muehlstedt,
+S., Zeng, J., Stock, A., Croken, M., Veremis, B., Elmas,
+A., Shujski, I., Neittaanm¨aki, N., lin Huang, K., Kwan,
+R., Houldsworth, J., Schoenfeld, A. J., and Vanderbilt, C.
+A clinical benchmark of public self-supervised pathology
+foundation models. Nature Communication, 16:3640,
+2025.
+Chen, R. J., Chen, C., Li, Y., Chen, T. Y., Trister, A. D., Kr-
+ishnan, R. G., and Mahmood, F. Scaling vision transform-
+ers to gigapixel images via hierarchical self-supervised
+learning. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR), pp.
+16144–16155, June 2022a.
+Chen, R. J., Lu, M. Y., Wang, J., Williamson, D. F. K.,
+Rodig, S. J., Lindeman, N. I., and Mahmood, F. Pathomic
+fusion: An integrated framework for fusing histopathol-
+ogy and genomic features for cancer diagnosis and prog-
+nosis. IEEE Transactions on Medical Imaging, 41(4):
+757–770, 2022b.
+Chen, R. J., Lu, M. Y., Williamson, D. F., Chen, T. Y.,
+Lipkova, J., Noor, Z., Shaban, M., Shady, M., Williams,
+M., Joo, B., and Mahmood, F. Pan-cancer integrative
+histology-genomic analysis via multimodal deep learning.
+Cancer Cell, 40(8):865–878.e6, 2022c.
+Chen, R. J., Ding, T., Lu, M. Y., Williamson, D. F. K.,
+Jaume, G., Song, A. H., Chen, B., Zhang, A., Shao, D.,
+Shaba, M., Williams, M., Oldenburg, L., Weishaupt, L. L.,
+Wang, J. J., Vaidya, A., Le, L. P., Gerber, G., Sahai,
+S., Williams, W., and Mahmood, F. Towards a general-
+purpose foundation model for computational pathology.
+Nature Medicine, 30:850–862, 2024.
+Chu, X., Tian, Z., Zhang, B., Wang, X., and Shen, C. Con-
+ditional positional encodings for vision transformers. In
+The Eleventh International Conference on Learning Rep-
+resentations, 2023.
+Deng, R., Cui, C., Remedios, L. W., Bao, S., Womick,
+R. M., Chiron, S., Li, J., Roland, J. T., Lau, K. S., Liu,
+Q., Wilson, K. T., Wang, Y., Coburn, L. A., Landman,
+B. A., and Huo, Y. Cross-scale multi-instance learning for
+pathological image diagnosis. Medical Image Analysis,
+94:103124, 2024. ISSN 1361-8415.
+El Nahhas, O. S. M., van Treeck, M., W¨olflein, G., Unger,
+M., Ligero, M., Lenz, T., Wagner, S. J., Hewitt, K. J.,
+Khader, F., Foersch, S., Truhn, D., and Kather, J. N.
+From whole-slide image to biomarker prediction: end-to-
+end weakly supervised deep learning in computational
+pathology. Nature Protocols, 20(1):293–316, 2025. ISSN
+1750-2799.
+Gao, Z., Chen, T., and Yang, B.
+A weakly supervised
+multiple instance learning approach for classification of
+Breast cancer HER-2 status using whole slide images.
+In Third International Conference on Biomedical and
+Intelligent Systems, volume 13208, pp. 132081D, 2024.
+Goode, A., Gilbert, B., Harkes, J., Jukic, D., and Satya-
+narayanan, M. Openslide: A vendor-neutral software
+foundation for digital pathology. Journal of Pathology
+Informatics, 4(1):27, 2013.
+Hashimoto, N., Fukushima, D., Koga, R., Takagi, Y., Ko,
+K., Kohno, K., Nakaguro, M., Nakamura, S., Hontani,
+H., and Takeuchi1, I. Multi-scale domain-adversarial
+multiple-instance cnn for cancer subtype classification
+with unannotated histopathological images. In Proceed-
+ings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pp. 3852–3861, 2020.
+He, K., Zhang, X., Ren, S., and Sun, J. Deep residual
+learning for image recognition. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), 2016.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Submission and Formatting Instructions for ICML 2026
+Ilse, M., Tomczak, J. M., and Welling, M. Attention-based
+deep multiple instance learning. In Proceedings of the
+35th International Conference on Machine Learning, pp.
+2127–2136, 2018.
+International
+Collboration
+on
+Cancer
+Report-
+ing.
+Invasive
+carcinoma
+of
+the
+breast,
+2022.
+URL
+https://www.iccr-cancer.org/
+datasets/published-datasets/breast/
+invasive-carcinoma-of-the-breast/.
+Islam, M. A., Jia, S., and Bruce, N. D. B. How much
+position information do convolutional neural networks
+encode? In International Conference on Learning Repre-
+sentations, 2020.
+Javed, S. A., Juyal, D., Padigela, H., Taylor-Weiner, A.,
+Yu, L., and aaditya prakash. Additive MIL: Intrinsically
+interpretable multiple instance learning for pathology.
+In Advances in Neural Information Processing Systems,
+2022.
+Jiang, X., Hoffmeister, M., Brenner, H., Muti, H. S., Yuan,
+T., Foersch, S., West, N. P., Brobeil, A., Jonnagaddala,
+J., Hawkins, N., Ward, R. L., Brinker, T. J., Saldanha,
+O. L., Ke, J., M¨uller, W., Grabsch, H. I., Quirke, P.,
+Truhn, D., and Kather, J. N. End-to-end prognostication
+in colorectal cancer by deep learning: a retrospective,
+multicentre study. The Lancet Digital Health, 6(1):e33–
+e43, Jan 2024. ISSN 2589-7500.
+Li, B., Li, Y., and Eliceiri, K. W. Dual-stream multiple
+instance learning network for whole slide image clas-
+sification with self-supervised contrastive learning. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 14318–14328, 2021.
+Liang, J., Zhang, W., Yang, J., Wu, M., Dai, Q., Yin, H.,
+Xiao, Y., and Kong, L. Deep learning supported discov-
+ery of biomarkers for clinical prognosis of liver cancer.
+Nature Machine Intelligence, 5:408–420, 2023.
+Liu-Swetz, Y., Niksic, S., Seethala, R. R., Shasteen, A.,
+Foran, D. J., and Bilodeau, E. A. Ai-driven prediction
+of progression to oral squamous cell carcinoma using a
+multiresolution pathology model. npj Digital Medicine,
+8(657), 2025.
+Lu, M. Y., Williamson, D. F. K., Chen, T. Y., Chen, R. J.,
+Barbieri, M., and Mahmood, F. Data-efficient and weakly
+supervised computational pathology on whole-slide im-
+ages. Nature Biomedical Engineering, 5(6):555–570,
+2021.
+Lu, M. Y., Chen, B., Williamson, D. F., Chen, R. J., Liang,
+I., Ding, T., Jaume, G., Odintsov, I., Le, L. P., Gerber, G.,
+et al. A visual-language foundation model for computa-
+tional pathology. Nature Medicine, 30:863–874, 2024.
+Lundberg, S. M. and Lee, S.-I. A unified approach to inter-
+preting model predictions. In Guyon, I., Luxburg, U. V.,
+Bengio, S., Wallach, H., Fergus, R., Vishwanathan, S.,
+and Garnett, R. (eds.), Advances in Neural Information
+Processing Systems, volume 30, 2017.
+Marini, N., Ot´alora, S., Ciompi, F., Silvello, G., Marchesin,
+S., Vatrano, S., Buttafuoco, G., Atzori, M., and M¨uller,
+H. Multi-scale task multiple instance learning for the
+classification of digital pathology images with global
+annotations. In Atzori, M., Burlutskiy, N., Ciompi, F., Li,
+Z., Minhas, F., M¨uller, H., Peng, T., Rajpoot, N., Torben-
+Nielsen, B., van der Laak, J., Veta, M., Yuan, Y., and
+Zlobec, I. (eds.), Proceedings of the MICCAI Workshop
+on Computational Pathology, volume 156 of Proceedings
+of Machine Learning Research, pp. 170–181. PMLR, 27
+Sep 2021.
+Myles, C., Um, I. H., Marshall, C., Harris-Birtill, D., and
+Harrison, D. J. Surgen: 1020 h&amp;e-stained whole-
+slide images with survival and genetic markers. Giga-
+Science, 14:giaf086, 10 2025. ISSN 2047-217X.
+Randell, R., Ruddle, R. A., Thomas, R., and Treanor,
+D. Diagnosis at the microscope: a workplace study of
+histopathology. Cognition, Technology & Work, 14(4):
+319–335, November 2012.
+Shao, D., Chen, R. J., Song, A. H., Runevic, J., Lu, M. Y.,
+Ding, T., , and Mahmood, F. Do multiple instance learn-
+ing models transfer? In Proceedings of the 42nd Interna-
+tional Conference on Machine Learning, 2025.
+Shao, Z., Bian, H., Chen, Y., Wang, Y., Zhang, J., Ji, X., and
+Zhang, Y. Transmil: Transformer based correlated multi-
+ple instance learning for whole slide image classification.
+In Advances in Neural Information Processing Systems,
+2021.
+Skrede, O.-J., De Raedt, S., Kleppe, A., Hveem, T. S., Li-
+estøl, K., Maddison, J., Askautrud, H. A., Pradhan, M.,
+Nesheim, J. A., Albregtsen, F., Farstad, I. N., Domingo,
+E., Church, D. N., Nesbakken, A., Shepherd, N. A., Tom-
+linson, I., Kerr, R., Novelli, M., Kerr, D. J., and Danielsen,
+H. E. Deep learning for prediction of colorectal cancer
+outcome: a discovery and validation study. The Lancet,
+395(10221):350–360, Feb 2020.
+Tan, W., Jing, Kim, Gangsu, Jeong, and Won-Ki. Pathme:
+Hierarchical multi-expert knowledge distillation for
+whole slide image analysis. IEEE Access, 13:163246–
+163257, 2025.
+Vorontsov, E., Bozkurt, A., Casson, A., Shaikovski, G.,
+Zelechowski, M., Severson, K., Zimmermann, E., Hall,
+J., Tenenholtz, N., Fusi, N., Yang, E., Mathieu, P., van
+Eck, A., Lee, D., Viret, J., Robert, E., Wang, Y. K., Kunz,
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Submission and Formatting Instructions for ICML 2026
+J. D., Lee, M. C. H., Bernhard, J. H., Godrich, R. A.,
+Oakley, G., Millar, E., Hanna, M., Wen, H., Retamero,
+J. A., Moye, W. A., Yousfi, R., Kanan, C., Klimstra, D. S.,
+Rothrock, B., Liu, S., and Fuchs, T. J. A foundation
+model for clinical-grade computational pathology and
+rare cancers detection. Nature Medicine, 30:2429–2935,
+2024.
+Wang, X., Yang, S., Zhang, J., Wang, M., Zhang, J., Huang,
+J., Yang, W., and Han, X. Transpath: Transformer-based
+self-supervised learning for histopathological image clas-
+sification. In Proceedings of the International Conference
+on Medical Image Computing and Computer-Assisted In-
+tervention, pp. 186–195, 2021.
+Wang, X., Zhao, J., Marostica, E., Yuan, W., Jin, J., Zhang,
+J., Li, R., Tang, H., Wang, K., Li, Y., Wang, F., Peng, Y.,
+Zhu, J., Zhang, J., Jackson, C. R., Zhang, J., Dillon, D.,
+Lin, N. U., Sholl, L., Denize, T., Meredith, D., Ligon,
+K. L., Signoretti, S., Ogino, S., Golden, J. A., Nasrallah,
+M. P., Han, X., Yang, S., and Yu, K.-H. A pathology
+foundation model for cancer diagnosis and prognosis
+prediction. Nature, 634:970–978, 2024.
+Xiong, C., Chen, H., Sung, J. J., and King, I. Diagnose like
+a pathologist: Transformer-enabled hierarchical attention-
+guided multiple instance learning for whole slide image
+classification. In Elkind, E. (ed.), Proceedings of the
+Thirty-Second International Joint Conference on Artifi-
+cial Intelligence, IJCAI-23, pp. 1587–1595. International
+Joint Conferences on Artificial Intelligence Organization,
+8 2023.
+Xu, H., Usuyama, N., Bagga, J., Zhang, S., Rao, R., Nau-
+mann, T., Wong, C., Gero, Z., Gonz´alez, J., Gu, Y., Xu,
+Y., Wei, M., Wang, W., Ma, S., Wei, F., Yang, J., Li, C.,
+Gao, J., Rosemon, J., Bower, T., Lee, S., Weerasinghe,
+R., Wright, B. J., Robicsek, A., Piening, B., Bifulco, C.,
+Wang, S., and Poon, H. A whole-slide foundation model
+for digital pathology from real-world data. Nature, 2024.
+Zadeh, S. G. and Schmid, M. Bias in cross-entropy-based
+training of deep survival networks. IEEE Transactions on
+Pattern Analysis and Machine Intelligence, 43(9):3126–
+3137, 2021.
+Zhang, D., Duan, Y., Guo, J., Wang, Y., Yang, Y., Li, Z.,
+Wang, K., Wu, L., and Yu, M. Using multi-scale convolu-
+tional neural network based on multi-instance learning to
+predict the efficacy of neoadjuvant chemoradiotherapy for
+rectal cancer. IEEE Journal of Translational Engineering
+in Health and Medicine, 10:1–8, 2022.
+Zhang, M. R., Lucas, J., Hinton, G., and Ba, J. Lookahead
+optimizer: k steps forward, 1 step back. In Advances in
+Neural Information Processing Systems, 2019.
+Zhang, Y., Yang, Z., Chen, R., Zhu, Y., Liu, L., Dong,
+J., Zhang, Z., Sun, X., Ying, J., Lin, D., Yang, L., and
+Zhou, M. Histopathology images-based deep learning
+prediction of prognosis and therapeutic response in small
+cell lung cancer. npj Digital Medicine, 7(15), 2024.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Submission and Formatting Instructions for ICML 2026
+A. Pseudo-codes
+A.1. Grid-based Remapping
+Algorithm 1 Grid-based Remapping
+Input: data H, coords (x, y), field-of-view s
+Output: coarse feature map M, patch index idx
+1) Create grids: (xg, yg) ←(⌈W/s⌉, ⌈H/s⌉), where xg
+n ∈[0, W ′], yg
+n ∈[0, H′]
+2) normalise coords: (x′, y′) ←norm(x, y)
+3) Give patch index:
+u ←⌊x′ · W ′⌋,v ←⌊y′ · H′⌋
+idx ←v · xg + u, where v · xg indexes the row and u indexes the column, idx ∈RN
+4) Remapping and intra-grid aggregation:
+M0 ←torch.zeros(H′ · W ′, D) # initialise
+Msum ←M0.index add(0, idx, H) # mapping into grid
+counts ←torch.bincount(idx)
+M ←reshape(Msum/counts) # average on each grid
+A.2. Coarse Guidance Network
+Algorithm 2 Coarse Guidance Network
+Input: data H, coords (x, y), field-of-view s
+Output: scored feature Hk
+M, idx ←grid based remapping(H, (x, y), s)
+P ←ConvLayers(M)
+MA ←flatten(M)[idx],
+where Mflatten ∈RH′·W ′, idx ∈RN and MA ∈RN
+Hk ←H ⊙MA
+A.3. Multi-scale Pyramidal Network
+Algorithm 3 Multi-scale Pyramidal Network
+Input: data H, coords (x, y), field-of-views s
+Output: multi-scale aggregated features Hmspn
+for k = 1 to k do
+Hk ←CGNk(H, (x, y), sk)
+H ←H + Hk
+end for
+Hmspn ←H
+B. Computational Complexity of MSPN
+The computational complexity of MSPN is analysed. Let M denotes the grid size of H′ × W ′, the complexity of a single
+CGN is as follows:
+TCGN = O(ND + M(DD′ + D′2))
+(3)
+, where a large hidden channel D′ results in squared complexity. Hence, D′ is set to be 64 in the implementation, as stated
+in the previous section.
+Next, denoting k as the number of fields-of-view chosen (i.e., the number of CGNs), the complexity of an MSPN module
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Submission and Formatting Instructions for ICML 2026
+consisting of k CGNs is computed as:
+TMSPN = O(SND +
+k
+X
+i=1
+Mi(DD′ + D′2))
+(4)
+Therefore, the complexity of an MSPN is roughly linear with respect to the patch number N and the number of CGN S,
+which is hypothesised to have well-controlled complexity under large patch number and the variation number of CGN, so
+long as D′ remains small.
+C. Annotation Protocols
+C.1. Biomarker Prediction: ER and PR
+For ER and PR prediction, the Allred scoring system is used following the breast cancer clinical guideline (International
+Collboration on Cancer Reporting, 2022). The scoring includes a proportion score (PS) and an intensity score (IS), where
+PS ∈Z ∩[0, 5] and IS ∈Z ∩[0, 3]. These scores are then combined to form a total score (TS), where TS ∈Z ∩[0, 8],
+with TS ̸= 1, and a higher score indicates greater receptor positivity. When converting into binary positive or negative
+status for binary classification, TS of 0 and 2 are considered as negative, and TS from 3 to 8 are considered as positive,
+in keeping with the clinical guidelines. Note that a TS = 1 does not exist, as either PS = 0 or IS = 0 would imply the
+absence of biomarker expression.
+C.2. Biomarker Prediction: HER2
+For HER2, we determine HER2 status following the breast cancer clinical guideline (International Collboration on Cancer
+Reporting, 2022). HER2 is scored as one of four scores, namely HER2 0, 1+, 2+, and 3+, where 0 is absolute negative, 1+ is
+low negative, 3+ is absolute positive, and 2+ indicates borderline. Clinically, Fluorescence In Situ Hybridisation (FISH) is
+performed on borderline cases to test for gene amplification, where amplified is considered positive, and vice versa. We
+included FISH test amplification results in IHC 2+ cases in our annotation to perform binary classification.
+C.3. Prognosis Prediction
+Following (Chen et al., 2022b;c), prognosis prediction is formularised as a four-class classification problem that splits patient
+survivorship into four discrete time slots. In preprocessing, to avoid data imbalance, data are distributed into four bins with
+equal cases number according to survival months using the qcut function from the pandas library. The annotation is
+made based the bin that the case is belonged to.
+D. Loss Function for Prognosis Prediction
+Under the formulation of prognosis prediction, patients have vital status (caused death) are considered as uncensored while
+patients alive are censored. β is a variable for adjusting the weight of censored and uncensored loss. Taking ABMIL with
+MSPN as an example, let Yhazard and Ysurv denote the predicted risk and survival rate, respectively, the censored loss
+Lcensored, uncensored loss Luncensored and the loss for prognosis prediction Lsurv are defined as follow (Chen et al.,
+2022c; Zadeh & Schmid, 2021):
+Yhazard = Sigmoid(ABMIL(MSPN(H, (x, y)))
+(5)
+Ysurv =
+Y
+(1 −Yhazard)
+(6)
+Lcensored = −log(Ysurv)
+(7)
+Luncensored = −log(Ysurv) −log(Yhazard)
+(8)
+Lsurv = (1 −β)Lcensored + βLuncensored
+(9)
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Submission and Formatting Instructions for ICML 2026
+E. Standard Deviation
+Table 4. Standard deviation reported for performance comparison across different tasks and foundation models. For ER, PR and
+HER2 biomarker prediction AUC score is used as metric, while for prognosis prediction (CRC Surv) C-index is used as metric. The
+standard deviation is determined with 2000 bootstrap trails.
+Model
+Multi-scale
+CONCH
+GigaPath
+UNI2
+ER
+PR
+HER2
+CRC Surv
+ER
+PR
+HER2
+CRC Surv
+ER
+PR
+HER2
+CRC Surv
+Maxpool
+×
+±3.16
+±2.83
+±4.08
+±2.51
+±2.62
+±2.48
+±2.86
+±2.48
+±2.15
+±2.44
+±3.29
+±2.47
+Meanpool
+×
+±2.42
+±2.44
+±2.78
+±2.20
+±2.21
+±2.23
+±2.61
+±2.43
+±2.10
+±2.36
+±2.75
+±2.24
+TransMIL
+×
+±2.80
+±2.27
+±3.47
+±2.19
+±2.65
+±2.21
+±3.35
+±2.36
+±2.46
+±2.35
+±3.22
+±2.17
+HAG-MIL
+IAT
+±2.18
+±3.60
+±3.71
+±2.11
+±2.17
+±3.37
+±3.92
+±2.29
+±2.03
+±3.81
+±3.84
+±2.13
+ABMIL
+×
+±2.46
+±2.28
+±2.85
+±2.20
+±2.06
+±2.04
+±2.67
+±2.32
+±1.29
+±2.08
+±2.59
+±2.10
+Concat
+±2.59
+±2.29
+±3.65
+±2.21
+±1.63
+±2.25
+±3.69
+±2.27
+±1.58
+±2.11
+±2.89
+±2.21
+CSA
+±2.80
+±2.39
+±2.88
+±2.22
+±1.58
+±2.39
+±3.53
+±2.56
+±2.09
+±2.20
+±3.09
+±2.28
+MSPN (Ours)
+±1.80
+±2.19
+±2.65
+±2.29
+±1.82
+±1.93
+±3.46
+±2.43
+±1.81
+±1.94
+±2.80
+±2.37
+DSMIL
+×
+±2.50
+±2.17
+±3.31
+±2.23
+±1.85
+±2.23
+±3.04
+±2.23
+±1.66
+±2.22
+±2.74
+±2.13
+Concat
+±2.25
+±2.17
+±3.29
+±2.20
+±1.90
+±2.16
+±3.41
+±2.35
+±2.16
+±2.28
+±3.53
+±2.20
+CSA
+±2.37
+±2.09
+±3.68
+±2.27
+±2.65
+±2.06
+±3.20
+±2.44
+±2.12
+±2.01
+±3.08
+±2.25
+MSPN (Ours)
+±2.39
+±1.89
+±3.36
+±2.23
+±1.71
+±1.94
+±2.34
+±2.32
+±1.55
+±1.92
+±2.94
+±2.27
+CLAM-SB
+×
+±2.45
+±2.37
+±2.88
+±2.16
+±2.09
+±2.04
+±2.57
+±2.32
+±1.75
+±2.25
+±2.85
+±2.25
+Concat
+±2.68
+±2.23
+±3.20
+±2.35
+±1.89
+±2.30
+±3.34
+±2.41
+±2.33
+±2.39
+±2.88
+±2.27
+CSA
+±3.10
+±2.25
+±3.93
+±2.33
+±2.27
+±2.40
+±3.09
+±2.46
+±2.18
+±2.40
+±3.03
+±2.41
+MSPN (Ours)
+±2.11
+±2.15
+±2.85
+±2.16
+±1.89
+±2.07
+±2.93
+±2.41
+±1.91
+±1.97
+±2.90
+±2.11
+CLAM-MB
+×
+±2.74
+±2.33
+±2.89
+±2.16
+±2.23
+±2.15
+±2.80
+±2.24
+±1.93
+±2.45
+±3.00
+±2.15
+Concat
+±2.86
+±2.26
+±3.96
+±2.30
+±1.98
+±2.42
+±3.04
+±2.27
+±2.16
+±2.26
+±2.76
+±2.31
+CSA
+±2.65
+±2.51
+±3.07
+±2.37
+±2.64
+±2.43
+±2.84
+±2.45
+±2.32
+±2.37
+±2.93
+±2.25
+MSPN (Ours)
+±2.24
+±2.09
+±2.68
+±2.15
+±1.97
+±2.22
+±2.47
+±2.27
+±1.59
+±2.06
+±3.16
+±2.21
+F. Training Runtime
+We compare the runtime based on several widely adopted feature dimensions, including 512 for CONCH (Lu et al., 2024);
+768 for CTransPath (Wang et al., 2021) and CONCHv1.5; 1024 and 2048 for ResNet (He et al., 2016) and UNI (Chen et al.,
+2024); 1280 for Virchow2 (Vorontsov et al., 2024); and 1536 for GigaPath (Xu et al., 2024), H-optimus-0/1 (Bioptimus,
+2025) and UNI2. It is shown that MSPN introduces more efficiency when the feature dimension scales up, which fits in the
+current state that larger foundation models are emerging.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Submission and Formatting Instructions for ICML 2026
+512
+768
+1024
+1280
+1536
+2048
+Feature Dimension
+0
+5
+10
+15
+20
+25
+30
+Runtime (ms/slide)
+(a) ABMIL
+512
+768
+1024
+1280
+1536
+2048
+Feature Dimension
+0
+5
+10
+15
+20
+25
+30
+35
+Runtime (ms/slide)
+(b) DSMIL
+512
+768
+1024
+1280
+1536
+2048
+Feature Dimension
+0
+5
+10
+15
+20
+25
+30
+35
+40
+Runtime (ms/slide)
+(c) CLAM-SB
+512
+768
+1024
+1280
+1536
+2048
+Feature Dimension
+0
+5
+10
+15
+20
+25
+30
+35
+40
+Runtime (ms/slide)
+(d) CLAM-MB
+w/o
+Concat
+CSA
+MSPN
+Figure 5. Runtime comparison under features in different dimensions. MSPN is more efficient when feature dimension scales up.
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Submission and Formatting Instructions for ICML 2026
+512
+768
+1024
+1280
+1536
+2048
+Feature Dimension
+0
+5
+10
+15
+20
+25
+30
+35
+Runtime (ms/slide)
+(a) MSPN vs. Concat/CSA
+ABMIL (Concat)
+ABMIL (CSA)
+MSPN (1 FOV)
+MSPN (2 FOV)
+MSPN (3 FOV)
+MSPN (4 FOV)
+MSPN (5 FOV)
+512
+768
+1024
+1280
+1536
+2048
+Feature Dimension
+0
+5
+10
+15
+20
+25
+30
+35
+40
+45
+Runtime (ms/slide) - MSPN
+(b) MSPN vs. HAG-MIL
+MSPN (1 FOV)
+MSPN (2 FOV)
+MSPN (3 FOV)
+MSPN (4 FOV)
+MSPN (5 FOV)
+HAG-MIL (IAT)
+512
+768
+1024
+1280
+1536
+2048
+Feature Dimension
+0
+20
+40
+60
+80
+100
+120
+140
+160
+Runtime (ms/slide)
+(c) MSPN vs. TransMIL
+MSPN (1 FOV)
+MSPN (2 FOV)
+MSPN (3 FOV)
+MSPN (4 FOV)
+MSPN (5 FOV)
+TransMIL
+Concat
+CSA
+MSPN
+(1 FOV)
+MSPN
+(3 FOV)
+MSPN
+(5 FOV)
+TransMIL HAG-MIL
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+Growth Ratio (2048-dim / 512-dim)
+2.50×
+2.38×
+2.03×
+1.63×
+1.38×
+1.05×
+1.02×
+(d) Runtime Scaling Factor
+600
+610
+620
+630
+640
+650
+Runtime (ms/slide) - HAG-MIL
+Figure 6. Runtime comparison of various FOV settings of MSPN under features in different dimensions. Even when MSPN includes
+more CGNs, it still being more efficient compared to the transformer-based frameworks.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Submission and Formatting Instructions for ICML 2026
+Table 5. Full data: Runtime comparison under features in different dimensions. MSPN is more efficient when feature dimension
+scales up.
+Model
+Multi-scale
+Runtime/slide under different feature dimensions (ms)
+512
+768
+1024
+1280
+1536
+2048
+Maxpool
+×
+6.45
+8.61
+10.82
+13.03
+16.58
+21.31
+Meanpool
+×
+0.38
+0.42
+0.38
+0.48
+0.46
+0.49
+TransMIL
+×
+153.04
+154.86
+158.47
+157.00
+158.14
+160.26
+HAG-MIL
+IAT
+618.50
+619.95
+621.45
+622.53
+623.49
+628.18
+ABMIL
+×
+5.92
+7.43
+8.31
+9.27
+10.43
+13.07
+Concat
+12.57
+16.81
+19.09
+21.54
+24.70
+31.37
+CSA
+13.22
+16.87
+19.24
+21.63
+24.80
+31.42
+MSPN
+18.46
+23.39
+25.34
+25.61
+26.15
+30.10
+DSMIL
+×
+1.28
+4.98
+6.02
+6.86
+8.17
+10.97
+Concat
+5.18
+16.98
+20.03
+21.70
+25.00
+31.97
+CSA
+5.43
+17.29
+20.85
+22.02
+25.16
+33.52
+MSPN
+5.80
+9.19
+10.56
+10.98
+12.34
+14.95
+CLAM-SB
+×
+7.75
+9.56
+10.43
+11.38
+12.66
+15.31
+Concat
+19.70
+23.93
+26.44
+28.80
+32.08
+38.54
+CSA
+19.74
+24.04
+26.41
+28.82
+32.14
+38.63
+MSPN
+20.69
+25.44
+26.44
+27.14
+28.43
+31.02
+CLAM-MB
+×
+8.21
+9.95
+10.90
+11.68
+13.01
+15.74
+Concat
+20.55
+24.72
+27.15
+29.55
+32.85
+40.00
+CSA
+21.18
+25.43
+27.98
+30.06
+33.22
+39.12
+MSPN
+21.08
+25.66
+28.26
+28.67
+29.03
+31.27
+Table 6. Full data: Runtime comparison of various FOV settings of MSPN under features in different dimensions. Even when
+MSPN includes more CGNs, it still being more efficient compared to the transformer-based frameworks.
+Model
+Multi-scale
+Scales/FOV
+Runtime/slide under different feature dimension (ms)
+512
+768
+1024
+1280
+1536
+2048
+TransMIL
+w/o
+w/o
+153.04
+154.86
+158.47
+157.00
+158.14
+160.26
+HAG-MIL
+IAT
+5×, 10×, 20×
+618.50
+619.95
+621.45
+622.53
+623.49
+628.18
+ABMIL
+Concat
+5×, 10×, 20×
+12.57
+16.81
+19.09
+21.54
+24.70
+31.37
+ABMIL
+CSA
+5×, 10×, 20×
+13.22
+16.87
+19.24
+21.63
+24.80
+31.42
+ABMIL
+MSPN
+1536
+10.09
+14.89
+16.15
+16.65
+17.95
+20.44
+1536, 2048
+14.42
+18.99
+20.57
+20.82
+22.03
+24.56
+1536, 2048, 3072
+18.46
+23.39
+25.34
+25.61
+26.15
+30.10
+1536, 2048, 2560, 3072
+22.79
+27.69
+29.32
+29.42
+30.66
+33.01
+1024, 1536, 2048, 2560, 3072
+26.86
+31.69
+33.58
+33.60
+34.84
+37.06
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Submission and Formatting Instructions for ICML 2026
+G. SHAP (SHapley Additive exPlanations) Analysis
+CONCH
+Concatenation
+MSPN
+UNI2
+Concatenation
+MSPN
+GigaPath
+Concatenation
+MSPN
+Figure 7. SHAP analysis for the multi-scale features on the 5-fold cross-validation, taking HER2 prediction as an example. The
+ABMIL+Concat and ABMIL+MSPN is compared. In concatenation, one or two scales are often dominant, while in the MSPN that each
+scale contribute more consistently. Furthermore, it witnesses higher SHAP value on the MSPN, indicating the MSPN provides stronger
+signal for the prediction.
+18
