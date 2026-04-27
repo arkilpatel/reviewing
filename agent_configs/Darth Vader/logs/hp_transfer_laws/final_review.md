@@ -1,0 +1,28 @@
+This paper investigates the scaling of the optimal learning rate with respect to network depth for non-recurrent multi-path neural networks, including CNNs, ResNets, and Transformers. Building upon Maximal Update Parametrization ($\mu$P), the authors propose an "Arithmetic-Mean $\mu$P" (AM-$\mu$P) budget to unify heterogeneous computational graphs. They theoretically derive and empirically test a universal $-3/2$ power law for depth-wise learning rate decay.
+
+### Novelty
+The paper bridges the gap between the known depth scaling behavior of sequential MLPs and modern multi-path architectures. The $-3/2$ learning rate scaling law under $\mu$P was previously established for sequential ReLU MLPs by Jelassi et al. (2023). Additionally, the required depth-scaled initialization for residual networks (scaling branches by $1/\sqrt{K}$) is well-documented for signal propagation stability (e.g., Taki, 2017) and has been recently leveraged for hyperparameter transfer by Bordelon & Pehlevan (2025). The primary contribution here is the formalization of the Arithmetic-Mean $\mu$P framework, which cleanly extends these existing concepts to CNNs, ResNets, and Transformers. While conceptually elegant, the work operates as a reasonable, expected formalization rather than a transformative leap, representing a moderate incremental advancement over the prior art.
+
+### Technical Soundness
+The formal derivation of AM-$\mu$P is mathematically sound for CNNs and ResNets, effectively handling the overlap propagation. However, there is a critical theory-practice gap in the proof for Transformers (Appendix D). The derivation explicitly assumes that the pre-LayerNorm sum $u^{(l)}$ satisfies $s(u^{(l)}) = \Theta(1)$ independent of total depth (Line 1083). Yet, the authors employ standard fan-in initialization for Transformer sublayers without scaling the residual branches by $1/\sqrt{L_{tr}}$ (a scaling they correctly apply to ResNets). In standard post-norm Transformers, this causes the variance of $u^{(l)}$ to grow linearly with depth, making $s(u^{(l)}) \propto \sqrt{l}$. Consequently, the LayerNorm Jacobian's operator norm shrinks as $1/\sqrt{l}$, which fundamentally alters the overlap propagation in Eq. 42 and invalidates the $-3/2$ exponent derivation. 
+
+This theoretical flaw manifests directly in the empirical results: the Post-LN ViT on ImageNet yields an exponent of -1.178, a massive 21.5% deviation from the predicted -1.5. Furthermore, the theory heavily relies on SGD, but empirical ablations using Adam shift the exponents significantly (-1.207 for CNNs, -1.269 for ResNets). In logarithmic space, an exponent shift of this magnitude implies a fundamental break in the scaling dynamics, contradicting the claim of universality.
+
+### Experimental Rigor
+The experimental protocol relies on a fundamentally weak proxy: the authors define the optimal learning rate as the value that minimizes training loss after a single epoch. Training for one epoch is entirely insufficient for establishing reliable hyperparameter transfer laws intended for full training trajectories. A learning rate that is optimal at step 100 may cause instability or sub-optimal convergence at step 10,000. 
+
+Additionally, the dataset choices are limiting; evaluating scaling laws on a "subset of ImageNet" obscures the true difficulty and generalizability of the findings. While the authors present confidence intervals across random seeds, they inappropriately aggregate disparate architectural results (e.g., claiming a mean exponent of -1.38) to argue for quantitative agreement, thereby brushing aside the severe failures observed with the Adam optimizer and Post-LN ViTs. 
+
+### Impact
+**1. Technical Significance (70%):** The practical utility of the proposed zero-shot transfer rule, $\eta(L) = \eta(L_0)(L/L_0)^{-1.5}$, is heavily compromised. Because modern large-scale training almost exclusively utilizes Adam/AdamW and standard LayerNorms, the true scaling exponent lies closer to -1.2 or -1.15. If a practitioner uses the -1.5 rule to scale a model from 10 to 1,000 layers, the predicted learning rate will be off by over an order of magnitude. This makes the transfer rule too brittle for real-world deployment.
+**2. Scientific Significance (30%):** The introduction of AM-$\mu$P provides a nice pedagogical lens for viewing heterogeneous networks, but it largely reformulates existing knowledge without revealing new architectural failure modes or fundamentally shifting how we understand feature learning. 
+**3. The 3-Year Citation Projection:** The paper will likely be cited within the niche community studying tensor programs and initialization scaling, but it is highly unlikely to see widespread adoption among practitioners training large-scale models due to its incompatibility with modern optimizers and full training schedules. 
+
+### Scoring Breakdown
+- **Impact:** 3.5 / 10
+- **Technical Soundness:** 3.5 / 10
+- **Experimental Rigor:** 3.0 / 10
+- **Novelty:** 4.0 / 10
+
+**Formula:** `score = (4.0 * Impact + 2.0 * Tech_Soundness + 2.0 * Exp_Rigor + 2.0 * Novelty) / 10`
+**Final Score: 3.5 / 10**

@@ -1,0 +1,4050 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural
+Networks
+Anonymous Authors1
+Abstract
+Deeper modern architectures are costly to train,
+making hyperparameter transfer preferable to
+expensive repeated tuning.
+Maximal Update
+Parametrization (µP) helps explain why many
+hyperparameters transfer across width. Yet depth
+scaling is less understood for modern architec-
+tures, whose computation graphs contain multi-
+ple parallel paths and residual aggregation. To
+unify various non-recurrent multi-path neural
+networks such as CNNs, ResNets, and Trans-
+formers, we introduce a graph-based notion of
+effective depth. Under stabilizing initializations
+and a maximal-update criterion, we show that the
+optimal learning rate decays with effective depth
+following a universal -3/2 power law. Here, the
+maximal-update criterion maximizes the typical
+one-step representation change at initialization
+without causing instability, and effective depth
+is the minimal path length from input to out-
+put, counting layers and residual additions. Ex-
+periments across diverse architectures confirm
+the predicted slope and enable reliable zero-
+shot transfer of learning rates across depths and
+widths, turning depth scaling into a predictable
+hyperparameter-transfer problem.
+1. Introduction
+In the process of scaling deep learning, training cost grows
+not only with the number of parameters and data(Hoffmann
+et al., 2022), but also because hyperparameter tuning is
+expensive and remains largely experience-driven in prac-
+tice(Cohen et al., 2021; Hayou & Yang, 2023; Godbole
+et al., 2023; Kalra & Barkeshli, 2024). Hyperparameters,
+including learning rate, regularization, initialization, etc.,
+often require repeated trials at the target scale.
+Nowa-
+1Anonymous Institution, Anonymous City, Anonymous Re-
+gion, Anonymous Country. Correspondence to: Anonymous Au-
+thor <anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+days, this step has become a non-negligible computational
+and engineering bottleneck. Recently, an important idea is
+“tuning” on a smaller proxy model and transfer. Under a
+suitable parameterization, one can identify effective hyper-
+parameters on a small model and transfer them zero-shot to
+the large one, which significantly reduces the overall tuning
+cost.
+(a) Prior work:
+(b) Our work: Non-Recurrent Multi-Path Neural Networks
+Sequential MLP
+𝜂⋆∝𝐿−3
+2
+ResNet with 1-layer blocks
+F
+F
+𝜂⋆∝𝐿−1
+2
+Transformer (only width, no depth theory)
+F
+Attn
+1
+1
+1
+1
+1
+1
+1
+1
+1
+1
+F
+Attn
+d
+D
+𝜂⋆∝ 𝑊−1
+CNN
+On CIFAR-100
+ResNet
+On ImageNet
+Vison Transformer
+On CIFAR-10
+𝜂⋆∝𝐿−3
+2
+1
+1
+1
+Conv
+ReLU
+Conv
+ReLU
+Conv
+ReLU
+Conv
+ReLU
+Conv
+ReLU
+1
+1
+Emb
+Attn
+MLP
+Transformer block
+···
+CLS
+1
+2
+1
+F
+Attn
+F
+Attn
+Figure 1. Overview of prior work and our results on depth-wise
+learning-rate scaling. 1 denotes one depth unit, d and D denote
+width. (a) Prior work mainly analyzes sequential networks or spe-
+cial cases, and Transformers are often discussed only under width
+scaling. (b) We treat CNNs, ResNets, and Transformers as non-
+recurrent multi-path networks and obtain a unified depth law for
+the maximal-update learning rate.
+The key to this paradigm is to find a parameterization under
+which training dynamics remain comparable as the model
+scale changes. Yang et al. (2021) showed that Maximal
+Update Parametrization, denoted µP, aligns update scales
+under width scaling, motivating the zero-shot hyperparam-
+eter transfer paradigm µTransfer, where one tunes on a
+narrow model and transfers to a wider one.
+However,
+changing depth introduces more complex scaling effects
+than those from width scaling.
+Even in sequential net-
+works like ReLU MLPs, existing analysis suggests that
+the µP maximal-update learning rate depends on depth L
+and scales as L−3/2 (Jelassi et al., 2023). Modern high-
+performance models have more complex connection pat-
+terns such as spatial convolution and weight sharing in
+CNNs, residual connections in ResNets, attention modules
+and residual branches in Transformers. For these models,
+a unified depth scaling law supporting hyperparameter pre-
+diction and transferring is still missing. Without such a law,
+changing depth still requires costly re-tuning.
+Unlike recurrent architectures such as RNNs (Elman, 1990;
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+Werbos, 2002) and LSTMs (Hochreiter & Schmidhuber,
+1997; Cho et al., 2014), these models are non-recurrent.
+They can be viewed as feedforward computation graphs
+with multiple parallel paths and branch aggregation. This
+multi-path view is especially explicit in residual networks
+(He et al., 2016; Veit et al., 2016) and recent work has
+shown cross-depth transfer in specific settings.
+For ex-
+ample, Bordelon & Pehlevan (2025) combine a 1/√depth
+residual-branch scaling with µP, enabling hyperparame-
+ter transfer across both width and depth in convolutional
+ResNets and Vision Transformers(ViTs). Meanwhile, Yang
+et al. (2023) propose Depth-µP and further points out that
+existing infinite-depth analyses would face new challenges
+when the block structure is deeper, for example, in Trans-
+formers (Vaswani et al., 2017; Wang et al., 2019). Thus,
+the main idea of this paper is to develop a unified vision of
+depth scaling for non-recurrent structures.
+This paper unifies CNNs, ResNets, and Transformers as
+parallel-structured non-recurrent architectures and studies
+how pre-activation update scale is allocated under par-
+allel aggregation.(Fig. 1).
+1
+Under a maximal-update
+framework, we obtain a depth law: the learning rate fol-
+lows a depthwise power law with exponent −3/2. This
+gives a predictable hyperparameter-transfer rule and ex-
+tends the “tune small, transfer large” paradigm from width-
+wise to depth-wise and cross-architecture transfer. Theoret-
+ically, we develop a depth-scaling framework for parallel-
+structured networks that absorbs the maximal-update idea
+of µP and extends sequential-MLP depth–LR arguments to
+CNNs, ResNets, and Transformers. Empirically, we build
+an automated learning-rate search pipeline that finds near-
+optimal rates across depths and architectures, validates the
+power law via fitting and extrapolation, and stress-tests ro-
+bustness across training setups, activations, and optimizers.
+We summarize the resulting transfer guidance in Table 3.
+Main contributions.
+• We introduce the concept of effective depth unit for
+non-recurrent multi-path networks, including sequen-
+tial MLPs, CNNs as well as ResNets, and Transform-
+ers under architecture-specific conventions.
+• We generalize the maximal-update principle of µP to
+heterogeneous multi-path graphs via a global update-
+energy budget, yielding a practical parameterization
+and a learning-rate scale under parallel aggregation.
+1For a scaling variable s, f ∝g means f(s)/g(s) →κ ∈
+(0, ∞), i.e., f(s) = κ g(s) (1 + o(1)) with κ independent of s;
+hence f = Θ(g) (not conversely). Operationally, we use this as a
+transfer rule by calibrating κ at a reference scale and extrapolating
+with the power-law exponent. Our theory yields the proportional
+form for MLP/CNN; otherwise we state the more conservative
+Θ(·) result. See Sec. 3.4 for the definition of Θ(·).
+• Under stabilizing initializations and the network-wide
+criterion, we prove a unified depth–LR power law with
+exponent −3/2 for CNNs, ResNets, and Transform-
+ers, enabling a zero-shot cross-depth transfer rule.
+• We build an automated learning-rate search and fit-
+ting pipeline and validate the law across architectures,
+datasets, and training variants; we summarize transfer
+guidance and its boundaries in Table 1 and Table 3.
+Organization. Sec. 2 reviews related work. Sec. 3 in-
+troduces our framework and theoretical analysis for depth-
+aware learning-rate scaling. Sec. 4 presents the automated
+learning-rate search pipeline and experiments. Sec. 5 con-
+cludes. Appendices show proofs and additional results.
+2. Related Works
+Initialization and signal propagation. Training very deep
+networks often requires controlling signal and gradient
+scales at initialization. Classic fan-in scaling schemes such
+as those of Glorot & Bengio (2010) and He et al. (2015)
+are designed to keep activations and gradients from vanish-
+ing or exploding in deep feedforward networks. Mean-field
+analyses further characterize trainability through depth
+scales and dynamical isometry conditions (Schoenholz
+et al., 2016; Xiao et al., 2018). For convolutional and resid-
+ual architectures, several works study how initialization or
+residual-branch scaling should depend on depth, including
+analyses of deep ResNets (Zagoruyko & Komodakis, 2016;
+Xie et al., 2017; Taki, 2017) and normalization-free vari-
+ants such as Fixup (Zhang et al., 2019), SkipInit (De &
+Smith, 2020), and ReZero (Bachlechner et al., 2021). In
+Transformers, stability is also closely tied to normaliza-
+tion and residual scaling. This has motivated both theo-
+retical and practical adjustments, such as analyzing Layer-
+Norm placement (Xiong et al., 2020) and proposing Deep-
+Norm with derived initialization for very deep Transform-
+ers (Wang et al., 2024) . We adopt these widely used ini-
+tialization and scaling principles throughout, and we build
+our theoretical framework on top of them; see Sec. 3.
+Hyperparameter transfer and maximal-update param-
+eterizations.
+The cost of tuning large models has mo-
+tivated work on transferring hyperparameters from small
+proxy models. A prominent theoretical approach is Max-
+imal Update Parametrization, or µP, introduced in Ten-
+sor Programs V by Yang et al. (2021). By aligning up-
+date scales under width scaling, µP makes many training-
+critical hyperparameters stable across widths, enabling
+the zero-shot transfer paradigm µTransfer.
+These ideas
+are put into practical tooling and recipes, including the
+open-source mup package (Microsoft Research, 2022a)
+and Transformer-oriented µP parameterizations released
+in accompanying codebases (Microsoft Research, 2022b).
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+Complementary viewpoints connect hyperparameter scales
+to feature-learning dynamics and offer a more flexible lens
+on transfer across regimes (Chizat & Netrapalli, 2024).
+Extending transfer laws from width to depth is more sub-
+tle (Hestness et al., 2017; Kaplan et al., 2020), since
+changing depth can alter effective path counts, normaliza-
+tion statistics, and residual accumulation. In the sequen-
+tial ReLU MLP setting, Jelassi et al. (2023) show that
+the maximal-update learning rate depends nontrivially on
+depth and scales as L−3/2. For residual architectures, Bor-
+delon & Pehlevan (2025) empirically demonstrate cross-
+depth transfer by combining µP with a 1/√depth residual-
+branch scaling, and motivate the behavior using dynamical
+mean field descriptions. From the Tensor Programs per-
+spective, Yang et al. (2023) propose Depth-µP and discuss
+when infinite-depth analyses can face new challenges for
+deeper block structures. Minimal models, such as the deep
+linear analysis of Bordelon & Pehlevan (2025), further clar-
+ify how width, depth, and parameterization interact behind
+hyperparameter transfer. Overall, these works suggest that
+depthwise transfer can be achieved under specific struc-
+tural choices, while a unified depth law that reliably applies
+across modern architectures remains to be established.
+Non-recurrent multi-path architectures and depth scal-
+ing. Many modern vision and language models are non-
+recurrent feedforward computation graphs with multiple
+parallel paths and branch aggregation. Residual networks
+make this structure explicit through skip connections (He
+et al., 2016; Balduzzi et al., 2017), and can be interpreted
+as ensembles over paths of different lengths (Veit et al.,
+2016). Mean-field studies of randomly initialized ResNets
+further analyze how depth interacts with stability and sig-
+nal propagation (Yang & Schoenholz, 2017). Transformers
+also follow a residual multi-branch pattern that alternates
+attention and feedforward sublayers (Vaswani et al., 2017).
+Our work builds on this multi-path viewpoint and asks how
+learning-rate scaling and hyperparameter transfer behave
+as depth grows in such non-recurrent architectures.
+Automated hyperparameter optimization and proxy
+training. Hyperparameter optimization has a long history,
+with methods ranging from Bayesian optimization (Snoek
+et al., 2012) to multi-fidelity and early-stopping strategies
+such as Hyperband (Li et al., 2018). At large scale, sys-
+tem efforts such as Hydro use surrogate models and scal-
+ing techniques to reduce end-to-end tuning cost in clusters
+(Hu et al., 2023). Learning-rate schedules and warmup are
+themselves important hyperparameters, and recent work
+studies when warmup is needed and how it can be re-
+duced in GPT training (Kosson et al., 2024). Our empir-
+ical pipeline uses automated learning-rate search mainly to
+validate transfer laws across depth and architecture, rather
+than to propose a new optimization algorithm.
+3. Methods
+This section establishes the common setup shared by our
+theoretical analysis and experiments. We first introduce
+architecture-dependent depth units, notation, and the ini-
+tialization conventions used throughout (Sec. 3.1).
+We
+then define our network-wide maximal-update criterion,
+Arithmetic-Mean µP, which provides a single width-robust
+learning-rate scale for heterogeneous multi-path architec-
+tures (Sec. 3.2).
+Finally, under this unified framework
+we derive depthwise learning-rate scaling laws for CNNs,
+ResNets, and Transformers, and discuss when architectural
+details only affect constant factors (Secs. 3.3–3.5).
+3.1. Initialization and architectural conventions
+Depth units and notation. We study non-recurrent feed-
+forward models and use a unified depth index ℓto denote
+depth units—the units with respect to which we state our
+depthwise scaling laws. The mapping from implementa-
+tion details to depth units is architecture-dependent.
+Fan-in and activation statistics. For a weight tensor W,
+we denote by fanin(W) the number of inputs contribut-
+ing to one output. For a linear layer W ∈Rdout×din, we
+have fanin(W) = din. For a convolution with kernel sup-
+port K ⊂Zd of size |K| = k and Cin input channels,
+fanin(W) = k Cin.
+Throughout, σ(·) denotes a point-
+wise activation function. We also define the gating factor
+q := E[σ′(Z)2] for Z ∼N(0, 1). In our theoretical proofs
+we use ReLU, in which case q = 1/2. Under the mean-
+field normalization where pre-activations are O(1) at ini-
+tialization, fan-in initialization can be written as
+Wij ∼N
+
+0,
+1
+q fanin(W)
+
+,
+(1)
+which reduces to the standard He initialization Var(Wij) =
+2/ fanin(W) for ReLU. The initialization will be used in
+this paper and serves as the basis for our framework.
+MLPs and homogeneous CNNs. For sequential models,
+we write z(0)(x) = x and
+z(ℓ)(x) = W (ℓ) σ
+
+z(ℓ−1)(x)
+
+,
+ℓ= 1, . . . , L,
+(2)
+where L is the number of depth units.
+For homogeneous CNNs2, W (ℓ) denotes a convolutional
+kernel followed by a pointwise nonlinearity.
+At depth
+ℓ, the feature map has Cℓoutput channels indexed by
+j ∈{1, . . . , Cℓ}, and a spatial index set Λℓ⊂Zd col-
+lecting all spatial locations. For example, in 1D we may
+take Λℓ= {0, 1, . . . , Nℓ−1}, while in 2D we may take
+Λℓ= {0, . . . , Hℓ−1} × {0, . . . , Wℓ−1} with Nℓ:=
+2Terminology: “homogeneous” means depth-stationary archi-
+tectural statistics, not positive homogeneity / scale equivariance.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+|Λℓ| = HℓWℓ. The convolution at location p ∈Λℓaggre-
+gates inputs from locations p + ∆, where ∆ranges over
+a kernel offset set Kℓ⊂Zd (e.g., for a 3 × 3 kernel,
+Kℓ= {−1, 0, 1}2 and kℓ:= |Kℓ| = 9). With circular
+padding, p+∆is interpreted modulo the spatial grid (torus
+indexing), so boundary effects are absent in the idealized
+setting. In our main derivations, we first consider the ho-
+mogeneous case where (Cℓ, Λℓ, Kℓ) do not vary with ℓ; we
+keep the subscripts for compatibility with variants.
+With stride 1, we write the pre-activation recursion as With
+stride 1, for ℓ= 1, . . . , L, we write the pre-activation re-
+cursion as z(0)(x) = x, and
+z(ℓ)
+j,p(x) =
+Cℓ−1
+X
+i=1
+X
+∆∈Kℓ
+W (ℓ)
+j,i,∆σ
+
+z(ℓ−1)
+i,p+∆(x)
+
+.
+(3)
+where p ∈Λℓand j ∈{1, . . . , Cℓ}. The classifier is global
+average pooling followed by a linear head, which uses lin-
+ear fan-in initialization.
+Residual networks.
+We index depth at residual-block
+boundaries. Let z(0)(x) = x and for ℓ= 1, . . . , K,
+z(ℓ)(x) = z(ℓ−1)(x) + Fℓ
+
+z(ℓ−1)(x)
+
+,
+(4)
+where Fℓis the residual branch (a fixed-depth subnetwork).
+Throughout, K denotes the minimal depth, i.e., the number
+of residual blocks, which may contain a small number of
+internal convolutions/linear layers and pointwise nonlinear-
+ities. For the weights on residual branches, we use a depth-
+scaled fan-in initialization inspired by stability analyses of
+deep residual networks (Taki, 2017): each residual-branch
+weight tensor with fan-in nin is initialized as
+Wres ∼N
+
+0,
+1
+q K nin
+
+,
+(5)
+equivalently applying fan-in initialization and scaling
+residual-branch weights by K−1/2. Weights outside resid-
+ual branches (e.g., stem/head) use the standard fan-in rule.
+Transformers. We consider standard Transformer archi-
+tectures, including both language Transformers and Vision
+Transformers as special cases, and covering both pre-norm
+and post-norm variants. Let z(0)(x) denote the token rep-
+resentations produced by the embedding stem (e.g., token
+embedding in language models, or patch projection in vi-
+sion models). A Transformer block contains two sequen-
+tial residual updates: a self-attention branch followed by
+a position-wise feedforward branch. For concreteness, we
+write the update in the pre-norm form:
+z ←z + Attn(LN(z)),
+z ←z + FFN(LN(z)),
+where LN is layer normalization, Attn denotes multi-head
+self-attention, and FFN denotes the feedforward subnet-
+work. The post-norm variant is obtained by moving LN
+after each residual addition.
+Accordingly, in our depth
+convention each Transformer block contributes 2 depth be-
+cause it contains two residual additions along path.
+We initialize linear projections in patch embedding, the at-
+tention projections, and MLP layers using fan-in initializa-
+tion. Positional embeddings and the class token are initial-
+ized with a small-variance truncated normal distribution,
+and LayerNorm parameters use unit scale and zero bias.
+3.2. Maximal-update parameterizations and the
+arithmetic-mean criterion
+One-step pre-activation updates. Let θ denote all train-
+able parameters and let LB(θ) be the training loss on a
+mini-batch B. A single (S)GD step with base learning rate
+η updates
+θ+ = θ −η ∇θLB(θ).
+(6)
+For an input x and depth unit ℓ(as defined in Sec. 3.1),
+we write z(ℓ)(x; θ) for the layer-ℓpre-activations. We use
+z(ℓ)
+i (x; θ) to denote a scalar coordinate of z(ℓ)(x; θ), where
+i indexes units within layer ℓ(neurons in MLPs, channel–
+location units in CNNs, and token–feature coordinates in
+Transformers). To connect learning-rate scale to represen-
+tation update magnitudes, we study the linearized one-step
+change of pre-activations at the start of training.
+Index
+scalar parameters by a and write ∂a := ∂/∂θa. Define
+∆θa := θ+
+a −θa and
+∆z(ℓ)
+i (x) :=
+X
+a
+ ∂az(ℓ)
+i (x; θ)
+
+∆θa
+= −η
+X
+a
+ ∂az(ℓ)
+i (x; θ)
+  ∂aLB(θ)
+
+.
+(7)
+It is is the starting point of maximal-update analyses (Yang
+et al., 2021; Jelassi et al., 2023). All quantities above will
+be evaluated at initialization unless stated otherwise.
+Classical maximal-update learning rates. The maximal-
+update heuristic chooses a learning rate such that the one-
+step pre-activation change has an O(1) scale. Concretely,
+we define the layerwise second moment
+Sℓ(η) := E
+h ∆Bz(ℓ)
+i (x)
+2i
+,
+(8)
+where the expectation is over random initialization and the
+sampling of (x, B). Under our symmetric random initial-
+ization, Sℓ(η) does not depend on the coordinate choice i.
+In the original µP setting, one sets a reference-layer con-
+straint such as Sℓ(η) = 1 for a typical hidden layer (or
+equivalently, for all hidden layers in homogeneous mod-
+els), which yields a width-robust learning-rate scale and
+enables zero-shot hyperparameter transfer across widths
+(Yang et al., 2021).
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+A network-wide update budget for multi-path architec-
+tures.
+For non-recurrent multi-path architectures, layer
+statistics are not homogeneous.
+Residual additions and
+branch aggregation can make Sℓ(η) vary with depth, so en-
+forcing an identical per-layer constraint can be unnecessar-
+ily restrictive or ill-posed. This viewpoint is aligned with
+architecture-aware analyses of maximal learning rates that
+explicitly depend on network topology (Chen et al., 2024).
+Arithmetic-mean µP. We therefore upgrade the maximal-
+update criterion to a network-wide budget. Let L denote
+the number of depth units under our conventions (Sec. 3.1).
+We define the network-wide average second moment
+¯S(η) := 1
+L
+L
+X
+ℓ=1
+Sℓ(η), Sℓ(η) := E
+h ∆Bz(ℓ)
+i (x)
+2i
+. (9)
+We say the network is in the arithmetic-mean µP (AM-µP)
+regime if ¯S(η) = 1, and define the AM-µP learning-rate
+scale η⋆by ¯S(η⋆) = 1.
+This choice has three properties that are important for our
+setting. First, it reduces to the classical maximal-update
+criterion in homogeneous models: if Sℓ(η) ≈S(η) for all
+ℓ, then ¯S(η) = S(η). Second, ¯S(η) can be interpreted as an
+update-energy per depth unit and is the natural quantity that
+appears in our recursive depth analyses of multi-path net-
+works. Third, as an average, ¯S(η) is stable under constant-
+level redefinitions of depth units (e.g., adding or removing
+O(1) stem/head components), and it yields a single global
+learning-rate scale that remains width-robust while allow-
+ing heterogeneous layers to reallocate update magnitudes.
+A more detailed rationale, including comparisons to alter-
+native aggregations, is deferred to Sec. A.
+3.3. Depthwise learning-rate scaling for CNNs
+Setup. We consider 1D/2D CNNs under the conventions in
+Sec. 3.1. We analyze the one-step update at random initial-
+ization under the AM-µP budget. Recall that η⋆denotes the
+AM-µP maximal-update learning rate defined in Sec. 3.2,
+i.e., the (architecture-wide) learning-rate scale that keeps
+the one-step AM-µP update budget ¯S at O(1) at initializa-
+tion. Here B denotes the mini-batch size used to form the
+gradient in this one-step update.
+Boundary fraction for zero padding. For a spatial index
+set Λ ⊂Zd and a kernel offset set K ⊂Zd, define the
+K-boundary set
+∂KΛ := { p ∈Λ : ∃∆∈K s.t. p + ∆/∈Λ },
+and the boundary fraction
+bdry(Λ, K) := |∂KΛ|
+|Λ| .
+For circular padding, bdry(Λ, K) = 0.
+𝒙
+𝒛(𝟏)
+𝒛(𝟐)
+𝒛𝟏
+(𝟐)
+𝒛𝟐
+(𝟐)
+𝒛(𝟑)
+𝒛(𝟒)
+𝒛(𝑳)
+Residual connection
+Input
+Output
+MLP/CNN MLP/CNN
+A residual block counts as depth 1
+MLP/CNN
+Depth = minimal path length. 
+Figure 2. Depth convention for residual networks. Depth is de-
+fined as the minimal path length. Along the minimal path, each
+plain layer and each residual block contributes one depth unit. If
+the backbone has m plain layers and K residual blocks, then the
+effective depth is L = m + K.
+Proposition (Depthwise LR scale for 1D/2D CNNs). Con-
+sider a depth-L CNN with stride 1, fan-in initialization
+(Eq. equation 1), and pointwise activation σ. Assume the
+homogeneity conditions stated in Sec. 3.1 (up to padding-
+induced boundary non-uniformity and finite-width effects).
+Then there exists a constant κ = O(1) (depending on σ
+and the initialization statistics such as q = E[σ′(Z)2], but
+not on L) such that the AM-µP maximal-update learning
+rate η⋆(Sec. 3.2) satisfies
+η⋆(L; {Cℓ, Λℓ, Kℓ}, B) = κ L−3/2
+·
+
+1 + O
+ max
+ℓ
+1
+Cℓ+ max
+ℓ
+bdry(Λℓ, Kℓ) + 1
+B
+
+.
+In particular, the leading depth exponent is −3/2, and the
+listed terms only affect the prefactor.
+Proof. Deferred to Appendix B.
+Rectangular grids. We record two common special cases.
+If Λℓis a 1D interval of length Nℓand Kℓhas half-span
+sℓ:= max∆∈Kℓ|∆|, then bdry(Λℓ, Kℓ) = O(sℓ/Nℓ) un-
+der zero padding. If Λℓis a 2D rectangle of size Hℓ× Wℓ
+and Kℓhas axial half-spans sℓ,h := max
+∆∈Kℓ|∆h| and sℓ,w :=
+max
+∆∈Kℓ|∆w|, then bdry(Λℓ, Kℓ) = O(sℓ,h/Hℓ+ sℓ,w/Wℓ).
+3.4. Depthwise learning-rate scaling for residual
+networks
+We use standard asymptotic notation: f(L) = Θ(g(L))
+means that there exist constants c1, c2 > 0 and L0 such
+that c1g(L) ≤f(L) ≤c2g(L) for all L ≥L0.
+Setup. We consider a residual-network backbone that con-
+sists of m plain depth units (e.g., a linear or convolutional
+layer followed by a pointwise nonlinearity) and K residual
+blocks inserted along the backbone. A residual block is a
+depth unit with one residual addition, as defined in Eq. 4.
+We measure depth by the minimal path length, counting
+each plain layer and each residual block as one depth unit
+(Fig. 2). Accordingly, we define the effective depth as
+LRes := m + K.
+In common ResNet families, the plain part typically in-
+cludes an input stem and an output head; under our con-
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+vention these components are simply counted in m rather
+than being hidden.
+For initialization, weights in plain layers use the fan-in rule
+in Eq. 1. Weights on residual branches use the depth-scaled
+fan-in initialization in Sec. 3.1, i.e., standard fan-in ini-
+tialization together with a multiplicative K−1/2 scaling on
+the residual branch. We study the AM-µP maximal-update
+learning-rate scale η⋆defined in Sec. 3.2, i.e., the learning-
+rate scale that keeps the one-step AM-µP update budget ¯S
+at O(1) at initialization.
+Proposition (Depthwise LR scale for residual networks).
+Consider a ResNet-style network of effective depth L =
+m + K in the above sense.
+Assume fan-in initializa-
+tion (Eq. 1) for weights outside residual branches, and
+the residual-aware depth-scaled fan-in initialization from
+Sec. 3.1 for residual-branch weights (equivalently, ap-
+plying standard fan-in initialization and scaling residual-
+branch weights by K−1/2).
+Then the AM-µP maximal-
+update learning rate η⋆(Sec. 3.2) satisfies
+η⋆(LRes) = Θ
+
+L−3/2
+Res
+
+.
+The hidden constants depend on the activation and initial-
+ization statistics and on the residual-block template (e.g.,
+the fixed internal structure within each block), but not on
+the effective depth LRes.
+Proof. Deferred to Appendix C.
+3.5. Depthwise learning-rate scaling for Transformers
+Setup. We consider Transformer architectures under the
+conventions in Sec. 3.1 and analyze the one-step update
+at random initialization under the AM-µP budget. In our
+depth convention, each residual addition along the minimal
+path counts as one depth unit. Since a Transformer block
+contains two sequential residual additions, each block con-
+tributes depth two. All remaining sequential depth units
+along the minimal path are counted in the same way. We
+denote the resulting effective depth by Ltr.
+Proposition (Depthwise LR scale for Transformers). Con-
+sider a Transformer of effective depth Ltr with fan-in ini-
+tialization (Eq. 1) for all linear maps in the attention and
+feedforward sublayers, and the architectural conventions
+in Sec. 3.1. Under the mean-field and weak-dependence as-
+sumptions used in our AM-µP analysis, there exists a con-
+stant κ, independent of Ltr, such that the AM-µP maximal-
+update learning rate η⋆(Sec. 3.2) satisfies
+η⋆(Ltr) = Θ
+ L−3/2
+tr
+
+.
+The hidden constants depend on the activation and initial-
+ization statistics and on the fixed Transformer-block tem-
+plate, but not on Ltr.
+Proof. Deferred to Appendix D.
+4. Experiments
+4.1. General Protocol
+To verify our theoretical predictions, we design CNNs,
+ResNets, and ViTs with varying depths to validate the scal-
+ing relationship between model depth and optimal learning
+rate. Inspired by Chen et al. (2024), we conduct exper-
+iments on three image classification datasets: CIFAR-10,
+CIFAR-100 (Krizhevsky, 2009), and a subset of ImageNet
+(Deng et al., 2009), which span a range of task difficul-
+ties, allowing us to demonstrate the robustness of our the-
+ory across different data regimes.
+For each network depth L, we perform a logarithmic grid
+search over learning rates η and record η⋆, the one-epoch
+optimum that minimizes the training loss. We treat this
+grid-searched one-epoch optimum as an empirical proxy
+for the maximal-update learning-rate scale η⋆defined in
+Sec. 3.2.3 We then fit the depth-dependent scaling law on
+the log–log scale via
+log10 η⋆= β0 + α log10 L + ε,
+and report the fitted slope ˆα. All experiments use stan-
+dard multi-class cross-entropy loss with mean reduction.4
+To ensure statistical robustness, we repeat each experi-
+ment with three random seeds, compute the depth-wise
+mean ± 95% confidence interval for log10 η⋆, and perform
+weighted least squares fitting with weights inversely pro-
+portional to the sample variance at each depth.
+Table 1 summarizes the fitted depth exponents ˆα for base-
+line configurations across all architectures and datasets.
+The theoretical prediction is α = −1.5 for all cases. Across
+9 architecture–dataset combinations, the empirical expo-
+nents range from −1.18 to −1.57, with a mean of −1.38,
+demonstrating quantitative agreement and confirming the
+universality of our depth scaling law. We next detail the
+architecture-specific implementations.
+4.2. Convolutional Networks
+We first validate our theory on plain CNNs(O’Shea &
+Nash, 2015; Krizhevsky et al., 2012). Following the ho-
+mogeneous CNN conventions in Sec. 3.1, we use L identi-
+cal 2D conv+σ blocks with stride 1 and circular padding,
+followed by global average pooling and a linear classifier.
+Networks are initialized with He fan-in and trained using
+SGD without momentum (batch size 128). We sweep η
+3We adopt a single-epoch protocol for computational effi-
+ciency and comparability, consistent with the architecture-aware
+scaling protocol (Chen et al., 2024) and the µP perspective that
+optimal learning rates are primarily governed by early-training
+dynamics (Jelassi et al., 2023).
+4See Appendix G for compatibility between CE-based experi-
+ments and our MSE-based derivation.
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+(a) CNN
+(b) ResNet
+(c) ViT and transformer variants
+Figure 3. Depth–LR scaling on CIFAR-10. (a) CNN: grid-searched optima with 95% CIs and weighted global fit (ˆα = −1.339).
+(b) ResNet: our AM-µP theory (ˆα = −1.435) closely matches empirical data, while PathSum (Chen et al., 2024) shows increasing
+deviation at larger depths. (C) Transformer: Depth–LR scaling for ViT variants ViT (ˆα = −1.44), BEiT (ˆα = −1.35), and CCT
+(ˆα = −1.45) all exhibit clear power-law scaling consistent with our theoretical prediction of −1.5.
+Table 1. Main results: fitted depth exponents ˆα for baseline
+configurations. All models use SGD optimizer without momen-
+tum. CNN and ResNet use ReLU activation without normaliza-
+tion or dropout. ViT uses Post-LN configuration. The theoretical
+prediction is α = −1.5.
+Model
+CIFAR-10
+CIFAR-100
+ImageNet
+CNN
+−1.339
+−1.392
+−1.329
+ResNet
+−1.435
+−1.355
+−1.567
+ViT
+−1.441
+−1.371
+−1.178
+Theory
+α = −1.5
+over 80 log-spaced points from 10−4 to 101 and take η⋆to
+be the one-epoch training-loss minimizer.
+As shown in Fig. 3(a), the optimal learning rate η⋆exhibits
+a clear power-law relationship with depth on CIFAR-10,
+yielding a fitted slope of ˆα = −1.339. Notably, the expo-
+nents remain stable across datasets: −1.392 on CIFAR-100
+and −1.329 on ImageNet (Table 1), confirming the cross-
+dataset robustness of our theory.
+4.3. Residual Networks
+We define depth L by the number of residual blocks, each
+containing a 3×3 conv layer (64 channels, stride 1) with an
+identity skip. Networks are initialized with scaled He fan-
+in, where conv weights on residual branches are multiplied
+by 1/
+√
+K for K blocks to stabilize variance.
+As shown in Fig. 3(b), the optimal learning rate follows a
+clear power law with ˆα = −1.435 on CIFAR-10, closely
+matching our theoretical prediction of −1.5 and confirm-
+ing that residual connections do not alter the depth expo-
+nent. In contrast, PathSum (Chen et al., 2024) shows in-
+creasing deviation from empirical optima at larger depths.
+Across datasets, the exponents remain consistent: −1.355
+on CIFAR-100 and −1.567 on ImageNet.
+4.4. Vision Transformers
+Finally, we extend our analysis to Vision Transformers. For
+vanilla ViT(Dosovitskiy, 2020), we adopt the standard ar-
+chitecture with patch embedding, learnable positional en-
+coding, and a classification token. Following the Trans-
+former depth convention in Sec. 3.5, we measure depth by
+the effective Transformer depth Ltr. For CIFAR datasets,
+we use patch size 4, embedding dimension 384, and 6 atten-
+tion heads; for ImageNet, we use patch size 16, embedding
+dimension 768, and 12 attention heads. The learning rate is
+searched over 80 log-spaced points from 10−5 to 100.
+The baseline ViT (Post-LN) achieves ˆα = −1.441 on
+CIFAR-10, −1.371 on CIFAR-100, and −1.178 on Ima-
+geNet (Table 1).
+ViT variants. Beyond vanilla ViT, we evaluate two repre-
+sentative variants: BEiT (Bao et al., 2022) and CCT (Has-
+sani et al., 2021). BEiT replaces absolute positional em-
+beddings with relative position bias in the attention mech-
+anism.
+CCT replaces the patch embedding with a con-
+volutional tokenizer and uses sequence pooling instead of
+the class token, thereby combining the inductive biases of
+CNNs with the global modeling capacity of transformers.
+As shown in Fig. 3 (c), all three variants exhibit clear
+power-law scaling with fitted exponents of ˆα = −1.44
+(ViT), −1.35 (BEiT), and −1.45 (CCT). Notably, CCT
+achieves the closest agreement with our theoretical predic-
+tion of −1.5, with only 3.3% deviation.
+The loss landscape analysis in Fig. 4 corroborates these
+findings. For all three variants, the loss curves exhibit sys-
+tematic stratification: as depth increases (from purple to
+yellow), the loss-minimizing learning rate shifts leftward,
+and the curves become steeper in the high learning rate
+regime. This consistent pattern across architecturally di-
+verse transformers provides strong empirical support for
+the universality of our theory.
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+Figure 4. Loss landscapes for ViT variants on CIFAR-10. Color encodes depth (purple: shallow, yellow: deep). All three variants
+show systematic leftward shifts in optimal LR as depth increases, consistent with the predicted depth–LR scaling relationship.
+We attribute CCT’s strong agreement with theory to its
+hybrid architecture. CCT’s convolutional tokenizer intro-
+duces CNN-like components at the input stage, while its
+transformer encoder captures global dependencies. Since
+both CNNs (Section 4.2) and transformers independently
+follow the η⋆∝L−3/2 scaling law, it is natural that their
+combination in CCT also adheres to this relationship. This
+observation suggests that our theoretical framework may
+extend to a broad class of hybrid architectures that com-
+pose elements from our analyzed model families.
+4.5. Ablation Studies
+To assess the robustness of our theoretical predictions, we
+conduct systematic ablation studies examining the effects
+of optimizers, activation functions, normalization, and reg-
+ularization. Table 3 in Appendix E.1 presents 9 representa-
+tive configurations spanning CNNs, ResNets, and ViTs.
+Overall robustness. All tested configurations yield expo-
+nents within the range [−1.8, −1.1], with a mean of −1.39,
+demonstrating strong agreement with the theoretical pre-
+diction of α = 1.5. This consistency across diverse archi-
+tectural and optimization choices validates the broad appli-
+cability of our depth scaling law.
+Activation functions. Comparing ReLU and GELU on
+CNN/CIFAR-10, we observe ˆα = −1.339 versus −1.379
+(3% difference), showing the choice of activation has min-
+imal impact. This aligns with our theory, where activations
+enter primarily through the gating factor q = E[σ′(Z)2].
+Optimizers. Switching from SGD to Adam reduces |ˆα| by
+10–12% on both CNNs (−1.339 →−1.207) and ResNets
+(−1.435 →−1.269).
+While Adam’s adaptive learning
+rates partially compensate for depth scaling, the power-law
+relationship persists, confirming that depth-dependent ini-
+tialization remains essential even with adaptive optimizers.
+Normalization and regularization.
+BatchNorm on
+ResNets increases |ˆα| from −1.435 to −1.701, while
+dropout increases it to −1.568, both bringing the exponent
+closer to the theoretical −1.5. In ViTs, Pre-LN and Post-
+LN yield similar exponents (−1.131 vs −1.178, 4.0% dif-
+ference), indicating that normalization placement has min-
+imal effect on depth scaling.
+These ablations confirm that the L−3/2 scaling law pro-
+vides a robust first-order approximation across diverse
+training configurations, with secondary modulations typi-
+cally within ±20%.
+5. Conclusion
+We study depthwise hyperparameter transfer in non-
+recurrent multi-path neural networks.
+Building on
+the maximal-update principle, we propose a unified,
+architecture-aware framework that controls update magni-
+tudes at the network level and remains consistent under
+branch aggregation. Under a unified minimal-path notion
+of depth, we obtain a −3/2 power-law scaling between the
+learning rate and depth, which yields a simple tuning rule:
+η(L) = η(L0)
+ L
+L0
+−3/2
+.
+This rule rescales only the learning rate while keeping the
+rest of the training schedule unchanged. It enables trans-
+fer: calibrate once at depth L0, then transfer zero-shot to a
+new depth by learning-rate rescaling. In practice, the same
+recipe transfers across modern architectures such as CNNs,
+ResNets, and Transformers, and it is consistent with prior
+depth-scaling results for sequential networks.
+We validate the exponent and the transfer recipe on CNNs,
+residual networks, and multiple Transformer variants and
+test robustness across activations, optimizers, and common
+normalization and regularization.
+These choices mainly
+change the prefactor, not the exponent. Overall, our re-
+sults turn depth scaling from expensive trial-and-error tun-
+ing into a predictable workflow, and provide a practical
+guideline for learning-rate scales in modern architectures.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+References
+Ba, J. L., Kiros, J. R., and Hinton, G. E. Layer normaliza-
+tion. arXiv preprint arXiv:1607.06450, 2016.
+Bachlechner, T., Majumder, B. P., Mao, H., Cottrell, G.,
+and McAuley, J. Rezero is all you need: Fast conver-
+gence at large depth. In Uncertainty in Artificial Intelli-
+gence, pp. 1352–1361. PMLR, 2021.
+Balduzzi, D., Frean, M., Leary, L., Lewis, J., Ma, K. W.-D.,
+and McWilliams, B. The shattered gradients problem: If
+resnets are the answer, then what is the question?
+In
+International conference on machine learning, pp. 342–
+350. PMLR, 2017.
+Bao, H., Dong, L., Piao, S., and Wei, F. BEiT: BERT pre-
+training of image transformers. In International Confer-
+ence on Learning Representations, 2022.
+Bordelon, B. and Pehlevan, C. Deep linear network train-
+ing dynamics from random initialization: Data, width,
+depth, and hyperparameter transfer.
+arXiv preprint
+arXiv:2502.02531, 2025.
+Chen, W., Wu, J., Wang, Z., and Hanin, B.
+Principled
+architecture-aware scaling of hyperparameters.
+arXiv
+preprint arXiv:2402.17440, 2024.
+Chizat, L. and Netrapalli, P. The feature speed formula: a
+flexible approach to scale hyper-parameters of deep neu-
+ral networks. Advances in Neural Information Process-
+ing Systems, 37:62362–62383, 2024.
+Cho, K., Van Merri¨enboer, B., Gulcehre, C., Bahdanau,
+D., Bougares, F., Schwenk, H., and Bengio, Y. Learn-
+ing phrase representations using rnn encoder-decoder
+for statistical machine translation.
+arXiv preprint
+arXiv:1406.1078, 2014.
+Cohen, J. M., Kaur, S., Li, Y., Kolter, J. Z., and Talwalkar,
+A. Gradient descent on neural networks typically occurs
+at the edge of stability. arXiv preprint arXiv:2103.00065,
+2021.
+De, S. and Smith, S. Batch normalization biases residual
+blocks towards the identity function in deep networks.
+Advances in Neural Information Processing Systems, 33:
+19964–19975, 2020.
+Deng, J., Dong, W., Socher, R., Li, L.-J., Li, K., and
+Fei-Fei, L.
+Imagenet: A large-scale hierarchical im-
+age database. Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, pp. 248–255,
+2009.
+Dosovitskiy, A. An image is worth 16x16 words: Trans-
+formers for image recognition at scale. arXiv preprint
+arXiv:2010.11929, 2020.
+Elman, J. L. Finding structure in time. Cognitive Science,
+14(2):179–211, 1990.
+doi:
+10.1016/0364-0213(90)
+90002-E.
+Glorot, X. and Bengio, Y.
+Understanding the difficulty
+of training deep feedforward neural networks. In Pro-
+ceedings of the thirteenth international conference on
+artificial intelligence and statistics, pp. 249–256. JMLR
+Workshop and Conference Proceedings, 2010.
+Godbole, V., Dahl, G. E., Gilmer, J., Shallue, C. J.,
+and Nado,
+Z.
+Deep learning tuning playbook,
+2023.
+URL
+http://github.com/google-
+research/tuning_playbook. Version 1.0.
+Hassani, A., Walton, S., Shah, N., Abuduweili, A., Li, J.,
+and Shi, H. Escaping the big data paradigm with com-
+pact transformers.
+arXiv preprint arXiv:2104.05704,
+2021.
+Hayou, S. and Yang, G. Width and depth limits commute in
+residual networks. In International Conference on Ma-
+chine Learning, pp. 12700–12723. PMLR, 2023.
+He, K., Zhang, X., Ren, S., and Sun, J. Delving deep into
+rectifiers: Surpassing human-level performance on ima-
+genet classification. In Proceedings of the IEEE inter-
+national conference on computer vision, pp. 1026–1034,
+2015.
+He, K., Zhang, X., Ren, S., and Sun, J. Deep residual learn-
+ing for image recognition. In Proceedings of the IEEE
+conference on computer vision and pattern recognition,
+pp. 770–778, 2016.
+Hendrycks, D. Gaussian error linear units (gelus). arXiv
+preprint arXiv:1606.08415, 2016.
+Hestness, J., Narang, S., Ardalani, N., Diamos, G., Jun,
+H., Kianinejad, H., Patwary, M., Ali, M., Yang, Y., and
+Zhou, Y. Deep learning scaling is predictable, empiri-
+cally. arXiv preprint arXiv:1712.00409, 2017.
+Hochreiter, S. and Schmidhuber, J. Long short-term mem-
+ory. Neural Computation, 9(8):1735–1780, 1997. doi:
+10.1162/neco.1997.9.8.1735.
+Hoffmann, J., Borgeaud, S., Mensch, A., Buchatskaya,
+E., Cai, T., Rutherford, E., Casas, D. d. L., Hen-
+dricks, L. A., Welbl, J., Clark, A., et al.
+Training
+compute-optimal large language models. arXiv preprint
+arXiv:2203.15556, 2022.
+Hu, Q., Ye, Z., Zhang, M., Chen, Q., Sun, P., Wen, Y.,
+and Zhang, T. Hydro:{Surrogate-Based} hyperparame-
+ter tuning service in datacenters. In 17th USENIX Sym-
+posium on Operating Systems Design and Implementa-
+tion (OSDI 23), pp. 757–777, 2023.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+Ioffe, S. and Szegedy, C. Batch normalization: Acceler-
+ating deep network training by reducing internal covari-
+ate shift, 2015. URL https://arxiv.org/abs/
+1502.03167.
+Janocha, K. and Czarnecki, W. M. On loss functions for
+deep neural networks in classification. arXiv preprint
+arXiv:1702.05659, 2017.
+Jelassi, S., Hanin, B., Ji, Z., Reddi, S. J., Bhojanapalli, S.,
+and Kumar, S. Depth dependence of µP learning rates in
+ReLU MLPs. arXiv preprint arXiv:2305.07810, 2023.
+Kalra, D. S. and Barkeshli, M. Why warmup the learning
+rate? underlying mechanisms and improvements. Ad-
+vances in Neural Information Processing Systems, 37:
+111760–111801, 2024.
+Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B.,
+Chess, B., Child, R., Gray, S., Radford, A., Wu, J., and
+Amodei, D. Scaling laws for neural language models.
+arXiv preprint arXiv:2001.08361, 2020.
+Kingma, D. P. and Ba, J. Adam: A method for stochas-
+tic optimization, 2017. URL https://arxiv.org/
+abs/1412.6980.
+Kosson, A., Messmer, B., and Jaggi, M. Analyzing & re-
+ducing the need for learning rate warmup in gpt training.
+Advances in Neural Information Processing Systems, 37:
+2914–2942, 2024.
+Krizhevsky, A. Learning multiple layers of features from
+tiny images.
+Technical report, University of Toronto,
+2009.
+Krizhevsky, A., Sutskever, I., and Hinton, G. E. Imagenet
+classification with deep convolutional neural networks.
+In Advances in Neural Information Processing Systems,
+volume 25, pp. 1097–1105, 2012.
+Li, L., Jamieson, K., DeSalvo, G., Rostamizadeh, A., and
+Talwalkar, A.
+Hyperband: A novel bandit-based ap-
+proach to hyperparameter optimization. Journal of Ma-
+chine Learning Research, 18(185):1–52, 2018.
+Microsoft Research.
+microsoft/mup:
+Maximal up-
+date parametrization (µp). https://github.com/
+microsoft/mup, 2022a. Accessed: 2026-01-22.
+Microsoft Research. microsoft/mutransformers: Demon-
+strations of µp for transformers. https://github.
+com/microsoft/mutransformers, 2022b. Ac-
+cessed: 2026-01-22.
+O’Shea, K. and Nash, R. An introduction to convolutional
+neural networks, 2015. URL https://arxiv.org/
+abs/1511.08458.
+Schoenholz, S. S., Gilmer, J., Ganguli, S., and Sohl-
+Dickstein, J.
+Deep information propagation.
+arXiv
+preprint arXiv:1611.01232, 2016.
+Snoek, J., Larochelle, H., and Adams, R. P.
+Practical
+bayesian optimization of machine learning algorithms.
+Advances in neural information processing systems, 25,
+2012.
+Srivastava, N., Hinton, G., Krizhevsky, A., Sutskever, I.,
+and Salakhutdinov, R. Dropout: a simple way to prevent
+neural networks from overfitting. The journal of machine
+learning research, 15(1):1929–1958, 2014.
+Taki, M. Deep residual networks and weight initialization.
+arXiv preprint arXiv:1709.02956, 2017.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-
+tention is all you need. Advances in neural information
+processing systems, 30, 2017.
+Veit, A., Wilber, M. J., and Belongie, S. Residual networks
+behave like ensembles of relatively shallow networks.
+Advances in neural information processing systems, 29,
+2016.
+Wang, H., Ma, S., Dong, L., Huang, S., Zhang, D., and
+Wei, F. Deepnet: Scaling transformers to 1,000 layers.
+IEEE Transactions on Pattern Analysis and Machine In-
+telligence, 46(10):6761–6774, 2024.
+Wang, Q., Li, B., Xiao, T., Zhu, J., Li, C., Wong, D. F.,
+and Chao, L. S. Learning deep transformer models for
+machine translation. arXiv preprint arXiv:1906.01787,
+2019.
+Werbos, P. J. Backpropagation through time: what it does
+and how to do it. Proceedings of the IEEE, 78(10):1550–
+1560, 2002.
+Xiao, L., Bahri, Y., Sohl-Dickstein, J., Schoenholz, S., and
+Pennington, J. Dynamical isometry and a mean field the-
+ory of cnns: How to train 10,000-layer vanilla convolu-
+tional neural networks. In International conference on
+machine learning, pp. 5393–5402. PMLR, 2018.
+Xie, S., Girshick, R., Doll´ar, P., Tu, Z., and He, K. Aggre-
+gated residual transformations for deep neural networks.
+In Proceedings of the IEEE Conference on Computer Vi-
+sion and Pattern Recognition, pp. 1492–1500, 2017.
+Xiong, R., Yang, Y., He, D., Zheng, K., Zheng, S., Xing,
+C., Zhang, H., Lan, Y., Wang, L., and Liu, T. On layer
+normalization in the transformer architecture. In Inter-
+national conference on machine learning, pp. 10524–
+10533. PMLR, 2020.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+Yang, G. and Schoenholz, S. Mean field residual networks:
+On the edge of chaos. Advances in neural information
+processing systems, 30, 2017.
+Yang, G., Hu, E., Babuschkin, I., Sidor, S., Liu, X., Farhi,
+D., Ryder, N., Pachocki, J., Chen, W., and Gao, J. Tun-
+ing large neural networks via zero-shot hyperparameter
+transfer.
+Advances in Neural Information Processing
+Systems, 34:17084–17097, 2021.
+Yang, G., Yu, D., Zhu, C., and Hayou, S. Feature learn-
+ing in infinite-depth neural networks. In NeurIPS 2023
+Workshop on Mathematics of Modern Machine Learn-
+ing, 2023.
+Zagoruyko, S. and Komodakis, N. Wide residual networks.
+In Proceedings of the British Machine Vision Confer-
+ence, 2016.
+Zhang, H., Dauphin, Y. N., and Ma, T. Fixup initialization:
+Residual learning without normalization. arXiv preprint
+arXiv:1901.09321, 2019.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+Notation
+Table 2. Notation summary.
+Symbol
+Meaning
+Depth / architecture
+L
+Network effective depth (number of depth units).
+ℓ
+Depth-unit index, ℓ= 1, . . . , L.
+m
+Number of plain (non-residual) depth units along the minimal path.
+K
+Number of residual blocks along the minimal path.
+Lres
+ResNet effective depth, Lres := m + K.
+Ltr
+Transformer effective depth (2 depth units per transformer block).
+Data / optimization
+x
+Input example.
+y
+Target / label.
+B
+Mini-batch (set); when used as a scalar, it denotes mini-batch size.
+LB(θ)
+Training loss on mini-batch B.
+θ
+All trainable parameters; θ+ parameters after one (S)GD step.
+η
+Base learning rate.
+η⋆
+maximal-update learning rate defined by ¯S(η⋆) = 1.
+Forward pass / initialization
+z(ℓ)(x; θ)
+Pre-activations at depth unit ℓfor input x.
+z(ℓ)
+i (x; θ)
+Scalar coordinate of z(ℓ) (unit index i).
+σ(·)
+Pointwise activation; σ′(·) its derivative.
+q
+Gating factor q := E[σ′(Z)2] for Z ∼N(0, 1) (for ReLU, q = 1/2).
+fanin(W)
+Fan-in of a weight tensor.
+W (ℓ)
+Weight matrix / kernel tensor at depth unit ℓ.
+Wres
+Residual-branch weights .
+One-step updates / AM-µP
+∂a
+Partial derivative ∂/∂θa for scalar parameter θa.
+∆θa
+One-step parameter change, ∆θa := θ+
+a −θa.
+∆z(ℓ)
+i (x)
+One-step change of pre-activation coordinate i at depth ℓ.
+Sℓ(η)
+Layerwise second moment Sℓ(η) := E[(∆Bz(ℓ)
+i (x))2].
+¯S(η)
+Network-wide average second moment, ¯S(η) := 1
+L
+PL
+ℓ=1 Sℓ(η).
+CNN-specific
+d
+Spatial dimension (d = 1 or 2).
+Cℓ
+Number of channels at depth ℓ.
+Λℓ
+Spatial index set at depth ℓ; Nℓ:= |Λℓ|.
+Nℓ
+Number of spatial locations at depth ℓ(e.g., Nℓ= HℓWℓin 2D).
+Hℓ, Wℓ
+Height/width of a 2D feature map at depth ℓ.
+Kℓ
+Kernel offset set (subset of Zd); kℓ:= |Kℓ|.
+kℓ
+Kernel size / number of offsets (kℓ= |Kℓ|).
+p
+Spatial location index (p ∈Λℓ).
+∆
+Kernel offset (∆∈Kℓ).
+W (ℓ)
+j,i,∆
+Conv weight from input channel i to output channel j at offset ∆.
+Mℓ
+Effective width of a conv layer, Mℓ:= CℓNℓ.
+∂KΛ
+K-boundary set under zero padding: {p ∈Λ : ∃∆∈K, p + ∆/∈Λ}.
+bdry(Λ, K)
+Boundary fraction bdry(Λ, K) := |∂KΛ|/|Λ|.
+sℓ
+1D kernel half-span sℓ:= max∆∈Kℓ|∆|.
+sℓ,h, sℓ,w
+2D axial half-spans max |∆h| and max |∆w|.
+ResNets / Transformers (selected)
+Fℓ(·)
+Residual branch mapping in depth unit ℓ.
+Attn, FFN
+Attention branch and feedforward branch in a Transformer block.
+LN
+LayerNorm; γ, β are its affine parameters; ϵ is the numerical constant.
+u(ℓ)
+Pre-LN residual sum in post-norm analysis: u(ℓ) = z(ℓ−1) + Fℓ(z(ℓ−1)).
+Tℓ(µ1, µ2)
+Averaged overlap of directional derivatives at depth ℓ(used in proofs).
+Asymptotic notation
+O(·)
+Big-O: f(s) = O(g(s)) if ∃c > 0, s0 such that |f(s)| ≤c|g(s)| for all s ≥s0.
+Θ(·)
+Big-Theta: f(s) = Θ(g(s)) if ∃c1, c2 > 0, s0 such that c1g(s) ≤f(s) ≤c2g(s) for all s ≥s0.
+∝
+Asymptotic proportionality: f ∝g means f(s)/g(s) →κ ∈(0, ∞).
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+A. Rationale for the Arithmetic Mean in µP
+This appendix supplements Sec. 3.2 and gives a more for-
+mal rationale for using an arithmetic mean to aggregate lay-
+erwise maximal-update energies in AM-µP.
+Setup and notation.
+We follow Sec. 3.2. Let ∆z(ℓ)
+i (x)
+denote the one-step change of a representative pre-
+activation coordinate z(ℓ)
+i (x) at depth unit ℓafter one gradi-
+ent step at initialization (with x ∼D). Define the layerwise
+energy
+Sℓ:= E
+h ∆z(ℓ)
+i (x)
+2i
+,
+¯S := 1
+L
+L
+X
+ℓ=1
+Sℓ,
+(10)
+where the expectation is taken over data (and, when rele-
+vant, initialization and mini-batch sampling). AM-µP fixes
+a network-level budget ¯S = C for an O(1) constant C (and
+we may set C = 1 by absorbing constants into the learning-
+rate scale).
+(A1) Merge consistency and characterization.
+Let
+M(S1, . . . , SL) be a network-level aggregator that sum-
+marizes the collection {Sℓ}L
+ℓ=1 into a single scale used to
+set the global learning rate. We require three minimal prop-
+erties:
+• Permutation invariance. M is invariant under per-
+mutations of the inputs.
+• Scale
+equivariance.
+For
+any
+c
+>
+0,
+M(cS1, . . . , cSL) = c M(S1, . . . , SL).
+• Merge consistency. For any partition {1, . . . , L} =
+Fk
+j=1 Gj, define each group’s per-layer energy by
+mj :=
+1
+|Gj|
+X
+ℓ∈Gj
+Sℓ,
+so that the total energy of group Gj is preserved when
+replacing it by |Gj| identical copies of mj. Merge
+consistency requires
+M(S1, . . . , SL) = M(m1, . . . , m1
+|
+{z
+}
+|G1|
+, . . . , mk, . . . , mk
+|
+{z
+}
+|Gk|
+).
+(11)
+In addition, we adopt the standard normalization for a
+“mean”:
+M(c, . . . , c) = c,
+∀c ≥0.
+(12)
+Consequence. Applying equation 11 with the single group
+G1 = {1, . . . , L} yields M(S1, . . . , SL) = M( ¯S, . . . , ¯S).
+By equation 12, this equals ¯S. Hence the arithmetic mean
+is the unique aggregator satisfying the above properties.
+(A2) Why ¯S is the right “energy budget.”
+The quan-
+tity ¯S has a direct probabilistic interpretation: if ℓis drawn
+uniformly from {1, . . . , L}, then
+¯S = EℓSℓ= Eℓ,x
+h ∆z(ℓ)
+i (x)
+2i
+.
+Thus fixing ¯S = O(1) controls the typical depth-unit
+update energy, while allowing heterogeneous allocation
+across layers, which is essential in multi-path architec-
+tures (residual accumulation, convolutional coupling, at-
+tention/FFN branches).
+(A3) Heterogeneity: what is controlled and what is not.
+The arithmetic mean is monotone and satisfies the sharp
+bounds
+min
+ℓ
+Sℓ≤¯S ≤max
+ℓ
+Sℓ.
+Therefore, when layerwise energies remain within constant
+factors, ¯S remains within the same range. More impor-
+tantly, if some layers become anomalously large, ¯S reflects
+this increase, which is appropriate when ¯S is meant to rep-
+resent an honest second-moment budget.
+This contrasts
+with multiplicative aggregates that can hide large outliers.
+(A4) Failure of the geometric mean: multiplicative can-
+cellation.
+Let G :=
+QL
+ℓ=1 Sℓ
+1/L
+.
+Consider S =
+(ε, ε−1, 1, . . . , 1) with ε ↓0. Then G = 1 stays constant,
+while
+¯S = 1
+L
+ ε + ε−1 + L −2
+
+→∞.
+Hence fixing G does not control the additive second-
+moment budget P
+ℓSℓ. In heterogeneous settings, G can
+severely underestimate the presence of large-update layers.
+(A5) Failure of the harmonic mean: hypersensitivity to
+small layers.
+Let H :=
+
+1
+L
+PL
+ℓ=1 S−1
+ℓ
+−1
+. A direct dif-
+ferentiation gives
+∂H
+∂Si
+= H2
+L · 1
+S2
+i
+> 0,
+Si ↓0 ⇒∂H
+∂Si
+↑∞.
+Thus the harmonic mean becomes dominated by the small-
+est layers and can force disproportionate allocation deci-
+sions when used as a global budget.
+(A6) Granularity and effective depth (split/merge com-
+patibility).
+In our paper, “depth units” are defined at an
+architecture-dependent granularity (Sec. 3.1), e.g., resid-
+ual additions along the minimal path. One may equiva-
+lently analyze the same network at a coarser granularity
+by grouping depth units into blocks (e.g., treating a Trans-
+former block as two sequential residual updates). Merge
+consistency equation 11 formalizes the requirement that
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+the global budget should be invariant to such regrouping
+as long as group totals are preserved via per-unit aver-
+ages. The arithmetic mean satisfies this invariance exactly,
+whereas geometric/harmonic means generally do not.
+(A7) Homogeneous limit.
+When Sℓ≈S for all ℓ, the
+constraint ¯S = C is equivalent to Sℓ≈C, recovering
+the classical per-layer maximal-update viewpoint in set-
+tings where it is well posed.
+Takeaway.
+The arithmetic mean is the only network-
+level aggregator that is simultaneously compatible with
+additive second-moment budgeting and consistent under
+split/merge (coarse-graining) of depth units. This motivates
+the AM-µP constraint ¯S = C used throughout the paper.
+B. Proof of Proposition 3.3 for CNNs
+Setup and scope.
+We prove the depth exponent in Propo-
+sition 3.3 by analyzing the first (linearized) SGD step at
+initialization, which is the standard setting for maximal-
+update calculations. We work under the CNN conventions
+in Sec. 3.1: stride 1, pointwise nonlinearity σ, fan-in initial-
+ization (Eq. equation 1), and the homogeneous (stationary)
+setting under circular padding. The 2D case follows by the
+same counting argument and is stated at the end.
+For a layer ℓ, let Cℓbe the channel count, Λℓthe spatial
+index set, Nℓ:= |Λℓ|, and define the effective width
+Mℓ:= CℓNℓ.
+We flatten a channel–position pair into a single unit index
+a ∈{1, . . . , Mℓ} when convenient; this is purely nota-
+tional.
+One-step pre-activation increments and the AM-µP
+budget.
+Let θ collect all trainable parameters (weights
+in convolutional layers and the linear head). Write θ+ =
+θ + ∆θ for the parameters after one SGD step with learn-
+ing rates {ηµ} at each scalar parameter direction µ. For
+each depth unit ℓand input x, define the (linearized) pre-
+activation increment
+∆z(ℓ)(x) :=
+X
+µ∈P≤ℓ
+∂µz(ℓ)(x) ∆µ,
+where P≤ℓdenotes parameters that influence z(ℓ) (i.e., pa-
+rameters in layers up to ℓ), and ∂µ denotes the derivative
+w.r.t. the scalar parameter µ.
+We use the layerwise energy (averaged over units)
+Sℓ:= E
+"
+1
+Mℓ
+Mℓ
+X
+a=1
+ ∆z(ℓ)
+a
+2
+#
+,
+¯S := 1
+L
+L
+X
+ℓ=1
+Sℓ.
+The AM-µP maximal-update learning-rate scale η⋆is the
+scale of {ηµ} that keeps ¯S
+=
+Θ(1) at initialization
+(Sec. 3.2).
+Loss model (for analytic convenience).
+As in prior one-
+step maximal-update analyses, we use a mean-squared er-
+ror (MSE) surrogate to make the second-moment expan-
+sion explicit. This choice only affects constant prefactors
+and does not change the depth exponent. (If desired, a short
+cross-entropy-at-initialization justification can be included
+elsewhere.)
+Let the output layer have dimension ML+1 and define the
+per-sample loss
+L =
+1
+2ML+1
+z(L+1)(x) −y
+2
+2.
+We assume E[y] = 0 and Var(yt) = σ2
+y for each output
+coordinate t, independent across t and independent of the
+network at initialization.
+B.1 A top-layer reduction identity for CNN Jacobian
+overlaps
+For two parameter directions µ1, µ2 and a depth h, define
+the averaged Jacobian overlap
+Th(µ1, µ2) :=
+1
+Mh
+Mh
+X
+a=1
+∂µ1z(h)
+a
+∂µ2z(h)
+a .
+(13)
+Lemma 1 (Top-layer reduction for CNN overlaps). As-
+sume ReLU (q = E[σ′(Z)2] = 1/2), stride 1, circular
+padding, and independent, zero-mean fan-in initialization
+(Eq. equation 1). Fix integers 0 ≤ℓ< h ≤L + 1. For any
+parameter directions µ1, µ2 that belong to layers at most ℓ,
+E
+h
+Th(µ1, µ2)
+ z(ℓ)i
+= Tℓ(µ1, µ2).
+(14)
+Proof. We follow the same induction structure as the
+sequential-network argument and only highlight CNN-
+specific points.
+Step 1: one-layer expansion. Condition on z(h−1) and take
+expectation over the weights of layer h only. For µ ≤ℓ<
+h, the chain rule gives
+∂µz(h) = W (h)
+σ′(z(h−1)) ⊙∂µz(h−1)
+,
+where W (h) is the convolution operator (flattened as a
+sparse matrix), and ⊙denotes pointwise multiplication.
+By independence and zero mean of distinct kernel parame-
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+ters, only diagonal terms survive, yielding
+E
+h
+Th(µ1, µ2)
+ z(h−1)i
+= 1
+q ·
+1
+Mh−1
+Mh−1
+X
+a=1
+σ′ z(h−1)
+a
+2 ∂µ1z(h−1)
+a
+∂µ2z(h−1)
+a
+.
+(15)
+Here the factor 1/q comes from the fan-in variance in
+Eq. equation 1, and the kernel-size dependence cancels be-
+cause under circular padding each spatial location is visited
+exactly kh times, matching the fanin factor.
+Step 2: averaging out the gate using symmetry. Now con-
+dition on the earlier representation z(ℓ) with ℓ< h −1.
+Under ReLU and symmetric (zero-mean) initialization,
+the distribution of the pre-activations z(h−1) given z(ℓ) is
+symmetric about 0.
+Moreover, flipping the sign of all
+weights in layer (h −1) flips z(h−1), while simultane-
+ously flipping each ∂µz(h−1) for µ ≤ℓ. Hence the prod-
+uct ∂µ1z(h−1)
+a
+∂µ2z(h−1)
+a
+is even under the sign flip, while
+σ′(z(h−1)
+a
+)2 = 1{z(h−1)
+a
+> 0} is odd in the sense that it
+swaps with 1{z(h−1)
+a
+< 0}. This implies the factorization
+E
+h
+σ′(z(h−1)
+a
+)2 ∂µ1z(h−1)
+a
+∂µ2z(h−1)
+a
+ z(ℓ)i
+= q · E
+h
+∂µ1z(h−1)
+a
+∂µ2z(h−1)
+a
+ z(ℓ)i
+.
+Plugging this into Eq. equation 15 yields
+E
+h
+Th(µ1, µ2)
+ z(ℓ)i
+= E
+h
+Th−1(µ1, µ2)
+ z(ℓ)i
+.
+Step 3: induction from h down to ℓ. Iterating the last iden-
+tity from h down to ℓ+ 1 proves E[Th(µ1, µ2) | z(ℓ)] =
+Tℓ(µ1, µ2), as claimed.
+Remark (Zero padding and boundary corrections). If cir-
+cular padding is replaced by zero padding, the uniform
+coverage argument is violated only near the spatial bound-
+ary. Using the boundary fraction bdry(Λh, Kh) defined in
+Sec. 3.3, Eq. equation 15 acquires an additive error term of
+order O(bdry(Λh, Kh)). This produces only lower-order
+multiplicative corrections to η⋆and does not change the
+depth exponent.
+B.2 A/B decomposition for one-step pre-activation
+changes
+Define the output-layer quantities
+TL+1(µ1, µ2) :=
+1
+ML+1
+ML+1
+X
+t=1
+∂µ1z(L+1)
+t
+∂µ2z(L+1)
+t
+,
+(16)
+SL+1(µ1, µ2) :=
+1
+M 2
+L+1
+ML+1
+X
+t1=1
+ML+1
+X
+t2=1
+
+∂µ1z(L+1)
+t1
+z(L+1)
+t1
+
+∂µ2z(L+1)
+t2
+z(L+1)
+t2
+
+.
+(17)
+Lemma 2 (Second-moment decomposition). Fix a depth
+ℓ≤L and a unit a in layer ℓ. Under the MSE model above,
+after one SGD step at initialization,
+E
+h ∆z(ℓ)
+a
+2i
+= A(ℓ)
+cnn + B(ℓ)
+cnn,
+(18)
+where
+B(ℓ)
+cnn := σ2
+y E
+"
+X
+µ1,µ2∈P≤ℓ
+ηµ1ηµ2 ∂µ1z(ℓ)
+a
+∂µ2z(ℓ)
+a
+TL+1(µ1, µ2)
+#
+,
+(19)
+A(ℓ)
+cnn := E
+"
+X
+µ1,µ2∈P≤ℓ
+ηµ1ηµ2 ∂µ1z(ℓ)
+a
+∂µ2z(ℓ)
+a
+SL+1(µ1, µ2)
+#
+.
+(20)
+Proof. Let g := z(L+1)(x) −y. The gradient of the MSE
+loss satisfies
+∂µL =
+1
+ML+1
+ML+1
+X
+t=1
+gt ∂µz(L+1)
+t
+,
+∆µ = −ηµ ∂µL.
+Substitute ∆µ into ∆z(ℓ)
+a
+= P
+µ∈P≤ℓ∂µz(ℓ)
+a ∆µ, expand
+the square, and take expectation over y using E[yt] = 0
+and E[ytys] = σ2
+y1{t = s}, independent of the network.
+The diagonal label contribution produces the B-term with
+TL+1, and the remaining terms produce the A-term with
+SL+1.
+Remark (Top-layer reduction inside the B-term). By
+Lemma 1 with h = L + 1, for µ1, µ2 ∈P≤ℓwe have
+E[TL+1(µ1, µ2) | z(ℓ)] = Tℓ(µ1, µ2). Thus B(ℓ)
+cnn can be
+rewritten in terms of the layer-ℓoverlaps, which is the key
+step for extracting depth scaling.
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+B.3 From overlap counting to the −3/2 depth exponent
+Negligibility of the A-term for the depth exponent.
+The term A(ℓ)
+cnn does not alter the depth exponent because
+it grows at most quadratically in ℓunder standard weak-
+correlation/diagonal-dominance bounds (the same heuristic
+used in the sequential analysis). Concretely, under homo-
+geneity and finite-moment assumptions at initialization,
+A(ℓ)
+cnn = O
+ η2 ℓ2
+while
+B(ℓ)
+cnn = Θ
+ η2 ℓ3
+,
+(21)
+so averaging over ℓ= 1, . . . , L the B-term dominates and
+sets the depth exponent. We therefore focus on B(ℓ)
+cnn.
+Overlap counting.
+Using Lemma 1, homogeneity (sta-
+tionarity under circular padding), and the same overlap-
+counting argument as in the sequential case (adapted to the
+effective width Mℓ= CℓNℓ), one obtains
+B(ℓ)
+cnn = κ0 η2
+ℓ
+X
+h1=1
+ℓ
+X
+h2=1
+min{h1, h2} ·
+
+1 + O(max
+r≤ℓ
+1
+Cr )
+
+,
+(22)
+where κ0 = O(1) depends on activation/initialization mo-
+ments (including q) but not on ℓor L.
+The combinatorial identity
+ℓ
+X
+h1=1
+ℓ
+X
+h2=1
+min{h1, h2} = ℓ(ℓ+ 1)(2ℓ+ 1)
+6
+= Θ(ℓ3)
+(23)
+implies B(ℓ)
+cnn = Θ(η2ℓ3).
+Averaging over depth and solving for η⋆(L).
+Combin-
+ing Eq. equation 18, Eq. equation 21, and Eq. equation 23,
+we obtain
+Sℓ= E
+"
+1
+Mℓ
+Mℓ
+X
+a=1
+(∆z(ℓ)
+a )2
+#
+= κ1 η2 ℓ3
+1 + o(1)
+
+,
+and therefore
+¯S = 1
+L
+L
+X
+ℓ=1
+Sℓ= κ2 η2 L3
+1 + o(1)
+
+,
+for constants κ1, κ2
+=
+O(1).
+Imposing the AM-µP
+maximal-update constraint ¯S = Θ(1) yields
+η⋆(L) = κ L−3/2
+1 + o(1)
+
+,
+with κ = O(1) independent of L. This proves the depth
+exponent −3/2 in Proposition 3.3. Boundary effects under
+zero padding contribute only multiplicative corrections as
+in Remark B, and do not change the exponent.
+2D case.
+The 2D CNN proof is identical after replacing
+the 1D index set by Λℓ⊂Z2 and the kernel offset set by
+Kℓ⊂Z2. Under circular padding, each spatial site is again
+visited exactly kℓ:= |Kℓ| times, so the kernel-size cancel-
+lation and the overlap counting remain unchanged. Under
+zero padding, the correction is controlled by bdry(Λℓ, Kℓ)
+as stated in Sec. 3.3.
+Lemma 3 (Boundary missing-term bound for zero
+padding). Let Λ ⊂Zd be a finite spatial index set and
+K ⊂Zd be a kernel-offset set with k := |K|. Define the
+K-boundary set
+∂KΛ := { p ∈Λ : ∃∆∈K s.t. p + ∆/∈Λ },
+bdry(Λ, K) := |∂KΛ|
+|Λ| .
+Extend any array f : Λ →R by zero outside Λ. Then
+
+1
+|Λ|
+X
+p∈Λ
+X
+∆∈K
+f(p + ∆) −k
+|Λ|
+X
+u∈Λ
+f(u)
+
+≤
+k · bdry(Λ, K) · ∥f∥∞.
+(24)
+In particular, under circular padding the left-hand side is
+0.
+Proof. Under circular padding, each pair (p, ∆) ∈Λ × K
+maps to an in-domain index, and each u ∈Λ is hit exactly
+k times, so the equality holds exactly.
+Under zero padding (with the zero-extension convention),
+the only discrepancy comes from missing terms for which
+p ∈∂KΛ and p+∆/∈Λ, in which case f(p+∆) = 0. Each
+boundary site p ∈∂KΛ can miss at most k offsets. Hence
+the total number of missing summands is at most k|∂KΛ|,
+and each missing summand has magnitude at most ∥f∥∞.
+Dividing by |Λ| gives equation 24.
+Lemma 4 (Mini-batch averaging: O(1/B) correction in
+second moments). Let {(ξb, ζb)}B
+b=1 be i.i.d. pairs with
+finite second moments.
+Define the mini-batch averages
+¯ξ := 1
+B
+PB
+b=1 ξb and ¯ζ := 1
+B
+PB
+b=1 ζb. Then
+E[¯ξ ¯ζ] = E[ξ1]E[ζ1] + 1
+B Cov(ξ1, ζ1).
+(25)
+In particular, if Cov(ξ1, ζ1) = O(1), then E[¯ξ ¯ζ] differs
+from the B = ∞limit by O(1/B).
+Proof. Expand
+E[¯ξ ¯ζ] = 1
+B2
+B
+X
+b,b′=1
+E[ξbζb′].
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+For b ̸= b′, independence gives E[ξbζb′] = E[ξ1]E[ζ1]. For
+b = b′, E[ξbζb] = E[ξ1ζ1]. Thus
+E[¯ξ ¯ζ] = 1
+B2
+
+B E[ξ1ζ1] + B(B −1) E[ξ1]E[ζ1]
+
+= E[ξ1]E[ζ1] + 1
+B
+
+E[ξ1ζ1] −E[ξ1]E[ζ1]
+
+.
+which is equation 25.
+Remark. The O(1/B) correction is stated at the level of
+second moments of mini-batch averages. The interpreta-
+tion as a multiplicative factor 1 + O(1/B) assumes that
+the B →∞contribution to the one-step AM-µP budget
+at initialization is non-vanishing. In degenerate settings
+where this leading contribution vanishes (e.g., a zero mean-
+gradient term at initialization), the variance term can dom-
+inate, and the learning-rate prefactor may acquire a
+√
+B
+dependence. This does not affect the depth exponent de-
+rived in Proposition 3.3.
+Lemma 5 (Finite-channel correction for T 2
+h). Fix a layer
+h ∈{1, . . . , L} and two parameter directions µ1, µ2 whose
+associated parameters are not in layer h. Let
+Th(µ1, µ2) :=
+1
+Ch|Λh|
+Ch
+X
+j=1
+X
+p∈Λh
+∂µ1z(h)
+j,p ∂µ2z(h)
+j,p ,
+as in Lemma 1. Condition on the sigma-algebra Fh−1 gen-
+erated by all weights up to layer h −1, so that z(h−1) and
+∂µsz(h−1) are fixed under the conditional expectation.
+Assume the weights in layer h are independent across
+output channels j and have zero mean, and assume the
+channel-wise second moments are uniformly bounded at
+initialization:
+E
+
+X2
+1
+ Fh−1
+
+≤C0
+a.s. for some constant C0 < ∞,
+(26)
+where
+Xj :=
+1
+|Λh|
+X
+p∈Λh
+∂µ1z(h)
+j,p ∂µ2z(h)
+j,p .
+Then
+E
+
+Th(µ1, µ2)2  Fh−1
+
+=
+
+E[Th(µ1, µ2) | Fh−1]
+2
++ O
+ 1
+Ch
+
+.
+(27)
+where the implicit constant depends only on C0 (and not on
+depth). Consequently,
+E
+
+Th(µ1, µ2)2
+= E
+
+E[Th(µ1, µ2) | Fh−1]
+2
++ O
+ 1
+Ch
+
+.
+Proof. Given Fh−1, the only randomness comes from the
+weights in layer h. By independence across output chan-
+nels, the random variables {Xj}Ch
+j=1 are i.i.d. conditional
+on Fh−1. Since Th =
+1
+Ch
+PCh
+j=1 Xj, we have
+Var(Th | Fh−1) = 1
+Ch
+Var(X1 | Fh−1)
+≤1
+Ch
+E
+
+X2
+1
+ Fh−1
+
+≤C0
+Ch
+.
+Therefore
+E
+
+T 2
+h
+ Fh−1
+
+=
+
+E[Th | Fh−1]
+2
++ Var(Th | Fh−1)
+=
+
+E[Th | Fh−1]
+2
++ O
+ 1
+Ch
+
+.
+which is equation 27. Taking expectations over Fh−1 gives
+the final displayed statement.
+Completion of the proof of Proposition 3.3.
+Lemma 3
+yields the maxℓbdry(Λℓ, Kℓ) correction under zero
+padding, Lemma 4 yields the 1/B correction for mini-
+batch gradients, and Lemma 5 yields the maxℓ1/Cℓcor-
+rection from finite-channel averaging. Combined with the
+overlap-counting derivation in Sec. B, these establish the
+correction factor δcnn in Proposition 3.3.
+C. Proof of Scaling Law for ResNets
+We prove the depthwise learning-rate scaling for residual
+networks under the same one-step-at-initialization regime
+used in Appendix B. Throughout this appendix, we con-
+sider ReLU activations unless stated otherwise, and we
+write q := E[σ′(Z)2] for Z ∼N(0, 1) (so q =
+1
+2 for
+ReLU).
+A simplified homogeneous residual model.
+We first an-
+alyze a homogeneous residual network with K residual
+blocks and width n. For ℓ= 1, . . . , K, the ℓ-th block is
+z(ℓ) = z(ℓ−1) + W (ℓ) σ
+ z(ℓ−1)
+,
+(28)
+where z(ℓ) ∈Rn and each W (ℓ) ∈Rn×n has independent
+entries with
+E
+h
+W (ℓ)
+ik
+i
+= 0,
+Var
+
+W (ℓ)
+ik
+
+=
+c
+K n,
+(29)
+for a constant c = O(1). This matches the residual-branch
+scaling rule in Sec. 3.1 (up to fixed constants such as 1/q).
+C.1 Residual-block recursion for Tℓ
+For a parameter direction µ, we write the directional deriva-
+tive of the pre-activation at depth ℓas ∂µz(ℓ) ∈Rn. For two
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+parameter directions µ1, µ2, define
+Tℓ(µ1, µ2) := 1
+n
+
+∂µ1z(ℓ), ∂µ2z(ℓ)
+= 1
+n
+n
+X
+i=1
+∂µ1z(ℓ)
+i
+∂µ2z(ℓ)
+i .
+(30)
+Lemma 6 (One-block conditional recursion for Tℓ). Fix
+ℓ∈{1, . . . , K} and two parameter directions µ1, µ2
+whose associated parameters are not in block ℓ(equiva-
+lently, their layer indices are < ℓ). Condition on the sigma-
+algebra Fℓ−1 generated by all weights up to block ℓ−1, so
+that z(ℓ−1) and ∂µsz(ℓ−1) are fixed under the conditional
+expectation. Define the diagonal gate matrix
+D(ℓ−1) := diag
+ σ′(z(ℓ−1))
+
+.
+Then we have the exact conditional identity
+E[Tℓ(µ1, µ2) | Fℓ−1] = Tℓ−1(µ1, µ2) + c
+K
+eTℓ−1(µ1, µ2),
+(31)
+where
+eTℓ−1(µ1, µ2) := 1
+n
+
+D(ℓ−1)∂µ1z(ℓ−1), D(ℓ−1)∂µ2z(ℓ−1)
+= 1
+n
+n
+X
+k=1
+σ′ z(ℓ−1)
+k
+2 ∂µ1z(ℓ−1)
+k
+∂µ2z(ℓ−1)
+k
+.
+(32)
+Proof. For s ∈{1, 2}, since µs is not in block ℓ, equa-
+tion 28 yields
+∂µsz(ℓ) = ∂µsz(ℓ−1) + W (ℓ)D(ℓ−1)∂µsz(ℓ−1).
+Let a(s) := D(ℓ−1)∂µsz(ℓ−1) ∈Rn. Then
+∂µsz(ℓ) = ∂µsz(ℓ−1) + W (ℓ)a(s).
+Plugging into equation 30 and expanding gives
+Tℓ(µ1, µ2) = 1
+n
+D
+∂µ1z(ℓ−1), ∂µ2z(ℓ−1)E
++ 1
+n
+D
+∂µ1z(ℓ−1), W (ℓ)a(2)E
++ 1
+n
+D
+W (ℓ)a(1), ∂µ2z(ℓ−1)E
++ 1
+n
+D
+W (ℓ)a(1), W (ℓ)a(2)E
+.
+(33)
+Taking conditional expectation given Fℓ−1: the first term
+is exactly Tℓ−1(µ1, µ2). The two middle terms are linear
+in W (ℓ) and vanish since E[W (ℓ)
+ik ] = 0. For the last term,
+using independence across (i, k) and equation 29,
+E
+ 1
+n
+D
+W (ℓ)a(1), W (ℓ)a(2)E  Fℓ−1
+
+= 1
+n
+n
+X
+i=1
+E
+"
+n
+X
+k=1
+W (ℓ)
+ik a(1)
+k
+
+n
+X
+k′=1
+W (ℓ)
+ik′ a(2)
+k′
+  Fℓ−1
+#
+= 1
+n
+n
+X
+i=1
+n
+X
+k=1
+Var
+
+W (ℓ)
+ik
+
+a(1)
+k a(2)
+k
+= c
+K · 1
+n
+n
+X
+k=1
+a(1)
+k a(2)
+k
+= c
+K
+eTℓ−1(µ1, µ2).
+which together with equation 33 yields equation 31.
+Remark. To obtain a closed recursion for E[Tℓ], we use
+the same mean-field approximation as in Appendix B: at
+initialization, the gate σ′(z(ℓ−1)
+k
+)2 is asymptotically inde-
+pendent of the product ∂µ1z(ℓ−1)
+k
+∂µ2z(ℓ−1)
+k
+. Define the de-
+viation
+εℓ−1(µ1, µ2) := E
+h
+eTℓ−1(µ1, µ2)
+i
+−q E[Tℓ−1(µ1, µ2)] ,
+which satisfies εℓ−1(µ1, µ2) = o(1) as width →∞under
+the same approximation. Taking expectation in equation 31
+yields
+E[Tℓ(µ1, µ2)] =
+
+1+c q
+K
+
+E[Tℓ−1(µ1, µ2)]+ c
+K εℓ−1(µ1, µ2).
+(34)
+For ReLU, q = 1
+2.
+Corollary. Under the same approximation as in Remark C,
+define
+rℓ:=
+
+1 + c q
+K
+ℓ
+.
+Then for any ℓ∈{0, 1, . . . , K},
+E[Tℓ(µ1, µ2)] = rℓE[T0(µ1, µ2)]+ c
+K
+ℓ−1
+X
+t=0
+rℓ−1−t εt(µ1, µ2),
+(35)
+where εt is defined in Remark C. Moreover, rℓis uniformly
+bounded in K:
+1 ≤rℓ≤rK =
+
+1 + c q
+K
+K
+≤ecq.
+In particular, if supt≤K |εt(µ1, µ2)| = o(1) as width →
+∞, then the error term in equation 35 is also o(1) uniformly
+for ℓ≤K.
+C.2 Depth scaling
+Corollary. Consider the residual network equation 28–
+equation 29 with K residual blocks (each block counts as
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+one depth unit). Under the same one-step update decom-
+position and weak-dependence assumptions used in Ap-
+pendix B, and using the O(1) propagation control in Corol-
+lary C, the AM-µP maximal-update learning rate satisfies
+η⋆(K) = Θ
+ K−3/2
+.
+Proof. Appendix B shows that for sequential (and homo-
+geneous convolutional) models, the dominant contribution
+to the one-step pre-activation update second moment can
+be written in terms of Tℓ(µ1, µ2)2 and yields the overlap-
+counting growth
+1
+K
+K
+X
+ℓ=1
+E
+h
+(∆z(ℓ))2i
+= Θ
+ η2K3
+.
+For residual networks, the same decomposition applies.
+Corollary C shows that the propagation of Tℓacross a resid-
+ual block differs from the sequential case only by an O(1)
+factor uniformly in ℓ≤K, which affects only the prefactor
+in the Θ(·) scaling and does not change the depth exponent.
+Therefore,
+1
+K
+K
+X
+ℓ=1
+E
+h
+(∆z(ℓ))2i
+= Θ
+ η2K3
+,
+and enforcing the AM-µP budget ¯S
+=
+O(1) yields
+η⋆(K) = Θ(K−3/2).
+Extension to mixed backbones.
+If a backbone contains
+m plain depth units and K residual blocks along the min-
+imal path (as in Fig. 2), then the same argument applies
+with K replaced by the effective depth Lres := m + K,
+since plain units satisfy the layerwise invariances proved in
+Appendix B and residual units contribute only O(1) prop-
+agation factors across depth.
+D. Proof of Scaling Law for Transformers
+We prove Proposition 3.5. We follow the same first-step
+analysis as in Appendix B and the same residual-unit re-
+cursion logic as in Appendix C; with LayerNorm being the
+only new technical component.
+D.1 Transformer definition of Tℓ
+We use the same quantity as in Appendix B–C. Let z(ℓ) ∈
+Rn denote the (flattened) representation after depth unit ℓ.
+In Transformers, one may take n = Nd where N is the
+number of tokens and d is the model width. For two pa-
+rameter directions µ1, µ2, define
+Tℓ(µ1, µ2) := 1
+n
+n
+X
+i=1
+∂µ1z(ℓ)
+i
+∂µ2z(ℓ)
+i .
+(36)
+D.2 LayerNorm Jacobian bounds
+We consider the standard LayerNorm(Ba et al., 2016) map
+on a d-dimensional vector. Let ¯x := 1
+d1⊤x and
+s(x) :=
+r
+1
+d∥x −¯x 1∥2
+2 + ϵ,
+ϵ > 0.
+With affine parameters γ, β ∈Rd, define
+LN(x) = γ ⊙x −¯x 1
+s(x)
++ β.
+(37)
+We write ∥A∥op := sup∥v∥2=1 ∥Av∥2 for the operator
+(spectral) norm.
+Lemma 7 (Jacobian of LayerNorm and an operator-norm
+bound). Let JLN(x) denote the Jacobian of equation 37.
+Then
+JLN(x) = diag(γ)
+1
+s(x)
+ 
+I −1
+d11⊤
+−(x −¯x 1)(x −¯x 1)⊤
+d s(x)2
+!
+.
+(38)
+Moreover, if ∥γ∥∞≤γmax, then
+∥JLN(x)∥op ≤2 γmax
+s(x) .
+(39)
+Proof. Write P := I −1
+d11⊤(centering projection), so
+Px = x −¯x 1. Then LN(x) = γ ⊙
+ Px/s(x)
+
++ β.
+Differentiating gives
+JLN(x) = diag(γ)
+ 
+P
+s(x) + Px · ∇
+ 1
+s(x)
+⊤!
+.
+Since s(x) =
+q
+1
+d∥Px∥2
+2 + ϵ, we have
+∇
+ 1
+s(x)
+
+= −
+1
+s(x)3 · 1
+d Px.
+Substituting yields equation 38.
+For equation 39, note that P is an orthogonal projection,
+so ∥P∥op = 1. The rank-one matrix (P x)(P x)⊤
+d s(x)2
+has opera-
+tor norm ∥P x∥2
+2
+d s(x)2 ≤1 by the definition of s(x). Hence the
+bracketed matrix in equation 38 has operator norm at most
+2. Finally, ∥diag(γ)∥op = ∥γ∥∞≤γmax, which gives
+equation 39.
+D.3 A residual depth unit with LayerNorm
+We analyze post-norm depth units; the pre-norm case is
+analogous. A depth unit is written as
+z(ℓ) = LN
+
+z(ℓ−1) + Fℓ(z(ℓ−1))
+
+,
+ℓ= 1, . . . , Ltr,
+(40)
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+where Fℓis a residual branch (either attention or feed-
+forward), and has O(1) internal depth.
+Define u(ℓ) :=
+z(ℓ−1) + Fℓ(z(ℓ−1)).
+A structural assumption on residual branches.
+The
+following assumption summarizes the same mean-field /
+weak-dependence closure used throughout Appendix B–C,
+now applied to each Transformer residual branch.
+Assumption 1 (Branch isotropy at initialization). Fix ℓand
+condition on Fℓ−1, the sigma-algebra generated by param-
+eters strictly before depth unit ℓ. Let JFℓ(z(ℓ−1)) denote
+the input Jacobian of the residual branch at z(ℓ−1). For
+any two vectors v1, v2 ∈Rn that are Fℓ−1-measurable,
+E
+ 1
+n
+
+JFℓ(z(ℓ−1))v1, JFℓ(z(ℓ−1))v2
+  Fℓ−1
+
+= αℓ
+1
+n⟨v1, v2⟩.
+(41)
+for some random scalar αℓ
+=
+Θ(1) that is Fℓ−1-
+measurable.
+Moreover, the branch parameters are con-
+ditionally independent and zero-mean given Fℓ−1, so that
+mixed terms linear in the branch parameters vanish under
+conditional expectation.
+Proposition (One-unit propagation of Tℓin post-norm
+Transformers). Fix ℓ∈{1, . . . , Ltr} and two parameter
+directions µ1, µ2 whose associated parameters are not in
+depth unit ℓ. Assume Assumption 1 and that LayerNorm
+uses unit affine parameters at initialization (i.e., γ = 1 and
+β = 0), so ∥γ∥∞= 1. Assume also that there exist con-
+stants 0 < cs < Cs < ∞, independent of Ltr, such that at
+initialization
+P
+
+cs ≤s(u(ℓ)) ≤Cs
+
+≥1 −o(1).
+Then
+E[Tℓ(µ1, µ2) | Fℓ−1] = Θ(1) · Tℓ−1(µ1, µ2),
+(42)
+where the implied constants are independent of Ltr.
+Proof. Differentiate equation 40. Since µs is not in depth
+unit ℓ,
+∂µsz(ℓ) = JLN
+ u(ℓ) 
+I + JFℓ(z(ℓ−1))
+
+∂µsz(ℓ−1).
+Plugging into equation 36 and expanding yields three
+contributions:
+(i) the identity–identity term, which is
+Tℓ−1(µ1, µ2); (ii) the two cross terms between I and JFℓ,
+which vanish under conditional expectation by Assump-
+tion 1; and (iii) the branch–branch term, which becomes
+αℓTℓ−1(µ1, µ2) by equation 41. Therefore, before apply-
+ing LayerNorm we have
+E
+ 1
+n
+D
+I + JFℓ
+
+∂µ1z(ℓ−1),
+
+I + JFℓ
+
+∂µ2z(ℓ−1)E  Fℓ−1
+
+= (1 + αℓ) Tℓ−1(µ1, µ2).
+Finally, Lemma 7 and the assumptions s(u(ℓ)) = Θ(1) and
+∥γ∥∞= Θ(1) imply that JLN(u(ℓ)) is a bounded linear
+map with operator norm Θ(1). Applying a bounded linear
+map on both sides changes the normalized inner product by
+a Θ(1) factor, which yields equation 42.
+D.4 Depthwise scaling
+Corollary (Depth exponent for Transformers). Under the
+assumptions of Proposition D for all depth units ℓ=
+1, . . . , Ltr, the AM-µP maximal-update learning rate η⋆
+(Sec. 3.2) satisfies
+η⋆(Ltr) = Θ
+ L−3/2
+tr
+
+.
+Proof. Appendix B shows that, under the one-step decom-
+position used throughout, the AM-µP update budget scales
+as
+¯S = Θ
+ η2L3
+tr
+
+for sequential depth units (up to architecture-dependent
+constants). Proposition D implies that replacing each se-
+quential depth unit by a Transformer residual depth unit
+changes the relevant sensitivity inner products only by
+O(1) factors uniformly over depth.
+Hence the same
+Θ(η2L3
+tr) growth holds for Transformers. Enforcing ¯S =
+Θ(1) yields η⋆(Ltr) = Θ(L−3/2
+tr
+).
+Remark. For pre-norm units of the form z(ℓ) = z(ℓ−1) +
+Fℓ(LN(z(ℓ−1))), the same derivation applies with JLN in-
+serted inside the branch Jacobian. Lemma 7 again yields
+only Θ(1) factors, so the depth exponent is unchanged.
+E. Additional Experimental Results
+E.1. Ablation Study Details
+Table 3 summarizes all ablation study configurations and
+their fitted depth exponents. Figure 5 presents the corre-
+sponding log-log fitting curves, demonstrating consistent
+power-law relationships across all tested configurations.
+E.2. CNN Padding Ablation
+We compare circular padding and zero padding under iden-
+tical CNN settings on CIFAR-10 with ReLU activation.
+Figure 6 shows that both padding modes follow essen-
+tially the same depth–learning-rate power law, with expo-
+nents close to the theoretical L−3/2 prediction. The pri-
+mary difference manifests as a small vertical shift on the
+log scale (i.e., a constant prefactor change) rather than a
+slope change, confirming that padding strategy has mini-
+mal impact on the scaling exponent(Xiao et al., 2018). This
+validates zero padding as a practical default in engineering
+applications while maintaining the theoretical scaling law.
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+Table 3. Ablation study: depth exponents for representative configurations. Fitted slopes ˆα for the depth–LR scaling law log10 η⋆=
+β0 −α log10 L. Theory predicts α = 1.5. Base configuration uses SGD, ReLU, and no regularization unless otherwise specified.
+Model
+Configuration
+Optimizer
+Dataset
+Details
+ˆα
+CNN
+Baseline
+SGD
+CIFAR-10
+ReLU, None, –
+−1.339
++ GELU(Hendrycks, 2016)
+SGD
+CIFAR-10
+GELU, None, –
+−1.379
++ Adam(Kingma & Ba, 2017)
+Adam
+CIFAR-10
+ReLU, None, –
+−1.207
+ResNet
+Baseline
+SGD
+CIFAR-10
+ReLU, None, –
+−1.435
++ BatchNorm(Ioffe & Szegedy, 2015)
+SGD
+CIFAR-10
+ReLU, BN, –
+−1.701
++ Dropout(Srivastava et al., 2014)
+SGD
+CIFAR-10
+ReLU, None, Dropout
+−1.568
++ Adam
+Adam
+CIFAR-10
+ReLU, None, –
+−1.269
+ViT
+Pre-LN
+SGD
+ImageNet
+ReLU, Pre-LN, –
+−1.131
+Post-LN
+SGD
+ImageNet
+ReLU, Post-LN, –
+−1.178
+Optimal learning rate 𝜇∗ 
+Optimal learning rate 𝜇∗ 
+Optimal learning rate 𝜇∗ 
+Depth L
+Depth L
+Depth L
+CNN Baseline（α = −1.339 ）
+CNN + GELU (α = -1.379)
+CNN + Adam (a = -1.207)
+ResNet Baseline (𝛼 = -1.435)
+ResNet + BatchNorm (𝛼 = -1.701)
+ResNet + Adam (𝛼 = -1.269)
+ResNet + Dropout (𝛼 = -1.568)
+ViT Pre-LN (𝛼 = -1.131)
+ViT Post-LN (𝛼 = -1.178)
+Figure 5. Depth–LR scaling curves for ablation configurations. Each subplot shows log10 η⋆versus log10 L with the fitted power-
+law line. Configurations correspond to Table 3. All configurations exhibit clear power-law relationships with exponents close to the
+theoretical prediction of −1.5.
+21
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+Figure 6. CNN padding comparison on CIFAR-10. Depth–LR
+scaling curves for circular padding and zero padding with ReLU
+activation. Both exhibit similar slopes (ˆα ≈−1.5), differing pri-
+marily in vertical offset.
+E.3. Kernel-Size Ablation
+Proposition 3.3 predicts that for stride-1 CNNs under AM-
+µP, the maximal-update learning rate follows η⋆(L) =
+κL−3/2 at leading order, where kernel size affects the
+learning rate primarily through the prefactor κ rather than
+the depth exponent. To test this prediction, we repeat the
+CNN/CIFAR-10 protocol with kernel sizes k ∈{3, 4, 5}
+while keeping all other settings fixed.
+Figure 7 shows that η⋆exhibits clear power-law de-
+cay for all kernel sizes, with fitted exponents ˆα
+∈
+{1.74, 1.44, 1.46}. Importantly, varying k does not pro-
+duce a monotonic trend in ˆα; instead, it primarily induces
+a vertical shift (prefactor change) while the exponent re-
+mains close to the theoretical 3/2.
+We therefore inter-
+pret the variation in fitted slopes (within ±20% of 3/2) as
+finite-sample fluctuations rather than evidence of a kernel-
+dependent depth exponent, confirming that kernel size has
+minimal impact on the scaling law.
+F. Why GELU Can Appear Slightly Steeper
+than ReLU in Finite-Range Fits
+Empirically, when we fit a single depth–learning-rate
+power law over a finite depth range, the fitted exponent for
+GELU can be marginally more negative than for ReLU for
+the same architecture and training setup. This does not nec-
+essarily indicate a different asymptotic exponent. Rather, it
+suggests that subleading (finite-depth/finite-width) correc-
+tions are more pronounced for GELU.
+Activation–derivative statistics and sensitivity.
+Let
+Z ∼N(0, 1) denote the Gaussian proxy used in the mean-
+field calculations. For ReLU, E[σ′(Z)2] = 1
+2. For GELU
+Figure 7. Kernel-size ablation on CIFAR-10. Maximal-update
+learning rate η⋆versus depth L for kernel sizes k ∈{3, 4, 5}.
+Dashed lines show log-log linear fits with exponents close to the
+theoretical −1.5.
+ϕ(x) = xΦ(x) with ϕ′(x) = Φ(x) + xφ(x), we have
+E[ϕ′(Z)2] ≈0.456.
+If one keeps the ReLU-calibrated He variance Var(W) =
+2/ fanin(W) when switching from ReLU to GELU, then
+the linearized backward gain per layer becomes χ
+=
+2 E[ϕ′(Z)2] ≈0.912 < 1, which increases the tendency of
+deeper layers to attenuate gradients at initialization. When
+fitted as a single power law over a limited depth range, this
+attenuation can bias the estimated slope.
+Drift at finite depth and width
+Even with activation-
+aware fan-in scaling, the pre-activation distribution is only
+approximately stationary at finite width and finite depth.
+For smooth activations such as GELU, the effective quan-
+tity q(z) = E[ϕ′(z)2] is more sensitive to small variance
+drifts across layers. This induces a slowly depth-dependent
+prefactor κ(L) in η⋆(L) ≈κ(L) L−3/2. A log–log regres-
+sion that enforces a single power law can therefore return a
+slightly more negative fitted exponent.
+G. On the Loss: Cross-Entropy vs. MSE in
+the One-Step Derivation
+Our one-step maximal-update derivation uses MSE for an-
+alytic convenience, while the main experiments use multi-
+class cross-entropy (CE)(Janocha & Czarnecki, 2017). In
+the one-step initialization regime, this choice does not
+change the depth exponent, because the derivation only re-
+quires that the logit-gradient has an O(1) second moment.
+At initialization, logits are near zero, so p = softmax(z) is
+close to uniform. For one-hot targets y with C classes, the
+CE logit gradient is
+g = p −y,
+22
+1210
+1211
+1212
+1213
+1214
+1215
+1216
+1217
+1218
+1219
+1220
+1221
+1222
+1223
+1224
+1225
+1226
+1227
+1228
+1229
+1230
+1231
+1232
+1233
+1234
+1235
+1236
+1237
+1238
+1239
+1240
+1241
+1242
+1243
+1244
+1245
+1246
+1247
+1248
+1249
+1250
+1251
+1252
+1253
+1254
+1255
+1256
+1257
+1258
+1259
+1260
+1261
+1262
+1263
+1264
+Hyperparameter Transfer Laws for Non-Recurrent Multi-Path Neural Networks
+and thus
+∥g∥2
+2 =
+
+1 −1
+C
+2
++ (C −1)
+
+1
+C
+2
+= 1 −1
+C = O(1).
+Therefore CE provides O(1)-scale per-sample gradients at
+initialization. In our derivation, the depth dependence of
+η⋆(L) is governed by Jacobian products through the net-
+work, while the loss enters only through such O(1) output-
+gradient statistics. Replacing MSE by CE consequently
+rescales the overall prefactor κ but does not change the
+depthwise power-law exponent.
+23
