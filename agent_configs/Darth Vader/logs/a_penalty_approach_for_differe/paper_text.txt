@@ -1,0 +1,1825 @@
+A Penalty Approach for Differentiation Through
+Black-Box Quadratic Programming Solvers
+Yuxuan Linghu∗
+Zhiyuan Liu†
+Qi Deng‡
+April 22, 2026
+Abstract
+Differentiating through the solution of a quadratic program (QP) is a central problem in dif-
+ferentiable optimization. Most existing approaches differentiate through the Karush–Kuhn–Tucker
+(KKT) system, but their computational cost and numerical robustness can degrade at scale. To ad-
+dress these limitations, we propose dXPP, a penalty-based differentiation framework that decouples
+QP solving from differentiation. In the solving step (forward pass), dXPP is solver-agnostic and can
+leverage any black-box QP solver. In the differentiation step (backward pass), we map the solution
+to a smooth approximate penalty problem and implicitly differentiate through it, requiring only the
+solution of a much smaller linear system in the primal variables. This approach bypasses the diffi-
+culties inherent in explicit KKT differentiation and significantly improves computational efficiency
+and robustness. We evaluate dXPP on various tasks, including randomly generated QPs, large-scale
+sparse projection problems, and a real-world multi-period portfolio optimization task. Empirical re-
+sults demonstrate that dXPP is competitive with KKT-based differentiation methods and achieves
+substantial speedups on large-scale problems. Our implementation is open source and available at
+https://github.com/mmmmmmlinghu/dXPP.
+Keywords: Differentiable Optimization, Quadratic Programming, Implicit differentiation
+1
+Introduction
+Differentiable optimization has emerged as a powerful paradigm for incorporating optimization problems
+into end-to-end learning pipelines. By embedding optimization layers that can backpropagate gradients,
+this approach enables automatic differentiation through complex decision-making processes, allowing
+model parameters to be learned from task-level objectives. The key advantage of differentiable opti-
+mization lies in its ability to directly encode optimization structure and enforce hard constraints (e.g.,
+feasibility, optimality) that standard neural network layers cannot naturally guarantee [3]. This capability
+has proven valuable across diverse applications, including inventory control [17], portfolio optimization
+[38], and other data-driven decision-making tasks.
+We consider the following convex quadratic program, parameterized by some θ ∈Rs:
+z⋆(θ) = arg min
+z∈Rn
+1
+2z⊤P(θ)z + q(θ)⊤z
+s.t.
+A(θ)z = b(θ),
+C(θ)z ≤d(θ),
+(1)
+where P(θ) ∈Sn
+++ is symmetric positive definite, q(θ) ∈Rn, A(θ) ∈Rp×n, b(θ) ∈Rp, C(θ) ∈Rm×n, and
+d(θ) ∈Rm are differentiable mappings of θ. We assume problem (1) is feasible for all θ of interest. Since
+the objective is strictly convex, the primal optimizer z⋆(θ) is unique. For notational simplicity, we omit
+the explicit dependence on θ when it is clear from context.
+Our goal is to compute ∂θz⋆(θ) ∈Rn×s, the sensitivity of the optimal solution with respect to the
+parameters. Early approaches often couple the layer with a customized solver to compute the gradient,
+∗Email: lhyx366893061@sjtu.edu.cn, Shanghai Jiao Tong University.
+†Email: zhiyuanliu@uchicago.edu, The University of Chicago.
+‡Email: qdeng24@sjtu.edu.cn, Shanghai Jiao Tong University.
+1
+
+Forward Pass
+Backward Pass
+Layer Input
+𝑧1
+∗
+⋮
+⋮
+𝑧n∗
+Quadratic Programming 
+Black-Box QP Solver
+Employ a user-specified 
+QP solver
+KKT-based Backward
+Requires solving a large 
+indefinite linear system
+Smoothed-Penalty 
+Formulation
+Primal-Dimension 
+SPD Linear System
+Reformulate as an 
+unconstrained objective
+Efficient, scalable and 
+sparsity-friendly
+𝑧(𝜃)∗= arg min
+𝑧
+1
+2𝑧𝑇𝑃(𝜃)𝑧+ 𝑞(𝜃)𝑇𝑧
+               s.t.    𝐴𝜃𝑧= 𝑏𝜃
+ 
+𝐶(𝜃)𝑧≤𝑑(𝜃)
+Layer Output
+𝜃1
+⋮
+⋮
+𝜃𝑠
+Decoupled
+Figure 1: The learning workflow of dXPP: the previous layer outputs parameters θ and the QP layer
+returns the optimal solution z⋆in the forward pass; the backward pass propagates loss gradients for
+end-to-end learning. By decoupling solving and differentiating through a penalty-based reformulation,
+dXPP enables efficient and scalable training with black-box QP solvers.
+which often leads to a slower and less scalable forward pass in practice [3, 1]. More recent solver-agnostic
+methods (e.g., BPQP and dQP) treat the forward pass as a black-box call to a mature optimizer [30, 26].
+Yet, their backward pass still necessitates solving a large linear system derived from the Karush–Kuhn–
+Tucker (KKT) equations, which can be computationally expensive for large-scale problems.
+This paper focuses on differentiation through quadratic programs (QPs). While mature black-box
+solvers make the forward pass efficient, backpropagation remains a bottleneck: KKT-based differentiation
+requires solving a large saddle-point linear system whose cost can scale cubically and becomes prohibitive
+for dense constraints or high-dimensional QPs. We propose dXPP, a new method for differentiating
+through black-box convex QP solvers based on a penalty formulation. Specifically, dXPP incorporates
+the constraints into the objective function and differentiates through the resulting unconstrained penalized
+problem. As shown in Figure 1, it serves as a plug-and-play layer that pairs any advanced QP solver
+(e.g., Gurobi) in the forward pass with a backward pass that reduces to solving symmetric positive definite
+(SPD) linear systems in primal variables, enabling an efficient, scalable, and sparsity-friendly gradient
+module.
+Our contributions can be summarized as follows:
+1. We present dXPP, a penalty-based approach to differentiating through black-box QP solvers that
+bypasses KKT differentiation and reduces the backward pass to a primal-dimensional SPD linear
+system, which is typically smaller and better conditioned than the KKT system, and remains well-
+defined under degeneracy due to smoothing. Our implementation is open source and available at
+https://github.com/mmmmmmlinghu/dXPP.
+2. We prove that the sensitivity computed from the smoothed penalty objective converges to the exact
+KKT sensitivity as the smoothing parameter tends to zero.
+3. We evaluate dXPP on diverse benchmarks and a real-world portfolio optimization task. dXPP
+consistently outperforms KKT-based methods and achieves state-of-the-art performance for differ-
+entiating QPs.
+2
+Related Work
+Differentiable Optimization
+Classical differentiable QP layers compute gradients by implicitly dif-
+ferentiating the KKT optimality conditions, as introduced in OptNet [3]. While effective at small- to
+medium-scale, KKT differentiation requires solving large indefinite linear systems in the backward pass
+and can become numerically fragile under active-set changes or degeneracy. To improve scalability, a
+parallel line of work differentiates through iterative-solver fixed points using residual-based implicit dif-
+ferentiation or Jacobian approximations [35, 10, 9], and augmented-Lagrangian variants further enhance
+2
+
+robustness to infeasibility [4]. Beyond QPs, differentiable optimization has been extended to cone pro-
+grams and disciplined convex programs [2, 1] and supported by modular implicit-differentiation toolkits
+[6, 31], albeit often at the expense of QP-specific efficiency. More recently, work has revisited the back-
+ward mechanism itself: Pan et al. [30] decouple the backward pass via simplified KKT structure, while
+Magoon et al. [26] provide a solver-agnostic interface by characterizing the solution map through the
+active set.
+Penalty Methods
+Classic work on exact penalties established that, for sufficiently large penalty pa-
+rameters, local minimizers of the penalized objective coincide with those of the original constrained
+problem, with the required threshold governed by the optimal Lagrange multipliers [20, 22, 15, 5]. In
+parallel, Augmented Lagrangian Methods (ALM) combine penalty terms with dual variables and remain
+a core paradigm for constrained nonlinear optimization [23, 32, 33]. A key practical issue is that widely
+used exact penalties are nonsmooth, motivating a broad literature on smoothing techniques that trade
+controlled approximation error for better numerical behavior [28, 27, 36]. More recently, smooth exact-
+penalty constructions have been developed that preserve exactness while improving compatibility with
+gradient-based algorithms in general constrained settings [16, 37, 19]. These ideas also connect to mod-
+ern constrained learning perspectives, including exact Augmented Lagrangian formulations and scalable
+large-scale solvers [24], as well as recent surveys of ALM and their advances [14].
+3
+Method
+In this section, we develop dXPP, a framework for differentiating through convex quadratic programs.
+Our approach adopts a smoothed penalty reformulation to reduce the backward pass to solving a primal-
+scale SPD linear system. We begin by reviewing differentiation through the KKT system.
+3.1
+Differentiating Through the KKT Conditions
+Since (1) is a strictly convex QP with affine constraints, its optimality is characterized by the Karush–
+Kuhn–Tucker (KKT) conditions. Introducing the Lagrange multipliers ν ∈Rp for the equality constraints
+and µ ∈Rm for the inequality constraints, the triplet (z⋆, ν⋆, µ⋆) is primal-dual optimal if and only if it
+satisfies
+Pz⋆+ q + A⊤ν⋆+ C⊤µ⋆= 0,
+Az⋆= b,
+Cz⋆≤d,
+µ⋆≥0,
+µ⋆
+i (Cz⋆−d)i = 0,
+i = 1, . . . , m.
+(2)
+Traditional layers obtain ∂θz⋆by implicitly differentiating the KKT conditions. Let U(z, ν, µ; θ) collect
+the equations in (2) as U(z, ν, µ; θ) =
+
+
+Pz + q + A⊤ν + C⊤µ
+Az −b
+diag(µ) (Cz −d)
+
+.
+Differentiating U(z⋆, ν⋆, µ⋆; θ) = 0 with respect to θ yields the linear system
+
+
+P
+A⊤
+C⊤
+A
+0
+0
+diag(µ⋆)C
+0
+diag(Cz⋆−d)
+
+
+
+
+∂θz⋆
+∂θν⋆
+∂θµ⋆
+
+= −
+
+
+(∂θP) z⋆+ ∂θq + (∂θA⊤) ν⋆+ (∂θC⊤) µ⋆
+(∂θA) z⋆−∂θb
+diag(µ⋆)
+ (∂θC) z⋆−∂θd
+
+
+.
+(3)
+Under the linear independence constraint qualification (LICQ) and strict complementarity, the linear
+system in (3) is nondegenerate, so the implicit system admits a unique solution for ∂θ(z⋆, ν⋆, µ⋆). Degen-
+eracy occurs precisely when there exists a weakly active inequality with (Cz⋆−d)i = 0 but µ⋆
+i = 0 [3].
+Define the active set A = {i : (Cz⋆−d)i = 0} and the inactive set I = {1, . . . , m} \ A. For any inactive
+constraint i ∈I, we have (Cz⋆−d)i < 0 and hence µ⋆
+i = 0 and ∂θµ⋆
+i = 0. Therefore, we can eliminate
+the inactive multipliers and retain only the active rows, yielding the reduced system
+
+
+P
+A⊤
+C⊤
+A
+A
+0
+0
+CA
+0
+0
+
+
+
+
+∂θz⋆
+∂θν⋆
+∂θµ⋆
+A
+
+= −
+
+
+(∂θP) z⋆+ ∂θq + (∂θA⊤) ν⋆+ (∂θC⊤
+A) µ⋆
+A
+(∂θA) z⋆−∂θb
+(∂θCA) z⋆−∂θdA
+
+,
+(4)
+3
+
+where CA, dA, and µ⋆
+A denote the restrictions of C, d, and µ⋆to the active inequalities. Here, we define
+∂θz⋆computed in (4) as ZKKT.
+3.2
+Penalty Reformulation and Implicit Differentiation
+For a fixed parameter θ, let the objective function be f(z) = 1
+2z⊤Pz + q⊤z. Following Nocedal & Wright
+[29], we introduce the exact penalty objective:
+F(z; θ, ρ, α) = f(z) + ρ∥Az −b∥1 + α∥[Cz −d]+∥1,
+(5)
+where [u]+ = max{u, 0} is taken element-wise. The corresponding penalized optimization problem is
+min
+z
+F(z; θ, ρ, α).
+(6)
+The necessary stationary condition for this penalty problem is given by:
+0 ∈∇f(z) + ρA⊤∂∥Az −b∥1 + αC⊤∂∥[Cz −d]+∥1.
+(7)
+Specifically, at any z for which Az = b, each component of ∂∥Az −b∥1 belongs to [−1, 1]; and at any
+z such that Cz ≤d, each component of ∂∥[Cz −d]+∥1 is zero if (Cz −d)i < 0 and lies in [0, 1] if
+(Cz −d)i = 0. The following standard result shows that, for sufficiently large penalty weights, the exact
+penalty formulation is equivalent to the original QP. For completeness, the proof is given in Appendix A.
+Proposition 1. Let (z⋆, ν⋆, µ⋆) be an optimal primal–dual solution of the QP (1). If the penalty weights
+satisfy
+ρ ≥∥ν⋆∥∞,
+α ≥∥µ⋆∥∞,
+(8)
+then z⋆is also a minimizer of the exact penalty problem (6).
+Remark 1. While the exact penalty problem may seem more tractable, recovering the solution to the
+original QP generally requires careful selection of the penalty parameters, which in turn typically neces-
+sitates knowledge of the optimal primal–dual solution. Fortunately, modern QP solvers provide optimal
+dual variables as a byproduct at little additional computational cost, enabling the explicit construction of
+an equivalent penalty formulation. Importantly, in our framework, we do not directly solve the penalty
+problem; rather, we employ this reformulation solely to facilitate a more efficient implicit differentiation
+scheme.
+The exact penalty objective is nonsmooth. To obtain stable derivatives through the penalty reformu-
+lation, we replace the hinge and ℓ1-norm terms in (5) with a softplus-smoothed approximation. Following
+Li et al. [25], we define the softplus function
+pδ(t) := δ log
+ 1 + exp(t/δ)
+
+, where δ > 0.
+It is easy to see that pδ(·) is convex and twice continuously differentiable. We rewrite the equality ℓ1-norm
+terms using |u| = [u]+ + [−u]+. We then apply softplus smoothing to the resulting hinge penalties for
+both equality and inequality constraints. Accordingly, we define the smoothed penalty objective
+Φδ(z; θ) = f(z) + α
+m
+X
+i=1
+pδ
+ (Cz −d)i
+
++ ρ
+p
+X
+j=1
+
+pδ
+ (Az −b)j
+
++ pδ
+ −(Az −b)j
+
+.
+(9)
+Let z⋆
+δ(θ) = arg minz Φδ(z; θ). We differentiate the stationarity condition ∇zΦδ
+ z⋆
+δ; θ
+
+= 0 with respect
+to θ. By the implicit function theorem, we have
+∂θz⋆
+δ = −
+
+∇2
+zzΦδ
+ z⋆
+δ; θ
+−1
+∇2
+zθΦδ
+ z⋆
+δ; θ
+
+.
+(10)
+3.3
+Plug-in Sensitivity and Consistency Analysis
+In practice, we do not compute the exact minimizer z⋆
+δ of the smoothed penalty objective (9). Rather,
+we utilize the primal and dual solution obtained from the QP solver and substitute it into (10). We now
+assume strict complementarity, whereby the active set A remains locally invariant. Further, we assume
+4
+
+that the inactive constraints are strictly separated; that is, there exists γ > 0 such that (Cz⋆−d)i ≤−γ
+for all i ∈I.
+We set up some notation. First, define the stacked active constraint function g(z, θ) :=
+
+Az −b
+CAz −dA
+
+∈
+Rp+|A| with its Jacobian given by B := ∇zg(z, θ) =
+
+A
+CA
+
+∈R(p+|A|)×n. Let gθ := ∂θg(z⋆, θ) ∈R(p+|A|)×s
+and G := ∇2
+zθf(z⋆; θ) ∈Rn×s. We further define W :=
+ ρ
+2Ip
+0
+0
+α
+4 I|A|
+
+.
+We begin by deriving the expression for ∇2
+zzΦδ
+ ·; θ
+
+and subsequently evaluate it at z⋆. The resulting
+formula for ∇2
+zzΦδ
+ z⋆; θ
+
+is presented in Proposition 2, with the proof detailed in Appendix B.
+Proposition 2. Let CI and dI denote the restriction of (C, d) to inactive rows, and sI = CIz⋆−dI ∈
+R|I|. Define Eδ = α C⊤
+I diag
+ p′′
+δ(sI)
+
+CI. Then
+∇2
+zzΦδ
+ z⋆; θ
+
+= P + 1
+δ B⊤WB + Eδ.
+(11)
+Moreover, limδ→0 ∥Eδ∥2 = 0.
+We now proceed to compute ∇2
+zθΦδ
+ z⋆
+δ; θ
+
+in closed form. The proof is deferred to Appendix C.
+Proposition 3. With ψδ(t) = pδ(t) + pδ(−t) applied elementwise, we have
+∇2
+zθΦδ
+ z⋆
+δ; θ
+
+= ∇2
+zθf
+ z⋆
+δ; θ
+
++ (∂θA)⊤ ρ ψ′
+δ(Az⋆
+δ −b)
+
++ (∂θCA)⊤ α p′
+δ(CAz⋆
+δ −dA)
+
++ A⊤Diag
+ ρ ψ′′
+δ (Az⋆
+δ −b)
+
+(∂θAz⋆
+δ −∂θb) + C⊤
+ADiag
+ α p′′
+δ(CAz⋆
+δ −dA)
+
+(∂θCAz⋆
+δ −∂θdA)
++ (∂θC⊤
+I )
+ α p′
+δ(CIz⋆
+δ −dI)
+
++ C⊤
+I Diag
+ α p′′
+δ(CIz⋆
+δ −dI)
+
+∂θ(CIz⋆
+δ −dI).
+(12)
+As previously discussed, the evaluation of ∇2
+zθΦδ(z⋆
+δ; θ) is performed at z⋆
+δ. In practice, we employ a
+plug-in approach that utilizes the solution obtained from the QP solver. First, consider the term
+(∂θA)⊤ ρ ψ′
+δ(Az⋆
+δ −b)
+
++ (∂θCA)⊤ α p′
+δ(CAz⋆
+δ −dA)
+
+,
+where ρ ψ′
+δ(Az⋆
+δ −b) and α p′
+δ(CAz⋆
+δ −dA) act as proxies for the Lagrange multipliers. To achieve a more
+accurate representation, we replace this contribution with (∂θB⊤) y⋆, where y⋆∈Rp+|A| denotes the
+actual stacked KKT multipliers associated with the active constraints.
+Next, for the inactive constraints, define
+Fδ := (∂θC⊤
+I )
+ α p′
+δ(CIz⋆
+δ −dI)
+
++ C⊤
+I Diag
+ α p′′
+δ(CIz⋆
+δ −dI)
+
+∂θ(CIz⋆
+δ −dI).
+Since limδ→0 z⋆
+δ = z⋆, for sufficiently small δ we have (CIz⋆
+δ −dI)i ≤−γ + o(γ) for all i ∈I. Under
+the strict separation assumption for inactive constraints, Fδ exhibits the same exponential decay as Eδ.
+Specifically, there exists cF > 0 such that ∥Fδ∥2 ≤cF
+δ e−(γ+o(γ))/δ. Thus, although Fδ depends on δ, it is
+asymptotically negligible.
+For the remaining terms in (12), we replace z⋆
+δ with z⋆. In particular, we take ∇2
+zθf(z; θ) and set
+G = ∇2
+zθf(z⋆; θ). Similarly, for the active curvature block, we substitute z⋆
+δ with z⋆:
+A⊤Diag
+ ρ ψ′′
+δ (Az⋆−b)
+
+(∂θAz⋆−∂θb) + C⊤
+ADiag
+ α p′′
+δ(CAz⋆−dA)
+
+(∂θCAz⋆−∂θdA) = 1
+δ B⊤Wgθ.
+Bringing these components together, we obtain the plug-in estimate Zplug
+δ
+by solving the following
+linear system:
+ P + 1
+δ B⊤WB + Eδ
+
+Zplug
+δ
+= −
+ G + (∂θB⊤) y⋆+ 1
+δ B⊤Wgθ + Fδ
+
+.
+(13)
+Empirically, we find that Zplug
+δ
+closely matches the reference gradients obtained by differentiating the
+KKT system of the original constrained problem (see Section 4.1). Next, we show that the plug-in sen-
+sitivity Zplug
+δ
+asymptotically converges to the exact gradient ZKKT. The proof is provided in Appendix D.
+Theorem 1. Suppose P is positive definite and that both LICQ and strict complementarity conditions
+are satisfied. Then, as δ →0, the approximate sensitivity Zplug
+δ
+defined in (13) converges to the exact
+gradient ZKKT given by (4).
+5
+
+Algorithm 1 dXPP: Differentiation through Black-Box Quadratic Programming Solvers and Penalty
+Formulation
+Input: parameters θ defining P, q, A, b, C, d; smoothing strength δ > 0; penalty strength ζ ≥1
+Output: z⋆and Jacobian ∂θz⋆
+Forward pass:
+Solve (1) using a black-box QP solver to obtain (z⋆, ν⋆, µ⋆)
+Set ρ = ζ∥ν⋆∥∞,
+α = ζ∥µ⋆∥∞
+Backward pass:
+Form the smoothed penalty objective in (9)
+Compute ∂θz⋆using (13)
+3.4
+Computational Advantages
+The complete training framework of dXPP is outlined in Algorithm 1.
+This framework comprises
+solving the forward QP with a black-box solver, penalty parameter scaling, softplus-based smoothing,
+and the implicit backward differentiation step. We now proceed to discuss the computational advantages
+offered by dXPP.
+Solver-agnostic forward pass
+Similar to dQP [26], the forward map of dXPP can be obtained by any
+convex QP solver, provided that the solver returns a primal solution z⋆together with the corresponding
+dual multipliers (ν⋆, µ⋆) for the equality and inequality constraints. These multipliers are used only to
+set the penalty magnitudes (ρ, α). This lets us flexibly choose the solver to match the underlying problem
+structure and hardware capabilities.
+dXPP as an embedding layer
+When dXPP is embedded in a deep learning model, it is unnec-
+essary to construct the Jacobian Zplug
+δ
+explicitly. Let L denote the loss function, r = ∂L/∂z⋆∈Rn
+the upstream gradient, and H = P + 1
+δ B⊤WB + Eδ the penalty Hessian. The vector-Jacobian prod-
+uct can then be computed by first solving Hu = r for u ∈Rn, and subsequently evaluating ∂θL =
+−
+ G + (∂θB⊤) y⋆+ 1
+δ B⊤Wgθ + Fδ
+⊤u. Accordingly, each backward pass entails solving a single n × n
+SPD linear system per evaluation, independent of the dimension s of the problem parameters.
+Reduction to primal-dimensional linear systems
+Traditional approaches to differentiating through
+QP layers rely on differentiating the KKT system, which leads to solving an indefinite linear system of
+size n+p+m as in (3), or n+p+|A| as in (4) after restricting to the active set A [3, 1, 26]. In contrast, the
+backward pass (13) in dXPP only involves the primal variable dimension n. Furthermore, the matrix H
+inherits and integrates the sparsity structures of both P and B. Owing to its symmetric positive definite
+(SPD) nature, H is well suited for state-of-the-art sparse Cholesky factorizations [13] and preconditioned
+conjugate gradient methods [29], which typically offer superior speed and numerical stability compared to
+indefinite KKT solvers at similar sparsity levels. Furthermore, dXPP yields a stable surrogate sensitivity
+even when the KKT system (4) is degenerate: when the LICQ or strict complementarity conditions do
+not hold, H stays strictly positive definite as long as P ∈Sn
+++. Consequently, the gradient Zplug
+δ
+remains
+well defined.
+Support for active-set pruning
+Unlike dQP [26], in which the backward pass involves only the active
+constraints, the backward pass of dXPP explicitly accounts for inactive constraints. This distinction
+arises because the softplus smoothing term remains nonzero for t < 0. Nevertheless, the contributions
+from strictly inactive inequalities, represented by Eδ and Fδ in (13), vanish as δ →0. In practice, we
+implement active-set pruning by omitting the Eδ and Fδ terms, and we observe empirically that this does
+not adversely affect performance.
+4
+Experiments
+We evaluate dXPP by studying gradient accuracy on random strictly convex QPs, scalability on large-
+scale sparse projection problems and an end-to-end multi-period portfolio optimization task. We use the
+6
+
+Table 1: Gradient discrepancy between our softplus-penalty QP layer and dQP [26]. We report the mean
+and standard deviation of the relative difference. The QP size n × m denotes n variables with m equality
+and m inequality constraints.
+QP size
+Avg. ϵrel
+Std. ϵrel
+10 × 5
+1.91 × 10−7
+1.40 × 10−7
+50 × 10
+8.55 × 10−8
+3.57 × 10−8
+100 × 20
+2.64 × 10−7
+9.50 × 10−8
+500 × 100
+5.21 × 10−6
+6.50 × 10−7
+1000 × 200
+1.74 × 10−5
+2.25 × 10−6
+1500 × 500
+5.36 × 10−5
+3.51 × 10−6
+3000 × 1000
+1.91 × 10−4
+1.23 × 10−5
+5000 × 2000
+5.14 × 10−4
+2.39 × 10−5
+unified setting in Algorithm 1 with smoothing strength δ = 10−6 and penalty strength ζ = 10. For a fair
+comparison, the forward QP solves for both dXPP and dQP are performed using Gurobi [21]. Additional
+experimental details are provided in Appendix E.
+4.1
+Gradient Accuracy
+Table 2: Runtime analysis for projection onto the probability simplex.
+Solver
+Metric
+Problem Size
+20
+100
+450
+1000
+4600
+10000
+100000
+1000000
+dXPP
+Backward (ms)
+0.72
+0.82
+0.91
+0.92
+1.09
+1.51
+8.35
+226.21
+Total (ms)
+5.01
+5.13
+6.27
+7.73
+22.48
+46.09
+494.02 5212.38
+dQP
+Backward (ms)
+0.82
+0.89
+0.99
+1.51
+4.63
+10.01
+83.79
+950.64
+Total (ms)
+5.55
+5.95
+7.11
+9.22
+26.55
+56.50
+572.64
+6103.44
+OptNet
+Backward (ms)
+0.54
+0.74
+2.84
+18.41
+372.73
+2647.40
+–
+–
+Total (ms)
+5.47
+8.21
+46.48 286.28 4716.01 34121.95
+–
+–
+SCQPTH
+Backward (ms)
+0.87
+2.62
+–
+–
+–
+–
+–
+–
+Total (ms)
+53.40 481.95
+–
+–
+–
+–
+–
+–
+CVXPYLayers Backward (ms)
+1.23
+1.72
+–
+–
+–
+–
+–
+–
+Total (ms)
+3.15
+7.37
+–
+–
+–
+–
+–
+–
+We first assess whether the gradients produced by dXPP are numerically reliable.
+Following the
+benchmark of BPQP [30], we construct random strictly convex QPs of different sizes. The problem size
+is denoted by n × m, where n is the number of decision variables, and we use m equality constraints and
+m inequality constraints. Concretely, we sample a random matrix P ′ ∈Rn×n and construct a positive
+definite quadratic term P = P ′P ′⊤+ 10−6I to ensure strict convexity. Linear terms and constraints are
+drawn from a standard normal distribution. To guarantee feasibility, we fix a reference point z0 = 1 at
+the all-ones vector and set the constraint right-hand sides as d = Cz0 + 1 and b = Az0.
+As a reference for gradient correctness, we compare our gradients against those produced by dQP [26].
+Let gdXPP be the gradient returned by our layer and gdQP be the gradient returned by dQP. We report the
+relative difference
+ϵrel = ∥gdXPP −gdQP∥2
+∥gdQP∥2
+.
+Table 1 summarizes the mean and standard deviation of ϵrel over multiple random instances for each prob-
+lem size. For each size, we report statistics over 50 independently generated random instances. Across
+all tested problem sizes, the relative gradient discrepancy remains small. Specifically, the average ϵrel is
+on the order of 10−7–10−4 as the problem scale increases from 10 × 5 to 5000 × 2000. As expected, the
+7
+
+Table 3: Runtime analysis for projection onto chains.
+Solver
+Metric
+Problem Size
+200
+500
+1000
+2000
+4000
+10000
+100000
+1000000
+dXPP
+Backward (ms)
+1.06
+1.74
+2.59
+3.05
+4.08
+7.01
+25.09
+333.42
+Total (ms)
+13.24
+15.61
+27.82
+45.56
+81.93
+214.52
+2495.59 29306.28
+dQP
+Backward (ms)
+1.49
+2.17
+3.72
+3.76
+7.90
+17.07
+195.27
+3071.18
+Total (ms)
+14.14
+16.97
+29.30
+47.08
+85.00
+225.94
+2695.72
+32201.43
+OptNet
+Backward (ms)
+7.25
+14.00
+43.75
+202.62
+1190.40
+12873.17
+–
+–
+Total (ms)
+46.76
+225.79 759.01 3210.28 19107.02 235462.01
+–
+–
+SCQPTH
+Backward (ms)
+18.93
+35.43
+162.59
+842.21
+5002.86
+68260.63
+–
+–
+Total (ms)
+47.68
+87.53
+897.21 3512.24 14956.00 110042.63
+–
+–
+CVXPYLayers Backward (ms)
+41.01
+–
+–
+–
+–
+–
+–
+–
+Total (ms)
+105.88
+–
+–
+–
+–
+–
+–
+–
+20
+100
+450
+1000
+4600
+10000
+100000
+1000000
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Ratio (dXPP / dQP)
+Projection - Backward Runtime Ratio
+200
+500
+1000
+2000
+4000
+10000
+100000
+1000000
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Ratio (dXPP / dQP)
+Chain - Backward Runtime Ratio
+Figure 2: Backward runtime ratio (tbwd
+dXPP/tbwd
+dQP) for structured projection problems. The black dashed line
+represents the baseline (dQP’s backward time normalized to 1). Exact results are reported in Table 2
+and Table 3.
+discrepancy increases with the problem dimension and the number of constraints, reflecting the accumu-
+lation of numerical errors in larger-scale instances. Nevertheless, even at the largest scale considered, the
+relative difference remains below 10−3, indicating that the backward pass of dXPP remains numerically
+reliable.
+4.2
+Scalability on Large-Scale Sparse Problems
+We evaluate the scalability of dXPP on two large-scale sparse projection problems [26]. The first task is
+projection onto the probability simplex:
+arg min
+z∈Rn
+∥x −z∥2
+2
+s.t.
+0 ≤z ≤1,
+n
+X
+i=1
+zi = 1,
+(P1)
+where the problem size corresponds to the dimension of x and z. The second task is projection onto a
+chain with ℓ∞-bounded differences:
+arg min
+z∈Rn
+n
+X
+j=1
+∥xj −zj∥2
+2
+s.t.
+∥zj −zj+1∥∞≤1, 1 ≤j ≤n −1,
+(P2)
+8
+
+Table 4: Average per-epoch runtime for end-to-end multi-period portfolio optimization. Both dXPP and
+dQP are run in dense mode.
+Solver
+Metric
+Horizon H
+10
+20
+50
+100
+150
+200
+dXPP
+Backward (ms)
+1.71
+2.91
+10.29
+36.66
+68.72
+113.97
+Total (ms)
+11.91
+18.07
+60.58
+210.41
+496.52
+977.98
+dQP
+Backward (ms)
+17.68
+68.00
+694.68
+3830.83
+16583.49
+39105.75
+Total (ms)
+27.50
+85.57
+763.92
+4049.86
+17122.70
+40066.11
+OptNet
+Backward (ms)
+3.24
+8.51
+34.82
+117.34
+293.70
+605.89
+Total (ms)
+35.32
+98.33
+538.97
+1911.39
+4698.60
+10978.19
+SCQPTH
+Backward (ms)
+6.55
+13.80
+96.02
+429.49
+1777.38
+3368.87
+Total (ms)
+1074.22 1641.08 8121.46 41659.76 114059.42 194166.95
+CVXPYLayers Backward (ms)
+7.76
+–
+–
+–
+–
+–
+Total (ms)
+25.52
+–
+–
+–
+–
+–
+where the problem size corresponds to the chain length n. Both problems are strictly convex projections
+with simple, highly structured constraints, making them well-suited for evaluating differentiation scal-
+ability. We compare dXPP against dQP, OptNet, SCQPTH, and CVXPYLayers over a wide range of
+problem sizes and report wall-clock runtime in milliseconds. The results are summarized in Table 2 and
+Table 3.
+We first note that dXPP and dQP share a key advantage in the forward pass: both are solver-agnostic.
+In particular, both leverage Gurobi, a commercial solver based on interior-point methods, which efficiently
+handles the forward solve even at the largest scale of 106 variables. In contrast, OptNet relies on a
+custom primal–dual interior-point method implemented in PyTorch, while SCQPTH uses an ADMM-
+based operator-splitting solver implemented as a custom PyTorch module. Meanwhile, CVXPYLayers
+transforms the QP into a standard second-order cone program; at our scale, this reduction and the
+associated data-construction overhead become prohibitive. Consequently, these prior methods are limited
+to substantially smaller problem sizes, with SCQPTH and CVXPYLayers failing to complete beyond
+dimensions of 102–103.
+In the backward pass, dXPP demonstrates superior scalability compared to dQP. For problem (P1),
+dXPP is competitive at small dimensions and becomes increasingly favorable as the dimension grows.
+Specifically, dXPP takes 226.21 ms at size 106 versus 950.64 ms for dQP, yielding a 4.2× speedup at
+the largest scale. For problem (P2), dXPP substantially outperforms dQP at large scales: at size 105,
+the backward pass is 25.09 ms for dXPP versus 195.27 ms for dQP (7.8× speedup), and at size 106 it is
+333.42 ms versus 3071.18 ms (9.2× speedup). Overall, these results indicate that dXPP sustains stable
+and efficient differentiation over six orders of magnitude in the problem dimension, whereas the runtimes
+of other baseline layers grow rapidly and do not extend to the largest sizes.
+To illustrate the scalability of dXPP compared with dQP, we report the backward runtime ratio
+(tbwd
+dXPP/tbwd
+dQP) in Figure 2. It can be seen that dXPP’s backward time is consistently faster than dQP’s
+backward time and exhibits significant speedups as the problem size increases.
+4.3
+End-to-End Multi-Period Portfolio Optimization
+We further demonstrate the scalability of dXPP on an end-to-end learning problem that couples predic-
+tion with multi-period portfolio optimization. We embed a multi-period mean-variance program [7] as
+a differentiable layer parameterized by the predictor’s return forecasts, and train the predictor by mini-
+mizing a portfolio-level decision loss computed from realized performance [18]. This setting is a typical
+application of decision-focused learning in finance, but it becomes challenging at scale [11].
+In portfolio optimization, many asset weights commonly lie on their bounds [34], resulting in a large
+number of active constraints for which strict complementarity can fail [29]. In such settings, KKT-based
+differentiation can yield severely ill-conditioned or even degenerate linear systems. As a result, sparse
+solvers may fail [12]. Practical implementations (e.g., Magoon et al. [26]) often rely on damping or least-
+squares solves, which may introduce bias or instability in the resulting sensitivities. Dense factorizations
+9
+
+10
+20
+50
+100
+150
+200
+H
+101
+102
+103
+104
+105
+Total time (ms)
+dXPP
+dQP
+OptNet
+SCQPTH
+Cvxpy
+Figure 3: Visualization of the runtime results in Table 4.
+with pivoting can improve numerical stability when solving these linear systems [8]. Accordingly, we run
+both dXPP and dQP in this dense mode to ensure numerical stability and a fair comparison.
+We consider seven tradable ETFs (VTI, IWM, AGG, LQD, MUB, DBC, GLD) and use different
+investment horizons H, which directly control the scale of the optimization problem. At each decision
+date t, we solve a multi-stage mean-variance planning problem using predicted returns and execute the
+first-step allocation w⋆
+t+1. The decision variables are the per-period portfolio weights {ws}t+H
+s=t+1. This
+yields the following bilevel formulation:
+min
+θ
+t+H
+X
+s=t+1
+
+−r⊤
+s w⋆
+s(θ) + λ
+2 (w⋆
+s(θ))⊤Σsw⋆
+s(θ)
+
+s.t. w⋆(θ) = arg min
+w
+t+H
+X
+s=t+1
+
+−ˆrs(θ)⊤ws + λ
+2 w⊤
+s ˆΣsws
+
+s.t. ws ≥0,
+1⊤ws = 1,
+∥ws −ws−1∥1 ≤τ.
+(14)
+Here, λ > 0 is the risk aversion parameter, τ > 0 is a global turnover budget, ˆrs(θ) is produced by a
+linear predictor from past ETF returns, and rs denotes the realized return vector. For each period s, ˆΣs
+denotes the covariance matrix estimated by returns before date t, whereas Σs denotes the corresponding
+realized return covariance used to evaluate risk in the outer objective. Details of the training process are
+provided in Appendix E.2.
+Table 4 and Figure 3 report average per-epoch runtime statistics as the investment horizon H increases.
+We observe that dXPP is highly efficient and scales nearly linearly in backward time, increasing from
+1.71 ms at H=10 to 113.97 ms at H=200. In contrast, dQP’s backward runtime grows dramatically,
+reaching 39105.75 ms at H=200 (nearly 343× slower than dXPP). OptNet scales more stably than dQP,
+but remains 5.3× slower than dXPP in the backward pass at H=200 and results in higher overall training
+time. SCQPTH and CVXPYLayers either do not scale to larger horizons or hit memory limits. Moreover,
+dXPP achieves a faster forward pass due to the efficiency of the underlying Gurobi solver. Although both
+dXPP and dQP use Gurobi, dQP incurs substantial overhead when forming the KKT-based linear system
+(4) in dense mode.
+Overall, these results indicate that dXPP provides order-of-magnitude speedups
+while retaining the numerical robustness required for stable end-to-end learning in complex optimization
+settings where strict complementarity frequently fails.
+5
+Conclusion
+We present dXPP, a penalty-based framework for differentiating through convex quadratic programs
+(QPs). Leveraging a softplus-smoothed penalty reformulation, dXPP decouples the forward and backward
+passes, reducing gradient computation to the solution of primal-dimensional linear systems, which circum-
+vents the numerical challenges associated with KKT-based differentiation. Empirically, dXPP achieves
+10
+
+significant speedups and maintains high accuracy across both random QPs and large-scale sparse projec-
+tion problems, offering a solver-agnostic and scalable optimization layer for differentiable programming.
+While we have focused on convex QPs, the penalty-based differentiation framework of dXPP extends
+naturally to more general convex programs. Exploring such extensions to broader convex programming
+problems is a promising direction for future work.
+11
+
+References
+[1] Agrawal, A., Amos, B., Barratt, S., Boyd, S., Diamond, S., and Kolter, J. Z. Differentiable convex
+optimization layers. Advances in neural information processing systems, 32, 2019.
+[2] Agrawal, A., Barratt, S., Boyd, S., Busseti, E., and Moursi, W. M. Differentiating through a cone
+program. arXiv preprint arXiv:1904.09043, 2019.
+[3] Amos, B. and Kolter, J. Z. OptNet: Differentiable optimization as a layer in neural networks. In
+Precup, D. and Teh, Y. W. (eds.), Proceedings of the 34th International Conference on Machine
+Learning, volume 70, pp. 136–145. PMLR, 2017.
+[4] Bambade, A., Schramm, F., Taylor, A., and Carpentier, J. Leveraging augmented-lagrangian tech-
+niques for differentiating over infeasible quadratic programs in machine learning. In ICLR 2024-The
+Twelfth International Conference on Learning Representations, 2024.
+[5] Bertsekas, D. P. and Koksal, A. E. Enhanced optimality conditions and exact penalty functions. In
+Proceedings of Allerton conference, 2000.
+[6] Blondel, M., Berthet, Q., Cuturi, M., Frostig, R., Hoyer, S., Llinares-L´opez, F., Pedregosa, F., and
+Vert, J.-P. Efficient and modular implicit differentiation. Advances in neural information processing
+systems, 35:5230–5242, 2022.
+[7] Boyd, S., Busseti, E., Diamond, S., Kahn, R. N., Koh, K., Nystrup, P., and Speth, J. Multi-period
+trading via convex optimization, 2017.
+[8] Bunch, J. R. and Kaufman, L. Some stable methods for calculating inertia and solving symmetric
+linear systems. Mathematics of computation, pp. 163–179, 1977.
+[9] Butler, A. Scqpth: an efficient differentiable splitting method for convex quadratic programming.
+arXiv preprint arXiv:2308.08232, 2023.
+[10] Butler, A. and Kwon, R. H. Efficient differentiable quadratic programming layers: an admm ap-
+proach. Computational Optimization and Applications, 84(2):449–476, 2023.
+[11] Butler, A. and Kwon, R. H. Integrating prediction in mean-variance portfolio optimization. Quan-
+titative finance, 23(3):429–452, 2023.
+[12] Cannataro, B. S¸., Rao, A. V., and Davis, T. A.
+State-defect constraint pairing graph coarsen-
+ing method for karush–kuhn–tucker matrices arising in orthogonal collocation methods for optimal
+control. Computational Optimization and Applications, 64(3):793–819, 2016.
+[13] Chen, Y., Davis, T. A., Hager, W. W., and Rajamanickam, S. Algorithm 887: Cholmod, supernodal
+sparse cholesky factorization and update/downdate. ACM Transactions on Mathematical Software
+(TOMS), 35(3):1–14, 2008.
+[14] Deng, K., Wang, R., Zhu, Z., Zhang, J., and Wen, Z. The augmented lagrangian methods: Overview
+and recent advances. arXiv preprint arXiv:2510.16827, 2025.
+[15] Di Pillo, G. and Grippo, L. Exact penalty functions in constrained optimization. SIAM Journal on
+control and optimization, 27(6):1333–1360, 1989.
+[16] Dolgopolik, M. V. Smooth exact penalty functions: a general approach. Optimization Letters, 10
+(3):635–648, 2016.
+[17] Donti, P., Amos, B., and Kolter, J. Z. Task-based end-to-end model learning in stochastic optimiza-
+tion. Advances in neural information processing systems, 30, 2017.
+[18] Elmachtoub, A. N. and Grigas, P. Smart “predict, then optimize”. Management Science, 68(1):
+9–26, 2022.
+[19] Estrin, R., Friedlander, M. P., Orban, D., and Saunders, M. A. Implementing a smooth exact penalty
+function for general constrained nonlinear optimization. SIAM Journal on Scientific Computing, 42
+(3):A1836–A1859, 2020.
+12
+
+[20] Evans, J. P., Gould, F. J., and Tolle, J. W. Exact penalty functions in nonlinear programming.
+Mathematical programming, 4(1):72–97, 1973.
+[21] Gurobi Optimization, LLC. Gurobi Optimizer Reference Manual, 2024. URL https://www.gurobi.
+com.
+[22] Han, S.-P. and Mangasarian, O. L. Exact penalty functions in nonlinear programming. Mathematical
+programming, 17(1):251–269, 1979.
+[23] Hestenes, M. R. Multiplier and gradient methods. Journal of optimization theory and applications,
+4(5):303–320, 1969.
+[24] Hong, I., Na, S., Mahoney, M. W., and Kolar, M. Constrained optimization via exact augmented
+lagrangian and randomized iterative sketching. In International Conference on Machine Learning,
+pp. 13174–13198. PMLR, 2023.
+[25] Li, M., Grigas, P., and Atamt¨urk, A. On the softplus penalty for large-scale convex optimization.
+Operations Research Letters, 51(6):666–672, 2023.
+[26] Magoon, C. W., Yang, F., Aigerman, N., and Kovalsky, S. Z. Differentiation through black-box
+quadratic programming solvers.
+In The Thirty-ninth Annual Conference on Neural Information
+Processing Systems, 2025.
+[27] Meng, Z., Dang, C., and Yang, X. On the smoothing of the square-root exact penalty function for
+inequality constrained optimization. Computational Optimization and Applications, 35(3):375–398,
+2006.
+[28] Nesterov, Y. Smooth minimization of non-smooth functions. Mathematical programming, 103(1):
+127–152, 2005.
+[29] Nocedal, J. and Wright, S. J. Numerical optimization. Springer, 2006.
+[30] Pan, J., Ye, Z., Yang, X., Yang, X., Liu, W., Wang, L., and Bian, J. BPQP: A differentiable convex
+optimization framework for efficient end-to-end learning. Advances in Neural Information Processing
+Systems, 37:77468–77493, 2024.
+[31] Pineda, L., Fan, T., Monge, M., Venkataraman, S., Sodhi, P., Chen, R. T., Ortiz, J., DeTone, D.,
+Wang, A., Anderson, S., et al. Theseus: A library for differentiable nonlinear optimization. Advances
+in Neural Information Processing Systems, 35:3801–3818, 2022.
+[32] Powell, M. J. A method for nonlinear constraints in minimization problems. Optimization, pp.
+283–298, 1969.
+[33] Rockafellar, R. T. Augmented lagrange multiplier functions and duality in nonconvex programming.
+SIAM Journal on Control, 12(2):268–285, 1974.
+[34] Sharpe, W. F. A simplified model for portfolio analysis. Management science, 9(2):277–293, 1963.
+[35] Sun, H., Shi, Y., Wang, J., Tuan, H. D., Poor, H. V., and Tao, D. Alternating differentiation for
+optimization layers. In The Eleventh International Conference on Learning Representations, 2023.
+[36] Xu, X., Meng, Z., Sun, J., and Shen, R. A penalty function method based on smoothing lower order
+penalty function. Journal of Computational and Applied Mathematics, 235(14):4047–4058, 2011.
+[37] Xu, X., Dang, C., Chan, F. T., and Wang, Y. On smoothing l 1 exact penalty function for constrained
+optimization problems. Numerical Functional Analysis and Optimization, 40(1):1–18, 2019.
+[38] Ye, Y., Pei, H., Wang, B., Chen, P.-Y., Zhu, Y., Xiao, J., and Li, B. Reinforcement-learning based
+portfolio management with augmented asset movement prediction states. In Proceedings of the AAAI
+conference on artificial intelligence, volume 34, pp. 1112–1119, 2020.
+13
+
+A
+Proof of Proposition 1
+Proof. The function F(·; θ, ρ, α) is convex because both f and the penalty terms are convex functions.
+Therefore, it is sufficient to show that 0 ∈∂F(z⋆). Without loss of generality, we assume that ν⋆and
+µ⋆are nonzero. If either were zero, the constraints would be trivially satisfied at z† = arg minz f(z), in
+which case, z† = z⋆, and for any ρ, α ≥0, z† would clearly minimize F(z; θ, ρ, α).
+We first characterize suitable subgradients for the penalty terms at z⋆. Since Az⋆= b, we have
+∂∥Az⋆−b∥1 =
+
+s ∈Rp : sj ∈[−1, 1], 1 ≤j ≤p
+	
+.
+Because ρ ≥∥ν⋆∥∞, the vector s := ν⋆/ρ satisfies s ∈[−1, 1]p and thus A⊤ν⋆= ρA⊤s.
+Next, define ϕ(u) = ∥[u]+∥1 = Pm
+i=1 max{ui, 0}. Then
+∂ϕ(u)i =
+
+
+
+
+
+{0},
+ui < 0,
+[0, 1],
+ui = 0,
+{1},
+ui > 0.
+At the feasible point z⋆we have Cz⋆−d ≤0. By complementary slackness, µ⋆
+i = 0 whenever (Cz⋆−d)i <
+0. For indices with (Cz⋆−d)i = 0, the assumption α ≥∥µ⋆∥∞implies µ⋆
+i /α ∈[0, 1]. Therefore, if we
+define t ∈Rm componentwise by
+ti :=
+(
+0,
+(Cz⋆−d)i < 0,
+µ⋆
+i /α,
+(Cz⋆−d)i = 0,
+then t ∈∂∥[Cz⋆−d]+∥1 and α C⊤t = C⊤µ⋆.
+Combining these choices with the KKT stationarity condition gives
+0 = ∇f(z⋆)+A⊤ν⋆+C⊤µ⋆= ∇f(z⋆)+ρA⊤s+αC⊤t ∈∇f(z⋆)+ρA⊤∂∥Az⋆−b∥1+αC⊤∂∥[Cz⋆−d]+∥1 = ∂F(z⋆).
+Thus 0 ∈∂F(z⋆), and convexity of F implies that z⋆is a global minimizer of minz F(z; θ, ρ, α).
+B
+Proof of Proposition 2
+Proof. Let σ(u) =
+1
+1+e−u . Then we have the following useful identities:
+p′
+δ(t) = σ(t/δ),
+p′′
+δ(t) = 1
+δ σ(t/δ)
+ 1 −σ(t/δ)
+
+,
+ψ′
+δ(t) = σ(t/δ) −σ(−t/δ) = tanh
+ t/(2δ)
+
+,
+ψ′′
+δ (t) = 1
+2δ sech2 t/(2δ)
+
+.
+(15)
+Hence p′′
+δ(0) =
+1
+4δ and ψ′′
+δ (0) =
+1
+2δ. Moreover, if t ≤−γ, then p′
+δ(t) ≤e−γ/δ and p′′
+δ(t) ≤1
+δ e−γ/δ.
+Differentiating Φδ twice with respect to z, the objective contributes P = ∇2
+zzf(z⋆; θ). For the equality
+penalties, using Az⋆−b = 0 and ψ′′
+δ (0) =
+1
+2δ, we have
+∇2
+zz
+
+ρ
+p
+X
+j=1
+ψδ((Az −b)j)
+
+z=z⋆= ρA⊤Diag
+ ψ′′
+δ (0)
+
+A = ρ
+2δ A⊤A.
+For active inequalities, using CAz⋆−dA = 0 and p′′
+δ(0) =
+1
+4δ, we have
+∇2
+zz
+
+α
+X
+i∈A
+pδ((Cz −d)i)
+
+z=z⋆= αC⊤
+ADiag
+ p′′
+δ(0)
+
+CA = α
+4δ C⊤
+ACA.
+For inactive constraints i ∈I, we have (Cz⋆−d)i ≤−γ. The inactive Hessian component is
+Eδ = α C⊤
+I Diag
+ p′′
+δ(sI)
+
+CI.
+14
+
+Since p′′
+δ(t) ≤1
+δ e−γ/δ for all t ≤−γ, it follows that ∥Eδ∥2 ≤cE
+δ e−γ/δ for a constant cE > 0 independent
+of δ. Thus, we obtain the decomposition
+∇2
+zzΦδ(z⋆; θ) = P + 1
+δ B⊤WB + Eδ.
+(16)
+C
+Proof of Proposition 3
+Proof. Differentiating (9) with respect to z, we obtain
+∇zΦδ(z; θ) = ∇zf(z; θ) + ρA⊤ψ′
+δ(Az −b) + αC⊤p′
+δ(Cz −d).
+(17)
+Differentiating (17) with respect to θ and evaluate at z = z⋆
+δ, we have
+∇2
+zθΦδ
+ z⋆
+δ; θ
+
+= ∇2
+zθf
+ z⋆
+δ; θ
+
++ (∂θA⊤)
+ ρ ψ′
+δ(Az⋆
+δ −b)
+
++ A⊤Diag
+ ρ ψ′′
+δ (Az⋆
+δ −b)
+
+∂θ(Az⋆
+δ −b)
++ (∂θC⊤)
+ α p′
+δ(Cz⋆
+δ −d)
+
++ C⊤Diag
+ α p′′
+δ(Cz⋆
+δ −d)
+
+∂θ(Cz⋆
+δ −d).
+(18)
+Next, we partition C and d by active and inactive sets:
+C =
+CA
+CI
+
+,
+d =
+dA
+dI
+
+.
+Then the inequality terms in (18) split as
+(∂θC⊤)
+ α p′
+δ(Cz⋆
+δ −d)
+
+= (∂θC⊤
+A)
+ α p′
+δ(CAz⋆
+δ −dA)
+
++ (∂θC⊤
+I )
+ α p′
+δ(CIz⋆
+δ −dI)
+
+,
+C⊤Diag
+ α p′′
+δ(Cz⋆
+δ −d)
+
+∂θ(Cz⋆
+δ −d)
+= C⊤
+ADiag
+ α p′′
+δ(CAz⋆
+δ −dA)
+
+∂θ(CAz⋆
+δ −dA) + C⊤
+I Diag
+ α p′′
+δ(CIz⋆
+δ −dI)
+
+∂θ(CIz⋆
+δ −dI).
+Substituting it back into (18) yields (12).
+D
+Proof of Theorem 1
+Proof. By the notations defined in Section 3.3, (4) is equal to the following linear system:
+
+P
+B⊤
+B
+0
+ 
+ZKKT
+Λ
+
+= −
+
+G + (∂θB⊤)y⋆
+gθ
+
+,
+(19)
+where Λ = ∂θy⋆. Next, for Zplug
+δ
+, we define an auxiliary variable ηplug
+δ
+= 1
+δ W(BZplug
+δ
++ gθ) ∈R(p+|A|)×s.
+Then (13) is equivalent to the block system
+
+P + Eδ
+B⊤
+B
+−δW −1
+ Zplug
+δ
+ηplug
+δ
+
+= −
+
+G + (∂θB⊤)y⋆+ Fδ
+gθ
+
+.
+(20)
+Let
+K0 =
+
+P
+B⊤
+B
+0
+
+,
+X0 =
+ZKKT
+Λ
+
+,
+Kδ =
+
+P + Eδ
+B⊤
+B
+−δW −1
+
+,
+Xδ =
+Zplug
+δ
+ηplug
+δ
+
+.
+Define the right-hand sides as
+R⋆=
+
+G + (∂θB⊤)y⋆
+gθ
+
+,
+Rδ =
+
+G + (∂θB⊤)y⋆+ Fδ
+gθ
+
+.
+Then (19) is K0X0 = −R⋆, and (20) is KδXδ = −Rδ. Since
+Kδ −K0 =
+Eδ
+0
+0
+−δW −1
+
+,
+15
+
+we have ∥Kδ −K0∥2 ≤∥Eδ∥2 + δ∥W −1∥2. Since K0 is nonsingular under LICQ and P ≻0, let M =
+∥K−1
+0 ∥2. Choose δ0 > 0 such that for all 0 < δ ≤δ0, M
+ ∥Eδ∥2 + δ∥W −1∥2
+
+≤1
+2. Then the Neumann-
+series bound yields
+∥K−1
+δ ∥2 ≤
+M
+1 −M∥Kδ −K0∥2
+≤2M.
+(21)
+Now decompose Xδ−X0 = (K−1
+δ
+−K−1
+0 )(−R⋆)+K−1
+δ
+ −(Rδ−R⋆)
+
+. For the first term, using K−1
+δ
+−K−1
+0
+=
+K−1
+0 (K0 −Kδ)K−1
+δ , we obtain
+∥(K−1
+δ
+−K−1
+0 )(−R⋆)∥2 ≤∥K−1
+0 ∥2∥Kδ −K0∥2∥K−1
+δ ∥2∥R⋆∥2 ≤(2M 2∥R⋆∥2)
+ δ∥W −1∥2 + ∥Eδ∥2
+
+.
+For the second term, note that
+Rδ −R⋆=
+Fδ
+0
+
+,
+hence by (21),
+∥K−1
+δ
+ −(Rδ −R⋆)
+
+∥2 ≤∥K−1
+δ ∥2∥Fδ∥2 ≤2M∥Fδ∥2.
+Combining the two bounds and using ∥Eδ∥2 ≤cE
+δ e−γ/δ and ∥Fδ∥2 ≤cF
+δ e−γ/δ, we obtain
+∥Xδ −X0∥2 ≤K1δ + K2
+δ e−γ/δ,
+(22)
+for constants K1, K2 > 0 independent of δ. Taking the primal block yields
+∥Zplug
+δ
+−ZKKT∥2 ≤K1δ + K2
+δ e−γ/δ.
+(23)
+Both terms on the right-hand side vanish as δ →0, which implies that the plug-in sensitivity Zplug
+δ
+satisfies
+∥Zplug
+δ
+−ZKKT∥2 →0 as δ →0. Furthermore, the auxiliary variable ηplug
+δ
+= 1
+δ W(BZplug
+δ
++ gθ) provides a
+consistent estimate of the KKT dual sensitivity Λ = ∂θy⋆. The total block convergence ∥Xδ −X0∥2 →0
+implies that ∥ηplug
+δ
+−Λ∥2 →0 as δ →0.
+E
+Experimental Details
+All experiments were conducted on a machine with an Intel® CoreTM Ultra 9 285H CPU and an NVIDIA
+GeForce RTX 5070 Laptop GPU (8 GB), using PyTorch 2.2 with CUDA 12.4.
+E.1
+Projection Experiments
+For each problem size, we summarize the mean runtime statistics over multiple random instances. In
+both dXPP and dQP, the Gurobi solver is run with an absolute residual tolerance of ϵabs = 10−6, and
+the active set is identified using the threshold ϵA = 10−5.
+E.1.1
+Projection onto the probability simplex
+For each dimension n, the input x ∈Rn is sampled with i.i.d. entries xi ∼N(0, 1). We evaluate a dataset
+of 325 instances with
+n ∈{20, 100, 450, 1000, 4600, 10000, 100000, 1000000}.
+To balance coverage at large scale, we generate 50 independent instances for each n ≤4600, and 25
+instances for each n > 4600.
+E.1.2
+Projection onto chains
+We fix the number of points at m = 100 and sample the inputs as xj ∈Rd with xj ∼N(0, 100Id). Letting
+n = md denote the total number of primal variables, we vary d to obtain
+n ∈{200, 500, 1000, 2000, 4000, 10000, 100000, 1000000}.
+This yields 325 instances in total: we generate 50 independent problems for each n ≤4000, and 25
+problems for each n > 4000.
+16
+
+E.2
+End-to-End Multi-Period Portfolio Optimization
+This section provides additional implementation details for the bilevel portfolio experiment in (14), in-
+cluding the rolling-window training procedure and the standard QP formulation of the inner problem.
+The dataset consists of daily ETF prices over the period 2011–2024. We use daily returns of 7 tradable
+ETFs and rebalance the portfolio daily. For each decision date t, we form a feature window Xt consisting
+of the past 120 days of ETF returns and predict a horizon-H sequence of returns via a linear predictor.
+Following a standard rolling retraining pattern, the predictor is retrained periodically every 20 trading
+days using a look-back window of 120 supervised samples. Covariances are estimated in a rolling manner
+from 20-day historical returns prior to t and are stabilized by adding a small diagonal ridge term to ensure
+positive definiteness. Each training epoch corresponds to one full pass through the chronological sequence
+of trading days in the dataset. Specifically, within each epoch, the following sequence of operations is
+performed for every decision date t: (i) the feature window Xt is fed into the linear predictor to generate
+horizon-H return forecasts ˆr(θ); (ii) the inner multi-period portfolio optimization problem (14) is solved
+to obtain the optimal weights w⋆(θ); (iii) the decision loss is computed by comparing the optimal weights
+against realized returns; (iv) gradients are backpropagated through the differentiable QP layer to update
+the model parameters θ. The runtime results presented in Table 4 are calculated as the average over 100
+training epochs.
+Fix a decision date t and horizon H. To express the inner portfolio optimization in (14) as a standard
+quadratic program, we introduce auxiliary variables ut+k ∈RN to linearize the ℓ1 turnover constraints
+and define the augmented decision vector ˜x ∈R2NH. The resulting standard QP form is:
+min
+˜x∈R2NH
+1
+2 ˜x⊤P ˜x + q(θ)⊤˜x
+s.t.
+A˜x = b,
+G˜x ≤h
+where
+˜x =
+
+w
+u
+
+,
+P =
+
+λˆΣ
+0
+0
+0
+
+,
+q(θ) =
+
+−ˆr(θ)
+0
+
+w = [w⊤
+t+1, . . . , w⊤
+t+H]⊤,
+u = [u⊤
+t+1, . . . , u⊤
+t+H]⊤
+ˆΣ = blkdiag(ˆΣt+1, . . . , ˆΣt+H),
+ˆr(θ) = [ˆrt+1(θ)⊤, . . . , ˆrt+H(θ)⊤]⊤
+and constraints
+∀k ∈{1, . . . , H} :
+1⊤wt+k = 1,
+wt+k ≥0,
+ut+k ≥0
+−ut+k ≤wt+k −wt+k−1 ≤ut+k
+1⊤ut+k ≤τ
+(24)
+where wt is treated as the known pre-trade portfolio constant for the k = 1 turnover constraint. As
+formulated in (24), the complexity of the inner QP scales linearly with the investment horizon H. Each
+planning stage k ∈{1, . . . , H} introduces a weight vector wt+k ∈RN and an auxiliary vector ut+k ∈RN,
+resulting in an augmented primal dimension of ˜n = 2NH. Similarly, the number of constraints in A and
+G grows linearly with H: there are H equality constraints for simplex normalization, and O(NH) linear
+inequalities arising from the turnover bounds, the turnover budget 1⊤ut+k ≤τ, and the non-negativity
+constraints. This linear scaling makes the horizon H the primary parameter for controlling the problem
+size in our dense-mode scalability study.
+E.3
+Additional Experiments: Sudoku
+This section reports additional experiments on the Sudoku benchmark.
+We follow the experimental
+setting in Amos & Kolter [3, Sec. 4], where solving Sudoku is cast as a differentiable optimization layer.
+Concretely, each instance is a size-n Sudoku puzzle with n ∈{2, 3, 4}, corresponding to 4×4, 9×9, and
+16×16 boards. At each training step, the model takes a puzzle as input and predicts per-cell scores over
+candidate digits. An optimization layer enforces Sudoku constraints and outputs a structured solution,
+and the loss is computed against the ground-truth solution. We compare dXPP with dQP and OptNet
+in both runtime and training dynamics.
+Training dynamics.
+Figure 4 displays the evolution of both the training loss and the error rate over the
+course of training. The error rate is measured as the fraction of puzzles for which the predicted solution
+does not exactly match the ground truth. As shown, dXPP, dQP, and OptNet exhibit remarkably similar
+17
+
+0
+2
+4
+6
+8
+10
+12
+14
+16
+18
+20
+epoch
+0.0
+0.2
+0.4
+0.6
+0.8
+loss
+dQP test
+dQP train
+dXPP test
+dXPP train
+OptNet test
+OptNet train
+0
+2
+4
+6
+8
+10
+12
+14
+16
+18
+20
+epoch
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+err
+dQP test
+dQP train
+dXPP test
+dXPP train
+OptNet test
+OptNet train
+Figure 4: Sudoku experiments: training loss (left) and error rate (right) for dXPP, dQP, and OptNet.
+Table 5: Average per-epoch runtime comparison for Sudoku experiments (ms).
+Board size n
+dXPP
+dQP
+OptNet
+2
+12.15
+12.81
+12.16
+3
+196.21
+261.86
+217.04
+4
+2591.54
+3109.08
+7877.82
+convergence behaviors: the loss functions decay at comparable rates, and the error trajectories follow
+nearly identical downward trends. This strong alignment confirms that the gradients produced by dXPP
+are as effective for learning structured constraints as those from established KKT-based differentiation
+methods, ensuring stable and reliable end-to-end training.
+Runtime efficiency.
+Table 5 summarizes the average runtime per epoch. dXPP consistently outper-
+forms the baselines across all board sizes. Notably, as the problem scale increases (e.g., for n = 4), the
+computational advantage of dXPP becomes increasingly significant, further validating its scalability in
+structured prediction tasks.
+18
+
