@@ -1,0 +1,3664 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+Anonymous Authors1
+Abstract
+We introduce a dynamic sparse training algorithm
+based on linearized Bregman iterations / mirror
+descent that exploits the naturally incurred spar-
+sity by alternating between periods of static and
+dynamic sparsity pattern updates. The key idea is
+to combine sparsity-inducing Bregman iterations
+with adaptive freezing of the network structure to
+enable efficient exploration of the sparse parame-
+ter space while maintaining sparsity. We provide
+convergence guaranties by embedding our method
+in a multilevel optimization framework. Further-
+more, we empirically show that our algorithm
+can produce highly sparse and accurate models
+on standard benchmarks. We also show that the
+theoretical number of FLOPs compared to SGD
+training can be reduced from 38% for standard
+Bregman iterations to 6% for our method while
+maintaining test accuracy.
+1. Introduction
+Deep neural networks have produced astonishing results in
+various areas such as computer vision and natural language
+processing (Mohd Noor & Ige, 2025) but demand significant
+memory and specialized hardware, contributing to growing
+concerns about their environmental impact, particularly the
+carbon footprint of training and inference (Dhar, 2020).
+In response, researchers have explored techniques for devel-
+oping compact and efficient models, such as sparse neural
+networks, wherein many neuron connections are absent.
+Within this context, the Lottery Ticket Hypothesis (Frankle
+& Carbin, 2019) plays a central role, suggesting that ev-
+ery dense network contains a sparse subnetwork that, when
+trained independently, can achieve comparable accuracy.
+There are two main approaches to obtain sparse neural net-
+works: pruning and sparse training. In pruning, a dense
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+model is first trained and unwanted connections are re-
+moved afterward. Because this usually causes a drop in
+performance, the pruned model is often retrained with the
+sparsity pattern fixed. By contrast, sparse training incorpo-
+rates mechanisms that encourage sparsity already during
+training. Pruning methods themselves vary widely, depend-
+ing on how weights are selected for removal and at what
+stage of training pruning is applied. A key distinction is
+between unstructured pruning, which eliminates individual
+weights, and structured pruning, which removes entire com-
+ponents such as neurons or filters, see Hoefler et al. (2021)
+for an extensive overview.
+In addition to pruning-based methods, another technique
+to encourage sparsity is to include explicit regularization
+terms in the loss function. A common example is Lasso
+regularization, which uses the ℓ1-norm as a penalty in the
+objective function (Tibshirani, 1996). The resulting opti-
+mization problem can be solved using algorithms such as
+Proximal Gradient Descent (Rosasco et al., 2020; Mosci
+et al., 2010). A conceptually different approach is to en-
+force sparsity through implicit regularization which can be
+achieved using mirror descent (Nemirovskij & Yudin, 1983).
+Here we would like to highlight a series of works (Huang
+et al., 2016; Azizan et al., 2021; Bungert et al., 2021; 2022;
+Wang & Benning, 2023; Heeringa et al., 2025b) that utilize
+mirror descent or linearized Bregman iterations to induce
+sparsity in neural networks without explicit regularization.
+Linearized Bregman iterations are equivalent to mirror de-
+scent, but they are typically formulated and analyzed with
+less regularity assumptions on the mirror map (e.g., com-
+pared to Azizan et al. (2021)), thereby lending themselves
+toward non-smooth sparsity-promoting mirror maps. This
+was exploited in (Bungert et al., 2022) to devise the LinBreg
+algorithm which essentially is a stochastic mirror descent
+algorithm applied with a non-smooth mirror map.
+Within the context of sparse training, we also highlight the
+relevance of genetic evolutionary algorithms, particularly
+Sparse Evolutionary Training (SET) (Mocanu et al., 2018).
+SET applies a dynamic sparse training approach by perform-
+ing pruning at the end of each epoch—removing a fraction
+of the active connections—and regrowing an equal number
+of new connections at random positions. This iterative pro-
+cess maintains a fixed sparsity level. Beyond sparse training,
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+evolutionary algorithms have also been successfully applied
+to Neural Architecture Search (Miikkulainen et al., 2024;
+Elsken et al., 2019); however, they typically lack rigorous
+convergence guarantees.
+In this paper, we propose a training algorithm based on lin-
+earized Bregman iterations, designed to promote sparsity
+in neural networks during training. A key benefit of Breg-
+man iterations over regularization methods like the Lasso
+is that for the former the number of non-zero parameters
+of the trained networks usually increases monotonically.
+Hence, algorithms like LinBreg lend themselves to exploit-
+ing sparsity early on in the training process. In our method,
+we periodically freeze the network’s structure: that is, we
+restrict updates to parameters that are non-zero in the cur-
+rent iteration. This approach offers two key benefits. First,
+stricter sparsity is enforced than through LinBreg alone, as
+the number of non-zero parameters cannot increase during
+the frozen phases. Second, during the frozen phases only
+derivatives corresponding to active parameters are required
+which provides scope for significant computational savings
+during training.
+We embed the resulting algorithm within a multilevel op-
+timization framework (Nash, 2000), which enables us to
+leverage existing convergence theory. In particular, we adapt
+the convergence analysis of Multilevel Bregman Proximal
+Gradient Descent (Elshiaty & Petra, 2025) to our sparse
+training setup. We find that our method can outperform
+the standard LinBreg algorithm by yielding models that
+are sparser while achieving comparable or even superior
+performance for image classification.
+The remainder of this paper is structured as follows. First,
+we explain our algorithm and present how it can be inter-
+preted as a multilevel optimization method. We proceed
+by proving a sublinear convergence result for the algorithm.
+Finally, we perform numerical experiments comparing our
+method to other methods that aim at achieving sparse but
+performative models.
+2. Related Work
+Bregman Iterations / Mirror descent
+Bregman iterations
+were originally introduced by Osher et al. (2005) as iterative
+reconstruction method for imaging inverse problems to over-
+come the bias of regularization methods like total variation
+denoising (Rudin et al., 1992). Later they were applied to
+compressed sensing (Yin et al., 2008) and nonlinear inverse
+problems (Bachmayr & Burger, 2009; Benning et al., 2021).
+In the context of machine learning, they were used for spar-
+sity (Bungert et al., 2021; 2022; Heeringa et al., 2025b;a) of
+neural network representations as well as for training net-
+works with non-smooth activations of proximal type (Wang
+& Benning, 2023). While Bregman iterations in their orig-
+inal form generalize the implicit Euler method, so-called
+linearized Bregman iterations are closely related to mirror
+descent (Nemirovskij & Yudin, 1983) or more precisely to
+lazy mirror descent / Nestorov’s dual averaging (Nesterov,
+2009). The method is also referred to as Bregman proximal
+gradient descent and a stochastic gradient version of it was
+coined LinBreg by Bungert et al. (2022). It must be em-
+phasized that, just like different communities use different
+terminologies, they also developed different mathematical
+tools to analyze the convergence behavior. In particular, the
+inverse problems community put a lot of effort into analyz-
+ing Bregman iterations with sparsity-promoting regularizers
+which translates to mirror descent with non-smooth mirror
+maps. This will also be our approach in this paper.
+Multilevel Optimization
+Multilevel optimization meth-
+ods originate from multigrid techniques, which were ini-
+tially developed to solve differential equations efficiently.
+The MGOPT algorithm (Nash, 2000) was among the first to
+adapt these ideas to optimization problems. More recently,
+Elshiaty & Petra (2025) extended this framework by incor-
+porating linearized Bregman iterations. Their work provides
+convergence guarantees via a Polyak–Łojasiewicz-type in-
+equality for the ML BPGD algorithm and demonstrates its
+effectiveness in image reconstruction tasks. Hovhannisyan
+et al. (2016) provide a connection between multilevel opti-
+mization and mirror descent, noting that the latter is equiv-
+alent to linearized Bregman iterations. They further incor-
+porate acceleration techniques, prove convergence of their
+algorithm, and illustrate its performance through numeri-
+cal experiments on face recognition. Multilevel strategies
+have also been explored in deep learning, particularly for
+training residual neural networks (ResNets). Kopaniˇc´akov´a
+& Krause (2023) introduce a hierarchy based on networks
+of varying depth and width, leveraging the fact that smaller
+models are faster and cheaper to train. Similar approaches
+have been made e.g. by Gaedke-Merzh¨auser et al. (2021).
+Other approaches embed the multilevel hierarchy directly
+into the objective function rather than the model architec-
+ture. For example, Braglia et al. (2020) use varying batch
+sizes to compute the loss, effectively inducing a multiscale
+structure during training.
+Sparse neural networks
+Within the context of sparse
+training, several methods have been proposed to obtain
+sparse yet performant models without the need to train a
+dense network beforehand. One approach is to keep a static
+sparsity pattern throughout training which is identified in
+advance based upon, say, the magnitude of the initialized
+weights’ gradient of the loss (Lee et al., 2019) or second
+order derivative information (Singh & Alistarh, 2020). An-
+other way is to allow for the sparsity pattern to dynamically
+change throughout training by including mechanisms that re-
+move and regrow connections according to certain criterion.
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+For example, DEEP-R (Bellec et al., 2018) uses a random
+regrowth strategy whereas RigL (Evci et al., 2020) acti-
+vates connections according to gradient magnitude. Other
+criterion may include: accumulated gradient information
+(Liu et al., 2021); momentum (Dettmers & Zettlemoyer,
+2019); the difference to the weights of a previous training
+step (Li et al., 2023). DFBST (Pote et al., 2023) applies
+binary masks during both the forward and backward passes
+in which the forward pass mask sparsifies the weights, while
+the backward pass mask restricts gradient updates, enabling
+sparse training. Top-KAST (Jayakumar et al., 2020) main-
+tains a fixed sparse model by using only the top-D weights
+for the forward pass, but employs a slightly larger set of
+parameters during the backward pass to update and explore
+potential alternative masks. Ji et al. (2024b) decouple the
+optimization of masks and weights, treating the mask as an
+explicit optimization variable. Such a decoupling can be
+viewed in a time-dependent mirror flow framework (Jacobs
+& Burkholz, 2025) in which convergence and optimality re-
+sults can be stated. The AC/DC method (Peste et al., 2021)
+uses alternating phases of full-support and sparse-support
+optimization to produce accurate sparse–dense model pairs,
+while providing convergence guarantees of the underlying
+iterative hard thresholding algorithm for non-convex train-
+ing under a Polyak–Łojasiewicz-type inequality. Yin et al.
+(2023) propose an algorithm to obtain channel-level sparse
+networks by performing channel pruning during training,
+where channels are removed based on the mean magnitude
+of their weights. Techniques have also been developed to
+further enhance existing sparse training algorithms such as
+applying the soft thresholding operator with learnable thresh-
+olds to layer weights (Kusupati et al., 2020) and performing
+weight updates that minimize over a local neighborhood (Ji
+et al., 2024a).
+3. Method
+A typical training problem to find optimal network parame-
+ters θ ∈Rd consists of solving
+min
+θ∈Rd L(θ),
+(1)
+where L: Rd →R is a differentiable and non-negative loss
+function, for example, the empirical loss. One way to en-
+force constraints or encourage sparsity in solutions is to
+specify a proper, convex, and lower semicontinuous func-
+tion J : Rd →(−∞, ∞], such as the ℓ1-norm or indicator
+function of a closed convex set, and consider a minimization
+of L + J. The approach of Bregman iterations is to directly
+minimize L, while implicitly minimizing J. This is achieved
+through the scheme
+θ(k+1) = argminθ∈Rd Dp(k)
+J
+(θ, θ(k)) + τ (k)L(θ),
+p(k+1) = p(k) −τ (k)∇L(θ(k+1)) ∈∂J(θ(k+1)),
+(2)
+where the so-called Bregman divergence (associated to J)
+is defined as:
+Dp
+J(˜θ, θ) := J(˜θ) −J(θ) −⟨p, ˜θ −θ⟩.
+(3)
+Here θ ∈dom(∂J), p ∈∂J(θ) is a subgradient, and
+τ (k) > 0 is a sequence of step sizes. The Bregman di-
+vergence (3) can be interpreted as the difference between J
+and its linearization around θ and satisfies properties such
+as Dp
+J(θ, θ) = 0 and, due to convexity of J, Dp
+J(˜θ, θ) ≥0.
+Since solving the optimization problem (2) is typically al-
+most as hard as solving (1), one typically replaces L in (2)
+with its first order approximation L(θ(k)) + ⟨∇L(θ(k)), θ −
+θ(k)⟩and J with the strongly convex elastic-net regularizer
+Jδ(θ) := 1
+2δ ∥θ∥2 + J(θ),
+δ ∈(0, ∞),
+to obtain (see, e.g., (Bungert et al., 2022) for a derivation)
+v(k+1) = v(k) −τ∇L(θ(k)),
+(4a)
+θ(k+1) = proxδJ(δv(k+1)),
+(4b)
+starting at some θ(0) and v(0) ∈∂Jδ(θ(0)). The algorithm
+involves the proximal operator
+proxδJ(θ) := argmin˜θ∈Rd 1
+2δ ∥˜θ −θ∥2 + J(˜θ).
+(5)
+To make (4) feasible for the high-dimensional and non-
+convex problems arising in machine learning, Bungert
+et al. (2022) in their LinBreg method replaced the gradi-
+ent ∇L(θ(k)) in (4a) by an unbiased stochastic estimator
+and provided a convergence analysis.
+Note that if J ≡0, the proximal operator is the identity map
+and, taking δ = 1, (4) recovers Gradient Descent. More gen-
+erally, (4) coincides with mirror descent (Beck & Teboulle,
+2003) applied to the distance generating function Jδ. This
+can be seen by noting that ∇J∗
+δ = proxδJ(δ·), where J∗
+δ de-
+notes the convex conjugate (Bauschke & Combettes, 2011)
+of Jδ.
+Although evaluating the proximal operator in (4b) is phrased
+as a minimization problem, particular choices of J admit
+closed forms, e.g., J = λ∥· ∥1 yields the soft shrinkage
+operator
+proxδJ(δv) = δ sign(v) max(|v| −λ, 0)
+(6)
+applied componentwise. This particular choice also demon-
+strates how Bregman iterations can lead to sparse networks.
+In (6); only parameters whose corresponding dual variable
+v exceeds the threshold λ in absolute value will be non-zero.
+Thus, we can view (4b) as a pruning step inherent to the
+optimizer, where the pruning criterion employs information
+associated with the regularizer J, and not just the magnitude
+of the parameter or of the gradient of the training loss L.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+In practice, θ can represent the parameters of several net-
+work layers, and as such one may wish to employ a different
+regularizer for each layer. To represent this, we split the
+parameter vector θ into groups via θ = (θ(1), . . . , θ(G)),
+where each group θ(g) ∈Rdg contains dg scalar parameters.
+Furthermore, we assume the regularizer J acts on these
+groups separately, taking the form
+J(θ) =
+G
+X
+g=1
+Jg(θ(g)),
+(7)
+where each Jg : Rdg →(−∞, ∞] is proper, convex, and
+lower-semicontinuous. We see that (7) includes the standard
+ℓ1-norm but also the group ℓ1,2-norm (Scardapane et al.,
+2017), given by
+J(θ) :=
+G
+X
+g=1
+√ng∥θ(g)∥2,
+(8)
+where ng denotes the number of parameters in the group.
+While the ℓ1-norm encourages individual parameters to be-
+come zero, the group ℓ1,2-norm can be used to enforce entire
+structures, such as convolutional kernels, to vanish.
+The main idea of our algorithm is to use this induced spar-
+sity of the iterations (4) by only performing a full update
+with this rule every m iterations. In all other iterations, we
+update only the non-zero parameters and consequently only
+require gradients with respect to the active parameters. De-
+pending on the induced sparsity pattern, this provides scope
+for significant computational savings during most training
+steps. We show that we can interpret this idea as a multi-
+level optimization scheme, allowing us to adapt convergence
+proofs from the multilevel optimization literature.
+More precisely, we consider a two-level framework con-
+sisting of the actual minimization problem (1) and a coarse
+problem with fewer variables. To map between these levels,
+the restriction and prolongation operators are used. The re-
+striction operator at iteration k, denoted R(k) : Rd →RDk
+with Dk < d, is a linear map that decides which of the
+variables we restrict ourselves to. Consequently, the rows of
+the matrix R(k) are standard unit vectors and θi is selected
+by R(k) if and only if one of the rows of the matrix is the
+i-th standard unit vector. We only consider the case where
+entire groups are selected by the restriction operator, so if
+one component of a group θ(g) is selected, then all the other
+components must be selected as well. Given the number of
+selected groups G(k), we can define an injective function
+r(k) : {1, 2, . . . , G(k)} →{1, 2, . . . , G} such that
+R(k)θ = (θ(r(k)(1)), . . . , θ(r(k)(G(k)))),
+θ ∈Rd.
+For a given coarse variable ˆθ, this function is useful to
+determine where its parameter groups belong on the fine
+level.
+The corresponding prolongation operator P (k) : RDk →
+Rd maps from the coarse to the fine level and is defined
+as the transpose of the restriction P (k) = (R(k))T . This
+means that the prolongation operator maps the groups that
+were selected by the restriction back and simply completes
+the parameter vector θ by setting zero for every parameter
+group that was not selected by the restriction. Using the
+previously defined function r(k), we can explicitly write the
+prolongation of a coarse variable ˆθ ∈RDk as
+(P (k)ˆθ)(g) =
+(ˆθ(i),
+if g = r(k)(i),
+0,
+otherwise.
+While the case where the restriction operator chooses the
+groups that are non-zero at iteration k is the most interest-
+ing for us, our analysis works for arbitrary selections of
+parameter groups.
+In our algorithm, during each iteration k, a predefined cri-
+terion is evaluated to decide whether to invoke the coarse-
+level model. If the coarse model is employed, the restriction
+operator R(k) maps the current iterate θ(k) and the corre-
+sponding subgradient v(k) to the coarse level. We denote
+these restrictions by ˆθ0,k := R(k)θ(k) and ˆv0,k := R(k)v(k).
+The algorithm then performs m LinBreg steps to minimize
+the coarse loss
+ˆL(k)(ˆθ) := L(θ(k) + P (k)(ˆθ −ˆθ0,k))
+(9)
+using ˆJ(k)
+δ
+(ˆθ) :=
+1
+2δ∥ˆθ∥2+ ˆJ(k)(ˆθ) as the regularizer, where
+ˆJ(k)(ˆθ) :=
+G(k)
+X
+i=1
+Jr(k)(i)(ˆθ(i)).
+The result of these coarse iteration steps ˆθm,k with corre-
+sponding subgradient ˆvm,k is then mapped back to the fine
+level via
+˜θ(k+1) := θ(k) + P (k)(ˆθm,k −ˆθ0,k),
+˜v(k+1) := v(k) + P (k)(ˆvm,k −ˆv0,k),
+before performing a LinBreg step on the fine level to obtain
+θ(k+1) and v(k+1). See Algorithm 1.
+If the restriction operator at iteration k only selects the
+parameter groups that are non-zero for θ(k), the coarse loss
+(9) and the prolongation to the fine level simplify to
+ˆL(k)(ˆθ) = L(P (k)ˆθ),
+˜θ(k+1) = P (k)ˆθm,k.
+For the subgradients, however, such simplification is not
+available.
+Typically in multilevel optimization, a linear correction term
+is added to the coarse objective function to ensure first-order
+coherence, i.e., critical points on the fine level are transferred
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+to ones on the coarse level. In our case, due to the special
+structure of ˆL(k) no correction term is necessary, since
+∇ˆL(k)(ˆθ0,k) = R(k)∇L(θ(k)).
+Hence, if θ(k) is a critical point of L, then ˆθ0,k := R(k)θ(k)
+is a critical point of ˆL(k).
+A criterion to decide when to use the coarse model is (Wen
+& Goldfarb, 2009; Vanmaele et al., 2025)
+∥R(k)∇L(θ(k))∥≥κ∥∇L(θ(k)∥,
+∥R(k)∇L(θ(k))∥> ε,
+(10)
+where κ and ε are positive hyperparameters. Inequalities
+(10) prevent coarse iteration updates in the case that ˆθ0,k is a
+critical point of ˆL(k) (which does not necessarily mean that
+θ(k) is a critical point of L). MAGMA (Hovhannisyan et al.,
+2016) uses a similar criterion to decide when to invoke the
+coarse model. Specifically, it checks the first part of (10)
+and, in addition, whether the current iterate is sufficiently
+far from the point of the last coarse update or the number of
+consecutive fine updates is below a predefined limit. This
+ensures coarse updates are triggered only when they are ben-
+eficial—either because the iterate has changed significantly,
+or because not too many consecutive fine steps have yet
+been taken.
+Since we work with subgradients, we carefully investigate
+the transfer between the different levels. In particular, we
+show that restricting the subgradients from the fine level
+yields subgradients of the coarse regularizer and mapping
+the coarse subgradients back to the fine level as described
+also leads to subgradients on the fine level due to the struc-
+ture of J from (7). The proofs of the following propositions
+can be found in Appendix A.
+Proposition 3.1. If v(k) ∈∂Jδ(θ(k)), then defining ˆv0,k :=
+R(k)v(k) and ˆθ0,k := R(k)θ(k) we have
+ˆv0,k ∈∂ˆJ(k)
+δ
+(ˆθ0,k).
+This implies that in Algorithm 1 we start the coarse iteration
+with a feasible pair (ˆθ0,k, ˆv0,k). Consequently, due to the
+structure of the iteration, we subsequently obtain ˆvi,k ∈
+∂ˆJ(k)
+δ
+(ˆθi,k) for i = 1, . . . , m. We also observe that the
+way of transferring the updated variables back to the fine
+level preserves the fact that ˜v(k+1) is a subgradient of Jδ at
+˜θ(k+1).
+Proposition 3.2. If ˆθm,k ∈dom(∂ˆJ(k)) and ˆvm,k ∈∂ˆJ(k)
+δ
+,
+then defining
+˜θ(k+1) := θ(k) + P (k)(ˆθm,k −ˆθ0,k),
+˜v(k+1) := v(k) + P (k)(ˆvm,k −ˆv0,k),
+we have ˜v(k+1) ∈∂Jδ(˜θ(k+1)).
+Algorithm 1 Multilevel LinBreg
+Input: Initial guess θ(0) ∈Rd, v(0) ∈∂Jδ(θ(0))
+for k ∈N do
+if condition to use coarse model is satisfied at θ(k)
+then
+ˆθ0,k = R(k)θ(k)
+ˆv0,k = R(k)v(k)
+for i = 1, . . . , m do
+ˆg(k) ←unbiased estimator of ∇ˆL(k)(ˆθi−1,k)
+ˆvi,k = ˆvi−1,k −ˆτ i−1,kˆg(k)
+ˆθi,k = proxδ ˆ
+J(k)(δˆvi,k)
+end for
+˜v(k+1) = v(k) + P (k)(ˆvm,k −ˆv0,k)
+˜θ(k+1) = θ(k) + P (k)(ˆθm,k −ˆθ0,k)
+g(k+1) ←unbiased estimator of ∇L(˜θ(k+1))
+v(k+1) = ˜v(k+1) −τg(k+1)
+θ(k+1) = proxδJ(δv(k+1))
+else
+g(k) ←unbiased estimator of ∇L(θ(k))
+v(k+1) = v(k) −τg(k)
+θ(k+1) = proxδJ(δv(k+1))
+end if
+end for
+To conclude this section, we would like to highlight the
+key differences between our algorithm and the methods
+ML BPGD (Elshiaty & Petra, 2025) and MGOPT (Nash,
+2000). Firstly, we use adaptive restriction and prolongation
+operators, which are necessary to focus on different parame-
+ters at different iterations. Secondly, we employ stochastic
+gradient estimators instead of exact gradients. However,
+for the purposes of our analysis, we assume access to ex-
+act gradients at the fine level and use stochastic estimators
+only for the coarse-level problem. Thirdly, we do not per-
+form a line search when mapping from the coarse level to
+the fine level. MGOPT and ML BPGD both use arbitrary
+convex coarse objective functions with a linear correction
+term to ensure that the direction found with the coarse it-
+erations is a descent direction, as well as a line search to
+ensure that the fine loss actually decreases. Our specific
+choice of the coarse objective eliminates the need for a line
+search. Finally, unlike ML BPGD, our regularizer Jδ can
+be non-differentiable. Therefore, rather than working with
+gradients, we need to consider subgradients which must be
+handled with care when mapping between different levels
+(see Propositions 3.1 and 3.2).
+4. Convergence Analysis
+For the convergence analysis, we need to make further as-
+sumptions. We follow Bauschke et al. (2019); Elshiaty & Pe-
+tra (2025) and require the loss function to be smooth relative
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+to the regularizer and to satisfy a Polyak–Łojasiewicz-like
+inequality.
+Assumption 1. We assume that L is L-smooth with respect
+to Jδ, i.e.
+L(˜θ) ≤L(θ) + ⟨∇L(θ), ˜θ −θ⟩+ LDv
+Jδ(˜θ, θ)
+for ˜θ ∈Rd, θ ∈dom(∂J) and v ∈∂Jδ(θ).
+Since Jδ is strongly convex, its induced Bregman divergence
+is bounded from below by the squared Euclidean norm.
+Therefore, from the descent lemma for L-smooth functions
+(Bauschke & Combettes, 2011; Beck, 2017) it follows that
+this assumption holds in particular for loss functions L
+with a Lipschitz-continuous gradient which, however, is
+generally a much stronger condition than Assumption 1.
+Assumption 2. For θ ∈dom(∂J), v ∈∂Jδ(θ) and τ > 0,
+let v+
+τ := v−τ∇L(θ) and θ+
+τ := proxδJ(δv+
+τ ). We assume
+the existence of a function λ: (0, ∞) →(0, ∞) and some
+η > 0 such that
+Dv+
+τ
+Jδ (θ, θ+
+τ ) ≥λ(τ)D
+v+
+1
+Jδ (θ, θ+
+1 )
+(11)
+for θ ∈dom(∂J), v ∈∂Jδ(θ), τ > 0 and
+D
+v+
+1
+Jδ (θ, θ+
+1 ) ≥η(L(θ) −L⋆),
+(12)
+where L⋆:= infRd L.
+In the gradient descent case where Jδ = 1
+2∥·∥2, assumption
+(11) is satisfied with λ(τ) = τ 2 and (12) becomes the well-
+known Polyak–Łojasiewicz inequality
+∥∇L(θ)∥2 ≥2η(L(θ) −L⋆),
+which is weaker than convexity but requires every stationary
+point of L to be a minimizer.
+For our convergence analysis, we use the exact gradients
+on the fine level and stochastic gradient estimators on the
+coarse level. We assume that these gradient estimators are
+unbiased with bounded variance. To be precise, let (Ω, F, P)
+be a probability space and ˆg(k) : RDk × Ω→RDk. We
+make the following assumption regarding ˆg(k).
+Assumption 3. We assume that for ˆθ ∈RDk,
+E
+h
+ˆg(k)(ˆθ, ω)|ˆθ
+i
+= ∇ˆL(k)(ˆθ).
+Moreover, there exists a positive constant σ such that
+E
+h
+∥ˆg(k)(ˆθ, ω) −∇ˆL(k)(ˆθ)∥2|ˆθ
+i
+≤σ2
+for any k ∈N and ˆθ ∈RDk.
+Using these two assumptions, following Bauschke et al.
+(2019); Elshiaty & Petra (2025) and extending the coarse
+descent to the stochastic case, we can prove a decrease
+property.
+Theorem 4.1. Let Assumptions 1, 2 and 3 be satisfied and
+(θ(k)) be the sequence generated by Algorithm 1 with exact
+gradients on the fine level. If the step size τ is chosen such
+that τ < 1
+L and the coarse step sizes such that ˆτ i,k ≤
+1
+4L
+then
+E
+h
+L(θ(k)) −L⋆i
+≤(1 −r)k(L(θ(0)) −L⋆)
++
+k−1
+X
+i=0
+(1 −r)k−iˆρi,
+where r = ηλ(τ)
+τ
+and
+ˆρi =
+m−1
+X
+j=0
+δσ2
+2 ˆτ j,i −
+1
+4ˆτ j,i E
+
+Dsym
+ˆ
+J(k)
+δ (ˆθj+1,i, ˆθj,i)
+
+if iteration i triggers a coarse step and ˆρi = 0 otherwise.
+See (14) for a definition of Dsym
+ˆ
+J(k)
+δ
+A direct consequence is the convergence in expectation of
+the Algorithm 1 if the coarse step-sizes converge to zero.
+Corollary 4.2. Let the assumptions from Theorem 4.1 hold.
+Define ˆτ (k) := maxi=0,...,m−1 ˆτ i,k, the maximum stepsize
+on the coarse level in iteration k. If ˆτ (k) converges to zero,
+then
+lim
+k→∞E
+h
+L(θ(k))
+i
+= L⋆.
+We note that ultimately, we would like to prove the same
+results when also using stochastic gradients on the fine level.
+However, this appears to be out of reach unless one is will-
+ing to assume (strong) convexity (Bungert et al., 2022),
+increased smoothness (Zhang & He, 2018), or perform vari-
+ance reduction (Li et al., 2022). The only results for stan-
+dard mirror descent in this direction that we are aware of
+are due to Fatkhullin & He (2024), who show that, in expec-
+tation, the best iterate is within one mirror-descent step of
+an ε-optimal point once sufficiently many steps have been
+taken and the step-sizes are chosen correctly depending on
+ε. Their analysis relies on a differentiable mirror map, weak
+relative convexity of the objective, and a different variant of
+the Polyak–Łojasiewicz inequality.
+In Appendix B, we examine convergence in a slightly dif-
+ferent setting. Specifically, when the loss function has a
+finite-sum structure, we show that using a mini-batch ap-
+proximation as the coarse loss, together with an added lin-
+ear correction term, makes the multilevel algorithm closely
+related to standard variance-reduction methods. This con-
+nection enables us to establish convergence of the resulting
+algorithm.
+5. Numerical Experiments
+All gradient estimators in Algorithm 1 are computed us-
+ing mini-batch approximations. It is also important to note
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+that the ordering of coarse and fine updates is flexible. For
+instance, one may perform a single fine update – using
+a mini-batch to update the fine model – followed by m
+coarse updates. Alternatively, switching can occur at the
+epoch level, where fine updates are carried out for an entire
+epoch, and then coarse updates are applied for m consecu-
+tive epochs.
+As mentioned above, we choose the linear map that selects
+all non-zero parameters in the current state as the restric-
+tion operator. The sparsity of a model is defined to be the
+percentage of the models’ parameters that are zero. We
+consider promoting unstructured sparsity with standard ℓ1-
+regularization, that is, J = λ∥· ∥1, and initialize all net-
+works with a sparsity of 99%. Due to our considerations re-
+garding the initialization (see Appendix D), we would need
+to multiply every sparsified parameter group by
+1
+√
+0.01 = 10.
+However, we instead use a multiplication of 5 as this leads to
+better results. For training, we use the step-wise switching
+strategy between fine and coarse model rather than switch-
+ing epoch-wise. To simplify the algorithm, we use the coarse
+model at every stage, and perform a fine level update every
+100 training steps, i.e. take m = 99 in Algorithm 1. For all
+experiments, we initialize the learning rate at 0.1 and apply
+a cosine annealing scheduler.
+For ablation studies investigating the effects of the hyperpa-
+rameters λ and m for medium and larger scale experiments
+we refer to Appendix D
+CIFAR-10 training
+In order to evaluate our proposed
+training algorithm, we train different neural network ar-
+chitectures on the CIFAR-10 dataset, containing 60,000
+32-by-32 color images in 10 different classes. The objec-
+tive is to construct sparse models that exhibit only marginal
+reductions in test accuracy.
+The hyperparameter λ plays a significant role in determining
+the characteristics of the trained network. As expected,
+stronger regularization – i.e., larger values of λ – leads to
+increased sparsity in the resulting model, potentially at the
+cost of reduced accuracy (see Figure 4a in the Appendix).
+Therefore, our aim is to find a trade-off between sparsity
+and accuracy.
+We train models using Algorithm 1 with different choices
+of the regularization parameter λ across multiple random
+seeds to produce models with different levels of sparsity. As
+baselines, we include dense models trained with stochastic
+gradient descent (SGD), LinBreg, RigL (Evci et al., 2020)
+and pruned versions of the SGD-trained models. The latter
+were pruned to match the sparsity levels achieved by Lin-
+Breg and then fine-tuned. For a fair comparison, the pruned
+models were trained for only 180 epochs before undergoing
+an additional 20 epochs of fine-tuning, whereas the base-
+line methods were trained for the full 200 epochs. Thus,
+the overall training budget is aligned at 200 epochs across
+all methods. For models trained with RigL, we used the
+proposed Erd˝os–R´enyi-Kernel (ERK) initialization method,
+as we found it yielded the best results. While our proposed
+method is robust to different initialization schemes, RigL
+relies on ERK initialization to achieve competitive results
+(see Table 2 in Appendix D). We visualize our results in Fig-
+ure 1 plotting the mean values over multiple random seeds
+of the test accuracy at the corresponding sparsity levels for
+different regularizers, for LinBreg, our proposed algorithm,
+RigL and the pruned and fine-tuned models. We observe
+that, across all the architectures considered, our method
+achieves results comparable to those of RigL. Moreover,
+we emphasize that, while achieving results comparable to
+LinBreg and pruning on ResNet18, our method requires
+substantially less gradient information. For the VGG16 ar-
+chitecture, the pruned architectures outperform the other
+approaches, however, at the cost of requiring training of a
+full architecture. Moreover, for WideResNet28-10, our algo-
+rithm outperforms both LinBreg and the pruning approach
+by producing models that are sparser and equally accurate.
+Compared to pruning, our method, RigL (and to some extent
+also LinBreg) have the advantage of not requiring a dense
+model to be trained.
+Exploiting sparsity in practice – especially unstructured
+sparsity as focused on in these experiments – is notoriously
+difficult, especially on GPUs. To this end, it is common to
+report theoretical computational savings – see Appendix C
+for how our method compares to standard training with SGD
+and LinBreg in this regard. Furthermore, implementations
+of sparse training algorithms often calculate dense gradients
+and only simulate sparse training via masking hooks on
+forward and backward passes. To illustrate that ML LinBreg
+can lead to real-time savings, we use SparseProp (Nikdan
+et al., 2023), a package which has implementations of linear
+and convolutional layers that exploit unstructured sparsity
+- with the caveat that it is only applicable on CPUs. We
+train ResNet18 on an AMD Ryzen 5 4500U CPU for 10
+epochs where, after each fine update, we replace Torch
+linear and convolutional layers with SparseProp analogues
+if doing so leads to faster forward and backward passes.
+We report the computational performance of SGD and the
+Torch and SparseProp implementations of ML LinBreg in
+Figure 2. Utilizing SparseProp reduces training time by 49%
+compared to the Torch implementation, with time spent for
+forward and backward passes reduced by 32% and 58%,
+respectively. In contrast, the Torch variant of ML LinBreg
+takes slightly longer than SGD since full gradients are still
+calculated under the hood and the optimizer step has added
+complexity.
+Further CIFAR-10 experiments are reported in Appendix D,
+including an ablation study investigating the effect of the
+duration of the coarse period and the regularization strength.
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+94
+95
+96
+97
+Sparsity [%]
+89.50
+89.75
+90.00
+90.25
+90.50
+90.75
+91.00
+91.25
+Test Accuracy [%]
+Optimizer
+LinBreg
+ML LinBreg
+pruning
+RigL
+(a) ResNet18
+89
+90
+91
+92
+93
+94
+95
+96
+97
+Sparsity [%]
+88.5
+89.0
+89.5
+90.0
+90.5
+91.0
+91.5
+92.0
+Test Accuracy [%]
+Optimizer
+LinBreg
+ML LinBreg
+pruning
+RigL
+(b) VGG16
+90
+91
+92
+93
+94
+95
+96
+97
+98
+Sparsity [%]
+90.0
+90.5
+91.0
+91.5
+92.0
+92.5
+93.0
+93.5
+Test Accuracy [%]
+Optimizer
+LinBreg
+ML LinBreg
+pruning
+RigL
+(c) WideResNet28-10
+Figure 1. Achieved accuracy and sparsity of different optimizers on CIFAR-10 for different architectures.
+(a) Per-epoch training time on CPU
+(b) Breakdown of total training time on CPU
+Figure 2. Timing breakdown for training ResNet18 for 10 epochs on an AMD Ryzen 5 4500U CPU when employing SparseProp modules
+to exploit unstructured sparsity. The sparsity induced by ML LinBreg can lead to real-time computational savings.
+TinyImageNet training
+We further evaluate our approach
+on the TinyImageNet dataset, containing 100,000 64-by-64
+color images in 200 different classes, using two different
+architectures. As in the CIFAR-10 experiments, we train
+models with the regularizer J = λ∥· ∥1 for different values
+of λ across multiple random seeds. The results are summa-
+rized in Figure 3, where we present the mean values of the
+achieved test accuracies located at the sparsity of the models.
+For comparison, we also include a dense baseline trained
+with standard SGD. We additionally provide the results that
+can be achieved by pruning and fine-tuning the dense SGD
+models to different levels of sparsity. Our findings show
+that the proposed multilevel method consistently outper-
+forms the standard LinBreg algorithm by producing models
+that are sparser while maintaining, or even improving, test
+accuracy. Compared to the pruning approach, we achieve
+comparable or better test accuracy across all sparsity levels.
+6. Conclusion and Outlook
+We proposed a multilevel framework for linearized Bregman
+iterations in the context of sparse training. We established
+convergence of the function values for our method assuming
+a PL-type condition for the objective, and we demonstrated
+its effectiveness in producing sparse yet accurate models
+for image classification tasks. An interesting direction for
+future work is to analyze the convergence of our algorithm
+in a fully stochastic setting, using gradient estimators in
+place of exact gradients for both the lower and the higher
+0
+10
+20
+30
+40
+50
+60
+70
+80
+90
+Sparsity [%]
+54
+55
+56
+57
+58
+59
+Test Accuracy [%]
+Optimizer
+SGD
+LinBreg
+ML LinBreg
+pruning
+(a) ResNet18
+0
+10
+20
+30
+40
+50
+60
+70
+80
+90
+Sparsity [%]
+57
+58
+59
+60
+61
+62
+63
+Test Accuracy [%]
+Optimizer
+SGD
+LinBreg
+ML LinBreg
+pruning
+(b) WideResNet28-10
+Figure 3. Achieved accuracy and sparsity of different optimizers
+on TinyImageNet for different architectures.
+level problem. Also, relaxing the PL-condition to a local
+condition of Kurdyka–Łojasiewicz type is an interesting
+but challenging follow-up problem. Moreover, sparsity-
+informed training implementations of our method have the
+potential to reduce training time and resource requirements.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+ACKNOWLEDGMENTS
+LB, YL, and SS acknowledge funding by the German Min-
+istry of Research, Technology and Space (BMFTR) under
+grant agreement No. 01IS24072A (COMFORT).
+REPRODUCIBILITY STATEMENT
+The code used to produce the results will be released at a
+GitHub repository.
+References
+Azizan, N., Lale, S., and Hassibi, B. Stochastic mirror
+descent on overparameterized nonlinear models. IEEE
+Transactions on Neural Networks and Learning Systems,
+33(12):7717–7727, 2021. doi: 10.1109/TNNLS.2021.
+3087480.
+Bachmayr, M. and Burger, M.
+Iterative total variation
+schemes for nonlinear inverse problems. Inverse Prob-
+lems, 25(10):105004, 2009. doi: 10.1088/0266-5611/25/
+10/105004.
+Bauschke, H. H. and Combettes, P. L. Convex Analysis and
+Monotone Operator Theory in Hilbert Spaces. Springer
+Publishing Company, Incorporated, 1st edition, 2011.
+ISBN 1441994661.
+Bauschke, H. H., Bolte, J., Chen, J., Teboulle, M., and Wang,
+X. On linear convergence of non-Euclidean gradient
+methods without strong convexity and Lipschitz gradient
+continuity. J. Optim. Theory Appl., 182(3):1068–1087,
+2019. doi: 10.1007/s10957-019-01516-9.
+Beck, A. First-Order Methods in Optimization. Society for
+Industrial and Applied Mathematics, Philadelphia, PA,
+2017. doi: 10.1137/1.9781611974997.
+Beck, A. and Teboulle, M. Mirror descent and nonlinear
+projected subgradient methods for convex optimization.
+Operations Research Letters, 31(3):167–175, 2003. doi:
+10.1016/S0167-6377(02)00231-6.
+Bellec, G., Kappel, D., Maass, W., and Legenstein, R.
+Deep rewiring: Training very sparse deep networks. In
+International Conference on Learning Representations,
+2018. URL https://openreview.net/forum?
+id=BJ_wN01C-.
+Benning, M., Betcke, M. M., Ehrhardt, M. J., and Sch¨onlieb,
+C.-B. Choose your path wisely: gradient descent in a
+Bregman distance framework. SIAM J. Imaging Sci., 14
+(2):814–843, 2021. doi: 10.1137/20M1357500.
+Braglia, V., Kopanic´akov´a, A., and Krause, R. A multilevel
+approach to training. ICML 2020 Workshop: Beyond
+First Order Methods in Machine Learning, 2020. doi:
+10.48550/arXiv.2006.15602.
+Bungert, L., Roith, T., Tenbrinck, D., and Burger, M. Neural
+architecture search via bregman iterations. arXiv, 2021.
+doi: 10.48550/arXiv.2106.02479.
+Bungert, L., Roith, T., Tenbrinck, D., and Burger, M. A
+Bregman learning framework for sparse neural networks.
+J. Mach. Learn. Res., 23:Paper No. [192], 43, 2022. ISSN
+1532-4435,1533-7928.
+Dettmers, T. and Zettlemoyer, L. Sparse networks from
+scratch: Faster training without losing performance.
+arXiv, 2019. doi: 10.48550/arXiv.1907.04840.
+Dhar, P. The carbon impact of artificial intelligence. Nature
+Machine Intelligence, 2:423–425, 08 2020. doi: 10.1038/
+s42256-020-0219-9.
+Elshiaty, Y. and Petra, S. Multilevel bregman proximal
+gradient descent. arXiv, 2025. doi: 10.48550/arXiv.2506.
+03950.
+Elsken, T., Metzen, J. H., and Hutter, F. Efficient multi-
+objective neural architecture search via lamarckian evolu-
+tion. In International Conference on Learning Represen-
+tations, 2019. URL https://openreview.net/
+forum?id=ByME42AqK7.
+Evci, U., Gale, T., Menick, J., Castro, P. S., and Elsen, E.
+Rigging the lottery: Making all tickets winners. In III,
+H. D. and Singh, A. (eds.), Proceedings of the 37th Inter-
+national Conference on Machine Learning, volume 119
+of Proceedings of Machine Learning Research, pp. 2943–
+2952. PMLR, 2020. URL https://proceedings.
+mlr.press/v119/evci20a.html.
+Fatkhullin, I. and He, N.
+Taming nonconvex stochas-
+tic mirror descent with general bregman divergence.
+In International Conference on Artificial Intelligence
+and Statistics, volume 238 of Proceedings of Ma-
+chine Learning Research, pp. 3493–3501. PMLR,
+2024. URL https://proceedings.mlr.press/
+v238/fatkhullin24a.html.
+Frankle, J. and Carbin, M. The lottery ticket hypothesis:
+Training pruned neural networks. In 7th International
+Conference on Learning Representations, ICLR 2019,
+New Orleans, LA, USA, May 6-9, 2019, 2019.
+Gaedke-Merzh¨auser, L., Kopaniˇc´akov´a, A., and Krause, R.
+Multilevel minimization for deep residual networks. In
+FGS’2019—19th French-German-Swiss conference on
+Optimization, volume 71 of ESAIM Proc. Surveys, pp.
+131–144. EDP Sci., Les Ulis, 2021. doi: 10.1051/proc/
+202171131.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+He, K., Zhang, X., Ren, S., and Sun, J. Delving deep into
+rectifiers: Surpassing human-level performance on ima-
+genet classification. In 2015 IEEE International Confer-
+ence on Computer Vision (ICCV), pp. 1026–1034, 2015.
+doi: 10.1109/ICCV.2015.123.
+Heeringa, T. J., Brune, C., and Guo, M. Sparsifying dimen-
+sionality reduction of pde solution data with bregman
+learning. SIAM Journal on Scientific Computing, 47(5):
+C1033–C1058, 2025a. doi: 10.1137/24M1684566.
+Heeringa, T. J., Roith, T., Brune, C., and Burger, M. Learn-
+ing a sparse representation of barron functions with the
+inverse scale space flow. Journal of Machine Learning, 4
+(1):48–88, 2025b. doi: 10.4208/jml.240123.
+Hoefler, T., Alistarh, D., Ben-Nun, T., Dryden, N., and
+Peste, A.
+Sparsity in deep learning:
+Pruning and
+growth for efficient inference and training in neural net-
+works. Journal of Machine Learning Research, 22(241):
+1–124, 2021.
+URL http://jmlr.org/papers/
+v22/21-0366.html.
+Hovhannisyan, V., Parpas, P., and Zafeiriou, S. MAGMA:
+Multilevel accelerated gradient mirror descent algorithm
+for large-scale convex composite minimization. SIAM J.
+Imaging Sci., 9(4):1829–1857, 2016. ISSN 1936-4954.
+doi: 10.1137/15M104013X.
+Huang, C., Sun, X., Xiong, J., and Yao, Y.
+Split LBI:
+An iterative regularization path with structural sparsity.
+In Proceedings of the 30th International Conference on
+Neural Information Processing Systems, volume 29 of
+NIPS’16, pp. 3377–3385, 2016. ISBN 9781510838819.
+Jacobs, T. and Burkholz, R. Mask in the Mirror: Implicit
+Sparsification. In The Thirteenth International Confer-
+ence on Learning Representations, 2025. URL https:
+//openreview.net/forum?id=U47ymTS3ut.
+Jayakumar, S., Pascanu, R., Rae, J., Osindero, S., and Elsen,
+E. Top-kast: Top-k always sparse training. In Proceed-
+ings of the 34th International Conference on Neural In-
+formation Processing Systems, volume 33 of NIPS ’20,
+pp. 20744–20754, 2020. ISBN 9781713829546.
+Ji, J., Li, G., Fu, J., Afghah, F., Guo, L., Yuan, X., and Ma, X.
+A Single-Step, Sharpness-Aware Minimization is All You
+Need to Achieve Efficient and Accurate Sparse Training.
+37:44269–44290, 2024a. doi: 10.52202/079017-1405.
+Ji, J., Li, G., Yin, L., Qin, M., Yuan, G., Guo, L., Liu, S., and
+Ma, X. Advancing dynamic sparse training by exploring
+optimization opportunities. In Forty-first International
+Conference on Machine Learning, 2024b.
+Johnson, R. and Zhang, T. Accelerating stochastic gradient
+descent using predictive variance reduction. In Burges,
+C., Bottou, L., Welling, M., Ghahramani, Z., and
+Weinberger, K. (eds.), Advances in Neural Information
+Processing Systems, volume 26. Curran Associates, Inc.,
+2013.
+URL https://proceedings.neurips.
+cc/paper_files/paper/2013/file/
+ac1dd209cbcc5e5d1c6e28598e8cbbe8-Paper.
+pdf.
+Kopaniˇc´akov´a, A. and Krause, R. Globally convergent mul-
+tilevel training of deep residual networks. SIAM Journal
+on Scientific Computing, 45(3):S254–S280, 2023. doi:
+10.1137/21M1434076.
+Kusupati, A., Ramanujan, V., Somani, R., Wortsman, M.,
+Jain, P., Kakade, S., and Farhadi, A. Soft threshold weight
+reparameterization for learnable sparsity. In International
+conference on machine learning, pp. 5544–5555. PMLR,
+2020.
+Lee, N., Ajanthan, T., and Torr, P. H. S. Snip: single-shot
+network pruning based on connection sensitivity. In 7th
+International Conference on Learning Representations,
+ICLR 2019, New Orleans, LA, USA, May 6-9, 2019, 2019.
+Li, G., Yin, L., Ji, J., Niu, W., Qin, M., Ren, B., Guo,
+L., Liu, S., and Ma, X. NeurRev: Train Better Sparse
+Neural Network Practically via Neuron Revitalization.
+2023. URL https://openreview.net/forum?
+id=60lNoatp7u.
+Li, W., Wang, Z., Zhang, Y., and Cheng, G.
+Variance
+reduction on general adaptive stochastic mirror descent.
+Machine Learning, 111(12):4639–4677, 2022.
+Liu, S., Chen, T., Chen, X., Atashgahi, Z., Yin, L., Kou,
+H., Shen, L., Pechenizkiy, M., Wang, Z., and Mocanu,
+D. C. Sparse training via boosting pruning plasticity
+with neuroregeneration. Advances in Neural Information
+Processing Systems, 34:9908–9922, 2021.
+Marini, F., Porcelli, M., and Riccietti, E.
+A multilevel
+stochastic regularized first-order method with applica-
+tion to training. arXiv, 2024. doi: 10.48550/arXiv.2412.
+11630.
+Miikkulainen, R., Liang, J., Meyerson, E., Rawal, A., Fink,
+D., Francon, O., Raju, B., Shahrzad, H., Navruzyan,
+A., Duffy, N., and Hodjat, B.
+14 - evolving deep
+neural networks. In Kozma, R., Alippi, C., Choe, Y.,
+and Morabito, F. C. (eds.), Artificial Intelligence in the
+Age of Neural Networks and Brain Computing (Sec-
+ond Edition), pp. 269–287. Academic Press, second
+edition edition, 2024. ISBN 978-0-323-96104-2. doi:
+10.1016/B978-0-323-96104-2.00002-6.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+Mocanu, D., Mocanu, E., Stone, P., Nguyen, P., Gibescu,
+M., and Liotta, A. Scalable training of artificial neural
+networks with adaptive sparse connectivity inspired by
+network science. Nature Communications, 9, 06 2018.
+doi: 10.1038/s41467-018-04316-3.
+Mohd Noor, M. H. and Ige, A. O. A survey on state-of-the-
+art deep learning applications and challenges. Engineer-
+ing Applications of Artificial Intelligence, 159:111225,
+2025. ISSN 0952-1976. doi: 10.1016/j.engappai.2025.
+111225.
+Mosci, S., Rosasco, L., Santoro, M., Verri, A., and Villa, S.
+Solving structured sparsity regularization with proximal
+methods. In Balc´azar, J. L., Bonchi, F., Gionis, A., and Se-
+bag, M. (eds.), Machine Learning and Knowledge Discov-
+ery in Databases, pp. 418–433, Berlin, Heidelberg, 2010.
+Springer Berlin Heidelberg. ISBN 978-3-642-15883-4.
+Nash, S. G. A multigrid approach to discretized optimization
+problems. Optimization Methods and Software, 14(1-2):
+99–116, 2000. doi: 10.1080/10556780008805795.
+Nemirovskij, A. S. and Yudin, D. B. Problem complexity
+and method efficiency in optimization. 1983.
+Nesterov, Y. Primal-dual subgradient methods for convex
+problems. Mathematical programming, 120(1):221–259,
+2009. doi: 10.1007/s10107-007-0149-x.
+Nikdan, M., Pegolotti, T., Iofinova, E., Kurtic, E., and Alis-
+tarh, D. SparseProp: Efficient Sparse Backpropagation
+for Faster Training of Neural Networks at the Edge. In
+Proceedings of the 40th International Conference on Ma-
+chine Learning, pp. 26215–26227. PMLR, 2023.
+Osher, S., Burger, M., Goldfarb, D., Xu, J., and Yin, W. An
+iterative regularization method for total variation-based
+image restoration. Multiscale Modeling & Simulation, 4
+(2):460–489, 2005.
+Peste, A., Iofinova, E., Vladu, A., and Alistarh, D. AC/DC:
+Alternating compressed/decompressed training of deep
+neural networks. Advances in neural information process-
+ing systems, 34:8557–8570, 2021.
+Pote, T., Ganaie, M. A., Hassan, A., and Khare, S. Dy-
+namic forward and backward sparse training (DFBST):
+Accelerated deep learning through completely sparse
+training schedule. In Khan, E. and Gonen, M. (eds.),
+Proceedings of The 14th Asian Conference on Ma-
+chine Learning, volume 189 of Proceedings of Machine
+Learning Research, pp. 848–863. PMLR, 12–14 Dec
+2023. URL https://proceedings.mlr.press/
+v189/pote23a.html.
+Rosasco, L., Villa, S., and Vundefined, B. C. Convergence
+of stochastic proximal gradient algorithm. Appl. Math.
+Optim., 82(3):891–917, December 2020. ISSN 0095-
+4616. doi: 10.1007/s00245-019-09617-7.
+Rudin, L. I., Osher, S., and Fatemi, E. Nonlinear total
+variation based noise removal algorithms. Physica D:
+nonlinear phenomena, 60(1-4):259–268, 1992.
+Scardapane, S., Comminiello, D., Hussain, A., and Uncini,
+A. Group sparse regularization for deep neural networks.
+Neurocomputing, 241:81–89, 2017.
+Singh, S. P. and Alistarh, D. WoodFisher: Efficient Second-
+Order Approximation for Neural Network Compression.
+In Advances in Neural Information Processing Systems,
+volume 33, pp. 18098–18109. Curran Associates, Inc.,
+2020.
+Tibshirani, R. Regression shrinkage and selection via the
+lasso. Journal of the Royal Statistical Society. Series B
+(Methodological), 58(1):267–288, 1996. ISSN 00359246.
+Vanmaele, F., Elshiaty, Y., and Petra, S. Multilevel optimiza-
+tion: Geometric coarse models and convergence analysis.
+In International Conference on Scale Space and Varia-
+tional Methods in Computer Vision, pp. 95–108. Springer,
+2025.
+Wang, X. and Benning, M. Lifted bregman training of
+neural networks. Journal of Machine Learning Research,
+24(232):1–51, 2023.
+Wen, Z. and Goldfarb, D. A line search multigrid method
+for large-scale nonlinear optimization. SIAM J. Optim.,
+20(3):1478–1503, 2009. doi: 10.1137/08071524X.
+Yin, L., Li, G., Fang, M., Shen, L., Huang, T., Wang, Z.,
+Menkovski, V., Ma, X., Pechenizkiy, M., Liu, S., et al.
+Dynamic sparsity is channel-level sparsity learner. Ad-
+vances in Neural Information Processing Systems, 36:
+67993–68012, 2023.
+Yin, W., Osher, S., Goldfarb, D., and Darbon, J. Bregman
+iterative algorithms for ℓ1-minimization with applications
+to compressed sensing. SIAM Journal on Imaging sci-
+ences, 1(1):143–168, 2008.
+Zhang, S. and He, N. On the convergence rate of stochastic
+mirror descent for nonsmooth nonconvex optimization.
+arXiv, 2018. doi: 10.48550/arXiv.1806.04781.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+A. Theoretical proofs
+A first very important observation is that ˆJ(k)
+δ
+coincides with ˆJ := Jδ(θ(k) + P (k)(· −ˆθ0,k)) up to a constant depending on
+θ(k). To see this, note that
+(θ(k) + P (k)(ˆθ −ˆθ0,k))(g) =
+(ˆθ(i),
+if g = r(k)(i),
+(θ(k))(g),
+otherwise
+(13)
+due to the definitions of P (k) and ˆθ0,k. Using this, it is straight-forward to compute
+ˆJ(ˆθ) = 1
+2δ ∥θ(k) + P (k)(ˆθ −ˆθ0,k)∥2 + J(θ(k) + P (k)(ˆθ −ˆθ0,k))
+= 1
+2δ ∥ˆθ∥2 + 1
+2δ
+X
+g∈X
+∥(θ(k))(g)∥2 +
+G(k)
+X
+i=1
+Jr(k)(i)(ˆθ(i)) +
+X
+g∈X
+Jg((θ(k))(g))
+= ˆJ(k)
+δ
+(ˆθ) + const(θ(k)),
+where we use the abbreviation
+X := {1, 2, . . . , G} \ r(k)({1, 2, . . . , G(k)})
+to denote all groups that are not selected by R(k). Therefore, ˆJ(k)
+δ
+and ˆJ share the same subdifferential and also induce the
+same Bregman divergence. We can make use of this fact to prove Proposition 3.1.
+Proof of Proposition 3.1. Due to the sum and chain rule for subdifferentials,
+∂ˆJ(ˆθ) = 1
+δ
+ˆθ + (P (k))T ∂J(θ(k) + P (k)(ˆθ −ˆθ0,k)).
+for ˆθ ∈RDk such that J(θ(k) + P (k)(ˆθ −ˆθ0,k)) < ∞and ∂J(θ(k) + P (k)(ˆθ −ˆθ0,k)) ̸= ∅. Consequently, since we have
+already established that ˆJ(k)
+δ
+and ˆJ share the same subdifferential, for ˆθ = ˆθ0,k, we have
+∂ˆJ(k)
+δ
+(ˆθ0,k) = ∂ˆJ(ˆθ0,k)
+= 1
+δ
+ˆθ0,k + R(k)∂J(θ(k))
+= R(k)∂Jδ(θ(k)).
+Obviously, ˆv0,k = R(k)v(k) belongs to the latter, concluding the proof.
+Proof of Proposition 3.2. Using (13) with ˆθ = ˆθm,k together with (7), it is easy to see that
+∂(g)Jδ(˜θ(k+1)) = 1
+δ
+˜θ(k+1)
+(g)
++ ∂Jg((˜θ(k+1))(g))
+=
+(
+∂(i) ˆJ(k)
+δ
+((ˆθm,k)(i)),
+if g = r(k)(i),
+∂(g)Jδ(θ(k)),
+otherwise.
+Since by definition
+˜v(k+1) =
+(
+(ˆvm,k)(i),
+if g = r(k)(i),
+(v(k))(g),
+otherwise,
+together with ˆvm,k ∈∂ˆJδ
+(k)(ˆθm,k) and v(k) ∈∂Jδ(θ(k)), we obtain overall that ˜v(k+1) ∈∂Jδ(˜θ(k+1)).
+As a next step, we prove that the coarse objective ˆL(k) is L-smooth relative to the coarse regularizer ˆJ(k)
+δ
+.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+Lemma A.1. Let Assumption 1 be satisfied. Then, the coarse objective ˆL(k) defined in (9) is L-smooth relative to ˆJ(k)
+δ
+.
+Proof. Let ˆθ ∈dom ∂J with ˆv ∈∂ˆJ(ˆθ) and ˆθ′ ∈RDk. We define
+˜v := v(k) + P (k)(ˆv −ˆv0,k),
+˜θ := θ(k) + P (k)(ˆθ −ˆθ0,k),
+and note that this leads to ˜v ∈∂Jδ(˜θ) following from the same argumentation as in the proof of Proposition 3.2. In particular,
+˜θ ∈dom ∂J. Hence, from the L-smoothness of L relative to Jδ, we deduce
+ˆL(k)(ˆθ′) −ˆL(k)(ˆθ) −⟨∇L(˜θ), P (k)(ˆθ′ −ˆθ)⟩≤L( ˆJ(ˆθ′) −ˆJ(ˆθ) −⟨˜v, P (k)(ˆθ′ −ˆθ)⟩)
+and using (P (k))T ∇L(˜θ) = ∇ˆL(k)(ˆθ), we obtain
+ˆL(k)(ˆθ′) −ˆL(k)(ˆθ) −⟨∇ˆL(k)(ˆθ), ˆθ′ −ˆθ⟩≤L( ˆJ(ˆθ′) −ˆJ(ˆθ) −⟨(P (k))T ˜v, ˆθ′ −ˆθ⟩).
+Due to the definition of ˜v, we have (P (k))T ˜v = R(k)˜v = ˆv, since R(k)P (k) = id. Consequently,
+ˆL(k)(ˆθ′) −ˆL(k)(ˆθ) −⟨∇ˆL(k)(ˆθ), ˆθ′ −ˆθ⟩≤LDˆv
+ˆ
+J(ˆθ′, ˆθ),
+meaning that ˆL(k) is L-smooth relative to ˆJ. Since we have already established that ˆJ and ˆJ(k)
+δ
+induce the same Bregman
+divergence, relative smoothness with respect to these two functions is equivalent.
+For the proof of our main result Theorem 4.1 we require two more lemmas, the proofs of which work very similar to the
+corresponding results in Bauschke et al. (2019); Elshiaty & Petra (2025) with the key differences being that we utilize
+subgradients instead of classical gradients of the regularizer Jδ and that we use stochastic gradients on the coarse level.
+Additionally, we introduce the concept of the symmetrized Bregman divergence by summing up two Bregman divergences,
+Dsym
+Jδ (θ, ˜θ) := Dv
+Jδ(˜θ, θ) + D˜v
+Jδ(θ, ˜θ) = ⟨v −˜v, θ −˜θ⟩,
+(14)
+for θ, ˜θ ∈dom∂J and v ∈∂Jδ(θ), ˜v ∈∂Jδ(˜θ).
+The first lemma asserts a linear convergence rate for the linearized Bregman iterations (4) without a multilevel component.
+Lemma A.2. Let Assumption 1 and Assumption 2 be satisfied. Moreover, for θ ∈dom(∂J), v ∈∂Jδ(θ) and 0 < τ < 1
+L,
+let v+
+τ := v −τ∇L(θ) and θ+
+τ := proxδJ(δv+
+τ ). Then,
+L(θ+
+τ ) −L⋆≤
+
+1 −η λ(τ)
+τ
+
+(L(θ) −L⋆).
+Proof. Using Assumption 1, the definition of v+
+τ and Assumption 2 together with the definition of the symmetrized Bregman
+divergence (14), we obtain
+L(θ+
+τ ) ≤L(θ) + ⟨∇L(θ), θ+
+τ −θ⟩+ LDv
+Jδ(θ+
+τ , θ)
+= L(θ) −1
+τ Dsym
+Jδ (θ+
+τ , θ) + LDv
+Jδ(θ+
+τ , θ)
+≤L(θ) −1
+τ Dv+
+τ
+Jδ (θ, θ+
+τ )
+≤L(θ) −λ(τ)
+τ
+D
+v+
+1
+Jδ (θ, θ+
+1 )
+≤L(θ) −η λ(τ)
+τ
+(L(θ) −L⋆).
+Subtracting L⋆from both sides yields the desired estimate.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+The second lemma investigates the decay of the function value if a coarse update is taken. The key observation to prove
+this result is that our coarse objective ˆL(k) is L-smooth relative to the coarse regularizer ˆJ(k)
+δ
+. This property follows from
+Assumption 1, see Lemma A.1.
+Lemma A.3. Let Assumption 1 and Assumption 3 be satisfied. If iteration step k triggers a coarse update and the coarse
+step size is chosen such that ˆτ i,k ≤
+1
+4L, then
+E
+h
+L(˜θ(k+1)
+i
+≤E
+h
+L(θ(k))
+i
+−
+m−1
+X
+j=0
+1
+4ˆτ j,k E
+
+Dsym
+ˆ
+J(k)
+δ (ˆθj+1,k, ˆθj,k)
+
++ δσ2
+2
+m−1
+X
+j=0
+ˆτ j,k.
+Proof. By Lemma A.1, ˆL(k) is L-smooth relative to ˆJ(k)
+δ
+. Hence, we obtain
+ˆL(k)(ˆθi+1,k) ≤ˆL(k)(ˆθi,k) + ⟨∇ˆL(k)(ˆθi,k), ˆθi+1,k −ˆθi,k⟩+ LDˆvi,k
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k)
+= ˆL(k)(ˆθi,k) + ⟨ˆg(k)(ˆθi,k, ω), ˆθi+1,k −ˆθi,k⟩
++ ⟨∇ˆL(k)(ˆθi,k) −ˆg(k)(ˆθi,k, ω), ˆθi+1,k −ˆθi,k⟩+ LDˆvi,k
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k)
+≤ˆL(k)(ˆθi,k) −
+1
+ˆτ i,k Dsym
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k) + εˆτ i,k
+2
+∥∇ˆL(k)(ˆθi,k) −ˆg(k)(ˆθi,k, ω)∥2
++
+1
+2εˆτ i,k ∥ˆθi+1,k −ˆθi,k∥2 + LDˆvi,k
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k)
+≤ˆL(k)(ˆθi,k) −2ε −2Lεˆτ i,k −δ
+2εˆτ i,k
+Dsym
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k)
++ εˆτ i,k
+2
+∥∇ˆL(k)(ˆθi,k) −ˆg(k)(ˆθi,k, ω)∥2
+for any ε > 0 using Young’s inequality. Consequently, taking the expectation conditioned on ˆθi,k, that we denote by Ei,k for
+simplicity, and letting ε = δ, we arrive at
+Ei,k
+h
+ˆL(k)(ˆθi+1,k)
+i
+≤ˆL(k)(ˆθi,k) −δ −2Lδˆτ i,k
+2δˆτ i,k
+Ei,k
+
+Dsym
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k)
+
++ δˆτ i,k
+2
+σ2.
+Thus, for ˆτ i,k ≤
+1
+4L, taking the full expectation and using the tower property, iterating this inequality leads to
+E
+h
+ˆL(k)(ˆθi+1,k)
+i
+≤E
+h
+ˆL(k)(ˆθ0,k)
+i
+−
+i
+X
+j=0
+1
+4ˆτ j,k E
+
+Dsym
+ˆ
+J(k)
+δ (ˆθj+1,k, ˆθj,k)
+
++
+i
+X
+j=0
+δσ2
+2 ˆτ j,k.
+In particular,
+E
+h
+ˆL(k)(ˆθm,k)
+i
+≤E
+h
+ˆL(k)(ˆθ0,k)
+i
+−
+m−1
+X
+j=0
+1
+4ˆτ j,k E
+
+Dsym
+ˆ
+J(k)
+δ (ˆθj+1,k, ˆθj,k)
+
++
+m−1
+X
+j=0
+δσ2
+2 ˆτ j,k.
+Since L(˜θ(k+1)) = ˆL(k)(ˆθm,k) and L(θ(k)) = ˆL(k)(ˆθ0,k), this yields the desired estimate.
+Remark A.4. In the deterministic case (σ = 0), the previous result guarantees a decrease in the loss during the coarse
+updates. The resulting estimate closely parallels the loss decay established in (Elshiaty & Petra, 2025).
+Combining the previous results we arrive at the proof of our main result.
+Proof of Theorem 4.1. The result follows by combining Lemmas A.2 and A.3 and iterating.
+Proof of Corollary 4.2. To prove this result, we consider the worst-case scenario in Theorem 4.1, that is
+ˆρi =
+m−1
+X
+j=0
+δσ2
+2 ˆτ j,i
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+for any i ∈N. This means that we assume that a coarse step is taken at each iteration and that the potential benefit in the
+loss descent with the symmetrized Bregman divergence vanishes. In this case,
+k−1
+X
+i=0
+(1 −r)k−iˆρi =
+k−1
+X
+i=0
+(1 −r)k−i
+m−1
+X
+j=0
+δσ2
+2 ˆτ j,i ≤C
+k−1
+X
+i=0
+(1 −r)k−iˆτ (i) = C
+k−1
+X
+i=0
+(1 −r)iˆτ (k−i)
+for some positive constant C depending on m, δ and σ2. We prove that the sum on the right-hand side converges to zero as
+k approaches infinity. Let ε > 0 be arbitrary and define M := supi∈N ˆτ (i) < ∞. Due to the convergence of the geometric
+series, we can choose J ∈N such that
+∞
+X
+i=J+1
+(1 −r)i <
+ε
+2M .
+Consequently, for k > J, we have
+k
+X
+i=J+1
+(1 −r)iˆτ (k−1) ≤M
+∞
+X
+i=J+1
+(1 −r)i ≤ε
+2.
+Let additionally k be large enough such that supi=k−J,...,k ˆτ (i) <
+ε
+2(J+1). Then, we can immediately conclude
+J
+X
+i=0
+(1 −r)iˆτ (k−i) ≤
+J
+X
+i=0
+ˆτ (k−i) ≤(J + 1)
+sup
+i=k−J,...,k
+ˆτ (i) < ε
+2
+leading to
+k
+X
+i=0
+(1 −r)iˆτ (k−i) =
+J
+X
+i=0
+(1 −r)iˆτ (k−i) +
+k
+X
+i=J+1
+(1 −r)iˆτ (k−i) < ε.
+Therefore, Theorem 4.1 yields
+lim
+k→∞E
+h
+L(θ(k))
+i
+= L⋆.
+B. Convergence in the case of finite sums
+In this section, we take a slightly different perspective and demonstrate that multilevel optimization methods can be
+interpreted as variance reduction methods. To this end, we consider a slightly modified algorithm compared to Algorithm 1.
+Specifically, we use a different objective function on the coarse level. Moreover, we analyze the resulting algorithm solely
+from a theoretical perspective without conducting numerical experiments.
+For our analysis in this section, we assume that the loss L has a finite sum structure
+L(θ) = 1
+n
+n
+X
+j=1
+Lj(θ)
+and each Lj has a Lipschitz-continuous gradient with Lipschitz-constant L > 0. In this setting, we use a mini-batch
+approximation of the loss as the loss of the coarse level. To be precise, we sample a mini-batch Ji,k of size b < n from
+[n] := {1, . . . , n} at the i-th coarse step within the k-th total cycle in Algorithm 1 and define
+ˆLi,k(ˆθ) := 1
+b
+X
+j∈Ji,k
+Lj(θ(k) + P (k)(ˆθ −ˆθ0,k)).
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+as the coarse loss. As usual in multilevel optimization algorithms (Elshiaty & Petra, 2025; Nash, 2000), we add a linear
+correction term to this coarse loss to ensure first-order coherence. Precisely, the function, we aim at minimizing in the i-th
+coarse step of the k-th total cycle is given by
+ˆΨi,k(ˆθ) := ˆLi,k(ˆθ) + ⟨R(k)∇L(θ(k)) −∇ˆLi,k(ˆθ0,k), ˆθ −ˆθ0,k⟩.
+(15)
+Computing the gradient of this function yields
+∇ˆΨi,k(ˆθ) = ∇ˆLi,k(ˆθ) + R(k)∇L(θ(k)) −∇ˆLi,k(ˆθ0,k).
+In particular, if θ(k) is a critical point of L, then ˆθ0,k = R(k)θ(k) is a critical point of ˆΨi,k for any i = 1, . . . , m. A different
+perspective on the gradient of the coarse objective is to see it as a variance reduction method. Making use of the special
+finite sum structure of both L and ˆLi,k, we compute
+∇ˆΨi,k(ˆθ) = 1
+b
+X
+j∈Ji,k
+R(k)∇Lj(˜θ) + R(k) 1
+n
+n
+X
+j=0
+∇Lj(θ(k)) −1
+b
+X
+j∈Ji,k
+R(k)∇Lj(θ(k)),
+where we use the abbreviation ˜θ := θ(k) + P (k)(ˆθ −ˆθ0,k). Thus, ∇ˆΨi,k is a combination of current and previous gradients,
+providing scope for variance reduction. The connection between multilevel optimization and variance reduction has already
+been investigated, e.g. in Marini et al. (2024); Braglia et al. (2020). We would in particular like to point out the similarity to
+stochastic variance reduced gradient (SVRG) (Johnson & Zhang, 2013), which uses the same ideas for variance reduction.
+As before, we denote
+ˆL(k)(ˆθ) := L(θ(k) + P (k)(ˆθ −ˆθ0,k)) = 1
+n
+n
+X
+j=1
+Lj(θ(k) + P (k)(ˆθ −ˆθ0,k))
+as the actual (non-stochastic) objective, we would like to minimize on the coarse level. We observe that ∇ˆΨi,k(ˆθ) is an
+unbiased estimator of ∇ˆL(k)(ˆθ) and we can prove a variance bound.
+Lemma B.1. ∇ˆΨi,k(ˆθ) is an unbiased estimator of ∇ˆL(k)(ˆθ), i.e.
+E
+h
+∇ˆΨi,k(ˆθ)
+i
+= ∇ˆL(k)(ˆθ)
+and satisfies the variance bound
+E
+h
+∥∇ˆΨi,k(ˆθ) −∇ˆL(k)(ˆθ)∥2i
+≤L2(n −b)
+b(n −1) ∥ˆθ −ˆθ0,k∥2,
+where all expected values are taken with respect to the mini-batch sampling.
+Proof. Taking the expected value with respect to drawing the mini-batch, we can easily compute
+E
+h
+∇ˆΨi,k(ˆθ)
+i
+= R(k)∇L(θ(k) + P (k)(ˆθ −ˆθ0,k)) = ∇ˆL(k)(ˆθ).
+Moreover, turning towards the variance, we observe that
+E
+h
+∥∇ˆΨi,k(ˆθ) −∇ˆL(k)(ˆθ)∥2i
+= E
+h
+∥∇ˆLi,k(ˆθ) −∇ˆLi,k(ˆθ0,k) −(∇ˆL(k)(ˆθ) −∇ˆL(k)(ˆθ0,k))∥2i
+= E
+
+∥1
+b
+X
+j∈Ji,k
+R(k)(∇Lj(˜θ) −∇Lj(θ(k))) −(∇ˆL(k)(ˆθ) −∇ˆL(k)(ˆθ0,k))∥2
+
+
+using the abbreviation ˜θ := θ(k) + P (k)(ˆθ −ˆθ0,k). In the case b = 1, we can estimate the variance by the second moment
+and arrive at
+Ej∼Unif(1,...,n)
+h
+∥R(k)(∇Lj(˜θ) −∇Lj(θ(k))) −(∇ˆL(k)(ˆθ) −∇ˆL(k)(ˆθ0,k))∥2i
+≤Ej∼Unif(1,...,n)
+h
+∥R(k)(∇Lj(θ(k) + P (k)(ˆθ −ˆθ0,k)) −∇Lj(θ(k)))∥2i
+≤∥R(k)∥2L2∥θ(k) + P (k)(ˆθ −ˆθ0,k) −θ(k)∥2
+≤L2∥ˆθ −ˆθ0,k∥2,
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+using the Lipschitz continuity of ∇Lj and the fact that ∥R(k)∥, ∥P (k)∥≤1. In the case b > 1, since we draw without
+replacement, the variance scales with
+n−b
+b(n−1), leading to
+E
+h
+∥∇ˆΨi,k(ˆθ) −∇ˆL(k)(ˆθ)∥2i
+≤L2(n −b)
+b(n −1) ∥ˆθ −ˆθ0,k∥2.
+In this setting, the linearized Bregman iteration scheme on the coarse level reads
+ˆgi,k = ∇ˆΨi,k,
+ˆvi+1,k = ˆvi,k −ˆτˆgi,k,
+ˆθi+1,k = proxδ ˆ
+J(k)(δˆvi+1,k).
+We investigate the descent of ˆL(k) during the coarse level iterations and assume that the number of steps on the coarse level
+m is at least 2. Note that for our setup to make sense, we require the full gradient of the loss at θ(k) and therefore m = 1
+would correspond to no stochasticity at all.
+Lemma B.2. If the step size ˆτ is chosen such that
+ˆτ ≤min
+(
+1
+2Lδ ,
+s
+b(n −1)
+2δ2(n −b)m(m −1)
+)
+and iteration k triggers a coarse update, then
+E
+h
+L(˜θ(k+1))
+i
+≤E
+h
+L(θ(k))
+i
+−1
+ˆτ
+m
+X
+j=1
+E
+h
+Dsym
+ˆ
+J(k)(ˆθj,k, ˆθj−1,k)
+i
+−
+1
+8δˆτ
+m
+X
+j=1
+E
+h
+∥ˆθj,k −ˆθj−1,k∥2i
+.
+Proof. Using the L-smoothness of ˆL(k) with respect to 1
+2∥· ∥2, which follows from the L-smoothness with respect to 1
+2∥· ∥2
+of each Lj (see the descent lemma for L-smooth functions (Bauschke & Combettes, 2011; Beck, 2017) and Lemma A.1),
+yields
+ˆL(k)(ˆθi+1,k) −ˆL(k)(ˆθi,k) ≤⟨∇ˆL(k)(ˆθi,k), ˆθi+1,k −ˆθi,k⟩+ L
+2 ∥ˆθi+1,k −ˆθi,k∥2
+= ⟨∇ˆL(k)(ˆθi,k) −ˆgi,k, ˆθi+1,k −ˆθi,k⟩+ ⟨ˆgi,k, ˆθi+1,k −ˆθi,k⟩+ L
+2 ∥ˆθi+1,k −ˆθi,k∥2
+≤ˆτ
+2ε∥∇ˆL(k)(ˆθi,k) −ˆgi,k∥2 −1
+ˆτ Dsym
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k) + Lˆτ + ε
+2ˆτ
+∥ˆθi+1,k −ˆθi,k∥2.
+for all ε > 0. Taking the expectation conditioned on ˆθi,k, that we denote by Ei,k for abbreviation and using the variance
+bound established in Lemma B.1, we obtain
+Ei,k
+h
+ˆL(k)(ˆθi+1,k)
+i
+≤ˆL(k)(ˆθi,k) + ˆτL2(n −b)
+2εb(n −1) ∥ˆθi,k −ˆθ0,k∥2 −1
+ˆτ Ei,k
+
+Dsym
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k)
+
++ Lˆτ + ε
+2ˆτ
+Ei,k
+h
+∥ˆθi+1,k −ˆθi,k∥2i
+≤ˆL(k)(ˆθi,k) + ˆτL2(n −b)
+2εb(n −1) i
+i
+X
+j=1
+∥ˆθj,k −ˆθj−1,k∥2
+−1
+ˆτ Ei,k
+
+Dsym
+ˆ
+J(k)
+δ (ˆθi+1,k, ˆθi,k)
+
++ Lˆτ + ε
+2ˆτ
+Ei,k
+h
+∥ˆθi+1,k −ˆθi,k∥2i
+.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+We take the full expectation and iterate this inequality to arrive at
+E
+h
+ˆL(k)(ˆθi+1,k)
+i
+≤E
+h
+ˆL(k)(ˆθ0,k)
+i
++ ˆτL2(n −b)
+2εb(n −1)
+i(i + 1)
+2
+i
+X
+j=1
+E
+h
+∥ˆθj,k −ˆθj−1,k∥2i
+−1
+ˆτ
+i+1
+X
+j=1
+E
+
+Dsym
+ˆ
+J(k)
+δ (ˆθj,k, ˆθj−1,k)
+
++ Lˆτ + ε
+2ˆτ
+i+1
+X
+j=1
+E
+h
+∥ˆθj,k −ˆθj−1,k∥2i
+.
+In particular, for i + 1 = m, we obtain
+E
+h
+ˆL(k)(ˆθm,k)
+i
+≤E
+h
+ˆL(k)(ˆθ0,k)
+i
+−1
+ˆτ
+m
+X
+j=1
+E
+h
+Dsym
+ˆ
+J(k)(ˆθj,k, ˆθj−1,k)
+i
+−2bε(n −1)(2 −δε −Lδˆτ) −ˆτ 2L2(n −b)m(m −1)δ
+4εb(n −1)δˆτ
+m
+X
+j=1
+E
+h
+∥ˆθj,k −ˆθj−1,k∥2i
+Considering this fraction, we observe that for ε = 1
+δ and ˆτ ≤
+1
+2Lδ, we have
+2bε(n −1)(2 −δε −Lδˆτ) −ˆτ 2L2(n −b)m(m −1)δ
+4εb(n −1)δˆτ
+=
+2b
+δ (n −1)(1 −Lδˆτ) −ˆτ 2L2(n −b)m(m −1)δ
+4b(n −1)ˆτ
+≥
+b
+δ(n −1) −ˆτ 2L2(n −b)m(m −1)δ
+4b(n −1)ˆτ
+.
+Moreover, if ˆτ ≤
+q
+b(n−1)
+2δ2(n−b)m(m−1), we have
+b
+δ(n −1) −ˆτ 2L2(n −b)m(m −1)δ
+4b(n −1)ˆτ
+≥
+1
+8δˆτ .
+Thus, with ˆL(k)(ˆθm,k) = L(˜θ(k+1)) and ˆL(k)(ˆθ0,k) = L(θ(k)) we obtain the desired result.
+Combining Lemma B.2 and Lemma A.2 yields the following convergence statement with constant step-sizes on the coarse
+level.
+Theorem B.3. Let Assumption 2 be satisfied and the step sizes chosen such that
+τ ≤1
+L
+and
+ˆτ ≤min
+(
+1
+2Lδ ,
+s
+b(n −1)
+2δ2(n −b)m(m −1)
+)
+.
+Let (θ(k)) be the sequence generated by Algorithm 1 with exact gradients on the fine level and the coarse objective defined
+in (15). Then,
+E
+h
+L(θ(k)) −L⋆i
+≤(1 −r)k(L(θ(0)) −L⋆) −
+k−1
+X
+i=0
+(1 −r)k−i ˆρi,
+where r = ηλ(τ)
+τ
+and
+ˆρi =
+
+
+
+1
+ˆτ
+m
+P
+j=1
+E
+h
+Dsym
+ˆ
+J(k)(ˆθj,k, ˆθj−1,k)
+i
++
+1
+8δˆτ
+m
+P
+j=1
+E
+h
+∥ˆθj,k −ˆθj−1,k∥2i
+,
+if i triggers coarse step,
+0,
+otherwise.
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+C. Computational savings
+Regarding the computational effort, we follow Evci et al. (2020) and estimate the theoretical FLOPs required for training.
+As in their approach, we approximate the FLOPs for one training step by summing the forward pass FLOPs and twice
+the forward pass FLOPs for the backward pass. We only account for the FLOPs of convolutional and linear layers. Other
+operations such as BatchNorm, pooling, and residual additions are ignored, as their contribution to the total FLOPs is
+negligible compared to the dominant convolutional and linear computations. Denoting the FLOPs of a sparse forward pass
+by fS and of a dense forward pass by fD, the expected FLOPs per training step are
+m · 3fS + (2fS + fD)
+m + 1
+,
+since every (m + 1)-th step computes a full gradient. This matches the estimation used in RigL, where the network structure
+is fixed for most iterations and the full gradient is only computed periodically. In our method, however, the sparsity level
+evolves during training, whereas RigL enforces a fixed sparsity. As a result, particularly in the early stages of training, our
+method requires substantially fewer FLOPs. By contrast, LinBreg incurs 2fS + fD FLOPs per training step, since a full
+gradient is computed at every iteration.
+We estimate the theoretical training FLOPs for the WideResNet28-10 models reported in Table 1. Using standard SGD
+training as the dense baseline, our analysis indicates that LinBreg requires only 0.38× the FLOPs of the baseline, while our
+method further reduces this to 0.06×.
+For the VGG16 models from Table 1, LinBreg requires 0.47× the FLOPs of the dense model, whereas our method only
+needs 0.18×. Finally, for ResNet18, we consider the LinBreg approach with λ = 0.2, which leads to 96.03% sparsity on
+average, and the ML LinBreg with λ = 0.007, which reaches 96.12% sparsity. This results in a theoretical FLOPs reduction
+of 0.43× for the former and 0.12× for the latter.
+D. Background on numerical experiments
+Initialization
+As previously mentioned, all networks are initialized in a highly sparse fashion, allowing the training
+algorithm to subsequently activate additional parameters by setting them to non-zero values. For this initialization, we
+follow the approach proposed by Bungert et al. (2022).
+He et al. (2015) suggest that for ReLU activation functions, the variance of the weights should satisfy
+Var
+
+W l
+=
+2
+nl−1
+,
+(16)
+where nl denotes the size of the l-th layer.
+To obtain a sparse initialization, we apply binary masks to dense weight matrices, defining the initial weights as
+W l = ˜W l ⊙M l,
+where ⊙denotes the element-wise (Hadamard) product, and each entry of the mask M l is independently drawn from a
+Bernoulli distribution with parameter r ∈[0, 1]. This construction implies that the variance of the resulting weights scales as
+Var
+
+W l
+= r Var
+h
+˜W li
+.
+To ensure that the condition in (16) is met, we adjust the distribution of ˜W l accordingly. For instance, if ˜W l originally
+satisfies (16), we scale it accordingly.
+CIFAR-10 training
+We summarize some of the results from our training on the CIFAR-10 dataset in Table 1, most of
+which are also visualized in Figure 1. As previously mentioned, we use J = λ∥· ∥1 as the regularizer and choose to perform
+a full update on the fine level every 100 iterations, meaning that m = 99 in Algorithm 1.
+To demonstrate the effect of the regularization parameter λ in our training procedure, we train models with varying values of
+λ and evaluate both the test accuracy and sparsity of the resulting models. As expected, smaller values of λ yield highly
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+0.00
+0.02
+0.04
+0.06
+0.08
+0.10
+76
+78
+80
+82
+84
+86
+88
+90
+92
+94
+Test Accuracy [%]
+77.5
+80.0
+82.5
+85.0
+87.5
+90.0
+92.5
+95.0
+97.5
+100.0
+Sparsity [%]
+(a) Accuracy and sparsity for ML LinBreg with differ-
+ent values of λ with fixed m
+0
+1
+4
+9
+19
+49
+99 199
+499 999
+Duration of coarse period m
+89.5
+90.0
+90.5
+91.0
+91.5
+92.0
+92.5
+93.0
+93.5
+Test Accuracy [%]
+10.00
+21.25
+32.50
+43.75
+55.00
+66.25
+77.50
+88.75
+100.00
+Sparsity [%]
+(b) Accuracy and sparsity for ML LinBreg with differ-
+ent values of m with fixed λ
+Figure 4. Ablation study comparing accuracy and sparsity across different choices of the hyperparameters λ and m for ResNet18 on
+CIFAR-10.
+accurate but less sparse models, whereas increasing λ results in reduced accuracy but greater sparsity. The results of this
+ablation study are presented in Figure 4a.
+In Figure 4b, we perform an ablation study to investigate the effect of the coarse update duration m in Algorithm 1 on
+test accuracy and sparsity of the trained models. All other parameters are fixed; in particular, the regularizer is chosen as
+J = 0.005∥·∥1. The network is trained on multiple random seeds, and we report the mean values in the figure. Note that the
+value m = 0 corresponds to the case without coarse updates, i.e., the standard LinBreg algorithm. As expected, increasing
+m – and thus prolonging the freezing period – quickly yields sparser models, where the reduction in accuracy is minor.
+Table 1. Total sparsity and test accuracy for different network architectures and different optimizers
+Architecture
+Optimizer
+Sparsity [%]
+Test acc [%]
+ResNet18
+SGD
+0.39 ± 0.08
+92.93 ± 0.23
+Prune+Fine-Tuning
+95.00
+90.84 ± 0.30
+ML LinBreg (λ = 0.005)
+94.76 ± 0.12
+90.89 ± 0.21
+ML LinBreg (λ = 0.007)
+96.12 ± 0.08
+90.24 ± 0.33
+ML LinBreg (λ = 0.01)
+97.20 ± 0.06
+89.60 ± 0.27
+LinBreg (λ = 0.2)
+96.03 ± 0.04
+90.35 ± 0.22
+VGG16
+SGD
+0.11 ± 0.02
+91.98 ± 0.13
+Prune+Fine-Tuning
+92.00
+91.39 ± 0.18
+LinBreg (λ = 0.1)
+91.82 ± 0.05
+90.21 ± 0.24
+ML LinBreg (λ = 0.003)
+91.29 ± 0.18
+90.71 ± 0.19
+WideResNet28-10
+SGD
+0.17 ± 0.03
+93.79 ± 0.08
+Prune+Fine-Tuning
+96.00
+90.55 ± 0.32
+LinBreg (λ = 0.1)
+95.89 ± 0.16
+91.70 ± 0.25
+ML LinBreg (λ = 0.005)
+96.58 ± 0.14
+91.69 ± 0.27
+To obtain some additional information on the training procedure, we track the mean and standard deviation of the validation
+accuracy and the sparsity as well as the train loss throughout the training procedure. The resulting plots for ResNet18 are
+displayed in Figure 5. We observe that freezing the network structure neither affects the final characteristics of the model
+nor alters the training speed.
+Moreover, in addition to comparing the different algorithms for extremely sparse models in Figure 1, we also compare them
+over the full range of possible levels of sparsity in Figure 6. As before, we include SGD as a dense baseline, as well as
+pruned versions of the SGD-trained models at various levels of sparsity. For sparsity levels that are not as extreme as those
+considered in Figure 1, we observe that our method is at least as performant as LinBreg and the pruning approach across
+different network architectures.
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+0
+50
+100
+150
+200
+Epoch
+80.0
+82.5
+85.0
+87.5
+90.0
+92.5
+95.0
+Val. Acc. [%]
+= 0.01
+= 0.005
+LinBreg ( = 0.2)
+0
+50
+100
+150
+200
+Epoch
+92
+94
+96
+98
+Sparsity [%]
+= 0.01
+= 0.005
+LinBreg ( = 0.2)
+0
+50
+100
+150
+200
+Epoch
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Training loss
+= 0.01
+= 0.005
+LinBreg ( = 0.2)
+Figure 5. Mean and standard deviation of validation accuracy, sparsity, and train loss of the model parameters over training epochs, shown
+for different regularization parameters, λ = 0.005 and λ = 0.01 and for LinBreg with λ = 0.2.
+0
+10
+20
+30
+40
+50
+60
+70
+80
+90
+100
+Sparsity [%]
+88
+89
+90
+91
+92
+93
+Test Accuracy [%]
+Optimizer
+SGD
+LinBreg
+ML LinBreg
+pruning
+(a) ResNet18
+0
+10
+20
+30
+40
+50
+60
+70
+80
+90
+100
+Sparsity [%]
+88.5
+89.0
+89.5
+90.0
+90.5
+91.0
+91.5
+92.0
+Test Accuracy [%]
+Optimizer
+SGD
+LinBreg
+ML LinBreg
+pruning
+(b) VGG16
+0
+10
+20
+30
+40
+50
+60
+70
+80
+90
+100
+Sparsity [%]
+86
+88
+90
+92
+94
+Test Accuracy [%]
+Optimizer
+SGD
+LinBreg
+ML LinBreg
+pruning
+(c) WideResNet28-10
+Figure 6. Accuracy and sparsity for different regularizers with LinBreg and ML LinBreg as well as a pruning baseline on CIFAR-10 for
+different architectures
+Mask initialization
+We explore the effect of the mask initialization scheme for CIFAR-10 ResNet18 models trained by
+both ML LinBreg and RigL (Evci et al., 2020). In particular, we consider three mask initialization schemes as proposed in
+(Evci et al., 2020).
+• Uniform: The mask for each layer of the network is uniformly sampled to achieve the target initial sparsity.
+• Erd˝os–R´enyi (ER): Both linear and convolutional layers have sparsities proportional to scores
+nin + nout
+ninnout
+where nin/nout refers to the dimensions of the input/output of a linear layer and the number of input/output channels
+for a convolutional layer.
+• Erd˝os–R´enyi-Kernel (ERK): Similar to ER except the scores for convolutional layers with k × k kernels are given by
+nin + nout + 2k
+ninnoutk2
+.
+In the case of ER and ERK, one would in practice calculate the scores and then determine a global rescaling factor of said
+scores such that the determined masked model achieves the specified target sparsity. The motivation of ER is that layers
+with many parameters should be very sparse, and ERK makes this more explicit in the case of convolutional layers.
+We remark that while the variance-preserving rescaling factor r will be constant across layers when using a uniform mask
+initialization, for ER and ERK one must adjust the value of r according to the layer’s determined sparsity.
+We report the achieved sparsity and test accuracy of RigL (target sparsity of 95%) and ML LinBreg (λ = 0.005) for
+different mask initialization schemes in Table 2. We see that, when using the variance-preserving rescaling for the weight
+initialization, the mask initialization can vary the accuracy of models trained via RigL by 2.5% whereas ML LinBreg is far
+more robust to the initialization and varies by only 0.6%.
+21
+1155
+1156
+1157
+1158
+1159
+1160
+1161
+1162
+1163
+1164
+1165
+1166
+1167
+1168
+1169
+1170
+1171
+1172
+1173
+1174
+1175
+1176
+1177
+1178
+1179
+1180
+1181
+1182
+1183
+1184
+1185
+1186
+1187
+1188
+1189
+1190
+1191
+1192
+1193
+1194
+1195
+1196
+1197
+1198
+1199
+1200
+1201
+1202
+1203
+1204
+1205
+1206
+1207
+1208
+1209
+Sparse Training of Neural Networks based on Multilevel Mirror Descent
+Table 2. Performance of RigL and ML LinBreg for various mask initialization schemes across 5 seeds.
+Optimizer
+Mask initialization
+Sparsity [%]
+Test acc [%]
+RigL
+Uniform
+94.918
+88.280 ± 0.14
+ER
+94.918
+88.274 ± 0.40
+ERK
+94.975
+90.830 ± 0.32
+ML LinBreg
+Uniform
+94.687 ± 0.10
+90.812 ± 0.33
+ER
+94.788 ± 0.06
+91.448 ± 0.15
+ERK
+94.835 ± 0.05
+91.180 ± 0.23
+Structured sparsity
+Even though, we do not induce any structured sparsity through the regularizer J, we observe that for
+our trained models many of the 2D-kernels are zero. To measure this kind of sparsity, we define the convolutional sparsity as
+Sconv := 1 −
+P
+l∈Iconv |{Kl
+ij ̸= 0}|
+P
+l∈Iconv cl−1 · cl
+,
+where Iconv denotes the index set of all convolutional layers, cl−1 and cl are the number of input and output channels of
+layer l ∈Iconv, respectively, and Kl
+ij is the kernel connecting input channel i to output channel j.
+For example, in the WideResNet28-10 case with λ = 0.005, where we observed a test accuracy of 91.69% ± 0.27% we
+obtain Sconv = 78.21% ± 0.82%, meaning that almost 80% of input-output connections are zero. We can further increase
+this structured sparsity by taking the group ℓ1,2 norm from (8) as the regularizer. We again scale it by some positive
+factor λ to control its influence on the optimization procedure. With this approach, we achieve a convolutional sparsity
+of Sconv = 84.06% ± 0.79% while maintaining a test accuracy of 91.45% ± 0.59%. By increasing the strength of the
+regularizer, this can be further improved to 93.09% ± 0.46% convolutional sparsity, with a corresponding test accuracy of
+90.48% ± 0.72%.
+Scaling up
+To investigate how increasing the scale of the experiments affects the results when keeping the hyperparameters
+fixed, we generated the same plots as in Figure 4, this time for the WideResNet28-10 architecture on the TinyImageNet
+dataset. This setup simultaneously increases both the network capacity and the size and complexity of the dataset. The
+results of this analysis are shown in Figure 7.
+0.00
+0.02
+0.04
+0.06
+0.08
+0.10
+10.0
+17.5
+25.0
+32.5
+40.0
+47.5
+55.0
+62.5
+Test Accuracy [%]
+65
+70
+75
+80
+85
+90
+95
+100
+Sparsity [%]
+(a) Accuracy and sparsity for ML LinBreg with differ-
+ent values of λ with fixed m
+0
+1
+4
+9
+19
+49
+99
+199
+499 999
+Duration of coarse period m
+42.5
+45.0
+47.5
+50.0
+52.5
+55.0
+57.5
+60.0
+62.5
+65.0
+Test Accuracy [%]
+10
+20
+30
+40
+50
+60
+70
+80
+90
+100
+Sparsity [%]
+(b) Accuracy and sparsity for ML LinBreg with differ-
+ent values of m with fixed λ
+Figure 7. Ablation study comparing accuracy and sparsity across different choices of the hyperparameters λ and m for WideResNet28-10
+on TinyImageNet.
+Although the sparsity and test accuracy values are, of course, not identical to those obtained on CIFAR-10, the sparsity
+levels achieved under the exact same hyperparameters remain in a similar range. As expected, the test accuracies are not
+directly comparable, since the classification task on TinyImageNet with 200 classes is substantially more challenging than
+CIFAR-10 with only 10 classes. Furthermore, we observe that small values of λ ≈0.005 give best result for both the small
+scale and the large scale experiment, suggesting that this parameter is pretty scale-invariant. On the other hand, it appears
+like the large scale experiment yields better results for smaller values of m than the small scale one which is potentially also
+due to the increased difficulty of the learning problem requiring more exact gradient information.
+22
