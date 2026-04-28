@@ -1,0 +1,6550 @@
+     1	000
+     2	001
+     3	002
+     4	003
+     5	004
+     6	005
+     7	006
+     8	007
+     9	008
+    10	009
+    11	010
+    12	011
+    13	012
+    14	013
+    15	014
+    16	015
+    17	016
+    18	017
+    19	018
+    20	019
+    21	020
+    22	021
+    23	022
+    24	023
+    25	024
+    26	025
+    27	026
+    28	027
+    29	028
+    30	029
+    31	030
+    32	031
+    33	032
+    34	033
+    35	034
+    36	035
+    37	036
+    38	037
+    39	038
+    40	039
+    41	040
+    42	041
+    43	042
+    44	043
+    45	044
+    46	045
+    47	046
+    48	047
+    49	048
+    50	049
+    51	050
+    52	051
+    53	052
+    54	053
+    55	054
+    56	Dimension-Free Multimodal Sampling
+    57	via Preconditioned Annealed Langevin Dynamics
+    58	Anonymous Authors1
+    59	Abstract
+    60	Designing algorithms that can explore multimodal
+    61	target distributions accurately across successive
+    62	refinements of an underlying high-dimensional
+    63	problem is a central challenge in sampling. An-
+    64	nealed Langevin dynamics (ALD) is a widely
+    65	used alternative to classical Langevin since it
+    66	often yields much faster mixing on multimodal
+    67	targets, but there is still a gap between this em-
+    68	pirical success and existing theory: when, and
+    69	under which design choices, can ALD be guaran-
+    70	teed to remain stable as dimension increases? In
+    71	this paper, we help bridge this gap by providing
+    72	a uniform-in-dimension analysis of continuous-
+    73	time ALD for multimodal targets that can be
+    74	well-approximated by Gaussian mixture models.
+    75	Along an explicit annealing path obtained by pro-
+    76	gressively removing Gaussian smoothing of the
+    77	target, we identify sufficient spectral conditions—
+    78	linking smoothing covariance and the covariances
+    79	of the Gaussian components of the mixture—
+    80	under which ALD achieves a prescribed accuracy
+    81	within a single, dimension-uniform time horizon.
+    82	We then establish dimension-robustness to imper-
+    83	fect initialization and score approximation: under
+    84	a misspecified-mixture score model, we derive
+    85	explicit conditions showing that preconditioning
+    86	the ALD algorithm with a sufficiently decaying
+    87	spectrum is necessary to prevent error terms from
+    88	accumulating across coordinates and destroying
+    89	dimension-uniform control. Finally, numerical
+    90	experiments illustrate and validate the theory.
+    91	1. Introduction
+    92	Classical Langevin dynamics is a standard tool for sam-
+    93	pling (Parisi, 1981; Roberts & Tweedie, 1996; Roberts &
+    94	1Anonymous Institution, Anonymous City, Anonymous Region,
+    95	Anonymous Country. Correspondence to: Anonymous Author
+    96	<anon.email@domain.com>.
+    97	Preliminary work. Under review by the International Conference
+    98	on Machine Learning (ICML). Do not distribute.
+    99	Rosenthal, 1998) and a key ingredient in recent score-based
+   100	generative models (Song & Ermon, 2019; Song et al., 2021).
+   101	Its limitations, however, are also well known. While it can
+   102	converge rapidly when the target distribution is strongly
+   103	log-concave or satisfies suitable isoperimetric inequalities
+   104	(Durmus et al., 2019; Vempala & Wibisono, 2019; Chewi
+   105	et al., 2025), its behavior can deteriorate dramatically out-
+   106	side these regimes: for non-strongly log-concave and espe-
+   107	cially multimodal distributions, its mixing can be extremely
+   108	slow, and this difficulty typically becomes more severe as
+   109	the dimension increases (Ma et al., 2019; Schlichting, 2019;
+   110	Dong & Tong, 2022). Rigorous results confirm such failures
+   111	in a variety of scenarios, including Bayesian posteriors in
+   112	nonlinear inverse problems (Bohr & Nickl, 2024; Bandeira
+   113	et al., 2023; Nickl, 2023).
+   114	These challenges have led to annealed Langevin dynamics
+   115	(ALD). Building on the empirical success of annealing-
+   116	based strategies (Kirkpatrick et al., 1983; Gelfand & Mitter,
+   117	1990; Neal, 2001), the ALD scheme considered here simu-
+   118	lates Langevin dynamics starting from a heavily regularized
+   119	(hence easier-to-sample) distribution and then gradually re-
+   120	duces the smoothing until it approaches the desired target
+   121	(Song & Ermon, 2019; Block et al., 2020). ALD is often
+   122	reported to improve exploration across modes and to yield
+   123	substantially better finite-time sampling accuracy (Song &
+   124	Ermon, 2020; Zilberstein et al., 2022; Sun et al., 2024),
+   125	and recent theoretical work has begun to clarify why an-
+   126	nealing can outperform classical Langevin under minimal
+   127	assumptions—sometimes turning worst-case sampling com-
+   128	plexity upper bounds from exponential to polynomial (Guo
+   129	et al., 2025). Nevertheless, important questions remain
+   130	open—especially whether sampling can remain uniformly
+   131	stable as the dimension increases, without incurring sub-
+   132	stantially longer mixing times. This question has been the
+   133	object of many studies for classical Langevin (Cotter et al.,
+   134	2013; Durmus et al., 2017), but has not yet been rigorously
+   135	addressed for ALD, except under strong regularity assump-
+   136	tions on the target distribution (Cattiaux et al., 2025). Yet
+   137	robustness is most critical in multimodal regimes, where
+   138	classical Langevin can fail.
+   139	A simple illustration suggests that this goal may not be out
+   140	of reach. Figure 1 considers, for each dimension d, sam-
+   141	1
+   142	055
+   143	056
+   144	057
+   145	058
+   146	059
+   147	060
+   148	061
+   149	062
+   150	063
+   151	064
+   152	065
+   153	066
+   154	067
+   155	068
+   156	069
+   157	070
+   158	071
+   159	072
+   160	073
+   161	074
+   162	075
+   163	076
+   164	077
+   165	078
+   166	079
+   167	080
+   168	081
+   169	082
+   170	083
+   171	084
+   172	085
+   173	086
+   174	087
+   175	088
+   176	089
+   177	090
+   178	091
+   179	092
+   180	093
+   181	094
+   182	095
+   183	096
+   184	097
+   185	098
+   186	099
+   187	100
+   188	101
+   189	102
+   190	103
+   191	104
+   192	105
+   193	106
+   194	107
+   195	108
+   196	109
+   197	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+   198	pling from a bimodal Gaussian mixture on Rd with weights
+   199	(w1, w2) = (0.75, 0.25), means (0, 10e1), and covariances
+   200	τ1Σd and τ2Σd, where τ1 = 1.2, τ2 = 2, and Σd has a de-
+   201	caying spectrum (j−2)d
+   202	j=1. Fixing ϵ = 0.3, we ask whether
+   203	the number of ALD steps needed to reach this accuracy
+   204	grows with d. The target is clearly multimodal, and even for
+   205	moderate dimensions ALD already exhibits a pronounced
+   206	dependence on d, in line with existing pessimistic bounds
+   207	(Guo et al., 2025); for d > 10 the required number of
+   208	steps exceeds our 20000-step cap. However, under a few
+   209	specific design choices—like changing the spectrum of the
+   210	smoothing operator from flat to sufficiently decaying—ALD
+   211	reaches the prescribed accuracy with no visible deterioration
+   212	in the required number of steps.
+   213	Figure 1. ALD step count vs. dimension. Number of ALD time
+   214	steps required for the empirical KL(ρd
+   215	⋆∥ρALD,d) to fall below the
+   216	prescribed accuracy ϵ = 0.3, plotted against the truncation dimen-
+   217	sion d. The red curve corresponds to the default flat-spectrum
+   218	choice, with preconditioner Γ = I and smoothing C = 40I,
+   219	while the green curve corresponds to a tailored spectral design:
+   220	Γ = Diag(j−1.5)j≥1 and C = Diag(40 · j−2.7)j≥1.
+   221	Despite being only illustrative, this toy example highlights
+   222	a gap between existing theory—where current results typi-
+   223	cally suggest that finite-time sampling accuracy deteriorates
+   224	with dimension at a polynomial rate (Guo et al., 2025)—and
+   225	the empirical behavior observed here. This motivates the
+   226	central question of this theoretical paper: can one design
+   227	meaningful annealed Langevin configurations for which sta-
+   228	ble sampling in high dimensions is not only within reach,
+   229	but can also be explained rigorously? The main message
+   230	of this work is that it is possible. Specifically, we identify
+   231	a physically motivated ALD design that yields dimension-
+   232	uniform sampling guarantees for multimodal distributions
+   233	in continuous time (Section 3), and we derive conditions
+   234	under which these guarantees remain stable under score and
+   235	initialization errors (Section 4). A key conclusion is that
+   236	stability is not automatic: as we show in subsection 4.2, it
+   237	requires appropriate preconditioning of the ALD diffusion.
+   238	Our analysis is carried out for Gaussian mixture models
+   239	(GMMs), a classical and widely used family for approximat-
+   240	ing complex distributions (McLachlan & Peel, 2000). For
+   241	each dimension d, we consider targets of the form
+   242	ρd
+   243	⋆=
+   244	X
+   245	i∈I
+   246	wiN(md
+   247	i , Σd
+   248	i ),
+   249	where I may be finite or countably infinite, the weights
+   250	satisfy wi > 0 and P
+   251	i∈I wi = 1, and (md
+   252	i , Σd
+   253	i ) denote
+   254	the component means and covariances in Rd. We view the
+   255	family (ρd
+   256	⋆)d≥1 as a sequence of increasingly accurate finite-
+   257	dimensional models—obtained, for example, by projecting
+   258	an infinite-dimensional target onto its first d coordinates (see
+   259	Section 2)—and we analyze whether ALD can achieve con-
+   260	trolled sampling accuracy uniformly in d as the truncation
+   261	level increases. This setting is general yet tractable: it lets
+   262	us make explicit how the annealing schedule, the precondi-
+   263	tioner, and the mixture geometry (means, covariances, and
+   264	weights) jointly yield dimension-uniform guarantees for the
+   265	continuous-time ALD diffusion, together with conditions
+   266	ensuring stability under score and initialization mismatch.
+   267	These insights translate into concrete design choices, illus-
+   268	trated numerically in Section 5; while we do not provide a
+   269	discretization analysis here, our results nonetheless suggest
+   270	principled guidelines for practice.
+   271	Related Work
+   272	Our work is primarily motivated by the recent wave
+   273	of papers focusing on infinite-dimensional analyses for
+   274	diffusion/score-based generative models (Kerrigan et al.,
+   275	2023; Franzese et al., 2023; Baldassari et al., 2023; Pidstri-
+   276	gach et al., 2024; Bond-Taylor & Willcocks, 2024; Baldas-
+   277	sari et al., 2024; Lim et al., 2025; Hagemann et al., 2025;
+   278	Baldassari et al., 2025; Franzese & Michiardi, 2025), and by
+   279	the limitations of these results when the target distribution
+   280	becomes multimodal.
+   281	Non-asymptotic analyses of Langevin-type samplers are
+   282	well developed under strong regularity assumptions (e.g.
+   283	strong log-concavity), where one can obtain sharp guaran-
+   284	tees on mixing and discretization error (Dalalyan, 2017;
+   285	Durmus et al., 2017; 2019; Vempala & Wibisono, 2019;
+   286	Chewi et al., 2025). These analyses also highlight a key lim-
+   287	itation: for multimodal targets, comparable guarantees for
+   288	classical Langevin are typically out of reach, since metasta-
+   289	bility and energy barriers dominate the mixing behavior (Ma
+   290	et al., 2019; Schlichting, 2019; Dong & Tong, 2022).
+   291	Motivated by this difficulty, annealing-based strategies alter
+   292	the sampling task through a prescribed path of intermedi-
+   293	ate distributions that progressively flattens the landscape
+   294	(Kirkpatrick et al., 1983; Gelfand & Mitter, 1990; Neal,
+   295	2001). Evolving a Langevin diffusion along these sched-
+   296	ules leads to annealed Langevin dynamics (Cattiaux et al.,
+   297	2025). While early uses of ALD were largely heuristic
+   298	(Song & Ermon, 2019; 2020), more recent theory—driven
+   299	2
+   300	110
+   301	111
+   302	112
+   303	113
+   304	114
+   305	115
+   306	116
+   307	117
+   308	118
+   309	119
+   310	120
+   311	121
+   312	122
+   313	123
+   314	124
+   315	125
+   316	126
+   317	127
+   318	128
+   319	129
+   320	130
+   321	131
+   322	132
+   323	133
+   324	134
+   325	135
+   326	136
+   327	137
+   328	138
+   329	139
+   330	140
+   331	141
+   332	142
+   333	143
+   334	144
+   335	145
+   336	146
+   337	147
+   338	148
+   339	149
+   340	150
+   341	151
+   342	152
+   343	153
+   344	154
+   345	155
+   346	156
+   347	157
+   348	158
+   349	159
+   350	160
+   351	161
+   352	162
+   353	163
+   354	164
+   355	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+   356	Figure 2. Illustration of annealed Langevin dynamics. The ALD scheme considered here starts from a heavily smoothed, and hence
+   357	tractable, version of the target and simulates a Langevin diffusion whose drift is adapted to the current smoothing level. As time progresses,
+   358	the smoothing is gradually removed, so the dynamics moves from an almost unimodal distribution back to the original multimodal target
+   359	through a controlled “complexification” of the landscape.
+   360	in part by the popularity of stochastic interpolants (Albergo
+   361	et al., 2025), which can be viewed as a generalization of
+   362	ALD (Cordero-Encinar et al., 2025)—has renewed interest
+   363	in samplers based on diffusion dynamics with prescribed,
+   364	time-dependent score schedules. A particularly interesting
+   365	example in conditional generation, which we discuss in
+   366	Appendix C, is classifier-free guidance (Pavasovic et al.,
+   367	2025; Yehezkel et al., 2025; Wang et al., 2024), where the
+   368	sampling score is formed by combining conditional and un-
+   369	conditional scores with a guidance weight that is often taken
+   370	to be time-dependent (stronger early and tapered later).
+   371	Our contribution is in the same vein as this growing body of
+   372	work, but with one important difference: by foregrounding
+   373	robustness with respect to dimension, we consider a family
+   374	of truncations of an infinite-dimensional multimodal model,
+   375	and we make explicit how dimension-robustness can be en-
+   376	forced through the spectral properties of both the annealing
+   377	geometry and the preconditioner. This perspective connects
+   378	naturally to the function-space MCMC literature, which has
+   379	long emphasized that Langevin-type algorithms should be
+   380	formulated in infinite dimension before discretization; doing
+   381	so makes it possible to design principled preconditioning
+   382	schemes that yield dimension-independent behavior (Cotter
+   383	et al., 2013; Hairer et al., 2014; Cui et al., 2016; Beskos
+   384	et al., 2017). It is also in this sense that, as mentioned at the
+   385	beginning of this section, our work can be viewed as parallel
+   386	to recent analyses of preconditioned score-based generative
+   387	models (Pidstrigach et al., 2024; Baldassari et al., 2025).
+   388	2. Problem Setting
+   389	Our goal is to understand when continuous-time annealed
+   390	Langevin dynamics can sample robustly across the succes-
+   391	sive refinements (ρd
+   392	⋆)d≥1 of an infinite-dimensional multi-
+   393	modal target distribution ρ∞
+   394	⋆. As d grows—resolving pro-
+   395	gressively finer features of the same target—we ask whether
+   396	(i) a single, fixed time horizon can control the sampling
+   397	error uniformly in d when the annealing scores are available
+   398	exactly, and (ii) whether the procedure remains stable under
+   399	approximation errors and imperfect initialization.
+   400	To make these questions precise, we first formalize the
+   401	infinite-dimensional setting, which fixes both the modeling
+   402	assumptions and the notion of refinement used throughout
+   403	the paper. Let H be a separable Hilbert space with orthonor-
+   404	mal basis (ej)j≥1. We consider a Gaussian mixture on H,
+   405	ρ∞
+   406	⋆
+   407	=
+   408	X
+   409	i∈I
+   410	wi N(mi, Σi),
+   411	where I is finite or countably infinite, wi > 0 for all i ∈I,
+   412	and P
+   413	i∈I wi = 1. We focus on a diagonal setting:
+   414	mi =
+   415	X
+   416	j≥1
+   417	mijej,
+   418	Σiej = σijej,
+   419	σij > 0.
+   420	Assumption 2.1 (Finite-energy). For each component i ∈I
+   421	of ρ∞
+   422	⋆= P
+   423	i∈I wi N(mi, Σi),
+   424	X
+   425	j≥1
+   426	m2
+   427	ij < ∞,
+   428	X
+   429	j≥1
+   430	σij < ∞.
+   431	3
+   432	165
+   433	166
+   434	167
+   435	168
+   436	169
+   437	170
+   438	171
+   439	172
+   440	173
+   441	174
+   442	175
+   443	176
+   444	177
+   445	178
+   446	179
+   447	180
+   448	181
+   449	182
+   450	183
+   451	184
+   452	185
+   453	186
+   454	187
+   455	188
+   456	189
+   457	190
+   458	191
+   459	192
+   460	193
+   461	194
+   462	195
+   463	196
+   464	197
+   465	198
+   466	199
+   467	200
+   468	201
+   469	202
+   470	203
+   471	204
+   472	205
+   473	206
+   474	207
+   475	208
+   476	209
+   477	210
+   478	211
+   479	212
+   480	213
+   481	214
+   482	215
+   483	216
+   484	217
+   485	218
+   486	219
+   487	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+   488	Note that Assumption 2.1 is not an ad hoc hypothesis: it is
+   489	the Hilbert-space analogue of finite energy. In other words,
+   490	it guarantees mi ∈H and that Σi are trace-class, so that
+   491	each N(mi, Σi) is a well-defined Gaussian measure on H
+   492	(Hairer, 2009).
+   493	The next step, preceding our analysis of ALD, is the defini-
+   494	tion of the finite-dimensional targets via truncation. Let Pd
+   495	be the orthogonal projection onto span{e1, . . . , ed}. The
+   496	d-dimensional target is the marginal
+   497	ρd
+   498	⋆:= (Pd)#ρ∞
+   499	⋆
+   500	=
+   501	X
+   502	i∈I
+   503	wi N(md
+   504	i , Σd
+   505	i ),
+   506	(1)
+   507	where
+   508	md
+   509	i = (mi1, . . . , mid),
+   510	Σd
+   511	i = Diag(σi1, . . . , σid).
+   512	Thus, increasing d adds new modes governed by the same
+   513	spectral sequences, while leaving the previously defined
+   514	coordinates unchanged. This is the refinement regime in
+   515	which we seek dimension-uniform guarantees.
+   516	3. Annealed Langevin Dynamics
+   517	The targets ρd
+   518	⋆are multimodal, and classical Langevin dy-
+   519	namics is well known to struggle with multimodal sam-
+   520	pling even at moderate dimension. In this section, we intro-
+   521	duce one possible remedy—annealed Langevin dynamics
+   522	(ALD)—which simulates a Langevin diffusion along a pre-
+   523	scribed sequence of progressively less smoothed targets.
+   524	Here we focus on the Gaussian-smoothing variant of ALD;
+   525	it is sketched in Figure 2 and formalized below in two steps.
+   526	Step 1 (annealing schedule). Let Cd be a positive-definite
+   527	matrix, diagonal in the basis (ej)d
+   528	j=1 with eigenvalues
+   529	(λj)d
+   530	j=1. To remain consistent with the infinite-dimensional
+   531	setting, we assume the eigenvalues are the first d terms of a
+   532	summable sequence (λj)j≥1, i.e.,
+   533	X
+   534	j≥1
+   535	λj < ∞,
+   536	(2)
+   537	so that the limiting covariance on H is trace-class. We
+   538	define the Gaussian-smoothing annealing path by
+   539	ρd
+   540	t = ρd
+   541	⋆∗N
+   542	
+   543	0,
+   544	T −t
+   545	T
+   546	Cd
+   547	,
+   548	t ∈[0, T].
+   549	(3)
+   550	Thus, at early times (t ≈0), ρd
+   551	t is a heavily smoothed
+   552	version of ρd
+   553	⋆, and is typically easier to explore; as t →
+   554	T, the smoothing vanishes and ρd
+   555	t returns to the original
+   556	multimodal target.
+   557	Step 2 (time-inhomogeneous dynamics). We then define a
+   558	diffusion driven by a time-dependent score ∇log ρd
+   559	t : start-
+   560	ing from ρd
+   561	0, the dynamics is gradually driven toward the
+   562	target ρd
+   563	T = ρd
+   564	⋆. Specifically, we initialize Xd
+   565	0 ∼ρd
+   566	0 and
+   567	evolve the ALD diffusion
+   568	dXd
+   569	t = Γd∇log ρd
+   570	t (Xd
+   571	t ) dt +
+   572	√
+   573	2Γd dW d
+   574	t ,
+   575	t ∈[0, T],
+   576	(4)
+   577	where (W d
+   578	t )t≥0 is a standard Brownian motion in Rd, and
+   579	Γd is a positive-definite matrix, also diagonal in the basis
+   580	(ej)d
+   581	j=1 with eigenvalues (γj)d
+   582	j=1, whose role as a precon-
+   583	ditioner will be discussed later. The corresponding ALD
+   584	output distribution, which we use as an approximation of
+   585	ρd
+   586	⋆, is the law at time T
+   587	ρALD,d
+   588	T
+   589	:= Law(Xd
+   590	T ).
+   591	(5)
+   592	There is an important distinction to keep in mind, which
+   593	helps clarify the analysis that follows. Standard Langevin
+   594	dynamics targeting ρd
+   595	⋆uses a fixed drift, ∇log ρd
+   596	⋆. In con-
+   597	trast, ALD uses the time-dependent score ∇log ρd
+   598	t , so the
+   599	dynamics (4) is time-inhomogeneous. Consequently, one
+   600	should not expect a stationary distribution, nor should one
+   601	expect the law ρALD,d
+   602	t
+   603	:= Law(Xd
+   604	t ) to coincide with the
+   605	instantaneous target ρd
+   606	t ; in fact, ρALD,d
+   607	T
+   608	may differ from ρd
+   609	⋆.
+   610	We quantify this annealing-induced bias at the final time T
+   611	via the Kullback-Leibler divergence
+   612	Bd
+   613	ann(T) := KL
+   614	 ρd
+   615	⋆∥ρALD,d
+   616	T
+   617	
+   618	.
+   619	In what follows, we show that the time T required to make
+   620	this bias small is dictated by the schedule and by the geome-
+   621	try of smoothing and preconditioning (through Cd and Γd),
+   622	as well as by the mixture covariances (Σd
+   623	i ); with the right
+   624	design choice, it can be made uniform in dimension.
+   625	Annealing-Induced Bias
+   626	To isolate the source of this bias, it is convenient to introduce
+   627	a reference time-inhomogeneous diffusion that does follow
+   628	the annealing path exactly. Namely, we consider a time-
+   629	dependent vector field (vd
+   630	t )t∈[0,T ] and the SDE
+   631	dXd
+   632	t = Γd ∇log ρd
+   633	t + vd
+   634	t
+   635	
+   636	(Xd
+   637	t ) dt +
+   638	√
+   639	2Γd dW d
+   640	t ,
+   641	(6)
+   642	with vd
+   643	t chosen so that Law(Xd
+   644	t ) = ρd
+   645	t for all t ∈[0, T]. In
+   646	particular, any such vd
+   647	t induces the path-matching energy,
+   648	J vd
+   649	t
+   650	ann(T) := 1
+   651	4
+   652	Z T
+   653	0
+   654	Z
+   655	Rd ∥(Γd)1/2vd
+   656	t (x)∥2 dρd
+   657	t (x) dt, (7)
+   658	(with a slight abuse of notation, we use ρd
+   659	t both for the law
+   660	and for its density), which upper bounds Bd
+   661	ann(T) for any
+   662	vd
+   663	t . In other words, controlling the bias reduces to control-
+   664	ling the energy cost of the correction vd
+   665	t needed to match
+   666	the annealing path, relative to the cheap drift ∇log ρd
+   667	t used
+   668	by the ALD diffusion (4). This is not merely a technical
+   669	convenience: in general, vd
+   670	t is inaccessible, since identify-
+   671	ing it amounts to solving a high-dimensional Fokker-Planck
+   672	4
+   673	220
+   674	221
+   675	222
+   676	223
+   677	224
+   678	225
+   679	226
+   680	227
+   681	228
+   682	229
+   683	230
+   684	231
+   685	232
+   686	233
+   687	234
+   688	235
+   689	236
+   690	237
+   691	238
+   692	239
+   693	240
+   694	241
+   695	242
+   696	243
+   697	244
+   698	245
+   699	246
+   700	247
+   701	248
+   702	249
+   703	250
+   704	251
+   705	252
+   706	253
+   707	254
+   708	255
+   709	256
+   710	257
+   711	258
+   712	259
+   713	260
+   714	261
+   715	262
+   716	263
+   717	264
+   718	265
+   719	266
+   720	267
+   721	268
+   722	269
+   723	270
+   724	271
+   725	272
+   726	273
+   727	274
+   728	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+   729	equation. Although for Gaussian mixtures such corrections
+   730	can sometimes be characterized explicitly, we adopt this set-
+   731	ting as a tractable proxy in which all quantities are explicit
+   732	and the dependence on (Cd, Γd) and (Σd
+   733	i ) can be tracked.
+   734	This leads to the paper’s first question: how large must
+   735	the annealing horizon be so that this bias stays within a
+   736	prescribed accuracy ϵ? In particular, how does the required
+   737	time horizon scale with the dimension d? Theorem 3.1
+   738	below answers this by giving a time horizon T d such that
+   739	KL
+   740	 ρd
+   741	⋆∥ρALD,d
+   742	T d
+   743	
+   744	≤ϵ,
+   745	with T d depending on d only via (λj, γj) and (σij). We
+   746	then use this dimension-explicit expression for T d to iden-
+   747	tify regimes in which achieving accuracy ϵ requires a time
+   748	horizon can be chosen uniformly in d. The result is proved
+   749	in Appendix A under exact-score and perfect-initialization
+   750	assumptions; we relax both in the next section.
+   751	Theorem 3.1. Fix d ≥1 and ϵ > 0. Define
+   752	Kd := 1
+   753	16
+   754	X
+   755	i∈I
+   756	wi
+   757	d
+   758	X
+   759	j=1
+   760	λj
+   761	γj
+   762	log
+   763	
+   764	1 + λj
+   765	σij
+   766	
+   767	.
+   768	Consider the ALD dynamics up to time
+   769	T d := ϵ−1 Kd.
+   770	Then Bd
+   771	ann(T d) ≤ϵ.
+   772	Theorem 3.1 shows that a dimension-uniform horizon exists
+   773	precisely when supd≥1 Kd < ∞, that is, when the series
+   774	X
+   775	i∈I
+   776	wi
+   777	X
+   778	j≥1
+   779	λj
+   780	γj
+   781	log
+   782	
+   783	1 + λj
+   784	σij
+   785	
+   786	is finite. In such regimes, the required time horizon to
+   787	reach accuracy ϵ does not deteriorate as d increases, for-
+   788	malizing the dimension-stability suggested by Figure 1.
+   789	Crucially, this condition can be enforced through design
+   790	choices in ALD, namely by selecting the spectrum (λj) of
+   791	the Gaussian-smoothing covariance and the preconditioner
+   792	spectrum (γj): indeed, using log(1 + u) ≤u for u ≥0, a
+   793	sufficient condition for supd Kd < ∞is
+   794	X
+   795	i∈I
+   796	wi
+   797	X
+   798	j≥1
+   799	λ2
+   800	j
+   801	γj σij
+   802	< ∞.
+   803	(8)
+   804	Finally, three remarks are worth noting:
+   805	• It may seem surprising that the component means mij
+   806	do not appear in (8). This is because Theorem 3.1 as-
+   807	sumes an idealized setting; in the next section we show
+   808	that the means mij play a significant role when the
+   809	score is imperfect or the initialization is misspecified.
+   810	• Theorem 3.1 assumes access to an exact initialization
+   811	Xd
+   812	0 ∼ρd
+   813	0; it does not quantify the cost of sampling
+   814	from ρd
+   815	0. This cost is controlled by the smoothing Cd,
+   816	which, when increased, makes ρd
+   817	0 = ρd
+   818	⋆∗N(0, Cd)
+   819	closer to a unimodal proxy and typically easier to sam-
+   820	ple from, but also increases Kd since the annealing path
+   821	starts farther from ρd
+   822	⋆. Conversely, weaker smoothing
+   823	shortens the path but yields a more multimodal ρd
+   824	0,
+   825	which is harder to sample from.
+   826	• One should not read the dependence of Kd on (γj) as
+   827	saying that multiplying Γd by a large scalar acceler-
+   828	ates sampling: this operation essentially rescales the
+   829	continuous-time clock (e.g. when Γd = κCd, only
+   830	T ′ = κT becomes meaningful), and in discrete time
+   831	it demands a correspondingly smaller stepsize to re-
+   832	main stable. What matters for dimension-free control
+   833	is the spectral shape of Γd relative to Cd, a point that
+   834	becomes especially important in the next section when
+   835	score and initialization errors are included.
+   836	4. Dimension-Robust Sampling under Score
+   837	and Initialization Errors
+   838	We now move past the idealized setting of Section 3 and
+   839	turn to the question of dimension-uniform stability when the
+   840	continuous-time dynamics evolves under an imperfect score
+   841	and a misspecified initialization. To separate the contribu-
+   842	tion of these errors from the intrinsic annealing-induced
+   843	bias analyzed in the previous section, we keep the ideal
+   844	annealing diffusion (6) as a reference and compare it to the
+   845	practical ALD driven by an approximate score and started
+   846	from an incorrect initial law:
+   847	d e
+   848	Xd
+   849	t = Γd sd
+   850	θ(t, e
+   851	Xd
+   852	t ) dt+
+   853	√
+   854	2Γd df
+   855	W d
+   856	t ,
+   857	e
+   858	Xd
+   859	0 ∼eρd
+   860	0. (9)
+   861	We denote its law by eρALD,d
+   862	t
+   863	:= Law( e
+   864	Xd
+   865	t ) (recall that the
+   866	ALD law with exact score is denoted by ρALD,d
+   867	t
+   868	), and we
+   869	measure score inaccuracies through the pointwise error
+   870	ϵd
+   871	t (x) := ∇log ρd
+   872	t (x) −sd
+   873	θ(t, x).
+   874	We start our analysis with the following proposition, whose
+   875	proof is given in Appendix B.1.
+   876	Proposition 4.1. We have the upper bound
+   877	KL
+   878	 ρd
+   879	⋆∥eρALD,d
+   880	T
+   881	
+   882	≤Ed
+   883	init + Ed
+   884	score,T + Ed
+   885	bias,T ,
+   886	(10)
+   887	where
+   888	Ed
+   889	init := KL(ρd
+   890	0 ∥eρd
+   891	0),
+   892	Ed
+   893	score,T := 1
+   894	2
+   895	Z T
+   896	0
+   897	Z (Γd)1/2ϵd
+   898	t (x)
+   899	2 dρd
+   900	t (x) dt,
+   901	and
+   902	Ed
+   903	bias,T := 2
+   904	inf
+   905	(vd
+   906	t )t∈[0,T ]:
+   907	∂tρd
+   908	t =−∇·(ρd
+   909	t Γdvd
+   910	t )
+   911	J vd
+   912	t
+   913	ann(T),
+   914	5
+   915	275
+   916	276
+   917	277
+   918	278
+   919	279
+   920	280
+   921	281
+   922	282
+   923	283
+   924	284
+   925	285
+   926	286
+   927	287
+   928	288
+   929	289
+   930	290
+   931	291
+   932	292
+   933	293
+   934	294
+   935	295
+   936	296
+   937	297
+   938	298
+   939	299
+   940	300
+   941	301
+   942	302
+   943	303
+   944	304
+   945	305
+   946	306
+   947	307
+   948	308
+   949	309
+   950	310
+   951	311
+   952	312
+   953	313
+   954	314
+   955	315
+   956	316
+   957	317
+   958	318
+   959	319
+   960	320
+   961	321
+   962	322
+   963	323
+   964	324
+   965	325
+   966	326
+   967	327
+   968	328
+   969	329
+   970	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+   971	with J vd
+   972	t
+   973	ann(T) defined in (7).
+   974	Note that Theorem 3.1 already provides a dimension-explicit
+   975	bound for Ed
+   976	bias,T . Indeed, the argument underlying (10)
+   977	relies on the inequality
+   978	Bd
+   979	ann(T) ≤1
+   980	2Ed
+   981	bias,T ,
+   982	and Theorem 3.1 bounds this path-matching energy through
+   983	the same quantity Kd. In particular, the dimension-uniform
+   984	regimes identified there—namely, the sufficient condi-
+   985	tion (8)—apply directly to Ed
+   986	bias,T . It therefore remains
+   987	to control the terms Ed
+   988	init and Ed
+   989	score,T , which we do next.
+   990	To this end, we introduce a score-error model that keeps the
+   991	analysis explicit while preserving multimodality.
+   992	Assumption 4.2. The learned score coincides with the exact
+   993	score of a misspecified Gaussian mixture along the anneal-
+   994	ing path:
+   995	sd
+   996	θ(t, x) = ∇log eρd
+   997	t (x),
+   998	where eρd
+   999	t is obtained by annealing a perturbed mixture with
+  1000	the same smoothing operator as in (3), namely
+  1001	eρd
+  1002	t = eρd
+  1003	⋆∗N
+  1004	
+  1005	0,
+  1006	T −t
+  1007	T
+  1008	Cd
+  1009	,
+  1010	eρd
+  1011	⋆:=
+  1012	X
+  1013	i∈I
+  1014	ewi N( emd
+  1015	i , eΣd
+  1016	i ),
+  1017	with perturbed parameters
+  1018	emd
+  1019	i = md
+  1020	i +∆md
+  1021	i ,
+  1022	eΣd
+  1023	i = Σd
+  1024	i +∆Σd
+  1025	i ,
+  1026	ewi = wi+∆wi,
+  1027	and with ( ewi)i∈I such that ewi > 0 and P
+  1028	i∈I ewi = 1.
+  1029	For the calculations that follow we continue adopting the
+  1030	diagonal setting introduced in Section 2: in particular, we
+  1031	assume that, for each d and each i ∈I,
+  1032	∆Σd
+  1033	i = Diag(∆σi1, . . . , ∆σid),
+  1034	(11)
+  1035	so that
+  1036	eΣd
+  1037	i = Diag(σi1 + ∆σi1, . . . , σid + ∆σid)
+  1038	with σij + ∆σij > 0.
+  1039	4.1. Initialization-Error Mismatch Ed
+  1040	init
+  1041	We begin by noting that
+  1042	ρd
+  1043	0(x) =
+  1044	X
+  1045	i∈I
+  1046	wiφd
+  1047	i,0(x),
+  1048	eρd
+  1049	0(x) =
+  1050	X
+  1051	i∈I
+  1052	ewi eφd
+  1053	i,0(x),
+  1054	where φd
+  1055	i,0 and eφd
+  1056	i,0 are the Gaussian densities
+  1057	φd
+  1058	i,t := N(md
+  1059	i , Σd
+  1060	i +κtCd),
+  1061	eφd
+  1062	i,t := N( emd
+  1063	i , eΣd
+  1064	i +κtCd),
+  1065	with κt := (T −t)/T, evaluated at t = 0. Thus, the initial-
+  1066	ization error in Proposition 4.1 reduces to the discrepancy
+  1067	between two Gaussian mixtures with misspecified weights,
+  1068	means and covariances. We quantify this mismatch in the
+  1069	following proposition.
+  1070	Proposition 4.3. We have the upper bound
+  1071	Ed
+  1072	init ≤KL(w ∥ew) +
+  1073	X
+  1074	i∈I
+  1075	wi KL
+  1076	 φd
+  1077	i,0 ∥eφd
+  1078	i,0
+  1079	
+  1080	,
+  1081	(12)
+  1082	where
+  1083	KL(w ∥ew) =
+  1084	X
+  1085	i∈I
+  1086	wi log
+  1087	wi
+  1088	ewi
+  1089	
+  1090	.
+  1091	(13)
+  1092	Moreover, combining Assumption 4.2 with (11) yields the
+  1093	explicit expression
+  1094	KL
+  1095	 φd
+  1096	i,0 ∥eφd
+  1097	i,0
+  1098	
+  1099	= 1
+  1100	2
+  1101	d
+  1102	X
+  1103	j=1
+  1104	"
+  1105	(∆mij)2
+  1106	σij + ∆σij + λj
+  1107	+ log
+  1108	 
+  1109	1 +
+  1110	∆σij
+  1111	σij + λj
+  1112	!
+  1113	−
+  1114	∆σij
+  1115	σij + ∆σij + λj
+  1116	#
+  1117	.
+  1118	(14)
+  1119	The bound (12) naturally splits into a weight-mismatch term
+  1120	(13) and a within-component Gaussian mismatch term (14):
+  1121	• The weight term can be controlled, for example, by
+  1122	assuming ewi = wi(1 + ηi), with ηi ∈(−η, η) for
+  1123	some η ∈(0, 1).
+  1124	• Controlling (14) uniformly in d instead amounts to
+  1125	ensuring that the coordinatewise contributions are
+  1126	summable as d →∞. For example, using log(1+r) ≤
+  1127	r for r > −1, one obtains the sufficient conditions
+  1128	sup
+  1129	i∈I
+  1130	X
+  1131	j≥1
+  1132	(∆mij)2
+  1133	σij + ∆σij + λj
+  1134	< ∞,
+  1135	sup
+  1136	i∈I
+  1137	X
+  1138	j≥1
+  1139	(∆σij)2
+  1140	(σij + λj)(σij + ∆σij + λj) < ∞.
+  1141	(15)
+  1142	4.2. Score-Error Mismatch Ed
+  1143	score,T
+  1144	We now turn to the score-error contribution, quantified by
+  1145	the Γd-weighted energy
+  1146	Ed
+  1147	score,T :=
+  1148	Z T
+  1149	0
+  1150	Eρd
+  1151	t
+  1152	(Γd)1/2ϵd
+  1153	t (X)
+  1154	2 dt.
+  1155	(16)
+  1156	In the Gaussian-mixture setting, the discrepancy ϵd
+  1157	t admits
+  1158	the decomposition
+  1159	ϵd
+  1160	t (x) =
+  1161	X
+  1162	i∈I
+  1163	pi,t(x)
+  1164	 eSd
+  1165	i,t(x) −Sd
+  1166	i,t(x)
+  1167	
+  1168	+
+  1169	X
+  1170	i∈I
+  1171	 epi,t(x) −pi,t(x)
+  1172	 eSd
+  1173	i,t(x),
+  1174	(17)
+  1175	where pi,t(x) =
+  1176	wiφd
+  1177	i,t(x)
+  1178	ρd
+  1179	t (x)
+  1180	and epi,t(x) =
+  1181	e
+  1182	wi eφd
+  1183	i,t(x)
+  1184	eρd
+  1185	t (x)
+  1186	are the
+  1187	exact and perturbed responsibilities, and
+  1188	Sd
+  1189	i,t(x)
+  1190	:= −
+  1191	
+  1192	Σd
+  1193	i + κtCd−1
+  1194	(x −md
+  1195	i ),
+  1196	eSd
+  1197	i,t(x)
+  1198	:= −
+  1199	
+  1200	eΣd
+  1201	i + κtCd−1
+  1202	(x −emd
+  1203	i ).
+  1204	6
+  1205	330
+  1206	331
+  1207	332
+  1208	333
+  1209	334
+  1210	335
+  1211	336
+  1212	337
+  1213	338
+  1214	339
+  1215	340
+  1216	341
+  1217	342
+  1218	343
+  1219	344
+  1220	345
+  1221	346
+  1222	347
+  1223	348
+  1224	349
+  1225	350
+  1226	351
+  1227	352
+  1228	353
+  1229	354
+  1230	355
+  1231	356
+  1232	357
+  1233	358
+  1234	359
+  1235	360
+  1236	361
+  1237	362
+  1238	363
+  1239	364
+  1240	365
+  1241	366
+  1242	367
+  1243	368
+  1244	369
+  1245	370
+  1246	371
+  1247	372
+  1248	373
+  1249	374
+  1250	375
+  1251	376
+  1252	377
+  1253	378
+  1254	379
+  1255	380
+  1256	381
+  1257	382
+  1258	383
+  1259	384
+  1260	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  1261	We bound the two contributions in (17) in the following
+  1262	proposition.
+  1263	Proposition 4.4. For each t ∈[0, T], we have
+  1264	Eρd
+  1265	t
+  1266	
+  1267	X
+  1268	i∈I
+  1269	pi,t(X) (Γd)1/2 eSd
+  1270	i,t−Sd
+  1271	i,t
+  1272	
+  1273	(X)
+  1274	
+  1275	2
+  1276	≤Bd
+  1277	comp(t),
+  1278	(18)
+  1279	with
+  1280	Bd
+  1281	comp(t) := 2
+  1282	X
+  1283	i∈I
+  1284	wi
+  1285	d
+  1286	X
+  1287	j=1
+  1288	γj
+  1289	(∆mij)2 +
+  1290	(∆σij)2
+  1291	σij+κtλj
+  1292	 σij + ∆σij + κtλj
+  1293	2 .
+  1294	Moreover, there exists an explicit function Bd
+  1295	resp(t) (given
+  1296	in Appendix B.3) such that
+  1297	Eρd
+  1298	t
+  1299	
+  1300	X
+  1301	i∈I
+  1302	 epi,t −pi,t
+  1303	
+  1304	(X) (Γd)1/2 eSd
+  1305	i,t(X)
+  1306	
+  1307	2
+  1308	≤Bd
+  1309	resp(t).
+  1310	(19)
+  1311	Consequently,
+  1312	Ed
+  1313	score,T ≤
+  1314	Z T
+  1315	0
+  1316	
+  1317	Bd
+  1318	comp(t) + Bd
+  1319	resp(t)
+  1320	
+  1321	dt.
+  1322	(20)
+  1323	Appendix B.4 states the full set of assumptions on ∆wi,
+  1324	∆mij, and ∆σij ensuring that the bounds (18) and (19) re-
+  1325	main uniform as d →∞; here we highlight a few key points,
+  1326	with particular emphasis on the role of the preconditioner
+  1327	spectrum (γj):
+  1328	• The term Bd
+  1329	comp(t) depends on (∆mij, ∆σij) only
+  1330	through γj-weighted coordinatewise contributions. Ac-
+  1331	cordingly, a sufficient condition for dimension-uniform
+  1332	control is to require that the corresponding series are
+  1333	summable
+  1334	sup
+  1335	i∈I
+  1336	X
+  1337	j≥1
+  1338	γj
+  1339	(∆mij)2
+  1340	(σij + ∆σij)2 < ∞,
+  1341	sup
+  1342	i∈I
+  1343	X
+  1344	j≥1
+  1345	γj
+  1346	(∆σij)2
+  1347	σij (σij + ∆σij)2 < ∞.
+  1348	• The term Bd
+  1349	resp(t) is more delicate because it cou-
+  1350	ples weight perturbations and component perturbations
+  1351	through the Gaussian-mixture responsibilities. Its full
+  1352	control is technical and is deferred to Appendix B.4.
+  1353	Here we only give a glimpse of the mechanism by
+  1354	which component perturbations enter via the respon-
+  1355	sibilities, and isolate a few representative conditions
+  1356	under which this effect can be bounded in terms of (i) a
+  1357	density-ratio factor Eeρd
+  1358	t [(ρd
+  1359	t /eρd
+  1360	t )2(X)] and (ii) a collec-
+  1361	tion of γj-weighted series. In the ideal case ∆mij = 0
+  1362	(perfect mean match), these conditions reduce to
+  1363	sup
+  1364	i∈I
+  1365	X
+  1366	j≥1
+  1367	γp
+  1368	j
+  1369	(σij + ∆σij)p < ∞, for p = 1, 2,
+  1370	together with uniform control of the variance ratio
+  1371	(σij + ∆σij)/σij. When the means are misspecified,
+  1372	additional weighted summability conditions are re-
+  1373	quired:
+  1374	sup
+  1375	i∈I
+  1376	X
+  1377	j≥1
+  1378	γp
+  1379	j
+  1380	(∆mij)2
+  1381	(σij + ∆σij)1+p < ∞, for p = 1, 2,
+  1382	and
+  1383	sup
+  1384	i∈I
+  1385	X
+  1386	j≥1
+  1387	γ2
+  1388	j
+  1389	(∆mij)4
+  1390	(σij + ∆σij)4 < ∞.
+  1391	These conditions highlight the importance of precondition-
+  1392	ing for designing ALD algorithms that remain robust in
+  1393	high dimensions: while Theorem 3.1 allows choices such
+  1394	as γj = λj (or even γj = 1), provided λj decays suffi-
+  1395	ciently fast relative to σij, in the presence of score errors it
+  1396	becomes crucial to choose (γj) with sufficient decay to pre-
+  1397	vent the error terms from accumulating across coordinates
+  1398	and destroying dimension-uniform control.
+  1399	5. Numerical Experiments
+  1400	We conclude the analysis by presenting simple numeri-
+  1401	cal experiments that corroborate our theoretical findings:
+  1402	for targets given by truncations of an infinite-dimensional
+  1403	Gaussian-mixture law, multimodal sampling via precondi-
+  1404	tioned ALD can be made dimension-robust. We estimate
+  1405	the empirical KL divergence between the truncated target
+  1406	ρd
+  1407	⋆and the ALD output law ρALD,d
+  1408	T
+  1409	as the dimension in-
+  1410	creases, and we compare the regimes discussed throughout
+  1411	the paper. Our goal is twofold: to highlight the impact of
+  1412	design choices that are intrinsic to the infinite-dimensional
+  1413	setting, and to illustrate the role of the preconditioner in
+  1414	ensuring stability under score error. Implementation and
+  1415	further details are provided in Appendix D.
+  1416	5.1. Annealing-Induced Bias vs. Dimension
+  1417	We
+  1418	consider
+  1419	a
+  1420	two-component
+  1421	infinite-dimensional
+  1422	Gaussian-mixture
+  1423	target
+  1424	with
+  1425	weights
+  1426	(0.75, 0.25),
+  1427	separated means m2 −m1 = 10 e1, and covariances
+  1428	Σ1 = τ1Σ and Σ2 = τ2Σ, where τ1 = 1.2, τ2 = 2, and
+  1429	Σ = Diag(j−1.25)j≥1.
+  1430	We study its truncations ρd
+  1431	⋆at
+  1432	dimensions d ∈{1, 5, . . . , 65}. We work in the idealized
+  1433	setting of Section 3, with the exact score along the annealing
+  1434	path and with initial samples drawn from the smoothed
+  1435	initialization ρd
+  1436	0 = ρd
+  1437	⋆∗N(0, Cd). We fix a common time
+  1438	horizon T and we run ALD for each truncation dimension
+  1439	d, and report the empirical bias KL
+  1440	 ρd
+  1441	⋆∥ρALD,d
+  1442	T
+  1443	
+  1444	.
+  1445	Within this controlled setting, we compare two regimes.
+  1446	In the first, we follow (8) and run ALD with diagonal
+  1447	preconditioner Γ = Diag(j−1.5)j≥1 and smoothing C =
+  1448	Diag(40 · j−2.7)j≥1 (the factor 40 sets the overall smooth-
+  1449	7
+  1450	385
+  1451	386
+  1452	387
+  1453	388
+  1454	389
+  1455	390
+  1456	391
+  1457	392
+  1458	393
+  1459	394
+  1460	395
+  1461	396
+  1462	397
+  1463	398
+  1464	399
+  1465	400
+  1466	401
+  1467	402
+  1468	403
+  1469	404
+  1470	405
+  1471	406
+  1472	407
+  1473	408
+  1474	409
+  1475	410
+  1476	411
+  1477	412
+  1478	413
+  1479	414
+  1480	415
+  1481	416
+  1482	417
+  1483	418
+  1484	419
+  1485	420
+  1486	421
+  1487	422
+  1488	423
+  1489	424
+  1490	425
+  1491	426
+  1492	427
+  1493	428
+  1494	429
+  1495	430
+  1496	431
+  1497	432
+  1498	433
+  1499	434
+  1500	435
+  1501	436
+  1502	437
+  1503	438
+  1504	439
+  1505	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  1506	Figure 3.
+  1507	Annealed-induced bias across dimensions.
+  1508	Em-
+  1509	pirical KL(ρd
+  1510	⋆∥ρALD,d) as a function of the truncation dimen-
+  1511	sion d, shown on a logarithmic y-axis. The green curve cor-
+  1512	responds to the prescribed spectra Γ = Diag(j−1.5)j≥1 and
+  1513	C = Diag(40 · j−2.7)j≥1, while the red curve corresponds to
+  1514	the flat-spectrum choice Γ = I and C = 40I. The KL is es-
+  1515	timated via kNN with k = 20; robustness to k is reported in
+  1516	Appendix D.
+  1517	Figure 4. Preconditioning and dimension dependence of the
+  1518	KL. Empirical KL(ρd
+  1519	⋆∥ρALD,d) as a function of the truncation
+  1520	dimension d, shown on a logarithmic y-axis. The green curve
+  1521	corresponds to runs of the ALD sampler with preconditioner Γ =
+  1522	Diag(j−3.5)j≥1, while the red curve corresponds to runs with
+  1523	Γ = Diag(j−1)j≥1. The KL is estimated via kNN with k = 20;
+  1524	robustness to k is reported in Appendix D.
+  1525	ing scale). In the second, the target ρd
+  1526	⋆is unchanged but we
+  1527	use the identity preconditioner and a flat-spectrum smooth-
+  1528	ing, i.e. Γ = I and C = 40I. Figure 3 contrasts the two
+  1529	behaviors on a logarithmic scale: under the prescribed spec-
+  1530	tra the empirical KL(ρd
+  1531	⋆∥ρALD,d) stays uniformly small as
+  1532	d increases, whereas under the flat-spectrum choice it grows
+  1533	rapidly with d. This illustrates that (8) reflects a genuine
+  1534	high-dimensional stability constraint rather than a proof
+  1535	artefact.
+  1536	5.2. The Importance of Preconditioning
+  1537	We now introduce error in both the initialization and the
+  1538	score. To isolate the role in achieving dimension-uniformity
+  1539	that our theory attributes to the preconditioner, we initialize
+  1540	the ALD diffusion from a mixture with incorrect weights
+  1541	(0.1, 0.9) but with the same component means and covari-
+  1542	ances as the target, so that the initialization error does not
+  1543	play a role in the stability analysis (the second sum on the
+  1544	right-hand side of (12) is zero). The ALD drift, in con-
+  1545	trast, is computed under a misspecified mixture in which the
+  1546	component covariances are perturbed.
+  1547	Specifically, in Figure 4 we consider an infinite-dimensional
+  1548	bimodal Gaussian mixture target with weights (0.75, 0.25),
+  1549	identical covariances Σ1 = Σ2 = Diag(j−2)j≥1, and sep-
+  1550	arated means m2 −m1 = 10e1. We study truncations at
+  1551	dimensions d ∈{1, 5, . . . , 75}. Following Section 4.2 and
+  1552	the conditions of Appendix B.4, we introduce a covariance
+  1553	perturbation ∆σij whose spectrum decays as (j−3.5)j≥1.
+  1554	We then compare two preconditioners: one that satisfies
+  1555	the conditions of Appendix B.4, Γ = Diag(j−3.5)j≥1, and
+  1556	one that violates them, Γ = Diag(j−1)j≥1. The contrast
+  1557	is once again evident: with the admissible preconditioner
+  1558	the error remains uniformly controlled as d grows, whereas
+  1559	with the non-admissible one it increases with dimension—
+  1560	highlighting that, under score error, preconditioning is cru-
+  1561	cial for dimension-robust stability.
+  1562	6. Discussion and Future Work
+  1563	We studied the robustness of continuous-time annealed
+  1564	Langevin dynamics with respect to dimension in a mul-
+  1565	timodal setting. We showed that, within a well-defined
+  1566	infinite-dimensional framework, appropriate design choices
+  1567	yield dimension-uniform behavior, improving upon recent
+  1568	bounds that degrade with dimension. Our analysis high-
+  1569	lights the central role of preconditioning—a message that is
+  1570	not surprising, and that connects our work to recent function-
+  1571	space diffusion models literature (Pidstrigach et al., 2024;
+  1572	Baldassari et al., 2025).
+  1573	We derive explicit dimension-
+  1574	dependent error bounds and identify conditions under which
+  1575	they remain uniform, clarifying the interplay between the
+  1576	mixture component means and covariances, the annealing
+  1577	smoothing, and the preconditioner. As the authors of (Bal-
+  1578	dassari et al., 2023; Pidstrigach et al., 2024; Baldassari et al.,
+  1579	2025), we adopt simplifying assumptions, notably that the
+  1580	mixture covariances are co-diagonalizable; this restriction
+  1581	is less limiting here, since we allow infinitely many mix-
+  1582	ture components, which still permit the approximation of
+  1583	rich distributions. Several questions remain open, including
+  1584	posterior sampling in Bayesian nonlinear inverse problems,
+  1585	where classical Langevin is known to struggle (Bohr &
+  1586	Nickl, 2024; Nickl, 2023). Developing an ALD analogue
+  1587	of the theory in Baldassari et al. (2025) in this setting is a
+  1588	natural next step, and one we are actively pursuing.
+  1589	8
+  1590	440
+  1591	441
+  1592	442
+  1593	443
+  1594	444
+  1595	445
+  1596	446
+  1597	447
+  1598	448
+  1599	449
+  1600	450
+  1601	451
+  1602	452
+  1603	453
+  1604	454
+  1605	455
+  1606	456
+  1607	457
+  1608	458
+  1609	459
+  1610	460
+  1611	461
+  1612	462
+  1613	463
+  1614	464
+  1615	465
+  1616	466
+  1617	467
+  1618	468
+  1619	469
+  1620	470
+  1621	471
+  1622	472
+  1623	473
+  1624	474
+  1625	475
+  1626	476
+  1627	477
+  1628	478
+  1629	479
+  1630	480
+  1631	481
+  1632	482
+  1633	483
+  1634	484
+  1635	485
+  1636	486
+  1637	487
+  1638	488
+  1639	489
+  1640	490
+  1641	491
+  1642	492
+  1643	493
+  1644	494
+  1645	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  1646	Impact Statement
+  1647	This paper presents work whose goal is to advance the field
+  1648	of machine learning. There are many potential societal
+  1649	consequences of our work, none of which we feel must be
+  1650	specifically highlighted here.
+  1651	References
+  1652	Albergo, M., Boffi, N. M., and Vanden-Eijnden, E. Stochas-
+  1653	tic interpolants: A unifying framework for flows and
+  1654	diffusions. Journal of Machine Learning Research, 26
+  1655	(209):1–80, 2025.
+  1656	Astolfi, P., Careil, M., Hall, M., Manas, O., Muckley, M.,
+  1657	Verbeek, J., Soriano, A., and Drozdzal, M. Consistency-
+  1658	diversity-realism Pareto fronts of conditional image gen-
+  1659	erative models. arXiv2406.10429, 2024.
+  1660	Baldassari, L., Siahkoohi, A., Garnier, J., Solna, K., and
+  1661	de Hoop, M. V. Conditional score-based diffusion models
+  1662	for Bayesian inference in infinite dimensions. Advances
+  1663	in Neural Information Processing Systems, 36:24262–
+  1664	24290, 2023.
+  1665	Baldassari, L., Siahkoohi, A., Garnier, J., Solna, K., and
+  1666	de Hoop, M. V. Taming score-based diffusion priors for
+  1667	infinite-dimensional nonlinear inverse problems. arXiv
+  1668	preprint arXiv:2405.15676, 2024.
+  1669	Baldassari, L., Garnier, J., Solna, K., and de Hoop, M. V.
+  1670	Preconditioned Langevin dynamics with score-based gen-
+  1671	erative models for infinite-dimensional linear Bayesian in-
+  1672	verse problems. arXiv preprint arXiv:2505.18276, 2025.
+  1673	Bandeira, A. S., Maillard, A., Nickl, R., and Wang, S. On
+  1674	free energy barriers in Gaussian priors and failure of cold
+  1675	start MCMC for high-dimensional unimodal distributions.
+  1676	Philosophical Transactions of the Royal Society A, 381
+  1677	(2247):20220150, 2023.
+  1678	Beskos, A., Girolami, M., Lan, S., Farrell, P. E., and Stuart,
+  1679	A. M. Geometric mcmc for infinite-dimensional inverse
+  1680	problems. Journal of Computational Physics, 335:327–
+  1681	351, 2017.
+  1682	Block, A., Mroueh, Y., and Rakhlin, A. Generative model-
+  1683	ing with denoising auto-encoders and Langevin sampling.
+  1684	arXiv preprint arXiv:2002.00107, 2020.
+  1685	Bohr, J. and Nickl, R. On log-concave approximations of
+  1686	high-dimensional posterior measures and stability proper-
+  1687	ties in non-linear inverse problems. Ann. Inst. H. Poincar´e
+  1688	Probab. Statist., 60:2619–2667, 2024.
+  1689	Bond-Taylor, S. and Willcocks, C. G. ∞-diff: Infinite reso-
+  1690	lution diffusion with subsampled mollified states. Inter-
+  1691	national Conference on Learning Representations, 2024.
+  1692	Bradley, A. and Nakkiran, P. Classifier-free guidance is a
+  1693	predictor-corrector. arXiv:2408.09000, 2024.
+  1694	Cattiaux, P., Cordero-Encinar, P., and Guillin, A. Diffusion
+  1695	annealed Langevin dynamics: a theoretical study. arXiv
+  1696	preprint arXiv:2511.10406, 2025.
+  1697	Chewi, S., Erdogdu, M. A., Li, M., Shen, R., and Zhang,
+  1698	M. S. Analysis of Langevin Monte Carlo from Poincare to
+  1699	log-Sobolev. Foundations of Computational Mathematics,
+  1700	25(4):1345–1395, 2025.
+  1701	Cordero-Encinar, P., Akyildiz, O. D., and Duncan, A. B.
+  1702	Non-asymptotic analysis of diffusion annealed Langevin
+  1703	Monte Carlo for generative modelling. arXiv preprint
+  1704	arXiv:2502.09306, 2025.
+  1705	Cotter, S. L., Roberts, G. O., Stuart, A. M., and White, D.
+  1706	MCMC methods for functions: modifying old algorithms
+  1707	to make them faster. Statistical Science, pp. 424–446,
+  1708	2013.
+  1709	Cui, T., Law, K. J., and Marzouk, Y. M.
+  1710	Dimension-
+  1711	independent likelihood-informed MCMC. Journal of
+  1712	Computational Physics, 304:109–137, 2016.
+  1713	Dalalyan, A. S. Theoretical guarantees for approximate
+  1714	sampling from smooth and log-concave densities. Jour-
+  1715	nal of the Royal Statistical Society Series B: Statistical
+  1716	Methodology, 79(3):651–676, 2017.
+  1717	Dong, J. and Tong, X. T. Spectral gap of replica exchange
+  1718	Langevin diffusion on mixture distributions. Stochastic
+  1719	Processes and their Applications, 151:451–489, 2022.
+  1720	Durmus, A., Roberts, G. O., Vilmart, G., and Zygalakis,
+  1721	K. C. Fast Langevin based algorithm for MCMC in high
+  1722	dimensions. The Annals of Applied Probability, 27:2195—
+  1723	-2237, 2017.
+  1724	Durmus, A., Majewski, S., and Miasojedow, B. Analysis of
+  1725	Langevin Monte Carlo via convex optimization. Journal
+  1726	of Machine Learning Research, 20(73):1–46, 2019.
+  1727	Franzese, G. and Michiardi, P. Generative diffusion models
+  1728	in infinite dimensions: a survey. Philosophical Transac-
+  1729	tions A, 383(2299):20240322, 2025.
+  1730	Franzese, G., Corallo, G., Rossi, S., Heinonen, M., Filip-
+  1731	pone, M., and Michiardi, P. Continuous-time functional
+  1732	diffusion processes. Advances in Neural Information
+  1733	Processing Systems, 36:37370–37400, 2023.
+  1734	Gelfand, S. B. and Mitter, S. K. On sampling methods and
+  1735	annealing algorithms. Technical report, 1990.
+  1736	Guo, W., Tao, M., and Chen, Y. Provable benefit of annealed
+  1737	Langevin Monte Carlo for non-log-concave sampling.
+  1738	International Conference on Learning Representations,
+  1739	2025.
+  1740	9
+  1741	495
+  1742	496
+  1743	497
+  1744	498
+  1745	499
+  1746	500
+  1747	501
+  1748	502
+  1749	503
+  1750	504
+  1751	505
+  1752	506
+  1753	507
+  1754	508
+  1755	509
+  1756	510
+  1757	511
+  1758	512
+  1759	513
+  1760	514
+  1761	515
+  1762	516
+  1763	517
+  1764	518
+  1765	519
+  1766	520
+  1767	521
+  1768	522
+  1769	523
+  1770	524
+  1771	525
+  1772	526
+  1773	527
+  1774	528
+  1775	529
+  1776	530
+  1777	531
+  1778	532
+  1779	533
+  1780	534
+  1781	535
+  1782	536
+  1783	537
+  1784	538
+  1785	539
+  1786	540
+  1787	541
+  1788	542
+  1789	543
+  1790	544
+  1791	545
+  1792	546
+  1793	547
+  1794	548
+  1795	549
+  1796	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  1797	Hagemann, P., Mildenberger, S., Ruthotto, L., Steidl, G.,
+  1798	and Yang, N. T. Multilevel diffusion: Infinite dimen-
+  1799	sional score-based diffusion models for image generation.
+  1800	SIAM Journal on Mathematics of Data Science, 7(3):
+  1801	1337–1366, 2025.
+  1802	Hairer, M.
+  1803	An introduction to stochastic PDEs.
+  1804	arXiv
+  1805	preprint arXiv:0907.4178, 2009.
+  1806	Hairer, M., Stuart, A. M., and Vollmer, S. J. Spectral gaps for
+  1807	a Metropolis–Hastings algorithm in infinite dimensions.
+  1808	The Annals of Applied Probability, 24:2455––2490, 2014.
+  1809	Ho, J. and Salimans, T. Classifier-free diffusion guidance.
+  1810	arXiv:2207.12598, 2022.
+  1811	Kerrigan, G., Ley, J., and Smyth, P. Diffusion generative
+  1812	models in infinite dimensions. International Conference
+  1813	on Artificial Intelligence and Statistics, 2023.
+  1814	Kirkpatrick, S., Gelatt Jr, C. D., and Vecchi, M. P. Opti-
+  1815	mization by simulated annealing. Science, 220(4598):
+  1816	671–680, 1983.
+  1817	Lim, J. H., Kovachki, N. B., Baptista, R., Beckham, C.,
+  1818	Azizzadenesheli, K., Kossaifi, J., Voleti, V., Song, J.,
+  1819	Kreis, K., Kautz, J., et al. Score-based diffusion models
+  1820	in function space. Journal of Machine Learning Research,
+  1821	26(158):1–62, 2025.
+  1822	Ma, Y.-A., Chen, Y., Jin, C., Flammarion, N., and Jordan,
+  1823	M. I. Sampling can be faster than optimization. Pro-
+  1824	ceedings of the National Academy of Sciences, 116(42):
+  1825	20881–20885, 2019.
+  1826	McLachlan, G. J. and Peel, D. Finite mixture models. John
+  1827	Wiley & Sons, 2000.
+  1828	Neal, R. M. Annealed importance sampling. Statistics and
+  1829	Computing, 11(2):125–139, 2001.
+  1830	Nickl, R. Bayesian non-linear statistical inverse problems.
+  1831	EMS press Berlin, 2023.
+  1832	Parisi, G. Correlation functions and computer simulations.
+  1833	Nuclear Physics B, 180(3):378–384, 1981.
+  1834	Pavasovic, K., Verbeek, J., Birulio, G., and Mezard, M.
+  1835	Classifier-free guidance: From high-dimensional analy-
+  1836	sis to generalized guidance forms. arXiv:2502.07849v2,
+  1837	2025.
+  1838	P´erez-Cruz, F. Kullback-Leibler divergence estimation of
+  1839	continuous distributions. In 2008 IEEE international
+  1840	symposium on information theory, pp. 1666–1670. IEEE,
+  1841	2008.
+  1842	Pidstrigach, J., Marzouk, Y., Reich, S., and Wang, S. Infinite-
+  1843	dimensional diffusion models. Journal of Machine Learn-
+  1844	ing Research, 25(414):1–52, 2024.
+  1845	Roberts, G. O. and Rosenthal, J. S. Optimal scaling of
+  1846	discrete approximations to Langevin diffusions. Jour-
+  1847	nal of the Royal Statistical Society: Series B (Statistical
+  1848	Methodology), 60(1):255–268, 1998.
+  1849	Roberts, G. O. and Tweedie, R. L. Exponential convergence
+  1850	of Langevin distributions and their discrete approxima-
+  1851	tions. Bernoulli, 2:341–363, 1996.
+  1852	Schlichting, A. Poincar´e and log–sobolev inequalities for
+  1853	mixtures. Entropy, 21(1):89, 2019.
+  1854	Song, Y. and Ermon, S. Generative modeling by estimating
+  1855	gradients of the data distribution. Advances in Neural
+  1856	Information Processing Systems, 32, 2019.
+  1857	Song, Y. and Ermon, S. Improved techniques for train-
+  1858	ing score-based generative models. Advances in Neural
+  1859	Information Processing Systems, 33:12438–12448, 2020.
+  1860	Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Er-
+  1861	mon, S., and Poole, B. Score-based generative modeling
+  1862	through stochastic differential equations. International
+  1863	Conference on Learning Representations, 2021.
+  1864	Sun, Y., Wu, Z., Chen, Y., Feng, B. T., and Bouman, K. L.
+  1865	Provable probabilistic imaging using score-based genera-
+  1866	tive priors. IEEE Transactions on Computational Imag-
+  1867	ing, 10:1290–1305, 2024.
+  1868	Vempala, S. and Wibisono, A. Rapid convergence of the
+  1869	unadjusted Langevin algorithm: Isoperimetry suffices.
+  1870	Advances in Neural Information Processing Systems, 32,
+  1871	2019.
+  1872	Wang, Q., Kulkarni, S. R., and Verd´u, S. Divergence es-
+  1873	timation for multidimensional densities via k-nearest-
+  1874	neighbor distances. IEEE Transactions on Information
+  1875	Theory, 55(5):2392–2405, 2009.
+  1876	Wang, X., Dufour, N., Andreou, N., Cani, M., Abrevaya, V.,
+  1877	Picard, D., and Kalogeiton, V. Analysis of classifier-free
+  1878	guidance weight schedulers. Transactions on Machine
+  1879	Learning Research, 2024. ISSN 2835-8856.
+  1880	Wu, Y., Chen, M., Li, Z., Wang, M., and Wei, Y. Theoretical
+  1881	insights for diffusion guidance: A case study for Gaussian
+  1882	mixture models. International Conference on Machine
+  1883	Learning, 2024.
+  1884	Yehezkel, S., Dahary, O., Voynov, A., and Cohen-Or, D.
+  1885	Navigating with annealing guidance scale in diffusion
+  1886	space.
+  1887	In Proceedings of the SIGGRAPH Asia 2025
+  1888	Conference Papers, pp. 1–11, 2025.
+  1889	Zilberstein, N., Dick, C., Doost-Mohammady, R., Sabhar-
+  1890	wal, A., and Segarra, S. Annealed Langevin dynamics for
+  1891	massive MIMO detection. IEEE Transactions on Wireless
+  1892	Communications, 22(6):3762–3776, 2022.
+  1893	10
+  1894	550
+  1895	551
+  1896	552
+  1897	553
+  1898	554
+  1899	555
+  1900	556
+  1901	557
+  1902	558
+  1903	559
+  1904	560
+  1905	561
+  1906	562
+  1907	563
+  1908	564
+  1909	565
+  1910	566
+  1911	567
+  1912	568
+  1913	569
+  1914	570
+  1915	571
+  1916	572
+  1917	573
+  1918	574
+  1919	575
+  1920	576
+  1921	577
+  1922	578
+  1923	579
+  1924	580
+  1925	581
+  1926	582
+  1927	583
+  1928	584
+  1929	585
+  1930	586
+  1931	587
+  1932	588
+  1933	589
+  1934	590
+  1935	591
+  1936	592
+  1937	593
+  1938	594
+  1939	595
+  1940	596
+  1941	597
+  1942	598
+  1943	599
+  1944	600
+  1945	601
+  1946	602
+  1947	603
+  1948	604
+  1949	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  1950	A. Proofs of Section 3
+  1951	Before proving Theorem 3.1, we recall a standard lemma. For completeness, we include the proof below.
+  1952	Lemma A.1. Let
+  1953	(
+  1954	dXd
+  1955	t = at(Xd
+  1956	t ) dt +
+  1957	√
+  1958	2Γd dW d
+  1959	t ,
+  1960	Xd
+  1961	0 ∼µd,
+  1962	dY d
+  1963	t = bt(Y d
+  1964	t ) dt +
+  1965	√
+  1966	2Γd dW d
+  1967	t ,
+  1968	Y d
+  1969	0 ∼νd,
+  1970	and denote by PXd and PY d the path laws of (Xd
+  1971	t )t∈[0,T ] and (Y d
+  1972	t )t∈[0,T ]. Then
+  1973	KL(PXd || PY d) = KL(µd || νd) + 1
+  1974	4 EXd∼PXd
+  1975	Z T
+  1976	0
+  1977	∥at(Xd
+  1978	t ) −bt(Xd
+  1979	t )∥2
+  1980	(Γd)−1 dt,
+  1981	where ∥u∥2
+  1982	(Γd)−1 := ⟨u, (Γd)−1u⟩.
+  1983	Proof. In dimension d, Girsanov formula gives
+  1984	dPXd
+  1985	dPY d = µd(Xd
+  1986	0)
+  1987	νd(Xd
+  1988	0) exp
+  1989	( Z T
+  1990	0
+  1991	D
+  1992	(2Γd)−1 at(Xd
+  1993	t ) −bt(Xd
+  1994	t )
+  1995	
+  1996	, dXd
+  1997	t
+  1998	E
+  1999	−1
+  2000	2
+  2001	Z T
+  2002	0
+  2003	
+  2004	∥(2Γd)−1/2at(Xd
+  2005	t )∥2 −∥(2Γd)−1/2bt(Xd
+  2006	t )∥2
+  2007	dt
+  2008	)
+  2009	.
+  2010	Taking the logarithm yields
+  2011	log dPXd
+  2012	dPY d = log µd(Xd
+  2013	0)
+  2014	νd(Xd
+  2015	0) +
+  2016	Z T
+  2017	0
+  2018	D
+  2019	(2Γd)−1 at(Xd
+  2020	t ) −bt(Xd
+  2021	t )
+  2022	
+  2023	, dXd
+  2024	t
+  2025	E
+  2026	−1
+  2027	2
+  2028	Z T
+  2029	0
+  2030	
+  2031	∥(2Γd)−1/2at(Xd
+  2032	t )∥2 −∥(2Γd)−1/2bt(Xd
+  2033	t )∥2
+  2034	dt.
+  2035	Using the SDE for dXd
+  2036	t , we have
+  2037	D
+  2038	(2Γd)−1 at −bt
+  2039	
+  2040	(Xd
+  2041	t ), dXd
+  2042	t
+  2043	E
+  2044	=
+  2045	D
+  2046	(2Γd)−1/2 at −bt
+  2047	
+  2048	(Xd
+  2049	t ), (2Γd)−1/2at(Xd
+  2050	t )
+  2051	E
+  2052	dt
+  2053	+
+  2054	D
+  2055	(2Γd)−1/2 at −bt
+  2056	
+  2057	(Xd
+  2058	t ), dW d
+  2059	t
+  2060	E
+  2061	.
+  2062	The stochastic integral has mean zero under PXd. Since KL(PXd||PY d) = EPXd
+  2063	h
+  2064	log
+  2065	dPXd
+  2066	dPY d
+  2067	i
+  2068	, taking expectations gives
+  2069	KL(PXd||PY d) = KL(µd||νd) + EPXd
+  2070	Z T
+  2071	0
+  2072	D
+  2073	(2Γd)−1/2 at −bt
+  2074	
+  2075	(Xd
+  2076	t ), (2Γd)−1/2at(Xd
+  2077	t )
+  2078	E
+  2079	dt
+  2080	−1
+  2081	2 EPXd
+  2082	Z T
+  2083	0
+  2084	
+  2085	∥(2Γd)−1/2at(Xd
+  2086	t )∥2 −∥(2Γd)−1/2bt(Xd
+  2087	t )∥2
+  2088	dt.
+  2089	By the identity
+  2090	⟨u −v, u⟩−1
+  2091	2
+  2092	 ∥u∥2 −∥v∥2
+  2093	= 1
+  2094	2 ∥u −v∥2,
+  2095	applied to u = (2Γd)−1/2at(Xd
+  2096	t ) and v = (2Γd)−1/2bt(Xd
+  2097	t ), we obtain
+  2098	KL(PXd||PY d) = KL(µd||νd) + 1
+  2099	4 EPXd
+  2100	Z T
+  2101	0
+  2102	∥(Γd)−1/2(at −bt)(Xd
+  2103	t )∥2 dt.
+  2104	We are now ready to prove Theorem 3.1. The proof builds on ideas from Appendix A of (Guo et al., 2025), adapted to our
+  2105	infinite-dimensional setting.
+  2106	11
+  2107	605
+  2108	606
+  2109	607
+  2110	608
+  2111	609
+  2112	610
+  2113	611
+  2114	612
+  2115	613
+  2116	614
+  2117	615
+  2118	616
+  2119	617
+  2120	618
+  2121	619
+  2122	620
+  2123	621
+  2124	622
+  2125	623
+  2126	624
+  2127	625
+  2128	626
+  2129	627
+  2130	628
+  2131	629
+  2132	630
+  2133	631
+  2134	632
+  2135	633
+  2136	634
+  2137	635
+  2138	636
+  2139	637
+  2140	638
+  2141	639
+  2142	640
+  2143	641
+  2144	642
+  2145	643
+  2146	644
+  2147	645
+  2148	646
+  2149	647
+  2150	648
+  2151	649
+  2152	650
+  2153	651
+  2154	652
+  2155	653
+  2156	654
+  2157	655
+  2158	656
+  2159	657
+  2160	658
+  2161	659
+  2162	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  2163	A.1. Proof of Theorem 3.1
+  2164	Let Qd be the path measure on C([0, T d]; Rd) of the ALD diffusion (4) initialized at Xd
+  2165	0 ∼ρd
+  2166	0, and let πT d(ω) = ω(T d) be
+  2167	the evaluation map. For any path measure P on C([0, T d]; Rd), the data-processing inequality yields
+  2168	KL
+  2169	 (πT d)#P ∥(πT d)#Qd
+  2170	≤KL(P ∥Qd).
+  2171	We apply this with a reference path measure Pv,d constructed as follows. Let Pv,d denote the path law of
+  2172	dXd
+  2173	t = Γd ∇log ρd
+  2174	t + vd
+  2175	t
+  2176	
+  2177	(Xd
+  2178	t ) dt +
+  2179	√
+  2180	2Γd dW d
+  2181	t ,
+  2182	Xd
+  2183	0 ∼ρd
+  2184	0,
+  2185	(21)
+  2186	where the annealing path is
+  2187	ρd
+  2188	t = ρd
+  2189	⋆∗N
+  2190	
+  2191	0, T d −t
+  2192	T d
+  2193	Cd
+  2194	,
+  2195	t ∈[0, T d].
+  2196	We choose vd = (vd
+  2197	t )t∈[0,T d] so that LawPv,d(Xd
+  2198	t ) = ρd
+  2199	t for all t ∈[0, T d]. Since the diffusion matrix is constant (2Γd), the
+  2200	corresponding Fokker–Planck equation reduces to
+  2201	∂tρd
+  2202	t = −∇· (ρd
+  2203	t Γdvd
+  2204	t ).
+  2205	(22)
+  2206	On the other hand, the Gaussian-smoothing path satisfies the backward heat equation
+  2207	∂tρd
+  2208	t = −1
+  2209	2T d ∇·
+  2210	 Cd∇ρd
+  2211	t
+  2212	
+  2213	,
+  2214	(23)
+  2215	because differentiating with respect to the covariance parameter introduces a factor 1/2, and d
+  2216	dt
+  2217	  T d−t
+  2218	T d
+  2219	
+  2220	= −1
+  2221	T d . Comparing
+  2222	(22) and (23), an admissible choice is
+  2223	Γdvd
+  2224	t =
+  2225	1
+  2226	2T d Cd∇log ρd
+  2227	t ,
+  2228	i.e.
+  2229	vd
+  2230	t =
+  2231	1
+  2232	2T d (Γd)−1Cd∇log ρd
+  2233	t .
+  2234	(24)
+  2235	With this choice, (πT d)#Pv,d = ρd
+  2236	T d = ρd
+  2237	⋆. Since (πT d)#Qd = ρALD,d
+  2238	T d
+  2239	by definition, we have
+  2240	KL
+  2241	 ρd
+  2242	⋆∥ρALD,d
+  2243	T d
+  2244	
+  2245	≤KL(Pv,d ∥Qd).
+  2246	(25)
+  2247	It therefore remains to obtain an explicit upper bound on the path-space divergence KL(Pv,d ∥Qd).
+  2248	By Lemma A.1, we have
+  2249	KL(Pv,d ∥Qd) = 1
+  2250	4 EPv,d
+  2251	Z T d
+  2252	0
+  2253	∥Γdvd
+  2254	t (Xd
+  2255	t )∥2
+  2256	(Γd)−1 dt = 1
+  2257	4
+  2258	Z T d
+  2259	0
+  2260	Z
+  2261	⟨vd
+  2262	t , Γdvd
+  2263	t ⟩dρd
+  2264	t dt
+  2265	=
+  2266	1
+  2267	16(T d)2
+  2268	Z T d
+  2269	0
+  2270	Z 
+  2271	∇log ρd
+  2272	t , Ad∇log ρd
+  2273	t
+  2274	
+  2275	dρd
+  2276	t dt,
+  2277	(26)
+  2278	where Ad := Cd(Γd)−1Cd.
+  2279	Fix t ∈[0, T d]. Since ρd
+  2280	t is a Gaussian mixture,
+  2281	ρd
+  2282	t =
+  2283	X
+  2284	i∈I
+  2285	wi N
+  2286	
+  2287	md
+  2288	i , Σd
+  2289	i + T d −t
+  2290	T d
+  2291	Cd
+  2292	,
+  2293	ρd
+  2294	t (x) =
+  2295	X
+  2296	i∈I
+  2297	wi φi,t(x),
+  2298	and with responsibilities pi,t(x) := wiφi,t(x)
+  2299	ρd
+  2300	t (x)
+  2301	we obtain
+  2302	∇log ρd
+  2303	t (x) = −
+  2304	X
+  2305	i∈I
+  2306	pi,t(x)
+  2307	
+  2308	Σd
+  2309	i + T d −t
+  2310	T d
+  2311	Cd−1
+  2312	(x −md
+  2313	i ).
+  2314	Since z 7→z⊤Adz is convex (Ad ⪰0), Jensen’s inequality yields
+  2315	
+  2316	∇log ρd
+  2317	t (x), Ad∇log ρd
+  2318	t (x)
+  2319	
+  2320	≤
+  2321	X
+  2322	i∈I
+  2323	pi,t(x) (x −md
+  2324	i )⊤
+  2325	Σd
+  2326	i + T d −t
+  2327	T d
+  2328	Cd−1
+  2329	Ad
+  2330	Σd
+  2331	i + T d −t
+  2332	T d
+  2333	Cd−1
+  2334	(x −md
+  2335	i ).
+  2336	12
+  2337	660
+  2338	661
+  2339	662
+  2340	663
+  2341	664
+  2342	665
+  2343	666
+  2344	667
+  2345	668
+  2346	669
+  2347	670
+  2348	671
+  2349	672
+  2350	673
+  2351	674
+  2352	675
+  2353	676
+  2354	677
+  2355	678
+  2356	679
+  2357	680
+  2358	681
+  2359	682
+  2360	683
+  2361	684
+  2362	685
+  2363	686
+  2364	687
+  2365	688
+  2366	689
+  2367	690
+  2368	691
+  2369	692
+  2370	693
+  2371	694
+  2372	695
+  2373	696
+  2374	697
+  2375	698
+  2376	699
+  2377	700
+  2378	701
+  2379	702
+  2380	703
+  2381	704
+  2382	705
+  2383	706
+  2384	707
+  2385	708
+  2386	709
+  2387	710
+  2388	711
+  2389	712
+  2390	713
+  2391	714
+  2392	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  2393	Integrating against ρd
+  2394	t (x) dx and using ρd
+  2395	t pi,t = wiφi,t gives
+  2396	Z 
+  2397	∇log ρd
+  2398	t , Ad∇log ρd
+  2399	t
+  2400	
+  2401	dρd
+  2402	t ≤
+  2403	X
+  2404	i∈I
+  2405	wi Tr
+  2406	
+  2407	Ad
+  2408	Σd
+  2409	i + T d −t
+  2410	T d
+  2411	Cd−1
+  2412	,
+  2413	where we used that, in the diagonal setting, all matrices commute and Cov(φi,t) = Σd
+  2414	i + T d−t
+  2415	T d Cd. Plugging this into (26)
+  2416	yields
+  2417	KL(Pv,d ∥Qd) ≤
+  2418	1
+  2419	16(T d)2
+  2420	X
+  2421	i∈I
+  2422	wi
+  2423	Z T d
+  2424	0
+  2425	Tr
+  2426	
+  2427	Ad
+  2428	Σd
+  2429	i + T d −t
+  2430	T d
+  2431	Cd−1
+  2432	dt.
+  2433	Changing variables s := T d−t
+  2434	T d
+  2435	∈[0, 1] (so dt = −T d ds) gives
+  2436	Z T d
+  2437	0
+  2438	Tr
+  2439	
+  2440	Ad
+  2441	Σd
+  2442	i + T d −t
+  2443	T d
+  2444	Cd−1
+  2445	dt = T d
+  2446	Z 1
+  2447	0
+  2448	Tr
+  2449	 Ad(Σd
+  2450	i + sCd)−1
+  2451	ds.
+  2452	Since Ad, Cd, and Σd
+  2453	i are diagonal with eigenvalues λ2
+  2454	j/γj, λj, and σij, respectively, we have
+  2455	Tr
+  2456	 Ad(Σd
+  2457	i + sCd)−1
+  2458	=
+  2459	d
+  2460	X
+  2461	j=1
+  2462	λ2
+  2463	j
+  2464	γj(σij + sλj).
+  2465	Therefore,
+  2466	KL(Pv,d ∥Qd) ≤
+  2467	1
+  2468	16T d
+  2469	X
+  2470	i∈I
+  2471	wi
+  2472	d
+  2473	X
+  2474	j=1
+  2475	λ2
+  2476	j
+  2477	γj
+  2478	Z 1
+  2479	0
+  2480	ds
+  2481	σij + sλj
+  2482	=
+  2483	1
+  2484	16T d
+  2485	X
+  2486	i∈I
+  2487	wi
+  2488	d
+  2489	X
+  2490	j=1
+  2491	λj
+  2492	γj
+  2493	log
+  2494	
+  2495	1 + λj
+  2496	σij
+  2497	
+  2498	.
+  2499	Finally, combining this estimate with (25) finally gives the desired bound
+  2500	KL
+  2501	 ρd
+  2502	⋆∥ρALD,d
+  2503	T d
+  2504	
+  2505	≤
+  2506	1
+  2507	16T d
+  2508	X
+  2509	i∈I
+  2510	wi
+  2511	d
+  2512	X
+  2513	j=1
+  2514	λj
+  2515	γj
+  2516	log
+  2517	
+  2518	1 + λj
+  2519	σij
+  2520	
+  2521	.
+  2522	Now fix ϵ > 0. Choosing
+  2523	T d =
+  2524	1
+  2525	16ϵ
+  2526	X
+  2527	i∈I
+  2528	wi
+  2529	d
+  2530	X
+  2531	j=1
+  2532	λj
+  2533	γj
+  2534	log
+  2535	
+  2536	1 + λj
+  2537	σij
+  2538	
+  2539	yields
+  2540	KL
+  2541	 ρd
+  2542	⋆∥ρALD,d
+  2543	T d
+  2544	
+  2545	≤ϵ.
+  2546	B. Proofs of Section 4
+  2547	B.1. Proof of Proposition 4.1
+  2548	As in Subsection A.1, we consider the reference SDE
+  2549	dXd
+  2550	t = Γd  ∇log ρd
+  2551	t + vd
+  2552	t
+  2553	
+  2554	(Xd
+  2555	t )dt +
+  2556	√
+  2557	2ΓddW d
+  2558	t ,
+  2559	Xd
+  2560	0 ∼ρd
+  2561	0,
+  2562	with path measure Pv,d and vd = (vd
+  2563	t )t∈[0,T d] so that LawPv,d(Xd
+  2564	t ) = ρd
+  2565	t , and compare it to the approximate SDE
+  2566	d e
+  2567	Xd
+  2568	t = Γdsd
+  2569	θ(t, e
+  2570	Xd
+  2571	t )dt +
+  2572	√
+  2573	2Γddf
+  2574	W d
+  2575	t ,
+  2576	e
+  2577	Xd
+  2578	0 ∼eρd
+  2579	0,
+  2580	with path measure eQd. Recall that ϵd
+  2581	t (x) := ∇log ρd
+  2582	t (x) −sd
+  2583	θ(t, x).
+  2584	By Lemma A.1,
+  2585	KL(Pv,d ∥eQd) = KL(ρd
+  2586	0 ∥eρd
+  2587	0) + 1
+  2588	4
+  2589	Z T
+  2590	0
+  2591	Z (Γd)1/2 vd
+  2592	t + ϵd
+  2593	t
+  2594	
+  2595	(x)
+  2596	2 dρd
+  2597	t (x) dt.
+  2598	13
+  2599	715
+  2600	716
+  2601	717
+  2602	718
+  2603	719
+  2604	720
+  2605	721
+  2606	722
+  2607	723
+  2608	724
+  2609	725
+  2610	726
+  2611	727
+  2612	728
+  2613	729
+  2614	730
+  2615	731
+  2616	732
+  2617	733
+  2618	734
+  2619	735
+  2620	736
+  2621	737
+  2622	738
+  2623	739
+  2624	740
+  2625	741
+  2626	742
+  2627	743
+  2628	744
+  2629	745
+  2630	746
+  2631	747
+  2632	748
+  2633	749
+  2634	750
+  2635	751
+  2636	752
+  2637	753
+  2638	754
+  2639	755
+  2640	756
+  2641	757
+  2642	758
+  2643	759
+  2644	760
+  2645	761
+  2646	762
+  2647	763
+  2648	764
+  2649	765
+  2650	766
+  2651	767
+  2652	768
+  2653	769
+  2654	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  2655	Using ∥a + b∥2 ≤2∥a∥2 + 2∥b∥2, we obtain
+  2656	KL(Pv,d ∥eQd) ≤KL(ρd
+  2657	0 ∥eρd
+  2658	0) + 1
+  2659	2
+  2660	Z T
+  2661	0
+  2662	Z (Γd)1/2vd
+  2663	t (x)
+  2664	2 dρd
+  2665	t (x) dt + 1
+  2666	2
+  2667	Z T
+  2668	0
+  2669	Z (Γd)1/2ϵd
+  2670	t (x)
+  2671	2 dρd
+  2672	t (x) dt.
+  2673	Since vd is chosen so that LawPv,d(Xd
+  2674	t ) = ρd
+  2675	t , the data-processing inequality yields KL(ρd
+  2676	⋆∥eρALD,d
+  2677	T
+  2678	) ≤KL(Pv,d ∥eQd).
+  2679	Hence
+  2680	KL(ρd
+  2681	⋆∥eρALD,d
+  2682	T
+  2683	) ≤KL(ρd
+  2684	0 ∥eρd
+  2685	0) + 1
+  2686	2
+  2687	Z T
+  2688	0
+  2689	Z (Γd)1/2vd
+  2690	t (x)
+  2691	2 dρd
+  2692	t (x) dt + 1
+  2693	2
+  2694	Z T
+  2695	0
+  2696	Z (Γd)1/2ϵd
+  2697	t (x)
+  2698	2 dρd
+  2699	t (x) dt.
+  2700	Taking the infimum over all such vd, which satisfy ∂tρd
+  2701	t = −∇· (ρd
+  2702	t Γdvd
+  2703	t ), yields
+  2704	KL(ρd
+  2705	⋆∥eρALD,d
+  2706	T
+  2707	) ≤Ed
+  2708	init + Ed
+  2709	bias,T + Ed
+  2710	score,T ,
+  2711	where
+  2712	Ed
+  2713	init := KL(ρd
+  2714	0 ∥eρd
+  2715	0),
+  2716	Ed
+  2717	score,T := 1
+  2718	2
+  2719	Z T
+  2720	0
+  2721	Z (Γd)1/2ϵd
+  2722	t (x)
+  2723	2 dρd
+  2724	t (x) dt,
+  2725	and
+  2726	Ed
+  2727	bias,T := 1
+  2728	2
+  2729	inf
+  2730	vd: ∂tρd
+  2731	t =−∇·(ρd
+  2732	t Γdvd
+  2733	t )
+  2734	Z T
+  2735	0
+  2736	Z (Γd)1/2vd
+  2737	t (x)
+  2738	2 dρd
+  2739	t (x) dt.
+  2740	B.2. Proof of Proposition 4.3
+  2741	At t = 0,
+  2742	ρd
+  2743	0(x) =
+  2744	X
+  2745	i∈I
+  2746	wiφd
+  2747	i,0(x),
+  2748	eρd
+  2749	0(x) =
+  2750	X
+  2751	i∈I
+  2752	ewi eφd
+  2753	i,0(x),
+  2754	where
+  2755	φd
+  2756	i,0 = N(md
+  2757	i , Σd
+  2758	i + Cd),
+  2759	eφd
+  2760	i,0 = N( emd
+  2761	i , eΣi + Cd).
+  2762	We have
+  2763	KL(ρd
+  2764	0||eρd
+  2765	0) =
+  2766	X
+  2767	i∈I
+  2768	wiEX∼φd
+  2769	i,0
+  2770	"
+  2771	log
+  2772	P
+  2773	i∈I wiφd
+  2774	i,0(X)
+  2775	P
+  2776	i∈I ewi eφd
+  2777	i,0(X)
+  2778	#
+  2779	.
+  2780	Consider the unnormalized weights
+  2781	ϕd(i, x) = wiφd
+  2782	i,0(x),
+  2783	eϕd(i, x) = ewi eφd
+  2784	i,0(x).
+  2785	Then by data-processing inequality,
+  2786	KL(ρd
+  2787	0||eρd
+  2788	0) ≤KL(ϕd||eϕd) = KL(w|| ew) +
+  2789	X
+  2790	i∈I
+  2791	wiKL(φd
+  2792	i,0||eφd
+  2793	i,0),
+  2794	where
+  2795	KL(w|| ew) =
+  2796	X
+  2797	i∈I
+  2798	wi log wi
+  2799	ewi
+  2800	,
+  2801	and each Gaussian-Gaussian KL is explicit:
+  2802	KL
+  2803	 φd
+  2804	i,0
+  2805	 eφd
+  2806	i,0
+  2807	
+  2808	= 1
+  2809	2
+  2810	h eΣd
+  2811	i + Cd−1/2 emd
+  2812	i −md
+  2813	i
+  2814	2
+  2815	2
+  2816	+ Tr
+  2817	 eΣd
+  2818	i + Cd−1/2 Σd
+  2819	i + Cd eΣd
+  2820	i + Cd−1/2 −I −log
+  2821	 eΣd
+  2822	i + Cd−1/2 Σd
+  2823	i + Cd eΣd
+  2824	i + Cd−1/2i
+  2825	.
+  2826	Under the diagonal assumption,
+  2827	KL
+  2828	 φd
+  2829	i,0
+  2830	 eφd
+  2831	i,0
+  2832	
+  2833	= 1
+  2834	2
+  2835	d
+  2836	X
+  2837	j=1
+  2838	
+  2839	σij + λj
+  2840	σij + ∆σij + λj
+  2841	−1 +
+  2842	(∆mij)2
+  2843	σij + ∆σij + λj
+  2844	+ log
+  2845	σij + ∆σij + λj
+  2846	σij + λj
+  2847	
+  2848	.
+  2849	14
+  2850	770
+  2851	771
+  2852	772
+  2853	773
+  2854	774
+  2855	775
+  2856	776
+  2857	777
+  2858	778
+  2859	779
+  2860	780
+  2861	781
+  2862	782
+  2863	783
+  2864	784
+  2865	785
+  2866	786
+  2867	787
+  2868	788
+  2869	789
+  2870	790
+  2871	791
+  2872	792
+  2873	793
+  2874	794
+  2875	795
+  2876	796
+  2877	797
+  2878	798
+  2879	799
+  2880	800
+  2881	801
+  2882	802
+  2883	803
+  2884	804
+  2885	805
+  2886	806
+  2887	807
+  2888	808
+  2889	809
+  2890	810
+  2891	811
+  2892	812
+  2893	813
+  2894	814
+  2895	815
+  2896	816
+  2897	817
+  2898	818
+  2899	819
+  2900	820
+  2901	821
+  2902	822
+  2903	823
+  2904	824
+  2905	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  2906	B.3. Proof of Proposition 4.4
+  2907	We work with the two annealed mixtures ρd
+  2908	t and eρd
+  2909	t introduced in the main text. Set
+  2910	Σd
+  2911	i,t := Σd
+  2912	i + κtCd,
+  2913	eΣd
+  2914	i,t := eΣd
+  2915	i + κtCd,
+  2916	where κt := (T −t)/T ∈[0, 1]. By Assumption 4.2 in the main text,
+  2917	Cd = Diag(λj)d
+  2918	j=1,
+  2919	Γd = Diag(γj)d
+  2920	j=1,
+  2921	Σd
+  2922	i = Diag(σij)d
+  2923	j=1,
+  2924	eΣd
+  2925	i = Diag(σij + ∆σij)d
+  2926	j=1,
+  2927	and therefore
+  2928	Σd
+  2929	i,t = Diag(σij + κtλj)d
+  2930	j=1,
+  2931	eΣd
+  2932	i,t = Diag(σij + ∆σij + κtλj)d
+  2933	j=1.
+  2934	We denote the (true and perturbed) component densities by
+  2935	φd
+  2936	i,t := N(md
+  2937	i , Σd
+  2938	i,t),
+  2939	eφd
+  2940	i,t := N( emd
+  2941	i , eΣd
+  2942	i,t),
+  2943	with emd
+  2944	i = md
+  2945	i + ∆md
+  2946	i , so that
+  2947	ρd
+  2948	t (x) =
+  2949	X
+  2950	i∈I
+  2951	wi φd
+  2952	i,t(x),
+  2953	eρd
+  2954	t (x) =
+  2955	X
+  2956	i∈I
+  2957	ewi eφd
+  2958	i,t(x),
+  2959	X
+  2960	i∈I
+  2961	wi =
+  2962	X
+  2963	i∈I
+  2964	ewi = 1.
+  2965	The responsibilities and component scores are
+  2966	pi,t(x) := wiφd
+  2967	i,t(x)
+  2968	ρd
+  2969	t (x)
+  2970	,
+  2971	epi,t(x) := ewi eφd
+  2972	i,t(x)
+  2973	eρd
+  2974	t (x)
+  2975	,
+  2976	and
+  2977	Sd
+  2978	i,t(x) := −(Σd
+  2979	i,t)−1(x −md
+  2980	i ),
+  2981	eSd
+  2982	i,t(x) := −(eΣd
+  2983	i,t)−1(x −emd
+  2984	i ).
+  2985	With this notation,
+  2986	∇log ρd
+  2987	t (x) =
+  2988	X
+  2989	i∈I
+  2990	pi,t(x) Sd
+  2991	i,t(x),
+  2992	∇log eρd
+  2993	t (x) =
+  2994	X
+  2995	i∈I
+  2996	epi,t(x) eSd
+  2997	i,t(x),
+  2998	and the score error ϵd
+  2999	t := ∇log eρd
+  3000	t −∇log ρd
+  3001	t decomposes as
+  3002	ϵd
+  3003	t (x) =
+  3004	X
+  3005	i∈I
+  3006	pi,t(x)
+  3007	 eSd
+  3008	i,t(x) −Sd
+  3009	i,t(x)
+  3010	
+  3011	|
+  3012	{z
+  3013	}
+  3014	=:I1(x,t)
+  3015	+
+  3016	X
+  3017	i∈I
+  3018	 epi,t(x) −pi,t(x)
+  3019	 eSd
+  3020	i,t(x)
+  3021	|
+  3022	{z
+  3023	}
+  3024	=:I2(x,t)
+  3025	.
+  3026	(27)
+  3027	Hence proving Proposition 4.4 boils down to bounding the following two terms:
+  3028	(1) A component-score mismatch Eρd
+  3029	t
+  3030	
+  3031	∥(Γd)1/2I1(X, t)∥2
+  3032	.
+  3033	(2) A responsibility mismatch Eρd
+  3034	t
+  3035	
+  3036	∥(Γd)1/2I2(X, t)∥2
+  3037	.
+  3038	(1) COMPONENT-SCORE MISMATCH: PROOF OF (18)
+  3039	Define ∆Sd
+  3040	i,t := eSd
+  3041	i,t −Sd
+  3042	i,t. A direct expansion gives
+  3043	∆Sd
+  3044	i,t(x) =
+  3045	 (Σd
+  3046	i,t)−1 −(eΣd
+  3047	i,t)−1
+  3048	(x −md
+  3049	i ) + (eΣd
+  3050	i,t)−1( emd
+  3051	i −md
+  3052	i ).
+  3053	Let ∆md
+  3054	i := emd
+  3055	i −md
+  3056	i and write ∆mij for its coordinates.
+  3057	Using Jensen’s inequality for the convex quadratic form z 7→∥(Γd)1/2z∥2 and P
+  3058	i pi,t(x) = 1,
+  3059	(Γd)1/2I1(x, t)
+  3060	2 =
+  3061	(Γd)1/2 X
+  3062	i∈I
+  3063	pi,t(x)∆Sd
+  3064	i,t(x)
+  3065	
+  3066	2
+  3067	≤
+  3068	X
+  3069	i∈I
+  3070	pi,t(x)
+  3071	(Γd)1/2∆Sd
+  3072	i,t(x)
+  3073	2.
+  3074	15
+  3075	825
+  3076	826
+  3077	827
+  3078	828
+  3079	829
+  3080	830
+  3081	831
+  3082	832
+  3083	833
+  3084	834
+  3085	835
+  3086	836
+  3087	837
+  3088	838
+  3089	839
+  3090	840
+  3091	841
+  3092	842
+  3093	843
+  3094	844
+  3095	845
+  3096	846
+  3097	847
+  3098	848
+  3099	849
+  3100	850
+  3101	851
+  3102	852
+  3103	853
+  3104	854
+  3105	855
+  3106	856
+  3107	857
+  3108	858
+  3109	859
+  3110	860
+  3111	861
+  3112	862
+  3113	863
+  3114	864
+  3115	865
+  3116	866
+  3117	867
+  3118	868
+  3119	869
+  3120	870
+  3121	871
+  3122	872
+  3123	873
+  3124	874
+  3125	875
+  3126	876
+  3127	877
+  3128	878
+  3129	879
+  3130	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  3131	Integrating and using ρd
+  3132	t (x)pi,t(x) = wiφd
+  3133	i,t(x) yields
+  3134	Eρd
+  3135	t
+  3136	
+  3137	∥(Γd)1/2I1(X, t)∥2
+  3138	≤
+  3139	X
+  3140	i∈I
+  3141	wi
+  3142	Z
+  3143	Rd
+  3144	(Γd)1/2∆Sd
+  3145	i,t(x)
+  3146	2 φd
+  3147	i,t(x) dx.
+  3148	(28)
+  3149	Using (a + b)2 ≤2a2 + 2b2,
+  3150	(Γd)1/2∆Sd
+  3151	i,t(x)
+  3152	2 ≤2
+  3153	(Γd)1/2 (Σd
+  3154	i,t)−1 −(eΣd
+  3155	i,t)−1
+  3156	(x −md
+  3157	i )
+  3158	2 + 2
+  3159	(Γd)1/2(eΣd
+  3160	i,t)−1∆md
+  3161	i
+  3162	2.
+  3163	Since everything is diagonal, the second term is explicit:
+  3164	(Γd)1/2(eΣd
+  3165	i,t)−1∆md
+  3166	i
+  3167	2 =
+  3168	d
+  3169	X
+  3170	j=1
+  3171	γj
+  3172	(∆mij)2
+  3173	(σij + ∆σij + κtλj)2 .
+  3174	For the first term, set
+  3175	bij(t) :=
+  3176	1
+  3177	σij + κtλj
+  3178	−
+  3179	1
+  3180	σij + ∆σij + κtλj
+  3181	=
+  3182	∆σij
+  3183	(σij + κtλj)(σij + ∆σij + κtλj),
+  3184	so that (Σd
+  3185	i,t)−1 −(eΣd
+  3186	i,t)−1 has j-th diagonal entry bij(t). Then
+  3187	(Γd)1/2 (Σd
+  3188	i,t)−1 −(eΣd
+  3189	i,t)−1
+  3190	(x −md
+  3191	i )
+  3192	2 =
+  3193	d
+  3194	X
+  3195	j=1
+  3196	γj bij(t)2 (xj −md
+  3197	ij)2.
+  3198	Since E[(Xj −md
+  3199	ij)2] = σij + κtλj with X ∼N(md
+  3200	i , Σd
+  3201	i,t), we have
+  3202	Z (Γd)1/2 (Σd
+  3203	i,t)−1−(eΣd
+  3204	i,t)−1
+  3205	(x−md
+  3206	i )
+  3207	2 φd
+  3208	i,t(x) dx =
+  3209	d
+  3210	X
+  3211	j=1
+  3212	γj bij(t)2 (σij+κtλj) =
+  3213	d
+  3214	X
+  3215	j=1
+  3216	γj
+  3217	(∆σij)2
+  3218	(σij + κtλj)(σij + ∆σij + κtλj)2 .
+  3219	Plugging everything into (28) gives
+  3220	Eρd
+  3221	t
+  3222	
+  3223	∥(Γd)1/2I1(X, t)∥2
+  3224	≤2
+  3225	X
+  3226	i∈I
+  3227	wi
+  3228	d
+  3229	X
+  3230	j=1
+  3231	γj
+  3232	
+  3233	(∆mij)2
+  3234	(σij + ∆σij + κtλj)2 +
+  3235	(∆σij)2
+  3236	(σij + κtλj)(σij + ∆σij + κtλj)2
+  3237	
+  3238	,
+  3239	which is exactly (18) with
+  3240	Bd
+  3241	comp(t) := 2
+  3242	X
+  3243	i∈I
+  3244	wi
+  3245	d
+  3246	X
+  3247	j=1
+  3248	γj
+  3249	(∆mij)2 +
+  3250	(∆σij)2
+  3251	σij+κtλj
+  3252	 σij + ∆σij + κtλj
+  3253	2 .
+  3254	This proves the first part of Proposition 4.4.
+  3255	(2) RESPONSIBILITY MISMATCH: PROOF OF (19)
+  3256	In this part it is convenient to abbreviate
+  3257	ρ := ρd
+  3258	t ,
+  3259	eρ := eρd
+  3260	t ,
+  3261	φi := φd
+  3262	i,t,
+  3263	eφi := eφd
+  3264	i,t,
+  3265	eSi := eSd
+  3266	i,t(·),
+  3267	pi := pi,t(·),
+  3268	epi := epi,t(·).
+  3269	Define also
+  3270	∆wi := ewi −wi,
+  3271	∆φi := eφi −φi,
+  3272	∆ρ := eρ −ρ.
+  3273	A direct algebraic manipulation gives
+  3274	epi −pi = eφi
+  3275	∆wi
+  3276	eρ
+  3277	+ wi
+  3278	∆φi
+  3279	eρ
+  3280	−wiφi
+  3281	∆ρ
+  3282	ρ eρ ,
+  3283	(29)
+  3284	16
+  3285	880
+  3286	881
+  3287	882
+  3288	883
+  3289	884
+  3290	885
+  3291	886
+  3292	887
+  3293	888
+  3294	889
+  3295	890
+  3296	891
+  3297	892
+  3298	893
+  3299	894
+  3300	895
+  3301	896
+  3302	897
+  3303	898
+  3304	899
+  3305	900
+  3306	901
+  3307	902
+  3308	903
+  3309	904
+  3310	905
+  3311	906
+  3312	907
+  3313	908
+  3314	909
+  3315	910
+  3316	911
+  3317	912
+  3318	913
+  3319	914
+  3320	915
+  3321	916
+  3322	917
+  3323	918
+  3324	919
+  3325	920
+  3326	921
+  3327	922
+  3328	923
+  3329	924
+  3330	925
+  3331	926
+  3332	927
+  3333	928
+  3334	929
+  3335	930
+  3336	931
+  3337	932
+  3338	933
+  3339	934
+  3340	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  3341	where
+  3342	∆ρ(x) =
+  3343	X
+  3344	k∈I
+  3345	h
+  3346	∆wk eφk(x) + wk ∆φk(x)
+  3347	i
+  3348	.
+  3349	(30)
+  3350	Correspondingly,
+  3351	I2(x, t) =
+  3352	X
+  3353	i∈I
+  3354	(epi −pi)(x) eSi(x) = δ(1)(x) + δ(2)(x) + δ(3)(x),
+  3355	with
+  3356	δ(1)(x) :=
+  3357	X
+  3358	i∈I
+  3359	eφi(x)∆wi
+  3360	eρ(x)
+  3361	eSi(x),
+  3362	δ(2)(x) :=
+  3363	X
+  3364	i∈I
+  3365	wi
+  3366	∆φi(x)
+  3367	eρ(x)
+  3368	eSi(x),
+  3369	δ(3)(x) := −
+  3370	X
+  3371	i∈I
+  3372	wiφi(x) ∆ρ(x)
+  3373	ρ(x)eρ(x)
+  3374	eSi(x).
+  3375	(31)
+  3376	Then
+  3377	Eρ
+  3378	
+  3379	∥(Γd)1/2I2(X, t)∥2
+  3380	≤3
+  3381	3
+  3382	X
+  3383	r=1
+  3384	Eρ
+  3385	
+  3386	∥(Γd)1/2δ(r)(X)∥2
+  3387	.
+  3388	(32)
+  3389	Using pi = wiφi/ρ and (30),
+  3390	δ(3)(x) = −∆ρ(x)
+  3391	eρ(x)
+  3392	X
+  3393	i∈I
+  3394	pi(x) eSi(x) = −
+  3395	 X
+  3396	k∈I
+  3397	eφk(x)∆wk
+  3398	eρ(x)
+  3399	!
+  3400	J(x) −
+  3401	 X
+  3402	k∈I
+  3403	wk
+  3404	∆φk(x)
+  3405	eρ(x)
+  3406	!
+  3407	J(x),
+  3408	where
+  3409	J(x) :=
+  3410	X
+  3411	i∈I
+  3412	pi(x) eSi(x)
+  3413	is a convex combination of the vectors {eSi(x)}i∈I.
+  3414	Thus δ(3) = δ(3,w) + δ(3,φ), where the first term involves only the weight perturbations (∆wk) and the second involves
+  3415	only the component-density perturbations (∆φk). Moreover, since P
+  3416	i pi(x) = 1 and z 7→∥(Γd)1/2z∥2 is convex,
+  3417	∥(Γd)1/2J(x)∥2 ≤
+  3418	X
+  3419	i∈I
+  3420	pi(x) ∥(Γd)1/2 eSi(x)∥2.
+  3421	(33)
+  3422	Consequently, bounding δ(3,w) uses the same input as bounding δ(1) (weight perturbations times second moments of eSi),
+  3423	and bounding δ(3,φ) uses the same input as bounding δ(2) (component-density perturbations controlled through density
+  3424	ratios, as in the analysis below). For this reason, after defining the three terms in (31), it is enough to develop the bounds for
+  3425	δ(1) and δ(2) in detail: the term δ(3) produces no new structural condition and can be absorbed into the same final upper
+  3426	bound by changing constants.
+  3427	We now provide explicit bounds for δ(1) and δ(2) and then define a corresponding Bd
+  3428	resp(t).
+  3429	(a) Weight perturbations: bound for δ(1).
+  3430	Write eSi(x) = −(eΣd
+  3431	i,t)−1(x −emd
+  3432	i ), hence
+  3433	(Γd)1/2 eSi(x)
+  3434	2 =
+  3435	d
+  3436	X
+  3437	h=1
+  3438	γh
+  3439	(xh −emd
+  3440	ih)2
+  3441	(σih + ∆σih + κtλh)2 .
+  3442	Assume ewi > 0 for all i ∈I, so that eρ(x) ≥ewi eφi(x). Fix p ≥2 (we will take p = 3 below). We write
+  3443	δ(1)(x) =
+  3444	X
+  3445	i∈I
+  3446	 
+  3447	∆wi
+  3448	ewp/2
+  3449	i
+  3450	eφi(x)
+  3451	eρ(x)
+  3452	!
+  3453	ewp/2
+  3454	i
+  3455	eSi(x).
+  3456	Cauchy–Schwarz yields
+  3457	∥(Γd)1/2δ(1)(x)∥2 ≤
+  3458	 X
+  3459	i∈I
+  3460	(∆wi)2
+  3461	ewp
+  3462	i
+  3463	! X
+  3464	i∈I
+  3465	ewp
+  3466	i
+  3467	eφi(x)2
+  3468	eρ(x)2 ∥(Γd)1/2 eSi(x)∥2.
+  3469	17
+  3470	935
+  3471	936
+  3472	937
+  3473	938
+  3474	939
+  3475	940
+  3476	941
+  3477	942
+  3478	943
+  3479	944
+  3480	945
+  3481	946
+  3482	947
+  3483	948
+  3484	949
+  3485	950
+  3486	951
+  3487	952
+  3488	953
+  3489	954
+  3490	955
+  3491	956
+  3492	957
+  3493	958
+  3494	959
+  3495	960
+  3496	961
+  3497	962
+  3498	963
+  3499	964
+  3500	965
+  3501	966
+  3502	967
+  3503	968
+  3504	969
+  3505	970
+  3506	971
+  3507	972
+  3508	973
+  3509	974
+  3510	975
+  3511	976
+  3512	977
+  3513	978
+  3514	979
+  3515	980
+  3516	981
+  3517	982
+  3518	983
+  3519	984
+  3520	985
+  3521	986
+  3522	987
+  3523	988
+  3524	989
+  3525	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  3526	Using eρ(x) ≥ewi eφi(x), we get
+  3527	ewp
+  3528	i
+  3529	eφi(x)2
+  3530	eρ(x)2 ≤ewp
+  3531	i
+  3532	eφi(x)2
+  3533	ew2
+  3534	i eφi(x)2 = ewp−2
+  3535	i
+  3536	.
+  3537	Therefore
+  3538	∥(Γd)1/2δ(1)(x)∥2 ≤
+  3539	 X
+  3540	i∈I
+  3541	(∆wi)2
+  3542	ewp
+  3543	i
+  3544	! X
+  3545	i∈I
+  3546	ewp−2
+  3547	i
+  3548	∥(Γd)1/2 eSi(x)∥2.
+  3549	(34)
+  3550	Integrating under ρ gives
+  3551	Eρ
+  3552	
+  3553	∥(Γd)1/2δ(1)(X)∥2
+  3554	≤
+  3555	 X
+  3556	i∈I
+  3557	(∆wi)2
+  3558	ewp
+  3559	i
+  3560	!
+  3561	C(1)
+  3562	d,p(t),
+  3563	(35)
+  3564	where
+  3565	C(1)
+  3566	d,p(t) :=
+  3567	Z
+  3568	Rd
+  3569	X
+  3570	i∈I
+  3571	ewp−2
+  3572	i
+  3573	∥(Γd)1/2 eSi(x)∥2 ρ(x) dx.
+  3574	In particular, using ρ = P
+  3575	ℓ∈I wℓφℓ,
+  3576	C(1)
+  3577	d,p(t) =
+  3578	X
+  3579	ℓ∈I
+  3580	wℓ
+  3581	X
+  3582	i∈I
+  3583	ewp−2
+  3584	i
+  3585	Z
+  3586	Rd ∥(Γd)1/2 eSi(x)∥2 φℓ(x) dx.
+  3587	If X(ℓ) ∼N(md
+  3588	ℓ, Σd
+  3589	ℓ,t), then for each coordinate h,
+  3590	E
+  3591	
+  3592	(X(ℓ)
+  3593	h
+  3594	−emd
+  3595	ih)2
+  3596	= (σℓh + κtλh) + (md
+  3597	ℓh −emd
+  3598	ih)2,
+  3599	and hence
+  3600	C(1)
+  3601	d,p(t) =
+  3602	X
+  3603	ℓ∈I
+  3604	wℓ
+  3605	X
+  3606	i∈I
+  3607	ewp−2
+  3608	i
+  3609	d
+  3610	X
+  3611	h=1
+  3612	γh
+  3613	(σℓh + κtλh) + (md
+  3614	ℓh −emd
+  3615	ih)2
+  3616	(σih + ∆σih + κtλh)2
+  3617	.
+  3618	(36)
+  3619	Taking p = 3 yields the bound:
+  3620	Eρ
+  3621	
+  3622	∥(Γd)1/2δ(1)(X)∥2
+  3623	≤
+  3624	 X
+  3625	i∈I
+  3626	(∆wi)2
+  3627	ew3
+  3628	i
+  3629	! X
+  3630	ℓ∈I
+  3631	wℓ
+  3632	X
+  3633	i∈I
+  3634	ewi
+  3635	d
+  3636	X
+  3637	h=1
+  3638	γh
+  3639	(σℓh + κtλh) + (md
+  3640	ℓh −emd
+  3641	ih)2
+  3642	(σih + ∆σih + κtλh)2
+  3643	.
+  3644	(b) Component-density perturbations: bound for δ(2).
+  3645	We now bound
+  3646	δ(2)(x) =
+  3647	X
+  3648	i∈I
+  3649	wi
+  3650	eφi(x) −φi(x)
+  3651	eρ(x)
+  3652	eSi(x).
+  3653	(37)
+  3654	The key point is to avoid any factor depending on |I| by repeatedly exploiting that responsibilities are convex weights.
+  3655	Step 1: rewrite δ(2) using eρ-responsibilities.
+  3656	Define the eρ-responsibilities
+  3657	eαi(x) := ewi eφi(x)
+  3658	eρ(x)
+  3659	.
+  3660	Then eαi(x) ≥0 a.e., and (crucially, even for infinite mixtures)
+  3661	X
+  3662	i≥1
+  3663	eαi(x) =
+  3664	P
+  3665	i≥1 ewi eφi(x)
+  3666	eρ(x)
+  3667	= eρ(x)
+  3668	eρ(x) = 1
+  3669	for a.e. x.
+  3670	Define the component density ratio and weight ratio
+  3671	ri(x) := φi(x)
+  3672	eφi(x),
+  3673	ci := wi
+  3674	ewi
+  3675	.
+  3676	18
+  3677	990
+  3678	991
+  3679	992
+  3680	993
+  3681	994
+  3682	995
+  3683	996
+  3684	997
+  3685	998
+  3686	999
+  3687	1000
+  3688	1001
+  3689	1002
+  3690	1003
+  3691	1004
+  3692	1005
+  3693	1006
+  3694	1007
+  3695	1008
+  3696	1009
+  3697	1010
+  3698	1011
+  3699	1012
+  3700	1013
+  3701	1014
+  3702	1015
+  3703	1016
+  3704	1017
+  3705	1018
+  3706	1019
+  3707	1020
+  3708	1021
+  3709	1022
+  3710	1023
+  3711	1024
+  3712	1025
+  3713	1026
+  3714	1027
+  3715	1028
+  3716	1029
+  3717	1030
+  3718	1031
+  3719	1032
+  3720	1033
+  3721	1034
+  3722	1035
+  3723	1036
+  3724	1037
+  3725	1038
+  3726	1039
+  3727	1040
+  3728	1041
+  3729	1042
+  3730	1043
+  3731	1044
+  3732	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  3733	Since eφi −φi = eφi(1 −ri),
+  3734	wi
+  3735	eφi −φi
+  3736	eρ
+  3737	= wi
+  3738	eφi
+  3739	eρ (1 −ri) = wi
+  3740	ewi
+  3741	ewi eφi
+  3742	eρ
+  3743	(1 −ri) = eαi(x) ci (1 −ri(x)).
+  3744	Plugging into (37) yields the pointwise identity (a.e.)
+  3745	δ(2)(x) =
+  3746	X
+  3747	i≥1
+  3748	eαi(x) ci (1 −ri(x)) eSi(x).
+  3749	(38)
+  3750	Step 2: pointwise convexity bound.
+  3751	Define for each i and a.e. x the vector
+  3752	ui(x) := ci(1 −ri(x)) (Γd)1/2 eSi(x).
+  3753	Then (38) implies
+  3754	(Γd)1/2δ(2)(x) =
+  3755	X
+  3756	i∈I
+  3757	eαi(x) ui(x).
+  3758	Since P
+  3759	i eαi(x) = 1 and eαi(x) ≥0, we can apply Cauchy-Schwarz inequality and obtain:
+  3760	∥(Γd)1/2δ(2)(x)∥2 ≤
+  3761	X
+  3762	i∈I
+  3763	eαi(x) ∥ui(x)∥2 =
+  3764	X
+  3765	i∈I
+  3766	eαi(x) c2
+  3767	i (1 −ri(x))2 ∥(Γd)1/2 eSi(x)∥2.
+  3768	(39)
+  3769	Step 3: change measure to eρ.
+  3770	Define the mixture density ratio
+  3771	R(x) := ρ(x)
+  3772	eρ(x).
+  3773	(40)
+  3774	Then
+  3775	Eρ
+  3776	
+  3777	∥(Γd)1/2δ(2)(X)∥2
+  3778	= Eeρ
+  3779	h
+  3780	R(X) ∥(Γd)1/2δ(2)(X)∥2i
+  3781	.
+  3782	By Cauchy–Schwarz,
+  3783	Eρ
+  3784	
+  3785	∥(Γd)1/2δ(2)(X)∥2
+  3786	≤
+  3787	
+  3788	Eeρ[R(X)2]
+  3789	1/2
+  3790	Eeρ
+  3791	
+  3792	∥(Γd)1/2δ(2)(X)∥41/2
+  3793	.
+  3794	(41)
+  3795	This step is valid whenever the two moments on the right are finite (otherwise the inequality remains true in [0, ∞]).
+  3796	Step 4: bound the 4th moment.
+  3797	From (39), define a.e. in x the nonnegative functions
+  3798	qi(x) := c2
+  3799	i (1 −ri(x))2 ∥(Γd)1/2 eSi(x)∥2,
+  3800	Q(x) :=
+  3801	X
+  3802	i∈I
+  3803	eαi(x) qi(x).
+  3804	By (39) we have ∥(Γd)1/2δ(2)(x)∥2 ≤Q(x), hence
+  3805	∥(Γd)1/2δ(2)(x)∥4 ≤Q(x)2.
+  3806	(42)
+  3807	Noting again that eαi(x) ≥0 and P
+  3808	i eαi(x) = 1, we can apply Cauchy-Schwarz inequality and obtain:
+  3809	Q(x)2 =
+  3810	 X
+  3811	i∈I
+  3812	eαi(x) qi(x)
+  3813	2
+  3814	≤
+  3815	X
+  3816	i∈I
+  3817	eαi(x) qi(x)2.
+  3818	Combine with (42):
+  3819	∥(Γd)1/2δ(2)(x)∥4 ≤
+  3820	X
+  3821	i∈I
+  3822	eαi(x) c4
+  3823	i (1 −ri(x))4 ∥(Γd)1/2 eSi(x)∥4.
+  3824	19
+  3825	1045
+  3826	1046
+  3827	1047
+  3828	1048
+  3829	1049
+  3830	1050
+  3831	1051
+  3832	1052
+  3833	1053
+  3834	1054
+  3835	1055
+  3836	1056
+  3837	1057
+  3838	1058
+  3839	1059
+  3840	1060
+  3841	1061
+  3842	1062
+  3843	1063
+  3844	1064
+  3845	1065
+  3846	1066
+  3847	1067
+  3848	1068
+  3849	1069
+  3850	1070
+  3851	1071
+  3852	1072
+  3853	1073
+  3854	1074
+  3855	1075
+  3856	1076
+  3857	1077
+  3858	1078
+  3859	1079
+  3860	1080
+  3861	1081
+  3862	1082
+  3863	1083
+  3864	1084
+  3865	1085
+  3866	1086
+  3867	1087
+  3868	1088
+  3869	1089
+  3870	1090
+  3871	1091
+  3872	1092
+  3873	1093
+  3874	1094
+  3875	1095
+  3876	1096
+  3877	1097
+  3878	1098
+  3879	1099
+  3880	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  3881	Now integrate under eρ; since the integrand is nonnegative, Tonelli’s theorem applies and allows exchanging sum and integral:
+  3882	Eeρ
+  3883	
+  3884	∥(Γd)1/2δ(2)(X)∥4
+  3885	=
+  3886	Z
+  3887	∥(Γd)1/2δ(2)(x)∥4 eρ(x) dx
+  3888	≤
+  3889	Z X
+  3890	i∈I
+  3891	eαi(x) c4
+  3892	i (1 −ri(x))4 ∥(Γd)1/2 eSi(x)∥4 eρ(x) dx
+  3893	=
+  3894	X
+  3895	i∈I
+  3896	Z
+  3897	eαi(x) c4
+  3898	i (1 −ri(x))4 ∥(Γd)1/2 eSi(x)∥4 eρ(x) dx.
+  3899	Use eαi = ewi eφi/eρ to simplify each term:
+  3900	Z
+  3901	eαi(x) g(x) eρ(x) dx =
+  3902	Z
+  3903	ewi eφi(x)
+  3904	eρ(x)
+  3905	g(x) eρ(x) dx
+  3906	= ewi
+  3907	Z
+  3908	g(x) eφi(x) dx = ewi Eeφi[g(X)].
+  3909	Apply this with g(x) = c4
+  3910	i (1 −ri(x))4∥(Γd)1/2 eSi(x)∥4 to obtain
+  3911	Eeρ
+  3912	
+  3913	∥(Γd)1/2δ(2)(X)∥4
+  3914	≤
+  3915	X
+  3916	i∈I
+  3917	ewi c4
+  3918	i Eeφi
+  3919	h
+  3920	(1 −ri(X))4 ∥(Γd)1/2 eSi(X)∥4i
+  3921	.
+  3922	(43)
+  3923	To further bound (43), we introduce a useful lemma.
+  3924	Lemma B.1. For any r > 0,
+  3925	(1 −r)4 ≤| log r|4 (r4 + r−4).
+  3926	(44)
+  3927	Proof. Let ℓ:= log r so r = eℓ. By the mean value theorem for f(u) = eu,
+  3928	|eℓ−1| = |f(ℓ) −f(0)| = |ℓ| eθℓ
+  3929	for some θ ∈(0, 1).
+  3930	Hence eθℓ≤e|ℓ| and therefore
+  3931	|1 −r| = |1 −eℓ| ≤|ℓ| e|ℓ|.
+  3932	Raise both sides to the fourth power:
+  3933	(1 −r)4 ≤|ℓ|4 e4|ℓ|.
+  3934	Now observe that for any real ℓ,
+  3935	e4|ℓ| = max(e4ℓ, e−4ℓ) ≤e4ℓ+ e−4ℓ.
+  3936	Thus
+  3937	(1 −r)4 ≤|ℓ|4 (e4ℓ+ e−4ℓ) = | log r|4 (r4 + r−4),
+  3938	which is exactly (44).
+  3939	Step 5: final bound.
+  3940	Apply Lemma B.1 with r = ri(X) and define
+  3941	ℓi(x) := log ri(x) = log φi(x)
+  3942	eφi(x).
+  3943	Then pointwise (a.e.)
+  3944	(1 −ri(x))4 ≤|ℓi(x)|4 (ri(x)4 + ri(x)−4).
+  3945	Plug this into (43) to obtain
+  3946	Eeρ
+  3947	
+  3948	∥(Γd)1/2δ(2)(X)∥4
+  3949	≤
+  3950	X
+  3951	i≥1
+  3952	ewi c4
+  3953	i Eeφi
+  3954	h
+  3955	|ℓi(X)|4 (ri(X)4 + ri(X)−4) ∥(Γd)1/2 eSi(X)∥4i
+  3956	.
+  3957	(45)
+  3958	20
+  3959	1100
+  3960	1101
+  3961	1102
+  3962	1103
+  3963	1104
+  3964	1105
+  3965	1106
+  3966	1107
+  3967	1108
+  3968	1109
+  3969	1110
+  3970	1111
+  3971	1112
+  3972	1113
+  3973	1114
+  3974	1115
+  3975	1116
+  3976	1117
+  3977	1118
+  3978	1119
+  3979	1120
+  3980	1121
+  3981	1122
+  3982	1123
+  3983	1124
+  3984	1125
+  3985	1126
+  3986	1127
+  3987	1128
+  3988	1129
+  3989	1130
+  3990	1131
+  3991	1132
+  3992	1133
+  3993	1134
+  3994	1135
+  3995	1136
+  3996	1137
+  3997	1138
+  3998	1139
+  3999	1140
+  4000	1141
+  4001	1142
+  4002	1143
+  4003	1144
+  4004	1145
+  4005	1146
+  4006	1147
+  4007	1148
+  4008	1149
+  4009	1150
+  4010	1151
+  4011	1152
+  4012	1153
+  4013	1154
+  4014	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  4015	Combining (41) and (45) gives the explicit bound
+  4016	Eρ
+  4017	
+  4018	∥(Γd)1/2δ(2)(X)∥2
+  4019	≤
+  4020	
+  4021	Eeρ[R(X)2]
+  4022	1/2
+  4023	 X
+  4024	i∈I
+  4025	ewi
+  4026	wi
+  4027	ewi
+  4028	4
+  4029	Eeφi
+  4030	h
+  4031	| log ri(X)|4 (ri(X)4+ri(X)−4) ∥(Γd)1/2 eSi(X)∥4i!1/2
+  4032	.
+  4033	(46)
+  4034	Finally, we further bound Eeρ[R(X)2]. Using ρ = P
+  4035	k wkφk and eρ = P
+  4036	k ewk eφk,
+  4037	R(x) = ρ(x)
+  4038	eρ(x) =
+  4039	X
+  4040	k≥1
+  4041	wkφk(x)
+  4042	eρ(x)
+  4043	=
+  4044	X
+  4045	k≥1
+  4046	ewk eφk(x)
+  4047	eρ(x)
+  4048	· wk
+  4049	ewk
+  4050	· φk(x)
+  4051	eφk(x)
+  4052	=
+  4053	X
+  4054	k≥1
+  4055	eαk(x) ck rk(x).
+  4056	Noting again that eαk(x) ≥0 and P
+  4057	k eαk(x) = 1, we can apply Cauchy-Schwarz inequality and obtain:
+  4058	R(x)2 =
+  4059	 X
+  4060	k
+  4061	eαk(x) ckrk(x)
+  4062	2
+  4063	≤
+  4064	X
+  4065	k
+  4066	eαk(x) c2
+  4067	k rk(x)2.
+  4068	Now integrate under eρ; using Tonelli, we have
+  4069	Eeρ[R(X)2] ≤
+  4070	X
+  4071	k≥1
+  4072	ewk c2
+  4073	k Eeφk[rk(X)2].
+  4074	(47)
+  4075	(c) Explicit form of Bd
+  4076	resp(t).
+  4077	Collect the bounds as follows. Define
+  4078	Bd
+  4079	resp(t) := 3
+  4080	
+  4081	Bd
+  4082	w(t) + Bd
+  4083	φ(t) + Bd
+  4084	mix(t)
+  4085	
+  4086	,
+  4087	where:
+  4088	1. Bd
+  4089	w(t) is any explicit upper bound for Eρd
+  4090	t
+  4091	
+  4092	∥(Γd)1/2δ(1)(X)∥2
+  4093	.
+  4094	2. Bd
+  4095	φ(t) is the right-hand side of (46).
+  4096	3. Bd
+  4097	mix(t) is a bound for the δ(3) term in (32). As explained after (32), δ(3) = δ(3,w) + δ(3,φ), and bounding δ(3,w) uses
+  4098	the same weight perturbations as δ(1) together with the convexity estimate (33), while bounding δ(3,φ) uses the same
+  4099	component-density perturbations as δ(2) (with eSi replaced by J, still controlled by (33)). Thus Bd
+  4100	mix(t) can be taken to
+  4101	be a (slightly enlarged) combination of Bd
+  4102	w(t) and Bd
+  4103	φ(t), and in particular it introduces no additional condition beyond
+  4104	those already needed to make Bd
+  4105	w(t) and Bd
+  4106	φ(t) finite.
+  4107	With this definition, (32) yields
+  4108	Eρd
+  4109	t
+  4110	
+  4111	X
+  4112	i∈I
+  4113	 epi,t −pi,t
+  4114	
+  4115	(X) (Γd)1/2 eSd
+  4116	i,t(X)
+  4117	
+  4118	2
+  4119	= Eρ
+  4120	
+  4121	∥(Γd)1/2I2(X, t)∥2
+  4122	≤Bd
+  4123	resp(t),
+  4124	which is (19). Together with the component bound already proved and (27), this implies
+  4125	Ed
+  4126	score,T ≤
+  4127	Z T
+  4128	0
+  4129	
+  4130	Bd
+  4131	comp(t) + Bd
+  4132	resp(t)
+  4133	
+  4134	dt,
+  4135	which is (20) and completes the proof of Proposition 4.4.
+  4136	B.4. Sufficient Conditions for (19) to Remain Uniform as d →∞
+  4137	The bound (35) is dimension-free provided the following quantities remain bounded uniformly in d (and, when relevant,
+  4138	uniformly in i):
+  4139	21
+  4140	1155
+  4141	1156
+  4142	1157
+  4143	1158
+  4144	1159
+  4145	1160
+  4146	1161
+  4147	1162
+  4148	1163
+  4149	1164
+  4150	1165
+  4151	1166
+  4152	1167
+  4153	1168
+  4154	1169
+  4155	1170
+  4156	1171
+  4157	1172
+  4158	1173
+  4159	1174
+  4160	1175
+  4161	1176
+  4162	1177
+  4163	1178
+  4164	1179
+  4165	1180
+  4166	1181
+  4167	1182
+  4168	1183
+  4169	1184
+  4170	1185
+  4171	1186
+  4172	1187
+  4173	1188
+  4174	1189
+  4175	1190
+  4176	1191
+  4177	1192
+  4178	1193
+  4179	1194
+  4180	1195
+  4181	1196
+  4182	1197
+  4183	1198
+  4184	1199
+  4185	1200
+  4186	1201
+  4187	1202
+  4188	1203
+  4189	1204
+  4190	1205
+  4191	1206
+  4192	1207
+  4193	1208
+  4194	1209
+  4195	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  4196	(W1) Weight perturbations. The weight-mismatch factor is uniformly bounded:
+  4197	X
+  4198	i∈I
+  4199	(∆wi)2
+  4200	ew3
+  4201	i
+  4202	< ∞.
+  4203	(S1) Preconditioner–variance compatibility. The γ–weighted series appearing in (36) is uniformly bounded:
+  4204	sup
+  4205	d≥1
+  4206	X
+  4207	ℓ∈I
+  4208	wℓ
+  4209	X
+  4210	i∈I
+  4211	ewi
+  4212	d
+  4213	X
+  4214	h=1
+  4215	γh
+  4216	(σℓh + κtλh) + (md
+  4217	ℓh −emd
+  4218	ih)2
+  4219	(σih + ∆σih + κtλh)2
+  4220	< ∞.
+  4221	Obtaining a dimension-free version of (46) is more delicate, since it requires controlling, uniformly in d, several more
+  4222	involved quantities (and, when relevant, uniformly in i):
+  4223	(W2) Weights. Uniform comparability of weights:
+  4224	sup
+  4225	i∈I
+  4226	wi
+  4227	ewi
+  4228	< ∞
+  4229	and
+  4230	sup
+  4231	i∈I
+  4232	ewi
+  4233	wi
+  4234	< ∞.
+  4235	This guarantees P
+  4236	i ewi(wi/ ewi)4 ≲1.
+  4237	(R2) Mixture ratio second moment. Since
+  4238	Eeρ[R(X)2] ≤
+  4239	X
+  4240	k≥1
+  4241	ewk c2
+  4242	k Eeφk[rk(X)2],
+  4243	a sufficient condition for Eeρ[R2] < ∞is a uniform bound on Eeφi[r2
+  4244	i ]. In the diagonal Gaussian case, we will
+  4245	show below that Eeφij[r2
+  4246	ij] < ∞iff evij > 1
+  4247	2vij; uniformity in d is then about the product over j, equivalently about
+  4248	summability of log Eeφij[r2
+  4249	ij].
+  4250	(Main) Main term in (46). The series
+  4251	X
+  4252	i∈I
+  4253	ewi
+  4254	wi
+  4255	ewi
+  4256	4
+  4257	Eeφi
+  4258	h
+  4259	| log ri(X)|4 (ri(X)4 + ri(X)−4) ∥(Γd)1/2 eSi(X)∥4i
+  4260	must be bounded uniformly in d. In the diagonal Gaussian case, log ri and ∥(Γd)1/2 eSi∥2 can be made explicit (see
+  4261	(50) and (51) below), so uniformity becomes an explicit summability/regularity statement involving (∆mij), (∆σij),
+  4262	and (γj).
+  4263	Since we already derived sufficient conditions for (19), we now focus on controlling (46). To this end, we make the
+  4264	dependence of the right-hand side of (46) explicit in terms of wi, ewi, mij, emij, σij, eσij, λj, and γj, in the same spirit as (36)
+  4265	for the bound on (19).
+  4266	Define
+  4267	vij := σij + κtλj,
+  4268	evij := eσij + κtλj = σij + ∆σij + κtλj,
+  4269	so that, for each component i,
+  4270	eφi = N( emi, eΣi),
+  4271	φi = N(mi, Σi),
+  4272	with diagonal covariances
+  4273	eΣi = diag(evij)d
+  4274	j=1,
+  4275	Σi = diag(vij)d
+  4276	j=1,
+  4277	Γd = diag(γj)d
+  4278	j=1.
+  4279	Set the variance ratio
+  4280	κij := evij
+  4281	vij
+  4282	= σij + ∆σij + κtλj
+  4283	σij + κtλj
+  4284	= 1 + ∆σij
+  4285	vij
+  4286	.
+  4287	We make explicit two ingredients:
+  4288	(1) Uniformity in d for the mixture ratio second moment Eeρ[R2].
+  4289	(2) Uniformity in d for the main term in (46), by completing the moment bounds into explicit summability conditions.
+  4290	22
+  4291	1210
+  4292	1211
+  4293	1212
+  4294	1213
+  4295	1214
+  4296	1215
+  4297	1216
+  4298	1217
+  4299	1218
+  4300	1219
+  4301	1220
+  4302	1221
+  4303	1222
+  4304	1223
+  4305	1224
+  4306	1225
+  4307	1226
+  4308	1227
+  4309	1228
+  4310	1229
+  4311	1230
+  4312	1231
+  4313	1232
+  4314	1233
+  4315	1234
+  4316	1235
+  4317	1236
+  4318	1237
+  4319	1238
+  4320	1239
+  4321	1240
+  4322	1241
+  4323	1242
+  4324	1243
+  4325	1244
+  4326	1245
+  4327	1246
+  4328	1247
+  4329	1248
+  4330	1249
+  4331	1250
+  4332	1251
+  4333	1252
+  4334	1253
+  4335	1254
+  4336	1255
+  4337	1256
+  4338	1257
+  4339	1258
+  4340	1259
+  4341	1260
+  4342	1261
+  4343	1262
+  4344	1263
+  4345	1264
+  4346	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  4347	(1) UNIFORMITY IN d FOR Eeρ[R2]
+  4348	Recall the bound already established:
+  4349	Eeρ[R(X)2] ≤
+  4350	X
+  4351	i≥1
+  4352	ewi c2
+  4353	i Eeφi[ri(X)2],
+  4354	ci := wi
+  4355	ewi
+  4356	,
+  4357	ri(x) := φi(x)
+  4358	eφi(x).
+  4359	(48)
+  4360	Write x = (x1, . . . , xd). Then
+  4361	φi(x) =
+  4362	d
+  4363	Y
+  4364	j=1
+  4365	1
+  4366	p2πvij
+  4367	exp
+  4368	
+  4369	−(xj −mij)2
+  4370	2vij
+  4371	
+  4372	,
+  4373	eφi(x) =
+  4374	d
+  4375	Y
+  4376	j=1
+  4377	1
+  4378	p
+  4379	2πevij
+  4380	exp
+  4381	
+  4382	−(xj −emij)2
+  4383	2evij
+  4384	
+  4385	,
+  4386	hence
+  4387	ri(x) = φi(x)
+  4388	eφi(x) =
+  4389	d
+  4390	Y
+  4391	j=1
+  4392	evij
+  4393	vij
+  4394	1/2
+  4395	exp
+  4396	
+  4397	−(xj −mij)2
+  4398	2vij
+  4399	+ (xj −emij)2
+  4400	2evij
+  4401	
+  4402	.
+  4403	(49)
+  4404	Taking logs and using xj −mij = (xj −emij) + ∆mij yields
+  4405	ℓi(x) := log ri(x) =
+  4406	d
+  4407	X
+  4408	j=1
+  4409	"
+  4410	1
+  4411	2 log evij
+  4412	vij
+  4413	−1
+  4414	2
+  4415	(xj −mij)2
+  4416	vij
+  4417	−(xj −emij)2
+  4418	evij
+  4419	#
+  4420	=
+  4421	d
+  4422	X
+  4423	j=1
+  4424	"
+  4425	1
+  4426	2 log evij
+  4427	vij
+  4428	−(∆mij)2
+  4429	2vij
+  4430	|
+  4431	{z
+  4432	}
+  4433	=:cij
+  4434	+ 1
+  4435	2
+  4436	 1
+  4437	evij
+  4438	−1
+  4439	vij
+  4440	
+  4441	|
+  4442	{z
+  4443	}
+  4444	=:a(2)
+  4445	ij
+  4446	(xj −emij)2 −∆mij
+  4447	vij
+  4448	|
+  4449	{z
+  4450	}
+  4451	=:a(1)
+  4452	ij
+  4453	(xj −emij)
+  4454	#
+  4455	.
+  4456	(50)
+  4457	Since eSi(x) = −(eΣi)−1(x −emi) and eΣi is diagonal,
+  4458	(eSi(x))j = −xj −emij
+  4459	evij
+  4460	,
+  4461	∥(Γd)1/2 eSi(x)∥2 =
+  4462	d
+  4463	X
+  4464	j=1
+  4465	γj
+  4466	(xj −emij)2
+  4467	ev2
+  4468	ij
+  4469	.
+  4470	(51)
+  4471	So γj enters only through the weights γj multiplying (xj −emij)2/ev2
+  4472	ij.
+  4473	Now, define
+  4474	eφij := N( emij, evij),
+  4475	φij := N(mij, vij),
+  4476	and
+  4477	rij(xj) := φij(xj)/eφij(xj).
+  4478	Then
+  4479	Eeφij[rij(Xj)2] =
+  4480	Z
+  4481	R
+  4482	φij(xj)2
+  4483	eφij(xj) dxj.
+  4484	We can write explicitly the probability density functions
+  4485	φij(xj) =
+  4486	1
+  4487	p2πvij
+  4488	exp
+  4489	
+  4490	−(xj −mij)2
+  4491	2vij
+  4492	
+  4493	,
+  4494	eφij(xj) =
+  4495	1
+  4496	p
+  4497	2πevij
+  4498	exp
+  4499	
+  4500	−(xj −emij)2
+  4501	2evij
+  4502	
+  4503	.
+  4504	Hence
+  4505	φij(xj)2
+  4506	eφij(xj) =
+  4507	
+  4508	1
+  4509	2πvij
+  4510	p
+  4511	2πevij exp
+  4512	
+  4513	−(xj −mij)2
+  4514	vij
+  4515	+ (xj −emij)2
+  4516	2evij
+  4517	
+  4518	=
+  4519	p
+  4520	evij
+  4521	vij
+  4522	√
+  4523	2π exp
+  4524	
+  4525	−(xj −mij)2
+  4526	vij
+  4527	+ (xj −emij)2
+  4528	2evij
+  4529	
+  4530	.
+  4531	23
+  4532	1265
+  4533	1266
+  4534	1267
+  4535	1268
+  4536	1269
+  4537	1270
+  4538	1271
+  4539	1272
+  4540	1273
+  4541	1274
+  4542	1275
+  4543	1276
+  4544	1277
+  4545	1278
+  4546	1279
+  4547	1280
+  4548	1281
+  4549	1282
+  4550	1283
+  4551	1284
+  4552	1285
+  4553	1286
+  4554	1287
+  4555	1288
+  4556	1289
+  4557	1290
+  4558	1291
+  4559	1292
+  4560	1293
+  4561	1294
+  4562	1295
+  4563	1296
+  4564	1297
+  4565	1298
+  4566	1299
+  4567	1300
+  4568	1301
+  4569	1302
+  4570	1303
+  4571	1304
+  4572	1305
+  4573	1306
+  4574	1307
+  4575	1308
+  4576	1309
+  4577	1310
+  4578	1311
+  4579	1312
+  4580	1313
+  4581	1314
+  4582	1315
+  4583	1316
+  4584	1317
+  4585	1318
+  4586	1319
+  4587	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  4588	We change variable yj := xj −emij so that
+  4589	xj −mij = (xj −emij) + ( emij −mij) = yj + ∆mij.
+  4590	Then
+  4591	−(xj −mij)2
+  4592	vij
+  4593	+ (xj −emij)2
+  4594	2evij
+  4595	= −(yj + ∆mij)2
+  4596	vij
+  4597	+ y2
+  4598	j
+  4599	2evij
+  4600	= −
+  4601	 1
+  4602	vij
+  4603	−
+  4604	1
+  4605	2evij
+  4606	
+  4607	y2
+  4608	j −2∆mij
+  4609	vij
+  4610	yj −(∆mij)2
+  4611	vij
+  4612	.
+  4613	Set
+  4614	Aij := 1
+  4615	vij
+  4616	−
+  4617	1
+  4618	2evij
+  4619	= 2evij −vij
+  4620	2vijevij
+  4621	.
+  4622	The Gaussian integral is finite iff Aij > 0, i.e. iff 2evij −vij > 0 (equivalently evij > vij/2). Assuming evij > vij/2, we
+  4623	complete the square:
+  4624	−Aijy2
+  4625	j −2∆mij
+  4626	vij
+  4627	yj = −Aij
+  4628	
+  4629	yj + ∆mij
+  4630	Aijvij
+  4631	2
+  4632	+ (∆mij)2
+  4633	Aijv2
+  4634	ij
+  4635	.
+  4636	Therefore
+  4637	−(yj + ∆mij)2
+  4638	vij
+  4639	+ y2
+  4640	j
+  4641	2evij
+  4642	= −Aij
+  4643	
+  4644	yj + ∆mij
+  4645	Aijvij
+  4646	2
+  4647	+
+  4648	(∆mij)2
+  4649	Aijv2
+  4650	ij
+  4651	−(∆mij)2
+  4652	vij
+  4653	
+  4654	.
+  4655	We compute the constant:
+  4656	(∆mij)2
+  4657	Aijv2
+  4658	ij
+  4659	−(∆mij)2
+  4660	vij
+  4661	= (∆mij)2
+  4662	1
+  4663	Aijv2
+  4664	ij
+  4665	−1
+  4666	vij
+  4667	
+  4668	= (∆mij)2 · 1 −Aijvij
+  4669	Aijv2
+  4670	ij
+  4671	.
+  4672	But Aijvij = 2evij−vij
+  4673	2evij
+  4674	, so 1 −Aijvij =
+  4675	vij
+  4676	2evij . Hence
+  4677	1 −Aijvij
+  4678	Aijv2
+  4679	ij
+  4680	= vij
+  4681	2evij
+  4682	·
+  4683	1
+  4684	Aijv2
+  4685	ij
+  4686	=
+  4687	1
+  4688	2evij
+  4689	·
+  4690	1
+  4691	Aijvij
+  4692	=
+  4693	1
+  4694	2evij
+  4695	·
+  4696	2evij
+  4697	2evij −vij
+  4698	=
+  4699	1
+  4700	2evij −vij
+  4701	,
+  4702	and thus the constant equals (∆mij)2/(2evij −vij).
+  4703	Now we integrate:
+  4704	Eeφij[rij(Xj)2] =
+  4705	p
+  4706	evij
+  4707	vij
+  4708	√
+  4709	2π
+  4710	Z
+  4711	R
+  4712	exp
+  4713	
+  4714	−Aij
+  4715	
+  4716	yj + ∆mij
+  4717	Aijvij
+  4718	2
+  4719	+ (∆mij)2
+  4720	2evij −vij
+  4721	
+  4722	dyj
+  4723	=
+  4724	p
+  4725	evij
+  4726	vij
+  4727	√
+  4728	2π exp
+  4729	 (∆mij)2
+  4730	2evij −vij
+  4731	 Z
+  4732	R
+  4733	exp
+  4734	
+  4735	−Aij
+  4736	
+  4737	yj + ∆mij
+  4738	Aijvij
+  4739	2
+  4740	dyj
+  4741	=
+  4742	p
+  4743	evij
+  4744	vij
+  4745	√
+  4746	2π exp
+  4747	 (∆mij)2
+  4748	2evij −vij
+  4749	r π
+  4750	Aij
+  4751	.
+  4752	We use Aij = (2evij −vij)/(2vijevij):
+  4753	p
+  4754	evij
+  4755	vij
+  4756	√
+  4757	2π
+  4758	r π
+  4759	Aij
+  4760	=
+  4761	p
+  4762	evij
+  4763	vij
+  4764	·
+  4765	1
+  4766	p
+  4767	2Aij
+  4768	=
+  4769	p
+  4770	evij
+  4771	vij
+  4772	s
+  4773	vijevij
+  4774	2evij −vij
+  4775	=
+  4776	evij
+  4777	vij
+  4778	
+  4779	1
+  4780	p
+  4781	2evij/vij −1
+  4782	.
+  4783	So finally
+  4784	Eeφij[rij(Xj)2] =
+  4785	evij
+  4786	vij
+  4787	
+  4788	1
+  4789	p
+  4790	2evij/vij −1
+  4791	exp
+  4792	 (∆mij)2
+  4793	2evij −vij
+  4794	
+  4795	,
+  4796	valid iff evij > vij
+  4797	2 ,
+  4798	(52)
+  4799	and in our diagonal setting,
+  4800	ri(x) =
+  4801	d
+  4802	Y
+  4803	j=1
+  4804	rij(xj),
+  4805	Eeφi[ri(X)2] =
+  4806	d
+  4807	Y
+  4808	j=1
+  4809	Eeφij[rij(Xj)2],
+  4810	(53)
+  4811	24
+  4812	1320
+  4813	1321
+  4814	1322
+  4815	1323
+  4816	1324
+  4817	1325
+  4818	1326
+  4819	1327
+  4820	1328
+  4821	1329
+  4822	1330
+  4823	1331
+  4824	1332
+  4825	1333
+  4826	1334
+  4827	1335
+  4828	1336
+  4829	1337
+  4830	1338
+  4831	1339
+  4832	1340
+  4833	1341
+  4834	1342
+  4835	1343
+  4836	1344
+  4837	1345
+  4838	1346
+  4839	1347
+  4840	1348
+  4841	1349
+  4842	1350
+  4843	1351
+  4844	1352
+  4845	1353
+  4846	1354
+  4847	1355
+  4848	1356
+  4849	1357
+  4850	1358
+  4851	1359
+  4852	1360
+  4853	1361
+  4854	1362
+  4855	1363
+  4856	1364
+  4857	1365
+  4858	1366
+  4859	1367
+  4860	1368
+  4861	1369
+  4862	1370
+  4863	1371
+  4864	1372
+  4865	1373
+  4866	1374
+  4867	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  4868	because eφi factorizes and ri factorizes across coordinates.
+  4869	Define the 1D factors
+  4870	aij := Eeφij[rij(Xj)2] ∈(0, ∞].
+  4871	Then (53) reads Eeφi[r2
+  4872	i (X)] = Qd
+  4873	j=1 aij.
+  4874	Step 1: aij ≥1 and why uniformity in d is equivalent to P
+  4875	j log aij < ∞.
+  4876	First observe that aij ≥1 always (whenever
+  4877	aij < ∞): indeed, since rij = φij/eφij and eφij is a probability density,
+  4878	Eeφij[rij(Xj)] =
+  4879	Z φij(x)
+  4880	eφij(x) eφij(x) dx =
+  4881	Z
+  4882	φij(x) dx = 1.
+  4883	By Cauchy–Schwarz,
+  4884	1 =
+  4885	 Eeφij[rij]
+  4886	2 ≤Eeφij[r2
+  4887	ij] · Eeφij[12] = aij.
+  4888	Hence aij ≥1 and thus log aij ≥0.
+  4889	Now fix i and define the partial products
+  4890	Ai,d :=
+  4891	d
+  4892	Y
+  4893	j=1
+  4894	aij
+  4895	(so Ai,d = Eeφi[r2
+  4896	i ]).
+  4897	Taking logs,
+  4898	log Ai,d =
+  4899	d
+  4900	X
+  4901	j=1
+  4902	log aij.
+  4903	(54)
+  4904	Since log aij ≥0, the partial sums in (54) are increasing in d. Therefore:
+  4905	sup
+  4906	d≥1
+  4907	Ai,d < ∞
+  4908	⇐⇒
+  4909	sup
+  4910	d≥1
+  4911	log Ai,d < ∞
+  4912	⇐⇒
+  4913	sup
+  4914	d≥1
+  4915	d
+  4916	X
+  4917	j=1
+  4918	log aij < ∞
+  4919	⇐⇒
+  4920	X
+  4921	j≥1
+  4922	log aij < ∞.
+  4923	So, in the diagonal Gaussian case, uniformity in d of Eeφi[r2
+  4924	i ] is equivalent to summability of P
+  4925	j≥1 log Eeφij[r2
+  4926	ij].
+  4927	Step 2: explicit formula for aij and an explicit summability condition.
+  4928	Set
+  4929	∆mij := emij −mij,
+  4930	∆σij := eσij −σij,
+  4931	κij := evij
+  4932	vij
+  4933	.
+  4934	Recall that aij < ∞iff κij > 1/2 and in that case
+  4935	aij = Eeφij[r2
+  4936	ij] =
+  4937	evij
+  4938	vij
+  4939	
+  4940	1
+  4941	p
+  4942	2evij/vij −1
+  4943	exp
+  4944	 (∆mij)2
+  4945	2evij −vij
+  4946	
+  4947	=
+  4948	κij
+  4949	p2κij −1 exp
+  4950	
+  4951	(∆mij)2
+  4952	vij(2κij −1)
+  4953	
+  4954	.
+  4955	(55)
+  4956	Taking logs,
+  4957	log aij = log κij −1
+  4958	2 log(2κij −1)
+  4959	|
+  4960	{z
+  4961	}
+  4962	=:g(κij)
+  4963	+
+  4964	(∆mij)2
+  4965	vij(2κij −1).
+  4966	(56)
+  4967	Step 3: bound g(κ).
+  4968	Define
+  4969	g(κ) := log κ −1
+  4970	2 log(2κ −1),
+  4971	κ > 1/2.
+  4972	Then g(1) = 0 and a direct computation gives
+  4973	g′(κ) = 1
+  4974	κ −
+  4975	1
+  4976	2κ −1,
+  4977	g′′(κ) = −1
+  4978	κ2 +
+  4979	2
+  4980	(2κ −1)2 .
+  4981	25
+  4982	1375
+  4983	1376
+  4984	1377
+  4985	1378
+  4986	1379
+  4987	1380
+  4988	1381
+  4989	1382
+  4990	1383
+  4991	1384
+  4992	1385
+  4993	1386
+  4994	1387
+  4995	1388
+  4996	1389
+  4997	1390
+  4998	1391
+  4999	1392
+  5000	1393
+  5001	1394
+  5002	1395
+  5003	1396
+  5004	1397
+  5005	1398
+  5006	1399
+  5007	1400
+  5008	1401
+  5009	1402
+  5010	1403
+  5011	1404
+  5012	1405
+  5013	1406
+  5014	1407
+  5015	1408
+  5016	1409
+  5017	1410
+  5018	1411
+  5019	1412
+  5020	1413
+  5021	1414
+  5022	1415
+  5023	1416
+  5024	1417
+  5025	1418
+  5026	1419
+  5027	1420
+  5028	1421
+  5029	1422
+  5030	1423
+  5031	1424
+  5032	1425
+  5033	1426
+  5034	1427
+  5035	1428
+  5036	1429
+  5037	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  5038	In particular, g′(1) = 1 −1 = 0. Fix ε ∈(0, 1/2) and assume κ ∈[1 −ε, 1 + ε]. Then κ ≥1 −ε and 2κ −1 ≥1 −2ε, so
+  5039	|g′′(κ)| ≤
+  5040	1
+  5041	(1 −ε)2 +
+  5042	2
+  5043	(1 −2ε)2 =: Cg(ε) < ∞.
+  5044	By Taylor’s theorem (using g(1) = g′(1) = 0), for each such κ there exists ξ between 1 and κ such that
+  5045	g(κ) = 1
+  5046	2g′′(ξ) (κ −1)2,
+  5047	hence the explicit bound
+  5048	0 ≤g(κ) ≤1
+  5049	2Cg(ε) (κ −1)2
+  5050	for all κ ∈[1 −ε, 1 + ε].
+  5051	(57)
+  5052	Notice that nonnegativity g(κ) ≥0 is consistent with aij ≥1 and (56).
+  5053	Step 4: an explicit sufficient condition for uniformity of Eeρ[R2].
+  5054	Assume there exists ε ∈(0, 1/2) such that for all i, j,
+  5055	κij = evij
+  5056	vij
+  5057	∈[1 −ε, 1 + ε].
+  5058	(58)
+  5059	Then 2κij −1 ≥1 −2ε > 0 and (56)–(57) imply
+  5060	log aij ≤1
+  5061	2Cg(ε) (κij −1)2 +
+  5062	1
+  5063	1 −2ε
+  5064	(∆mij)2
+  5065	vij
+  5066	.
+  5067	(59)
+  5068	Therefore, for each i,
+  5069	X
+  5070	j≥1
+  5071	log aij < ∞
+  5072	⇐
+  5073	X
+  5074	j≥1
+  5075	(κij −1)2 < ∞and
+  5076	X
+  5077	j≥1
+  5078	(∆mij)2
+  5079	vij
+  5080	< ∞.
+  5081	In particular, the following uniform-in-i condition implies supi≥1 supd≥1 Eeφi[r2
+  5082	i ] < ∞:
+  5083	There exists ε ∈(0, 1/2) such that (58) holds and sup
+  5084	i≥1
+  5085	X
+  5086	j≥1
+  5087	
+  5088	(κij −1)2 + (∆mij)2
+  5089	vij
+  5090	
+  5091	< ∞.
+  5092	(60)
+  5093	Assume (W2) (uniform comparability of weights), i.e. supi ci < ∞. Then from (48) and P
+  5094	i ewi = 1,
+  5095	Eeρ[R2] ≤(sup
+  5096	i
+  5097	c2
+  5098	i )
+  5099	X
+  5100	i
+  5101	ewi Eeφi[r2
+  5102	i ] ≤(sup
+  5103	i
+  5104	c2
+  5105	i ) · sup
+  5106	i
+  5107	Eeφi[r2
+  5108	i ].
+  5109	Thus (60) implies
+  5110	sup
+  5111	d≥1
+  5112	Eeρ[R2] < ∞.
+  5113	(61)
+  5114	(2) UNIFORMITY IN d FOR THE MAIN TERM IN (46)
+  5115	Define the main term that appears in (46)
+  5116	Maind :=
+  5117	X
+  5118	i∈I
+  5119	ewi c4
+  5120	i Eeφi
+  5121	h
+  5122	| log ri(X)|4 (ri(X)4 + ri(X)−4) ∥(Γd)1/2 eSi(X)∥4i
+  5123	.
+  5124	(62)
+  5125	We derive explicit sufficient conditions ensuring supd Maind < ∞.
+  5126	26
+  5127	1430
+  5128	1431
+  5129	1432
+  5130	1433
+  5131	1434
+  5132	1435
+  5133	1436
+  5134	1437
+  5135	1438
+  5136	1439
+  5137	1440
+  5138	1441
+  5139	1442
+  5140	1443
+  5141	1444
+  5142	1445
+  5143	1446
+  5144	1447
+  5145	1448
+  5146	1449
+  5147	1450
+  5148	1451
+  5149	1452
+  5150	1453
+  5151	1454
+  5152	1455
+  5153	1456
+  5154	1457
+  5155	1458
+  5156	1459
+  5157	1460
+  5158	1461
+  5159	1462
+  5160	1463
+  5161	1464
+  5162	1465
+  5163	1466
+  5164	1467
+  5165	1468
+  5166	1469
+  5167	1470
+  5168	1471
+  5169	1472
+  5170	1473
+  5171	1474
+  5172	1475
+  5173	1476
+  5174	1477
+  5175	1478
+  5176	1479
+  5177	1480
+  5178	1481
+  5179	1482
+  5180	1483
+  5181	1484
+  5182	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  5183	Step 1: remove | log r|4 by absorbing it into higher likelihood-ratio moments.
+  5184	Let y ∈R. We use the elementary
+  5185	inequality: for u ≥0,
+  5186	u4 ≤4! eu = 24eu
+  5187	Apply this with u = |y|. Then |y|4 ≤24e|y| ≤24(ey + e−y), so
+  5188	|y|4 ≤24(ey + e−y)
+  5189	∀y ∈R.
+  5190	Now set y = log r. Then ey = r and e−y = r−1, hence
+  5191	| log r|4 ≤24(r + r−1).
+  5192	Multiply by (r4 + r−4):
+  5193	| log r|4 (r4 + r−4) ≤24 (r + r−1)(r4 + r−4) = 24 (r5 + r−3 + r−5 + r3) ≤24 (2 + 2r8 + 2r−8),
+  5194	because for r > 0, r5 ≤1 + r8 and r3 ≤1 + r8 (and similarly for negative powers). Thus we have the explicit pointwise
+  5195	bound, for all r > 0,
+  5196	| log r|4 (r4 + r−4) ≤C⋆(1 + r8 + r−8),
+  5197	C⋆:= 48.
+  5198	(63)
+  5199	Apply (63) to r = ri(X) inside (62):
+  5200	Maind ≤C⋆
+  5201	X
+  5202	i≥1
+  5203	ewi c4
+  5204	i Eeφi
+  5205	h
+  5206	(1 + ri(X)8 + ri(X)−8) ∥(Γd)1/2 eSi(X)∥4i
+  5207	.
+  5208	(64)
+  5209	Therefore it suffices to control, uniformly in d, the three families of terms
+  5210	Eeφi
+  5211	
+  5212	∥(Γd)1/2 eSi∥4
+  5213	,
+  5214	Eeφi
+  5215	
+  5216	r8
+  5217	i ∥(Γd)1/2 eSi∥4
+  5218	,
+  5219	Eeφi
+  5220	
+  5221	r−8
+  5222	i
+  5223	∥(Γd)1/2 eSi∥4
+  5224	.
+  5225	Step 2: explicit eφi-moment of the score.
+  5226	Under eφi, the coordinates Zij := Xj −emij are independent with Zij ∼
+  5227	N(0, evij). Since (eSi(X))j = −(Xj −emij)/evij = −Zij/evij,
+  5228	∥(Γd)1/2 eSi(X)∥2 =
+  5229	d
+  5230	X
+  5231	j=1
+  5232	γj
+  5233	Z2
+  5234	ij
+  5235	ev2
+  5236	ij
+  5237	.
+  5238	Define Aij := γj Z2
+  5239	ij/ev2
+  5240	ij ≥0. Then
+  5241	∥(Γd)1/2 eSi(X)∥4 =
+  5242	
+  5243	d
+  5244	X
+  5245	j=1
+  5246	Aij
+  5247	2
+  5248	=
+  5249	d
+  5250	X
+  5251	j=1
+  5252	A2
+  5253	ij + 2
+  5254	X
+  5255	1≤j<k≤d
+  5256	AijAik.
+  5257	Using independence of (Zij)j, we have E[AijAik] = E[Aij]E[Aik] for j ̸= k. Compute
+  5258	E[Aij] = γj
+  5259	E[Z2
+  5260	ij]
+  5261	ev2
+  5262	ij
+  5263	= γj
+  5264	evij
+  5265	ev2
+  5266	ij
+  5267	= γj
+  5268	evij
+  5269	,
+  5270	E[A2
+  5271	ij] = γ2
+  5272	j
+  5273	E[Z4
+  5274	ij]
+  5275	ev4
+  5276	ij
+  5277	= γ2
+  5278	j
+  5279	3ev2
+  5280	ij
+  5281	ev4
+  5282	ij
+  5283	= 3γ2
+  5284	j
+  5285	ev2
+  5286	ij
+  5287	.
+  5288	Therefore,
+  5289	Eeφi
+  5290	
+  5291	∥Γ1/2 eSi(X)∥4
+  5292	=
+  5293	d
+  5294	X
+  5295	j=1
+  5296	3γ2
+  5297	j
+  5298	ev2
+  5299	ij
+  5300	+ 2
+  5301	X
+  5302	j<k
+  5303	γj
+  5304	evij
+  5305	γk
+  5306	evik
+  5307	=
+  5308	
+  5309	d
+  5310	X
+  5311	j=1
+  5312	γj
+  5313	evij
+  5314	2
+  5315	+ 2
+  5316	d
+  5317	X
+  5318	j=1
+  5319	γ2
+  5320	j
+  5321	ev2
+  5322	ij
+  5323	.
+  5324	(65)
+  5325	This identity is fully explicit and already shows the role of γj: dimension-free control requires the series P
+  5326	j γj/evij and
+  5327	P
+  5328	j γ2
+  5329	j /ev2
+  5330	ij to remain bounded (uniformly in i).
+  5331	27
+  5332	1485
+  5333	1486
+  5334	1487
+  5335	1488
+  5336	1489
+  5337	1490
+  5338	1491
+  5339	1492
+  5340	1493
+  5341	1494
+  5342	1495
+  5343	1496
+  5344	1497
+  5345	1498
+  5346	1499
+  5347	1500
+  5348	1501
+  5349	1502
+  5350	1503
+  5351	1504
+  5352	1505
+  5353	1506
+  5354	1507
+  5355	1508
+  5356	1509
+  5357	1510
+  5358	1511
+  5359	1512
+  5360	1513
+  5361	1514
+  5362	1515
+  5363	1516
+  5364	1517
+  5365	1518
+  5366	1519
+  5367	1520
+  5368	1521
+  5369	1522
+  5370	1523
+  5371	1524
+  5372	1525
+  5373	1526
+  5374	1527
+  5375	1528
+  5376	1529
+  5377	1530
+  5378	1531
+  5379	1532
+  5380	1533
+  5381	1534
+  5382	1535
+  5383	1536
+  5384	1537
+  5385	1538
+  5386	1539
+  5387	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  5388	Step 3: handle r±8
+  5389	i
+  5390	by introducing a tilted Gaussian measure.
+  5391	Fix any real p such that the moment
+  5392	M (p)
+  5393	i
+  5394	:= Eeφi[ri(X)p]
+  5395	is finite, and define
+  5396	eφ(p)
+  5397	i
+  5398	(x) := ri(x)p eφi(x)
+  5399	M (p)
+  5400	i
+  5401	.
+  5402	Then eφ(p)
+  5403	i
+  5404	is a probability density and, for any nonnegative measurable function F,
+  5405	Eeφi[ri(X)p F(X)] = M (p)
+  5406	i
+  5407	Eeφ(p)
+  5408	i [F(X)].
+  5409	(66)
+  5410	We will use (66) with p = ±8 and F(X) = ∥(Γd)1/2 eSi(X)∥4.
+  5411	Step 4: explicit 1D formula for M (p)
+  5412	i
+  5413	and its dimension-free criterion (via P log).
+  5414	Since ri = Qd
+  5415	j=1 rij and eφi
+  5416	factorizes, we have
+  5417	M (p)
+  5418	i
+  5419	= Eeφi[rp
+  5420	i ] =
+  5421	d
+  5422	Y
+  5423	j=1
+  5424	M (p)
+  5425	ij ,
+  5426	M (p)
+  5427	ij
+  5428	:= Eeφij[rp
+  5429	ij].
+  5430	A direct Gaussian integration gives, with κij = evij/vij and ∆mij = emij −mij,
+  5431	M (p)
+  5432	ij
+  5433	=
+  5434	κp/2
+  5435	ij
+  5436	p
+  5437	pκij −(p −1)
+  5438	exp
+  5439	
+  5440	p(p −1)(∆mij)2
+  5441	2vij (pκij −(p −1))
+  5442	
+  5443	,
+  5444	valid iff pκij −(p −1) > 0.
+  5445	(67)
+  5446	For p = 8 this requires κij > 7/8, and for p = −8 it requires κij < 9/8. Hence finiteness of both M (8)
+  5447	i
+  5448	and M (−8)
+  5449	i
+  5450	is
+  5451	guaranteed by the uniform band
+  5452	∃ε ∈(0, 1/8) s.t. κij ∈[1 −ε, 1 + ε] ∀i, j.
+  5453	(68)
+  5454	We have
+  5455	M (p)
+  5456	i
+  5457	=
+  5458	d
+  5459	Y
+  5460	j=1
+  5461	M (p)
+  5462	ij ,
+  5463	log M (p)
+  5464	i
+  5465	=
+  5466	d
+  5467	X
+  5468	j=1
+  5469	log M (p)
+  5470	ij .
+  5471	For p > 1 (e.g. p = 8) one has M (p)
+  5472	ij
+  5473	≥1 (same Jensen/Cauchy argument as before), so uniformity in d of M (8)
+  5474	i
+  5475	is again
+  5476	equivalent to summability of P
+  5477	j log M (8)
+  5478	ij . Similarly for p = −8 under the band (68) (in fact M (−8)
+  5479	ij
+  5480	≥1 as well).
+  5481	Moreover, under the uniform band (68), the logarithm of (67) satisfies
+  5482	log M (p)
+  5483	ij
+  5484	= p
+  5485	2 log κij −1
+  5486	2 log
+  5487	 pκij −(p −1)
+  5488	
+  5489	+ p(p −1)
+  5490	2
+  5491	∆m2
+  5492	ij
+  5493	vij (pκij −(p −1)).
+  5494	(69)
+  5495	Exactly as in Part (1), the first two terms in (69) have a second-order cancellation at κ = 1, so for each fixed p ∈{8, −8}
+  5496	there exists a constant Cp(ε) < ∞such that
+  5497	log M (p)
+  5498	ij
+  5499	≤Cp(ε) (κij −1)2 + Cp(ε) ∆m2
+  5500	ij
+  5501	vij
+  5502	for all i, j;
+  5503	(70)
+  5504	here the proof uses the same Taylor/second-derivative argument as in (57), plus pκij −(p −1) ≥1 −pε > 0.
+  5505	Therefore the same summability condition as (60) implies uniform boundedness of both M (8)
+  5506	i
+  5507	and M (−8)
+  5508	i
+  5509	:
+  5510	sup
+  5511	i≥1
+  5512	X
+  5513	j≥1
+  5514	
+  5515	(κij −1)2 + ∆m2
+  5516	ij
+  5517	vij
+  5518	
+  5519	< ∞
+  5520	plus (68)
+  5521	⇓
+  5522	(71)
+  5523	sup
+  5524	i≥1
+  5525	sup
+  5526	d≥1
+  5527	M (8)
+  5528	i
+  5529	< ∞
+  5530	and
+  5531	sup
+  5532	i≥1
+  5533	sup
+  5534	d≥1
+  5535	M (−8)
+  5536	i
+  5537	< ∞.
+  5538	28
+  5539	1540
+  5540	1541
+  5541	1542
+  5542	1543
+  5543	1544
+  5544	1545
+  5545	1546
+  5546	1547
+  5547	1548
+  5548	1549
+  5549	1550
+  5550	1551
+  5551	1552
+  5552	1553
+  5553	1554
+  5554	1555
+  5555	1556
+  5556	1557
+  5557	1558
+  5558	1559
+  5559	1560
+  5560	1561
+  5561	1562
+  5562	1563
+  5563	1564
+  5564	1565
+  5565	1566
+  5566	1567
+  5567	1568
+  5568	1569
+  5569	1570
+  5570	1571
+  5571	1572
+  5572	1573
+  5573	1574
+  5574	1575
+  5575	1576
+  5576	1577
+  5577	1578
+  5578	1579
+  5579	1580
+  5580	1581
+  5581	1582
+  5582	1583
+  5583	1584
+  5584	1585
+  5585	1586
+  5586	1587
+  5587	1588
+  5588	1589
+  5589	1590
+  5590	1591
+  5591	1592
+  5592	1593
+  5593	1594
+  5594	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  5595	Step 5: explicit tilted Gaussian parameters.
+  5596	Fix p with pκij −(p −1) > 0 and consider one coordinate j. Under eφ(p)
+  5597	ij ,
+  5598	the random variable Xj is Gaussian. Indeed, an explicit completion-of-squares computation shows that the probability
+  5599	density function eφ(p)
+  5600	ij of Xj is
+  5601	eφ(p)
+  5602	ij (xj) =
+  5603	1
+  5604	M (p)
+  5605	ij
+  5606	rij(xj)p eφij(xj) =
+  5607	1
+  5608	M (p)
+  5609	ij
+  5610	φij(xj)p
+  5611	eφij(xj)p−1
+  5612	=
+  5613	1
+  5614	√
+  5615	2π
+  5616	1
+  5617	M (p)
+  5618	ij
+  5619	ev(p−1)/2
+  5620	ij
+  5621	vp/2
+  5622	ij
+  5623	exp
+  5624	h
+  5625	−p(xj −mij)2
+  5626	2vij
+  5627	+ (p −1)(xj −emij)2
+  5628	2evij
+  5629	i
+  5630	=
+  5631	1
+  5632	q
+  5633	2πv(p)
+  5634	ij
+  5635	exp
+  5636	h
+  5637	−
+  5638	(xj −m(p)
+  5639	ij )2
+  5640	2v(p)
+  5641	ij
+  5642	i
+  5643	with
+  5644	v(p)
+  5645	ij =
+  5646	evij
+  5647	Dij(p),
+  5648	m(p)
+  5649	ij = emij −p κij
+  5650	Dij(p) ∆mij,
+  5651	Dij(p) := pκij −(p −1),
+  5652	(72)
+  5653	which gives:
+  5654	Xj ∼N
+  5655	 m(p)
+  5656	ij , v(p)
+  5657	ij
+  5658	
+  5659	under eφ(p)
+  5660	ij .
+  5661	(73)
+  5662	Consequently, if we set Zij := Xj −emij, then under eφ(p)
+  5663	ij we have
+  5664	Zij ∼N
+  5665	 µ(p)
+  5666	ij , v(p)
+  5667	ij
+  5668	
+  5669	,
+  5670	µ(p)
+  5671	ij := −p κij
+  5672	Dij(p) ∆mij,
+  5673	v(p)
+  5674	ij =
+  5675	evij
+  5676	Dij(p).
+  5677	Step 6: explicit bound for Eeφ(p)
+  5678	i [∥(Γd)1/2 eSi∥4].
+  5679	Under eφ(p)
+  5680	i
+  5681	, coordinates remain independent (still diagonal). We again
+  5682	use Aij := γj Z2
+  5683	ij/ev2
+  5684	ij but now Zij has mean µ(p)
+  5685	ij and variance v(p)
+  5686	ij . As before,
+  5687	E
+  5688	h
+  5689	d
+  5690	X
+  5691	j=1
+  5692	Aij
+  5693	2i
+  5694	=
+  5695	d
+  5696	X
+  5697	j=1
+  5698	E[A2
+  5699	ij] + 2
+  5700	X
+  5701	j<k
+  5702	E[Aij]E[Aik] ≤
+  5703	
+  5704	d
+  5705	X
+  5706	j=1
+  5707	E[Aij]
+  5708	2
+  5709	+
+  5710	d
+  5711	X
+  5712	j=1
+  5713	E[A2
+  5714	ij].
+  5715	Compute, using Gaussian moment formulas:
+  5716	E[Z2
+  5717	ij] = v(p)
+  5718	ij + (µ(p)
+  5719	ij )2,
+  5720	E[Z4
+  5721	ij] = 3(v(p)
+  5722	ij )2 + 6v(p)
+  5723	ij (µ(p)
+  5724	ij )2 + (µ(p)
+  5725	ij )4.
+  5726	Thus
+  5727	Eeφ(p)
+  5728	i [∥(Γd)1/2 eSi(X)∥4] ≤
+  5729	 
+  5730	d
+  5731	X
+  5732	j=1
+  5733	γj
+  5734	v(p)
+  5735	ij + (µ(p)
+  5736	ij )2
+  5737	ev2
+  5738	ij
+  5739	!2
+  5740	+
+  5741	d
+  5742	X
+  5743	j=1
+  5744	γ2
+  5745	j
+  5746	3(v(p)
+  5747	ij )2 + 6v(p)
+  5748	ij (µ(p)
+  5749	ij )2 + (µ(p)
+  5750	ij )4
+  5751	ev4
+  5752	ij
+  5753	.
+  5754	(74)
+  5755	Now plug the explicit parameters (72) into (74). Since v(p)
+  5756	ij = evij/Dij(p) and µ(p)
+  5757	ij = −pκij
+  5758	Dij(p)∆mij, we obtain term-by-
+  5759	term:
+  5760	v(p)
+  5761	ij
+  5762	ev2
+  5763	ij
+  5764	=
+  5765	1
+  5766	Dij(p) evij
+  5767	,
+  5768	(µ(p)
+  5769	ij )2
+  5770	ev2
+  5771	ij
+  5772	=
+  5773	p2κ2
+  5774	ij
+  5775	Dij(p)2
+  5776	∆m2
+  5777	ij
+  5778	ev2
+  5779	ij
+  5780	,
+  5781	and
+  5782	(v(p)
+  5783	ij )2
+  5784	ev4
+  5785	ij
+  5786	=
+  5787	1
+  5788	Dij(p)2
+  5789	1
+  5790	ev2
+  5791	ij
+  5792	,
+  5793	v(p)
+  5794	ij (µ(p)
+  5795	ij )2
+  5796	ev4
+  5797	ij
+  5798	=
+  5799	p2κ2
+  5800	ij
+  5801	Dij(p)3
+  5802	∆m2
+  5803	ij
+  5804	ev3
+  5805	ij
+  5806	,
+  5807	(µ(p)
+  5808	ij )4
+  5809	ev4
+  5810	ij
+  5811	=
+  5812	p4κ4
+  5813	ij
+  5814	Dij(p)4
+  5815	∆m4
+  5816	ij
+  5817	ev4
+  5818	ij
+  5819	.
+  5820	Hence (74) becomes
+  5821	Eeφ(p)
+  5822	i [∥(Γd)1/2 eSi∥4] ≤
+  5823	 
+  5824	d
+  5825	X
+  5826	j=1
+  5827	γj
+  5828	h
+  5829	1
+  5830	Dij(p) evij
+  5831	+
+  5832	p2κ2
+  5833	ij
+  5834	Dij(p)2
+  5835	∆m2
+  5836	ij
+  5837	ev2
+  5838	ij
+  5839	i!2
+  5840	+
+  5841	d
+  5842	X
+  5843	j=1
+  5844	γ2
+  5845	j
+  5846	h
+  5847	3
+  5848	Dij(p)2
+  5849	1
+  5850	ev2
+  5851	ij
+  5852	+ 6p2κ2
+  5853	ij
+  5854	Dij(p)3
+  5855	∆m2
+  5856	ij
+  5857	ev3
+  5858	ij
+  5859	+
+  5860	p4κ4
+  5861	ij
+  5862	Dij(p)4
+  5863	∆m4
+  5864	ij
+  5865	ev4
+  5866	ij
+  5867	i
+  5868	.
+  5869	(75)
+  5870	29
+  5871	1595
+  5872	1596
+  5873	1597
+  5874	1598
+  5875	1599
+  5876	1600
+  5877	1601
+  5878	1602
+  5879	1603
+  5880	1604
+  5881	1605
+  5882	1606
+  5883	1607
+  5884	1608
+  5885	1609
+  5886	1610
+  5887	1611
+  5888	1612
+  5889	1613
+  5890	1614
+  5891	1615
+  5892	1616
+  5893	1617
+  5894	1618
+  5895	1619
+  5896	1620
+  5897	1621
+  5898	1622
+  5899	1623
+  5900	1624
+  5901	1625
+  5902	1626
+  5903	1627
+  5904	1628
+  5905	1629
+  5906	1630
+  5907	1631
+  5908	1632
+  5909	1633
+  5910	1634
+  5911	1635
+  5912	1636
+  5913	1637
+  5914	1638
+  5915	1639
+  5916	1640
+  5917	1641
+  5918	1642
+  5919	1643
+  5920	1644
+  5921	1645
+  5922	1646
+  5923	1647
+  5924	1648
+  5925	1649
+  5926	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  5927	Step 7: explicit dimension-free sufficient conditions for the main term in (46).
+  5928	Fix ε ∈(0, 1/8) and assume the band
+  5929	(68). Then for p ∈{8, −8}, the denominators Dij(p) = pκij −(p −1) satisfy uniform positive lower bounds:
+  5930	Dij(8) = 8κij −7 ≥8(1 −ε) −7 = 1 −8ε > 0,
+  5931	Dij(−8) = 9 −8κij ≥9 −8(1 + ε) = 1 −8ε > 0.
+  5932	Also κij is uniformly bounded above and below on the band.
+  5933	Therefore, for each p ∈{8, −8} there exists a constant Cp(ε) < ∞such that (75) implies the simpler bound
+  5934	Eeφ(p)
+  5935	i [∥(Γd)1/2 eSi∥4] ≤Cp(ε)
+  5936	 
+  5937	d
+  5938	X
+  5939	j=1
+  5940	γj
+  5941	evij
+  5942	2
+  5943	+
+  5944	
+  5945	d
+  5946	X
+  5947	j=1
+  5948	γj
+  5949	∆m2
+  5950	ij
+  5951	ev2
+  5952	ij
+  5953	2
+  5954	+
+  5955	d
+  5956	X
+  5957	j=1
+  5958	γ2
+  5959	j
+  5960	ev2
+  5961	ij
+  5962	+
+  5963	d
+  5964	X
+  5965	j=1
+  5966	γ2
+  5967	j
+  5968	∆m2
+  5969	ij
+  5970	ev3
+  5971	ij
+  5972	+
+  5973	d
+  5974	X
+  5975	j=1
+  5976	γ2
+  5977	j
+  5978	∆m4
+  5979	ij
+  5980	ev4
+  5981	ij
+  5982	!
+  5983	,
+  5984	(76)
+  5985	where we used that κij and Dij(p) are bounded above/below, so they can be absorbed into Cp(ε).
+  5986	Now combine:
+  5987	Eeφi[rp
+  5988	i ∥(Γd)1/2 eSi∥4] = M (p)
+  5989	i
+  5990	Eeφ(p)
+  5991	i [∥(Γd)1/2 eSi∥4]
+  5992	by (66).
+  5993	Thus, using (64), a sufficient condition for supd Maind < ∞is:
+  5994	(M0) Uniform bound (in i and d) on Eeφi[∥(Γd)1/2 eSi∥4], which by (65) is ensured by
+  5995	sup
+  5996	i≥1
+  5997	X
+  5998	j≥1
+  5999	γj
+  6000	evij
+  6001	< ∞
+  6002	and
+  6003	sup
+  6004	i≥1
+  6005	X
+  6006	j≥1
+  6007	γ2
+  6008	j
+  6009	ev2
+  6010	ij
+  6011	< ∞.
+  6012	(77)
+  6013	(M±) Uniform bounds on M (8)
+  6014	i
+  6015	and M (−8)
+  6016	i
+  6017	(handled by (71)) together with uniform bounds on the tilted score 4th moments
+  6018	(handled by (76)), which is ensured by (68) plus:
+  6019	sup
+  6020	i≥1
+  6021	X
+  6022	j≥1
+  6023	
+  6024	(κij −1)2 + ∆m2
+  6025	ij
+  6026	vij
+  6027	
+  6028	< ∞and sup
+  6029	i≥1
+  6030	X
+  6031	j≥1
+  6032	γj
+  6033	∆m2
+  6034	ij
+  6035	ev2
+  6036	ij
+  6037	< ∞,
+  6038	(78)
+  6039	and
+  6040	sup
+  6041	i≥1
+  6042	X
+  6043	j≥1
+  6044	γ2
+  6045	j
+  6046	∆m2
+  6047	ij
+  6048	ev3
+  6049	ij
+  6050	< ∞,
+  6051	sup
+  6052	i≥1
+  6053	X
+  6054	j≥1
+  6055	γ2
+  6056	j
+  6057	∆m4
+  6058	ij
+  6059	ev4
+  6060	ij
+  6061	< ∞,
+  6062	(79)
+  6063	together with (77).
+  6064	(3) SUMMARY OF SUFFICIENT CONDITIONS FOR (46) TO STAY UNIFORM AS d →∞
+  6065	We need to assume:
+  6066	1. Uniform comparability of weights: supi
+  6067	wi
+  6068	e
+  6069	wi and supi
+  6070	e
+  6071	wi
+  6072	wi < ∞.
+  6073	2. The uniform variance-ratio band (68).
+  6074	3. The summability (60) (this gives supd Eeρ[R2] < ∞and also uniform finiteness of M (±8)
+  6075	i
+  6076	).
+  6077	4. The preconditioner–covariance compatibility conditions (77), (78), (79).
+  6078	Then all terms on the right-hand side of (64) are uniformly bounded in d, hence
+  6079	sup
+  6080	d≥1
+  6081	Maind < ∞.
+  6082	Together with supd≥1 Eeρ[R2] < ∞, the bound (46) is uniformly bounded in d.
+  6083	30
+  6084	1650
+  6085	1651
+  6086	1652
+  6087	1653
+  6088	1654
+  6089	1655
+  6090	1656
+  6091	1657
+  6092	1658
+  6093	1659
+  6094	1660
+  6095	1661
+  6096	1662
+  6097	1663
+  6098	1664
+  6099	1665
+  6100	1666
+  6101	1667
+  6102	1668
+  6103	1669
+  6104	1670
+  6105	1671
+  6106	1672
+  6107	1673
+  6108	1674
+  6109	1675
+  6110	1676
+  6111	1677
+  6112	1678
+  6113	1679
+  6114	1680
+  6115	1681
+  6116	1682
+  6117	1683
+  6118	1684
+  6119	1685
+  6120	1686
+  6121	1687
+  6122	1688
+  6123	1689
+  6124	1690
+  6125	1691
+  6126	1692
+  6127	1693
+  6128	1694
+  6129	1695
+  6130	1696
+  6131	1697
+  6132	1698
+  6133	1699
+  6134	1700
+  6135	1701
+  6136	1702
+  6137	1703
+  6138	1704
+  6139	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  6140	(4) THE ROLE OF THE PRECONDITIONER TO ACHIEVE UNIFORMITY IN d
+  6141	All dimension-free requirements involving γj appear through the weighted series in (77)–(79). Concretely:
+  6142	• Even in the ideal case ∆mij = 0 (perfect mean match), dimension-free control of E[∥Γ1/2 eSi∥4] already requires
+  6143	P
+  6144	j γj/evij < ∞and P
+  6145	j γ2
+  6146	j /ev2
+  6147	ij < ∞.
+  6148	• When means mismatch, extra weighted summability is required, e.g. P
+  6149	j γj ∆m2
+  6150	ij/ev2
+  6151	ij < ∞.
+  6152	This is exactly the mechanism by which choosing γj sufficiently decaying (relative to evij) enforces dimension-free bounds.
+  6153	C. Annealed Classifier Free Guidance
+  6154	We have discussed annealing in the context of sampling from a target distribution via a forward diffusion by an appropriate
+  6155	choice of a time dependent drift. We remark here that annealing also may be useful in the context of Classifier Free Guidance
+  6156	when we also condition on a class label.
+  6157	In order to relate to the above discussion we write the annealed Langevin diffusion in (4) as
+  6158	dXd
+  6159	t = v(t, Xd
+  6160	t ) dt +
+  6161	√
+  6162	2 dW d
+  6163	t ,
+  6164	t ∈[0, T],
+  6165	where we have chosen Γd to be the identity and we have
+  6166	v(t, X) = ∇log ρd
+  6167	t (X) = ∇log
+  6168	
+  6169	ρd
+  6170	⋆∗N
+  6171	
+  6172	0, T −t
+  6173	T
+  6174	Cd
+  6175	
+  6176	,
+  6177	with ρd
+  6178	⋆the multimodal Gaussian mixture in (1). By appropriate choice of the time dependent drift via the selection of the
+  6179	time horizon T we can show that the distribution of Xd
+  6180	T is close to ρd
+  6181	⋆in Kullback-Leibler (KL) divergence.
+  6182	To contrast this with diffusion generative modeling consider pd
+  6183	t the distribution of Y d for Y d an Ornstein-Uhlenbeck process
+  6184	solving
+  6185	dY d
+  6186	t = −Y d
+  6187	t dt +
+  6188	√
+  6189	2 dW d
+  6190	t ,
+  6191	t ∈[0, T],
+  6192	with pd
+  6193	0 = ρd
+  6194	⋆. Then for a Gaussian noise initial condition, Y0 ∼N
+  6195	 0, Id
+  6196	, and Y d solving in reverse time τ = T −t the
+  6197	SDE
+  6198	dY d
+  6199	τ = w(τ, Y d
+  6200	τ ) dτ +
+  6201	√
+  6202	2 dW d
+  6203	t ,
+  6204	τ ∈[0, T],
+  6205	one can show that for T large the distribution Y d
+  6206	T is close to ρd
+  6207	⋆for the choice
+  6208	w(τ, Y ) = Y + 2S(τ, Y )
+  6209	with the score function defined by S(τ, Y ) = ∇log pd
+  6210	T −τ(Y ) (Baldassari et al., 2023).
+  6211	In Classifier Free Guidance (CFG) (Ho & Salimans, 2022) one considers conditional generation via conditioning on
+  6212	observation of a class label c and replace w by
+  6213	wCFG(τ, Y ) = Y + 2SCFG(τ, Y ),
+  6214	for
+  6215	SCFG(τ, Y ) = ∇log pd
+  6216	T −τ(Y |c) + ω
+  6217	 ∇log pd
+  6218	T −τ(Y |c) −∇log pd
+  6219	T −τ(Y )
+  6220	
+  6221	.
+  6222	Here ω is a ‘guidance scale’ and by increasing this one can generate samples more aligned with the data. In fact a relatively
+  6223	large guidance scale relaxation ω > 0 is often considered. However, a large guidance scale steers the samples toward a high
+  6224	likelihood mode at the cost of reducing sample diversity and fidelity (Astolfi et al., 2024). It is clear that the distribution
+  6225	induced by CFG in general modifies the (conditional) target distribution and recent work shows in particular that in case of
+  6226	Gaussian mixtures in one and finite dimensions, it results in general in a sharper distribution than the target one (Bradley &
+  6227	Nakkiran, 2024; Pavasovic et al., 2025; Wu et al., 2024).
+  6228	In order to improve the performance of CFG with a constant guidance scale recent works have considered annealing CFG
+  6229	where the guidance scale is chosen to be time dependent (Pavasovic et al., 2025; Yehezkel et al., 2025; Wang et al., 2024).
+  6230	31
+  6231	1705
+  6232	1706
+  6233	1707
+  6234	1708
+  6235	1709
+  6236	1710
+  6237	1711
+  6238	1712
+  6239	1713
+  6240	1714
+  6241	1715
+  6242	1716
+  6243	1717
+  6244	1718
+  6245	1719
+  6246	1720
+  6247	1721
+  6248	1722
+  6249	1723
+  6250	1724
+  6251	1725
+  6252	1726
+  6253	1727
+  6254	1728
+  6255	1729
+  6256	1730
+  6257	1731
+  6258	1732
+  6259	1733
+  6260	1734
+  6261	1735
+  6262	1736
+  6263	1737
+  6264	1738
+  6265	1739
+  6266	1740
+  6267	1741
+  6268	1742
+  6269	1743
+  6270	1744
+  6271	1745
+  6272	1746
+  6273	1747
+  6274	1748
+  6275	1749
+  6276	1750
+  6277	1751
+  6278	1752
+  6279	1753
+  6280	1754
+  6281	1755
+  6282	1756
+  6283	1757
+  6284	1758
+  6285	1759
+  6286	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  6287	One may then start with a large guidance scale to promote rapid alignment with data and then reduce the guidance scale
+  6288	close to terminal time T to promote alignment with the target distribution. In this manner one can achieve both prompt
+  6289	alignment as well as high fidelity with the target distribution.
+  6290	We remark also that in (Pavasovic et al., 2025) the authors discuss what they refer to as ‘blessing-of-dimensionality’ that in
+  6291	fact CFG generates samples with the right target distribution in the limit of high dimension d. They do this in the setting of a
+  6292	(centered) two mode gaussian mixture of equal strength, a setting analogous to the one we considered in the motivating
+  6293	example in the introduction, but with equal weights for the modes. In a first phase, up until what the authors refer to as a
+  6294	specification time the CFG correction serves to push the trajectory in the direction of the mean vector. After the specification
+  6295	time the effect of the CFG correction becomes negligible, in the limit of high dimension, thus explaining that CFG may
+  6296	generate high fidelity samples. The authors also introduce a power law form of the CFG score correction motivated by this
+  6297	observation and find that this improves fidelity and which effectively gives a time dependent guidance scale. In (Yehezkel
+  6298	et al., 2025) a learning algorithm is introduced to identify a time dependent score which also introduce an effective score that
+  6299	in general is nonlinear in the difference between the conditional and unconditional scores. Finally, in (Wang et al., 2024)
+  6300	various guidance scales that are only time dependent were considered and the authors found that the choice
+  6301	ω(τ) = ω0
+  6302	T −τ
+  6303	T
+  6304	
+  6305	,
+  6306	gave essentially the best performance among those tried. The annealing schedule for the classifier Free Guidance then starts
+  6307	with a simulation phase where the diffusion is driven toward the data distribution and with a monotonous predetermined
+  6308	tapering. This is analogous to the situation considered in this paper.
+  6309	D. Further Details on the Experiments in Section 5
+  6310	This appendix collects implementation details and additional diagnostics for the experiments of Section 5. All figures were
+  6311	generated in Google Colab (13GB RAM).
+  6312	D.1. Targets
+  6313	In the experiments of Section 5, the target at truncation level d is a two-component diagonal Gaussian mixture on Rd,
+  6314	ρd
+  6315	⋆= w1 N(md
+  6316	1, Σd
+  6317	1) + w2 N(md
+  6318	2, Σd
+  6319	2),
+  6320	w = (0.75, 0.25),
+  6321	with separated means md
+  6322	1 = 0 and md
+  6323	2 = 10 e1 and diagonal covariances of the form Σd
+  6324	1 = τ1Σd and Σd
+  6325	2 = τ2Σd.
+  6326	Throughout, Σd is built from a power-law spectrum: for a chosen exponent αmix > 1,
+  6327	Σd = Diag(j−αmix)d
+  6328	j=1.
+  6329	D.2. Implementation of preconditioned ALD
+  6330	We implement preconditioned ALD for the experiments as an Euler–Maruyama discretization of the time-inhomogeneous
+  6331	diffusion
+  6332	dXd
+  6333	t = Γd ∇log ρd
+  6334	t (Xd
+  6335	t ) dt +
+  6336	√
+  6337	2Γd dW d
+  6338	t ,
+  6339	where Γd = Diag(γj)d
+  6340	j=1 is the diagonal preconditioner and ρd
+  6341	t denotes the Gaussian-smoothed mixture along the annealing
+  6342	path. In discrete time, with stepsize ∆t and N steps, the iteration is
+  6343	Xd
+  6344	k+1 = Xd
+  6345	k + ∆t Γd sd
+  6346	θk(Xd
+  6347	k) +
+  6348	√
+  6349	2∆t Γd ξd
+  6350	k,
+  6351	ξd
+  6352	k ∼N(0, Id),
+  6353	where sd
+  6354	θ(x) = ∇log(ρd
+  6355	⋆∗N(0, θCd))(x) is the analytic score of the smoothed mixture at smoothing level θ and diagonal
+  6356	smoothing operator Cd = Diag(λj)d
+  6357	j=1.
+  6358	We use the linear schedule
+  6359	θk = 2S
+  6360	
+  6361	1 −
+  6362	k
+  6363	N −1
+  6364	
+  6365	,
+  6366	k = 0, . . . , N −1,
+  6367	so θ0 = 2S and θN−1 = 0. In the experiments: S = 20, ∆t = 9 × 10−3, N = 20000, Tcont := (N −1)∆t ≈1.80 × 102.
+  6368	32
+  6369	1760
+  6370	1761
+  6371	1762
+  6372	1763
+  6373	1764
+  6374	1765
+  6375	1766
+  6376	1767
+  6377	1768
+  6378	1769
+  6379	1770
+  6380	1771
+  6381	1772
+  6382	1773
+  6383	1774
+  6384	1775
+  6385	1776
+  6386	1777
+  6387	1778
+  6388	1779
+  6389	1780
+  6390	1781
+  6391	1782
+  6392	1783
+  6393	1784
+  6394	1785
+  6395	1786
+  6396	1787
+  6397	1788
+  6398	1789
+  6399	1790
+  6400	1791
+  6401	1792
+  6402	1793
+  6403	1794
+  6404	1795
+  6405	1796
+  6406	1797
+  6407	1798
+  6408	1799
+  6409	1800
+  6410	1801
+  6411	1802
+  6412	1803
+  6413	1804
+  6414	1805
+  6415	1806
+  6416	1807
+  6417	1808
+  6418	1809
+  6419	1810
+  6420	1811
+  6421	1812
+  6422	1813
+  6423	1814
+  6424	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  6425	D.3. ALD diffusion design choices: Γd and Cd
+  6426	Both the preconditioner and smoothing are chosen as diagonal power laws (possibly up to constant factors),
+  6427	Γd = Diag(γj)d
+  6428	j=1,
+  6429	γj ∝j−αpre,
+  6430	Cd = Diag(λj)d
+  6431	j=1,
+  6432	λj ∝j−αsmooth.
+  6433	In Figure 3, we contrast two configurations:
+  6434	(Γd, Cd) =
+  6435	 Diag(j−1.5)d
+  6436	j=1, Diag(j−2.7)d
+  6437	j=1
+  6438	
+  6439	,
+  6440	(Γd, Cd) = (Id, 40 Id).
+  6441	In Figure 4, we fix Cd = Diag(j−4)d
+  6442	j=1 and vary only the preconditioner:
+  6443	Γd = Diag(j−3.5)d
+  6444	j=1,
+  6445	Γd = Diag(j−1)d
+  6446	j=1,
+  6447	so that one choice is consistent with the sufficient conditions used in the analysis while the other violates them.
+  6448	D.4. Initialization choices
+  6449	In Figure 3, we initialize from
+  6450	Xd
+  6451	0 ∼(0.75) N(md
+  6452	1, τ1Σd + Cd) + (0.25) N(md
+  6453	2, τ2Σd + Cd),
+  6454	with Cd = Diag(40 · j−2.7)d
+  6455	j=1, τ1 = 1.2, τ2 = 1, and Σd = Diag(j−1.25)d
+  6456	j=1.
+  6457	In Figure 4, to isolate the role of preconditioning under score error, we control initialization mismatch by perturbing only
+  6458	the mixture weights:
+  6459	Xd
+  6460	0 ∼(0.1) N(md
+  6461	1, Σd) + (0.9) N(md
+  6462	2, Σd),
+  6463	Σd = Diag(j−2)d
+  6464	j=1.
+  6465	The component means and covariances are kept unchanged.
+  6466	D.5. Score-error model in Figure 4: covariance-only perturbations
+  6467	To simulate the score error while keeping the setting analytically transparent, we compute the drift using the exact score of a
+  6468	misspecified mixture where only the diagonal covariances are perturbed, while the weights and means remain unchanged.
+  6469	Concretely, if Σd
+  6470	i = Diag(σij)d
+  6471	j=1, we set eΣd
+  6472	i = Diag(eσij)d
+  6473	j=1 with eσij = σij + ∆σij, where ∆σij follows a power law
+  6474	∆σij ∝j−αerr with αerr = 3.5. The ALD drift is then Γd∇log(eρd
+  6475	⋆∗N(0, θCd)). This construction aligns with the error
+  6476	model of Section 4.
+  6477	D.6. KL estimation via kNN
+  6478	To estimate KL(ρd
+  6479	⋆∥ρALD,d), we generate n = 2500 samples X(p)
+  6480	1 , . . . , X(p)
+  6481	n
+  6482	∼ρd
+  6483	⋆and m = 2500 samples
+  6484	X(q)
+  6485	1 , . . . , X(q)
+  6486	m ∼ρALD,d, and apply a fixed-k nearest-neighbor estimator of KL(P∥Q) (P´erez-Cruz, 2008; Wang et al.,
+  6487	2009). Below we report plots for k ∈{20, 50, 80} for both Figures 3 and 4 of the paper to confirm that the qualitative trends
+  6488	are robust with respect to the neighborhood size (the main text reports k = 20).
+  6489	Figure 5. Robustness to k. Supplementary plots for Figure 3: we report the kNN estimate for k ∈{20, 50, 80} (the main text reports
+  6490	k = 20), illustrating that the observed trend is stable across these choices of k.
+  6491	33
+  6492	1815
+  6493	1816
+  6494	1817
+  6495	1818
+  6496	1819
+  6497	1820
+  6498	1821
+  6499	1822
+  6500	1823
+  6501	1824
+  6502	1825
+  6503	1826
+  6504	1827
+  6505	1828
+  6506	1829
+  6507	1830
+  6508	1831
+  6509	1832
+  6510	1833
+  6511	1834
+  6512	1835
+  6513	1836
+  6514	1837
+  6515	1838
+  6516	1839
+  6517	1840
+  6518	1841
+  6519	1842
+  6520	1843
+  6521	1844
+  6522	1845
+  6523	1846
+  6524	1847
+  6525	1848
+  6526	1849
+  6527	1850
+  6528	1851
+  6529	1852
+  6530	1853
+  6531	1854
+  6532	1855
+  6533	1856
+  6534	1857
+  6535	1858
+  6536	1859
+  6537	1860
+  6538	1861
+  6539	1862
+  6540	1863
+  6541	1864
+  6542	1865
+  6543	1866
+  6544	1867
+  6545	1868
+  6546	1869
+  6547	Dimension-Free Multimodal Sampling via Preconditioned Annealed Langevin Dynamics
+  6548	Figure 6. Robustness to k. Supplementary plots for Figure 4: we report the kNN estimate for k ∈{20, 50, 80} (the main text reports
+  6549	k = 20), illustrating that the observed trend is stable across these choices of k.
+  6550	34
