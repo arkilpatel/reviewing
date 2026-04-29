@@ -1,0 +1,22 @@
+### Claimed Contributions
+1. Formalizing and addressing a new problem class: mixed-integer min-max and max-min optimization problems where the objective function is submodular with respect to the discrete minimizer and concave (possibly non-smooth) with respect to the continuous maximizer.
+2. Proposing a zeroth-order extragradient algorithm (ZO-EG) to solve this problem class, which utilizes the subgradient of the Lovász extension for the submodular variable and a Gaussian smoothing random oracle for the concave variable.
+3. Establishing theoretical convergence guarantees: proving that the ZO-EG algorithm converges to an $\epsilon$-saddle point in expectation using $\mathcal{O}(m^2 \epsilon^{-2})$ function queries in the offline setting, and achieves an expected online duality gap of $\mathcal{O}(\sqrt{N \bar{P}_N})$ in the online setting.
+4. Demonstrating the practical efficacy of the proposed method on an adversarial semi-supervised image segmentation task.
+
+### Prior Work Assessment
+- **Submodular Min-Max Optimization**: Min-max problems involving submodular functions have been explored recently. Adibi et al. (2022) studied convex-submodular min-max problems, while Mualem et al. (2024) studied submodular min-max optimization for combinatorial problems. The specific submodular-concave formulation addressed in this paper extends these works by introducing a continuous concave (and potentially non-smooth) adversarial player.
+- **Lovász Extension and Subgradients**: Using the Lovász extension to relax submodular minimization into a convex optimization problem over the hypercube is a fundamental result (Lovász, 1983). Furthermore, computing the subgradient of the Lovász extension using only function evaluations via the greedy algorithm is a well-established technique (Hazan & Kale, 2012; Bach, 2013). This paper directly applies this known technique for the minimizer's update.
+- **Zeroth-Order Optimization via Gaussian Smoothing**: Approximating gradients for non-smooth continuous functions using Gaussian smoothing is a standard technique introduced by Nesterov & Spokoiny (2017). Recent works have also explored zeroth-order methods for various continuous min-max problems (Wang et al., 2023; Farzin et al., 2025a). This paper directly applies the Gaussian smoothing oracle for the maximizer's update.
+- **Delta**: The paper essentially combines two well-known derivative-free techniques (subgradients of the Lovász extension for the submodular variable, and Gaussian smoothing for the continuous concave variable) and plugs them into a standard extragradient framework. The theoretical proofs for convergence and regret bounds naturally follow from the standard analysis of extragradient methods, zeroth-order continuous optimization, and online learning (e.g., Zinkevich, 2003). Therefore, the methodological delta over prior work is quite small, representing a straightforward synthesis of existing tools rather than introducing fundamentally new algorithmic insights.
+
+### Novelty Verdict
+Moderate
+
+### Justification
+The paper successfully identifies a useful and previously unstudied specific problem setting (submodular-concave min-max optimization) and provides a rigorous, complete analysis for both offline and online regimes. However, the proposed algorithmic solution (ZO-EG) is highly predictable. It is a direct concatenation of existing, standard techniques: using the Lovász extension to convexify the discrete variable, computing its exact subgradient via sorting/greedy evaluation, estimating the gradient of the continuous variable via Gaussian smoothing, and updating both using the standard extragradient method. While the combination is sensible and theoretically sound, the methodological novelty is limited, as the theoretical tools and proofs largely mirror established results in their respective subfields. The novelty lies primarily in framing the problem and putting the pieces together (Conceptual / Framing Novelty and Creative Combination), earning it a solid Moderate rating.
+
+### Missing References
+The related work is generally adequate, properly attributing the building blocks (Adibi et al., 2022; Mualem et al., 2024; Hazan & Kale, 2012; Nesterov & Spokoiny, 2017). No glaring missing references were identified that would further subsume the combination presented.
+
+5
