@@ -1,0 +1,4511 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+Approximate Nearest Neighbor Search for Modern AI:
+A Projection-Augmented Graph Approach
+Anonymous Authors1
+Abstract
+Approximate Nearest Neighbor Search (ANNS)
+is fundamental to modern AI applications. Most
+existing solutions optimize query efficiency but
+fail to align with the practical requirements of
+modern workloads. In this paper, we outline six
+critical demands of modern AI applications: high
+query efficiency, fast indexing, low memory foot-
+print, scalability to high dimensionality, robust-
+ness across varying retrieval sizes, and support for
+online insertions. To satisfy all these demands,
+we introduce Projection-Augmented Graph (PAG),
+a new ANNS framework that integrates projec-
+tion techniques into a graph index. PAG reduces
+unnecessary exact distance computations through
+asymmetric comparisons between exact and ap-
+proximate distances as guided by projection-based
+statistical tests. Three key components are de-
+signed and unified to the graph index to opti-
+mize indexing and searching. Experiments on
+six modern datasets demonstrate that PAG consis-
+tently achieves superior query per second (QPS)-
+recall performance—up to 5× faster than HNSW—
+while offering fast indexing speed and moderate
+memory footprint.
+PAG remains robust as di-
+mensionality and retrieval size increase and nat-
+urally supports online insertions.
+Our source
+code is available at: https://github.com/
+KejingLu-810/PAG/ .
+1. Introduction
+Given a dataset D ⊂Rd with size n and a query q ∈Rd,
+Approximate Nearest Neighbor Search (ANNS) aims to find
+K approximate nearest neighbors of q as accurately and
+efficiently as possible. Due to its crucial role in many ap-
+plications such as image search, recommender systems, and
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+retrieval-augmented-generation (RAG), we have witnessed
+the rapid proliferation of ANNS solvers. Whereas the ANN-
+Benchmarks (Bernhardsson et al., 2015) has been developed
+to compare these methods in a unified environment, many
+datasets in the ANN-Benchmarks, as pointed out by Chen
+et al. (2025), are derived from outdated models such as SIFT
+and GIST, which are image descriptors developed more than
+20 years ago (Lowe, 2004; Oliva & Torralba, 2001). In ad-
+dition, its evaluation metric is limited to query per second
+(QPS)-recall under K = 10.
+Seeing the fast development of AI technology, we argue that a
+well-designed ANNS solver should perform well on modern
+datasets, and beyond (D1) QPS-recall performance, several
+demands must also be considered: (D2) indexing time, for
+which graph indexes such as HNSW (Malkov & Yashunin,
+2020) are often criticized (Lin, 2025; Li & Papakonstantinou,
+2025), compromising their use in applications that require
+instant deployment; (D3) memory footprint, where moder-
+ate and adjustable consumption, mostly caused by the index
+size, is desired for the memory vs accuracy trade-off (Cheng
+et al., 2024; Wallace, 2025); (D4) scalability to high dimen-
+sionality, as motivated by the increasing dimensionality of
+modern embedding models such as CLIP (Radford et al.,
+2021) 1; (D5) robustness against the retrieval size K, due to
+the needs in various applications (e.g., K is typically 10 for
+RAG (Fensore et al., 2025; Ke et al., 2025) but can be up to
+hundreds in image retrieval (Vendrow et al., 2024) and thou-
+sands in recommender systems (Zhang et al., 2025)); (D6)
+support of online insertions, which is essential for emergent
+applications such as self-evolving agents that continually ac-
+cumulate and reuse experience through interaction (Ouyang
+et al., 2025; Zhai et al., 2025; Zhang et al., 2026).
+1.1. Prior Works
+We review representative ANNS solvers based on D1 – D6.
+More discussions on literature can be found in Appendix C.
+1Despite the availability of dimensionality reduction techniques,
+Weller et al. (2025) proved that for embedding-based retrieval with
+dimensionality d, there exists a dataset size n (e.g., n ≈4M for
+d = 1024) beyond which it is theoretically impossible to represent
+all possible top-2 document combinations, showcasing the necessity
+for higher dimensionality on large datasets.
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+Table 1. Summary of empirical performance comparison of notable ANNS solvers, HNSW (Malkov & Yashunin, 2020), Vamana (in-memory
+DiskANN (Subramanya et al., 2019)), IVFPQFS (fast scan IVFPQ (J´egou et al., 2011)), ScaNN (Guo et al., 2020a), RaBitQ+ (Gao et al., 2025),
+SymQG (Gou et al., 2025), HNSW+KS2 (Lu et al., 2025), and our solutions PAG-Base (for high QPS) and PAG-Lite (for fast indexing and small index
+size). Detailed results are available in Sec. 5.2. The evaluation of D1 – D3 is clustered into tiers, where Tier-4 is the best. D4 – D6 are evaluated in
+yes/no (✓/✗).
+Graph-Based
+Quantization-Based
+QG
+PG
+PAG
+Criteria
+HNSW
+Vamana
+IVFPQFS1
+ScaNN1
+RaBitQ+
+SymQG
+HNSW+KS2
+PAG-Base
+PAG-Lite
+D1. QPS-recall
+Tier-2
+Tier-2
+Tier-1
+Tier-1
+Tier-1
+Tier-3
+Tier-3
+Tier-4
+Tier-3
+D2. Indexing time
+Tier-1
+Tier-1
+Tier-3
+Tier-3
+Tier-3
+Tier-2
+Tier-1
+Tier-2
+Tier-4
+D3. Memory footprint2
+Tier-3
+Tier-3
+Tier-4
+Tier-4
+Tier-4
+Tier-1
+Tier-2
+Tier-3
+Tier-4
+D4. High-dim. scalability
+✓
+✓
+✓
+✓
+✓
+✗
+✓
+✓
+✓
+D5. Retrieval size robustness
+✓
+✓
+✓
+✓
+✓
+✗
+✓
+✓
+✓
+D6. Online insertion support3
+✓
+✓
+✓
+✓
+✓
+✗
+✗
+✓
+✓
+1 Reranking is enabled for IVFPQFS and ScaNN.
+2 Memory footprint for searching, rather than indexing, is compared.
+3 For any streaming workload Q composed of search and insertion queries, we say an algorithm supports online insertion, if the amortized cost of
+processing a query in Q is O(1) times the cost of a search. In other words, the index can be incrementally updated with minimal cost. See Sec. 4.3
+for the analysis of PAG.
+Graph-Based Methods. These methods construct a similar-
+ity graph connecting nearby vectors and hop towards the
+neighborhood of q. Notable methods are HNSW (Malkov &
+Yashunin, 2020), NSG (Fu et al., 2019), and DiskANN (Sub-
+ramanya et al., 2019). They are generally competitive in
+QPS-recall but slow in building indexes.
+Quantization-Based Methods. These methods compress vec-
+tors and rank them using approximate (i.e., quantized) dis-
+tances to q in pursuit of efficiency. Representative methods
+are IVFPQ (J´egou et al., 2011) and ScaNN (Guo et al., 2020a).
+They are fast in building indexes and save memory, but their
+QPS-recall is generally inferior to graph-based methods.
+Projection-Based Methods. These methods use random (e.g.,
+E2LSH (Andoni & Indyk, 2005), Falconn (Andoni et al.,
+2015), and CEOs (Pham, 2021)) or data-dependent (e.g.,
+learning to hash (Wang et al., 2018)) projections of the orig-
+inal vectors for indexing. Although many of them enjoy
+theoretical guarantees, they are less competitive than graph-
+and quantization-based methods in QPS-recall performance,
+hence becoming less popular in modern top-K ANNS.
+Tree-Based Methods. They utilize tree indexes.
+No-
+table methods include k-d tree (Bentley, 1990), cover
+tree (Beygelzimer et al., 2006), and Annoy (Bernhardsson,
+2013). Like projection-based methods, they are less widely
+used for modern ANNS due to limited QPS-recall perfor-
+mance.
+As discussed above, graph-based methods are good at QPS-
+recall. But they compute exact distances between vectors,
+which is computationally costly. To address this weakness,
+recent advancements attempt to integrate other techniques,
+in particular, quantization or projection, into graphs.
+Quantized Graph (QG) Methods. They construct a similarity
+graph based on quantized vectors instead of the original ones,
+thereby replacing exact distances with approximate values.
+Representative methods are NGT-QG (Yahoo! Japan, 2023),
+LVQ (Aguerrebere et al., 2023), and SymphonyQG (Gou
+et al., 2025). QG methods can achieve very high QPS-recall
+performance, yet they are sensitive to the data distribution
+and many of them do not perform very well in D3 – D6.
+Projection + Graph (PG) Methods. Unlike QG, they operate
+on original vectors and reduce unnecessary exact distance
+computations. To this end, they employ projection tech-
+niques to test whether a neighbor needs to be explored (called
+routing tests). Representative methods are FINGER (Chen
+et al., 2023), PEOs (Lu et al., 2024), and KS2 (Lu et al., 2025).
+DespiteQPS-recall improvement ontop ofgraph-based meth-
+ods, such improvement comes at the cost of indexing time,
+memory footprint, and support for online insertions.
+Table 1 compares notable methods implemented in leading
+vector databases and recent ones representing state of the art.
+1.2. Our Solution
+We propose a new ANNS framework, Projection-Augmented
+Graph (PAG), which integrates projection into a similarity
+graph and achieves superior performance for all the six cri-
+teria. Unlike PG methods, PAG treats projection as a fun-
+damental building block of graph construction rather than
+as a plug-in. The rationale of PAG is to accommodate both
+exact and approximate distances within a unified framework,
+addressing two key issues: (1) when distances shall be com-
+puted exactly and when they shall be approximated, and (2)
+how exact and approximate distances are compared during
+indexing and searching to enhance the performance.
+PAG significantly reduces the computational cost of search-
+ing (D1) and indexing (D2) by carefully determining whether
+exact distance computation is needed. Such procedure relies
+on asymmetric comparisons between exact and approximate
+distance values obtained from space-efficient and adjustable
+random-projection structures (D3), as opposed to symmet-
+ric comparisons in QG. Moreover, the asymmetric distance
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+comparisons, as guided by random-projection-based statis-
+tical tests, only need to tell which value is larger, thereby
+achieving accuracy while preserving efficiency. Meanwhile,
+PAG inherits graph-based methods’ scalability to high di-
+mensionality (D4) and robustness against retrieval size (D5),
+and follows the search-and-insertion paradigm (e.g., HNSW)
+to accommodate online insertions (D6).
+Our technical contributions are summarized as follows.
+(1) Following the idea of routing tests in PEOs (Lu et al.,
+2024) and KS2 (Lu et al., 2025), we derive a Probabilistic
+Routing Test (PRT) function (Sec. 3.2). The theoretical result
+(Theorem 3.1), along with Lemma 4.3 in Lu et al. (2025), pro-
+vides a complete theoretical explanation of PRT. In addition,
+our work is the first to apply PRT to graph construction.
+(2) We propose a data structure called Test Feedback Buffer
+(TFB) (Sec. 3.3), which refines the threshold setting in PRT
+and enables the reuse of false positives generated by PRT. By
+incorporating TFB into PRT, we obtain the PRT-TFB test as a
+core technique for accelerating both indexing and searching.
+(3) We propose a statistical test called Probabilistic Edge Se-
+lection (PES) (Sec. 3.4), which is derived from Theorem 3.1
+and can expand in-degrees when necessary. In collaboration
+with PRT, PRT-PES can improve the search performance for
+hard datasets on which traditional graph indexes perform
+poorly, while incurring very small indexing overhead.
+(4) PRT, TFB, and PES constitute PAG (Fig. 1). We show
+how the three components interact within PAG, with imple-
+mentation details and complexity analysis provided.
+(5) We conduct experiments on six modern (post-2023)
+datasets covering text, image, and multimodal data, with
+dimensionality ranging from 384 to 3072 and retrieval size
+from 10 to 1000. The results show that PAG achieves the best
+QPS-recall performance (up to 5× faster than HNSW), and
+its superiority is particularly evident on datasets with higher
+dimensionality. PAG remains dominant as K increases. By
+adjusting parameters, PAG can deliver the fastest indexing
+speed and lowest memory footprint on most datasets while
+maintaining competitive QPS-recall. PAG also performs
+well on the datasets in the ANN-Benchmarks, showcasing its
+compatibility with data generated by legacy models.
+2. Problem Setting
+Since PAG adopts a search-and-insertion paradigm, its search
+process, similar to HNSW, can be seen as a special case of
+index construction (i.e., no update to the graph), and we
+can focus on the problems that arise in index construction.
+Because constructing a similarity graph is essentially deter-
+mining its edge set, we consider the following question: Can
+we design statistical methods that select edges efficiently (i.e.,
+fast indexing) and effectively (i.e., fast searching)? To an-
+swer this question, we first review the existing edge-selection
+strategy, and then formalize the problems to be solved.
+2.1. Background of RobustPrune
+Given a directed graph, let v be a node whose edges are to
+be determined. To identify its in-neighbor set Nin(v) and
+out-neighbor set Nout(v), state-of-the-art methods, such
+as HNSW, NSG and Vamana, employ a strategy known as
+RobustPrune to decide whether a candidate edge should be
+preserved. Take the construction of Nin(v) as an example.
+For a candidate neighbor u of node v, the pruning criterion
+considers the following set 2:
+Su,v = {w ∈Nout(u) | ∥w −v∥≤∥v −u∥}.
+(1)
+In RobustPrune, if there exists w in Su,v such that ∥w −
+u∥≤∥v −u∥, u is not added to Nin(v); otherwise, Nin(v)
+is updated as Nin(v)∪{u}. This criterion admits an intuitive
+interpretation: if ∥w −u∥≤∥v −u∥holds for some
+w, it is likely that one can reach v from u via w along
+a monotonic search path (Fu et al., 2019), implying that
+the direct edge ⃗
+uv is redundant. Similarly, Nout(v) can
+be constructed by RobustPrune with the roles of u and v
+reversed. In sum, existing graph-based methods determine
+Nout(v) and Nin(v) sequentially in the following manner.
+Nout(v). We take v as the query and conduct an ANNS from
+v to obtain a candidate set, which is stored in a priority queue
+P. RobustPrune is then applied to P to determine Nout(v).
+Nin(v). We check every u in Nout(v) and preserve those
+u’s retained by RobustPrune as Nin(v).
+2.2. Towards Fast Graph Construction
+During graph construction, most of the time is spent on
+ANNS for the candidate set of Nout(v). Although we can re-
+duce the graph construction parameter (e.g., efC in HNSW)
+forfastgraphconstruction, thequeryprocessingperformance
+degrades accordingly. Thus, we raise the following question.
+Q1. How can we accelerate the ANNS for v while preserving
+the query processing performance?
+Existing studies PEOs and KS2 have shown that PRT has the
+potential to be an appropriate answer to Q1. For each visited
+node u and its out-neighbor w, PRT sends (u, v, w) to a
+probabilistic test function to see whether they can pass the
+test, and then determines whether the exact distance between
+v and w needs to be computed based on the test result. Con-
+sequently, PRT avoids unnecessary distance computations,
+leading to faster search. In KS2 (Lu et al., 2025), it is shown
+that the routing test under ℓ2 and cosine distances is equiva-
+lent to the angle-thresholding problem when vector norms
+2For Vamana, we assume its pruning ratio α = 1 and omit it in
+the inequality.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+⋮
+⋮
+Projection Table
+𝑐𝑐𝑐𝑐𝑐𝑐𝜃𝜃1
+𝑐𝑐𝑐𝑐𝑐𝑐𝜃𝜃2
+𝑐𝑐𝑐𝑐𝑐𝑐𝜃𝜃3
+𝑐𝑐𝑐𝑐𝑐𝑐𝜃𝜃4
+𝑐𝑐𝑐𝑐𝑐𝑐𝜃𝜃5
+𝑐𝑐𝑐𝑐𝑐𝑐𝜃𝜃6
+𝑐𝑐𝑐𝑐𝑐𝑐𝜃𝜃7
+𝑐𝑐𝑐𝑐𝑐𝑐𝛽𝛽1
+𝑐𝑐𝑐𝑐𝑐𝑐𝛽𝛽2
+𝑐𝑐𝑐𝑐𝑐𝑐𝛽𝛽3
+𝑐𝑐𝑐𝑐𝑐𝑐𝛽𝛽4
+𝑐𝑐𝑐𝑐𝑐𝑐𝛽𝛽5
+𝑐𝑐𝑐𝑐𝑐𝑐𝛽𝛽6
+𝑐𝑐𝑐𝑐𝑐𝑐𝛽𝛽7
+𝛿𝛿1
+𝛿𝛿2
+𝛿𝛿3
+𝛿𝛿4
+𝛿𝛿5
+𝛿𝛿6
+𝛿𝛿7
+𝜏𝜏1
+𝜏𝜏2
+𝜏𝜏3
+𝜏𝜏4
+𝜏𝜏5
+𝜏𝜏6
+𝜏𝜏7
+⋯
+1st 2nd
+⋯
+𝑢𝑢
+𝑧𝑧𝑚𝑚𝑚𝑚𝑚𝑚
+𝑢𝑢
+𝑣𝑣
+𝑤𝑤3
+𝑤𝑤1
+𝑤𝑤5
+𝑤𝑤2
+𝑤𝑤6
+𝑤𝑤7
+𝑤𝑤4
+𝑒𝑒1
+Left Shift
+𝑒𝑒2
+𝑒𝑒3
+𝑒𝑒4
+𝑒𝑒5
+𝑒𝑒6
+𝑒𝑒7
+𝑤𝑤5
+𝑤𝑤3
+𝑤𝑤5
+𝑧𝑧𝑚𝑚𝑚𝑚𝑚𝑚
+𝑢𝑢
+𝑣𝑣
+⋮⋮⋮
+⋮⋮⋮
+⋯
+1st 2nd
+K−th
+PES Set
+𝑅𝑅𝐿𝐿
+𝑊𝑊
+Probabilistic Routing Test
+Probabilistic Edge Selection
+Update
+Test Feedback Buffer
+Head
+Head
+𝑅𝑅𝑇𝑇
+𝑅𝑅𝐹𝐹
+Dual Rings
+Refilling 
+False Positives 
+⋮⋮
+Insert
+Figure 1. An overview of PAG. In this example, u has 7 out-neighbors {wi}7
+i=1. Let {ei}7
+i=1 denote the edges between u and {wi}7
+i=1,
+which are sent to PRT, where the threshold is determined by zmax. As a result, only w3 and w5 pass PRT, and their exact distances to v are
+computed. By distance comparison, node w5 is identified as a false positive, not added to W, and thus sent to RF . Node w3 is inserted
+into W, causing zmax to be ejected from W and sent to RT . The two rings RF and RT are merged and refilled into W. On the other
+route, by a left shift, the signs of both w3 and w5 are reversed, and all signs become negative, indicating that u is rejected by the PES test.
+Consequently, ⃗
+uv is treated as a candidate edge and added to the PES set.
+are stored explicitly. Therefore, PRT can be formulated as
+follows:
+Problem
+2.1.
+(Probabilistic
+Routing
+Test)
+Given
+u, v, w ∈Sd−1 and a threshold −1 ≤τ ≤1, construct
+a random-projection vector set F and design a test function
+w.r.t F, i.e., PRT : (u, v, w, τ) →RV with time com-
+plexity o(d), where RV denotes the set of one-dimensional
+random variables, such that if cos(∠(v −u, w −u)) ≥
+τ, then P[PRT(u, v, w, τ) ≥0] ≥0.5.
+Otherwise,
+P[PRT(u, v, w, τ) < 0] →1 as |F| →∞.
+Different from the routing test functions used in PEOs and
+KS2, we take τ as an explicit input. In this paper, we use
+another method to determine τ in order to further improve
+the efficiency of the routing test.
+2.3. Towards High Graph Connectivity
+From the process of determining Nin(v), we observe that its
+candidate set is restricted to Nout(v). Recent work (Wang
+et al., 2025a) shows that |Nout(v)| may be too small to re-
+liably determine incoming edges, causing some nodes to
+have very small in-degrees. Such nodes may become un-
+reachable during search, which partly explains why HNSW
+performs poorly on certain real-world datasets. On the other
+hand, for each checked node u, the worst-case time com-
+plexity of RobustPrune can reach O(|Nout(u)|d), implying
+that a straightforward enlargement of the candidate set for
+𝑁𝑁𝑖𝑖𝑖𝑖(𝑣𝑣)
+𝐻𝐻(𝑣𝑣)
+𝑁𝑁𝑜𝑜𝑜𝑜𝑜𝑜(𝑣𝑣)
+RobustPrune
+PES
+(Old)
+𝑁𝑁𝑖𝑖𝑖𝑖(𝑣𝑣)
+(New)
+𝑣𝑣
+𝐶𝐶𝐶𝐶𝐶𝐶𝐶𝐶(𝑣𝑣)
+Figure 2. Illustration of PES (left: the role of PES; right: geometric
+illustration). Let v be the node to be inserted. The four green nodes
+are out-neighbors of v. Without PES, we can obtain only a single
+in-neighbor via RobustPrune. By taking all other visited nodes (the
+blue ones) into account, we apply PES, followed by RobustPrune.
+As such, we can identify three additional promising in-neighbors,
+thereby strengthening the connectivity of the neighborhood of v.
+determining incoming edges is expensive. Considering this
+dilemma, we raise the following question.
+Q2. How can we efficiently detect incoming edges outside
+Nout(v) that are useful for improving query processing per-
+formance but hard to be identified by RobustPrune?
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+To answer this question, we formulate a problem as follows.
+Problem 2.2. (Probabilistic Edge Selection) Given u, v ∈
+Sd−1, construct a random-projection-vector set F and design
+a probabilistic edge selection function PES : (u, v) →RV
+whose time complexity is O(|Nout(u)|), such that if Su,v
+is non-empty, then P[PES(u, v) ≥0] ≥0.5. Otherwise,
+P[PES(u, v) < 0] →1 as |F| →∞.
+We emphasize that the PES test is far more than a fast prob-
+abilistic implementation of RobustPrune. This is because
+the PES test can be applied to all visited nodes during the
+ANNS of v, whose number is typically much larger than
+Nout(v) in practice, leading to a better graph index in terms
+of connectivity (Fig. 2).
+3. Projection-Augmented Graph
+We show that Problems 2.1 and 2.2 can be solved in a unified
+framework PAG, which contains three components: Prob-
+abilistic Routing Test (PRT), Test Feedback Buffer (TFB),
+and Probabilistic Edge Selection (PES).
+3.1. Neighborhood Relations via Random Projection
+We present an asymptotic result that characterizes the rela-
+tionship between multiple angles in high-dimensional spaces
+and their corresponding projection values onto a certain pro-
+jection vector. This result forms the theoretical basis for all
+the three components. We first describe how to construct
+the random-projection vector set F that appears in Prob-
+lems 2.1 and 2.2, following an approach similar to that used
+in KS2 (Lu et al., 2025). Specifically, we divide the original
+space Rd into L subspaces, each of dimension d/L. In each
+subspace, we generate multiple cross-polytopes and apply an
+independent rotation to each, producing a total of m normal-
+ized vectors on Sd/L−1. By concatenation, we obtain a total
+of mL normalized vectors {rj}mL
+j=1, which together form the
+set F. Consider v as the node to be inserted and u as the
+candidate neighbor to be checked, let Nout(u) := {wi}t
+i=1.
+We define {αi}t
+i=1 as follows.
+αi := arccos ⟨wi −u, v −u⟩
+∥wi −u∥∥v −u∥,
+1 ≤i ≤t
+(2)
+Since ∥wi−u∥and ∥v−u∥can be pre-computed, we aim to
+estimate [cos α1, . . . , cos αt]⊤without exact inner product
+computation in Eq. (2). We will show that this can be realized
+by F. For each wi (1 ≤i ≤t), let r∗
+i ∈F be the reference
+vector that has the smallest angle with wi −u, and denote
+this smallest angle by βi. We use cos θi to denote the cosine
+of the angle between r∗
+i and v −u, and subscript l to denote
+the l-th sub-vector of the original vector in Rd, 1 ≤l ≤L.
+We introduce the following assumptions for each i:
+(A1) ∥(wi −u)∥= 1 and ∥(v −u)∥= 1.
+(A2) ∥(wi−u)l∥and ∥(v−u)l∥are equal to (1+o(1))/
+√
+L.
+(A3) ⟨(v −u)l, (wi −u)l⟩= (cos αi)(1 + o(1))/L.
+Here, A1 does not lose generality, and A2 and A3 are mild for
+large d and L (see the remarks in Appendix B). Under these
+assumptions, the following theorem shows that {αi}t
+i=1 can
+be asymptotically estimated by {βi}t
+i=1 and {θi}t
+i=1.
+Theorem 3.1. Under A1–A3, as L →∞, d/L →∞,
+and m grows sufficiently fast with respect to d/L, X =
+[cos θ1, . . . , cos θt]⊤, conditioned on {αi, βi}t
+i=1, is asymp-
+totically Gaussian:
+X | {αi, βi}t
+i=1
+d−→N(¯µ, ¯Σm,L)
+(3)
+where the mean is ¯µ = [cos α1 cos β1, . . . , cos αt cos βt]⊤,
+and ¯Σm,L = O(ϵm/L) with ϵm →0 as m →∞.
+Remarks. (1) Theorem 3.1 establishes a geometric rela-
+tionship among multiple out-neighbors of u and v, allowing
+us to estimate the relative location of v w.r.t. u within the
+neighborhood of u. This relationship is the key to both PRT
+and PES. (2) In our proof, m →∞is used to eliminate noise
+from off-diagonal entries, while L →∞is required for the
+central limit theorem (CLT). In practice, moderate values of
+m and L are sufficient. Weak results under finite (m, L) can
+be found in Lemma 4.3 in the KS2 paper (Lu et al., 2025). (3)
+X can be computed efficiently by AVX512 on modern CPUs.
+Vector [cos β1, . . . , cos βt]⊤can be pre-computed, meaning
+that we can obtain an efficient way to estimate all cos αi’s
+simultaneously.
+3.2. Probabilistic Routing Test
+Let τi be a threshold w.r.t wi. Our PRT function is as follows:
+PRT(u, v, wi, τi) = cos θi
+cos βi
+−τi.
+(4)
+For fixed (u, v), if the value of PRT is positive, the corre-
+sponding wi passes the PRT. Based on Theorem 3.1, under
+asymptotic assumptions, the PRT function satisfies all the
+required properties in Problem 2.1. Here, we do not specify
+the setting of τi, which will be postponed to Sec. 3.3.
+Remarks. Following the use of routing test in PEOs and
+KS2, exact distances are computed only between v and
+those wi’s that pass PRT (see Fig. 1). The PRT function
+has the same structure as the KS2 test function (Lu et al.,
+2025), except for the setting of the threshold τ. However,
+since the PRT and KS2 tests are derived using different prin-
+ciples, their theoretical results are complementary. Theo-
+rem 4.3 in the KS2 paper shows that, for every single wi,
+even for finite (m, L), if cos(∠(v −u, wi −u)) ≥τi, then
+P[PRT(u, v, wi, τi) ≥0] ≥0.5 still holds. Our result, on
+the other hand, characterizes the concrete asymptotic distri-
+bution and reveals the impact of L on the covariance, thereby
+explaining how L is used to adjust the estimation accuracy.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+3.3. Test Feedback Buffer
+For the PRT function, a key issue is how to set an appropriate
+threshold τ. In PEOs and KS2, τ is simply determined by
+the current furthest point in the result list (priority queue) P.
+However, due to the existence of false positives (FPs) gener-
+ated by PRT, some points may pass PRT but cannot be added
+to P, which implies that the exact distance computations w.r.t
+such points are redundant. On the other hand, the Gaussian
+distribution established in Theorem 3.1 implies that, with
+high probability, the actual distances of these FPs to the query
+q are not much larger than the threshold τ. This observation
+naturally raises the following question: can we incrementally
+increase the threshold τ so that the currently generated FPs
+can be reused in subsequent search process?
+We give an affirmative answer to this question and propose
+TFB, which consists of four components: the top-K result
+list RL, the working set W, and two ring buffers RF and RT ,
+where |W| = |RF | = |RT |. The search procedure is divided
+into multiple rounds. In the j-th round, we operate on W
+and adopt the standard Best-First Search (BFS) strategy to
+update its nodes. During the BFS over W, in addition to the
+nodes stored in W, there are two types of nodes whose exact
+distances to the query q are computed. The first type consists
+of nodes ejected from W; these nodes are inserted into RT .
+The second type consists of false-positive (FP) nodes that
+pass the PRT but cannot be added to W; these nodes are
+inserted into RF . After all nodes in W have been visited,
+we update RL and clear W. We then merge RF and RT and
+sort the combined list by distance to q. The sorted nodes are
+first inserted into W until it is full, and the remaining nodes
+are inserted into RT . Finally, RF is cleared. The ANNS is
+completed after several such rounds. In the j-th round, let
+zmax denote the furthest node in W. τi in Eq. (4) is set to be
+the threshold on the cosine of the angle between wi −u and
+v −u required for wi to be admitted into W, i.e.,
+τi = ∥u −wi∥2 + ∥u −v∥2 −∥zmax −v∥2
+2∥v −u∥∥wi −u∥
+.
+(5)
+PRT-TFB Test. We call the combination of Eq. (4) and Eq. (5)
+the PRT-TFB test. Compared with existing routing test meth-
+ods such as PEOs and KS2, which operate on the whole
+priority queue P, the PRT-TFB test has the following two
+advantages. (1) For large efC or large efS—which denotes
+the result list size, same as the notation in HNSW—the size
+of W is much smaller than that of P, and the movement of
+elements in W is much faster than that in P. (2) Each FP
+has a good chance of being selected as the visited node in
+the future rounds only if it remains in either of two rings,
+ensuring that its exact distance to q can be utilized at a certain
+time point.
+3.4. Probabilistic Edge Selection
+In RobustPrune, ∥wi −v∥needs to be smaller than ∥v −u∥
+to allow u to be retained. Let δi := ∥wi −u∥/(2∥v −u∥)
+denote the threshold on the cosine of the angle between
+wi −u and v −u, such that ∥wi −v∥< ∥v −u∥. Then,
+the PES function is designed as follows.
+PES(u, v) = max
+1≤i≤t
+ cos θi
+cos βi
+−δi
+
+.
+(6)
+By Theorem 3.1, we can see that the PES function in Eq. (6)
+satisfies the probabilistic properties in Problem 2.2. In prac-
+tice, if the value in Eq. (6) is negative, we say that (u, v) is
+rejected by PES, and this edge will be regarded as a promising
+candidate for further examination of RobustPrune.
+PRT-PES Collaboration. From their definitions, the differ-
+ence between the two thresholds, that is, τi −δi, is a value
+independent of v −w and can be pre-computed. Thus, we
+can conduct the PES test based on the test results of the
+PRT, leading to an O(1) time complexity, which confirms
+the objective O(|Nout(u)|) stated in Problem 2.2.
+PES Set. For every u whose PES value is negative, we do not
+check ⃗
+uv by RobustPrune immediately. Instead, we add ⃗
+uv
+into a so-called PES set for later examination (see Fig. 1).
+4. Implementation and Analysis
+4.1. Implementation
+Indexing Phase. PAG inserts every v ∈D sequentially into
+the graph. For each v, the process can be divided into the
+following three steps.
+Step 1. PAG performs ANNS equipped with the PRT-TFB
+test to obtain the elements stored in RL, and then uses Ro-
+bustPrune to determine Nout(v) and Nin(v).
+Step2. LetCand(v)denotethe setofall nodesvisited during
+ANNS. PAG uses PRT-PES to select additional in-neighbors
+from Cand(v), thereby supplementing the PES set.
+Based on our preceding discussion, PRT-TFB ensures the
+efficiency of ANNS, while PRT-PES detects more promising
+edges. We finally select more edges from the PES set.
+Step 3. For each candidate edge in the PES set, we apply
+RobustPrune to determine if it can be added to the graph.
+Searching Phase. The query processing with PAG is exactly
+the PRT-TFB-based ANNS for a query q.
+Online Insertion. Like HNSW, PAG naturally supports on-
+line insertion. The PES set is checked only after enough new
+nodes have been inserted into the graph.
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+Algorithm 1: Construction of PAG
+Input: G := ∅is the graph to be built; D is the dataset;
+2M is the maximum out-degree; L is the space
+partition size; efC is the maximum size of visited
+nodes; b is the size of W
+Output: G with node set D, edge set E, and inference
+structure I
+1 PES set is an empty table to accommodate candidate
+edges;
+2 The capacity of RL is set to efC;
+3 Maximum round Rmax is set to efC/b;
+4 Generate multi-level random-projection structure
+F = {rjl} (1 ≤j ≤m, 1 ≤l ≤L);
+5 Select b initial nodes, connect them, and write the
+projection information w.r.t the connected edges to I. Let
+V denote the set of all initial nodes;
+6 foreach v ∈D\V do
+7
+Insert b nodes to W and compute their distances to v;
+8
+Compute all ⟨vl, rjl⟩’s and build a projection table;
+9
+for r = 1 to Rmax do
+10
+foreach unvisited u ∈W do
+11
+foreach w in Nout(u) do
+12
+if w passes the PRT-TFB test then
+13
+Compute the distance between v
+and w;
+14
+if ∥w −v∥< ∥zmax −v∥then
+15
+Update W and insert zmax to
+RT ;
+16
+else
+17
+Insert w to RF ;
+18
+if (u, v) is rejected by the PRT-PES test
+then
+19
+Add (u, v) to the PES set;
+20
+Update the nodes in W to RL, and empty W;
+21
+Sort and merge RF and RT , and empty RF and
+RT ;
+22
+Refill W until it is full using the sorted elements,
+and refill RT with the remaining sorted nodes;
+23
+Apply RobustPrune to RL to compute Nout(v) and
+Nin(v);
+24
+Add the projection information of new edges to I;
+25 Apply RobustPrune to the PES set, supplement Nin(v)’s,
+and add the projection information of new edges to I;
+4.2. Algorithm Pseudo-Codes of PAG
+The pseudo-codes of the PAG algorithms are presented in
+Algs. 1 and 2, which represent the indexing and searching,
+respectively. Note that indexing is essentially the sequential
+insertion of all nodes. Similar to Lu et al. (2024), we store the
+computed projections in a projection table for lookup (Line
+8, Alg. 1 and Line 4, Alg. 2).
+4.3. Complexity Analysis
+Time complexity. Searching with HNSW is in O(n′d)-time,
+where n′ is the number of visited nodes during the search.
+Although a rigorous analysis of n′ remains an open problem,
+n′ can be roughly estimated as O(M log n), where 2M is the
+Algorithm 2: Search with PAG
+Input: G(D, E, I) is the constructed similarity graph; F
+is the random-projection structure; efS is the
+result list size; q is the query; K is the retrieval size
+Output: Top-K ANN nodes
+1 The capacity of RL is set to K;
+2 b = max{10, K};
+3 Maximum round Rmax is set to efS/b;
+4 Compute all ⟨ql, rjl⟩’s and build a projection table;
+5 Insert b elements to W and compute their distance to q;
+6 for r = 1 to Rmax do
+7
+foreach unvisited u ∈W do
+8
+foreach w in Nout(u) do
+9
+if w passes PRT-TFB test then
+10
+Compute the distance between q and w;
+11
+if ∥w −q∥< ∥zmax −q∥then
+12
+Update W and insert zmax to RT ;
+13
+else
+14
+Insert w to RF ;
+15
+Update the nodes in W to RL, and empty W;
+16
+Sort and merge RF and RT , and empty RF and RT ;
+17
+Refill W until it is full using the sorted elements, and
+refill RT with the remaining sorted nodes;
+18 Return the top-K nodes in RL;
+maximum out-degree. In contrast, the complexity of PAG is
+O(n′L+γn′d), where L ≪d is the user-specified parameter
+and γ ≤0.5 denotes the ratio of nodes that passed the PRT-
+PES test relative to the total number of candidates checked.
+γ is small in practice (generally < 0.2), and is smaller than
+the ratio in PEOs and KS2, because TFB ensures that the
+threshold increases incrementally rather than being set to the
+furthest distance w.r.t. a full priority queue.
+As for indexing, due to the search-and-insertion paradigm,
+we focus on the insertion of v, for which the complexity
+is O(n′L + γn′d + M 2d + Mdm). Here, O(M 2d) is the
+complexity of node connection, and O(Mdm) is used to
+compute projection information, both of which are much
+smaller than the ANNS part due to their independence of n′.
+Space complexity. The space complexity of searching with
+PAG is O(nd + nM + nML), where O(nd) corresponds
+to the original dataset, O(nM) corresponds to the edge set
+and O(nML) corresponds to the inference structure. In the
+indexing phase, since we adopt in-place search for insertion,
+we only require an additional space of at most O(Mn) to
+store the edges in PES set. To further reduce the memory
+footprint, we can follow LVQ (Aguerrebere et al., 2023) and
+represent floats with 2 bytes.
+4.4. Parameter Analysis of PAG
+We analyze the settings of the parameters in PAG.
+(1) m: The value of m is fixed to 16, so that each projection
+vector in a subspace is represented by 4 bits, which is com-
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+Table 2. Dataset statistics.
+Name/Source
+Dataset Size
+Query Size
+Dim.
+OOD
+Type
+Embedding Model
+Distance Measure
+Modern Datasets
+DBpedia1536
+999,000
+1,000
+1,536
+No
+Text
+text-embedding-3-large (OpenAI, 2024)
+Euclidean
+DBpedia3072
+999,000
+1,000
+3,072
+No
+Text
+text-embedding-3-large (OpenAI, 2024)
+Euclidean
+WoltFood
+1,719,611
+1,000
+512
+No
+Image
+clip-ViT-B-32 (Radford et al., 2021)
+Euclidean
+DataCompDr
+12,779,520
+1,000
+1,536
+Yes
+Text-to-Image
+coca ViT-L-14 (Yu et al., 2022)
+Euclidean
+AmazonBooks
+15,928,208
+1,000
+384
+No
+Text
+all-MiniLM-L12-v2 (Wang et al., 2020)
+Euclidean
+MajorTOM
+56,506,400
+10,000
+1,024
+No
+Image
+DINOv2 (Oquab et al., 2024)
+Euclidean
+Legacy Datasets
+Word2Vec
+1,000,000
+1,000
+300
+No
+Text
+Word2Vec (Mikolov et al., 2013)
+Euclidean
+GIST
+1,000,000
+1,000
+960
+No
+Image
+GIST (Oliva & Torralba, 2001)
+Euclidean
+GloVe
+1,193,514
+1,000
+200
+No
+Text
+GloVe (Pennington et al., 2014)
+Euclidean
+ImageNet
+2,340,373
+200
+150
+No
+Image
+dense SIFT (Lazebnik et al., 2006)
+Euclidean
+SIFT10M
+10,000,000
+1,000
+128
+No
+Image
+SIFT (Lowe, 2004)
+Cosine
+DEEP100M
+100,000,000
+1,000
+96
+No
+Image
+GoogLeNet (Szegedy et al., 2015)
+Cosine
+patible with the AVX512 instruction set. The choice of 4 bits
+follows NGT-QG (Yahoo! Japan, 2023).
+(2) L: L is recommended to be in [8, d/8], where 8 is compat-
+ible with AVX512 because at most 8 levels can be accessed
+at a time, while d/L = 8 is a safe ratio that ensures the accu-
+racy of the multi-level projection structure, as explained in
+PEOs (Lu et al., 2024). Based on the analysis in Sec. 4.3, L
+is used to tune the trade-off between efficiency and accuracy.
+(3) M: Similar to its usage in HNSW, 2M is the maximum
+out-degree of PAG. Based on the analysis in Sec. 4.3, M is
+recommended to be 64 when space cost permits. In practice,
+M is generally chosen from {16, 32, 64}.
+(4) |W|: The size of W is set to max{10, K}. Under this
+setting, when K ≥10, W is aligned with the result list,
+which enables refilling to be easily executed.
+(5) efC: efC determines how many nodes are visited in
+W and plays a role similar to efC in HNSW. It is used
+to control the trade-off between indexing time and search
+performance. For fast indexing, efC is recommended to be
+in [100, 200]. For high graph quality, efC is recommended
+to be in [1000, 10000]. Notably, thanks to TFB, PAG with a
+very large efC can be built much faster than HNSW with the
+same efC.
+5. Experiments
+We report main results here. Detailed setup and more results
+are available in Appendices D and E, respectively.
+5.1. Experimental Setup
+Data Statistics. In the main experiments, we evaluate
+PAG on eight datasets: DBpedia1536 (Qdrant, 2024a)
+(a.k.a., OpenAI-1536), DBpedia3072 (Qdrant, 2024b)
+(a.k.a., OpenAI-3072), WoltFood (Qdrant, 2024c), Ama-
+zonBooks (Kang et al., 2024), DataCompDr (Apple, 2025),
+MajorTOM (Major TOM, 2024), GloVe (Pennington et al.,
+2014), and DEEP100M (Simhadri et al., 2021). The first
+six are modern text, image, and multimodal (text-to-image)
+datasets generated by recent embedding models. The lat-
+ter two are widely-used legacy datasets (downloaded from
+The Similarity Search Team, CUHK (2018)).
+In addi-
+tion, we report the experimental results on other legacy
+datasets (Word2Vec, GIST, ImageNet, and SIFT10M) in
+Appendix E.3. Dataset statistics are reported in Table 2.
+The queries of DataCompDr are out-of-distribution (OOD).
+Fig. 11 in Appendix D plots the data and query distributions
+of this dataset.
+Baselines. Baselines include HNSW (Malkov & Yashunin,
+2020), Vamana (Subramanya et al., 2019), SymQG (Gou
+et al., 2025), ScaNN (Guo et al., 2020a), IVFPQFS (J´egou
+et al., 2011), and RaBitQ+ (Gao et al., 2025). We design two
+variants of PAG by tuning its parameters, as shown in Table 4
+in Appendix D: (1) PAG-Base, for higher search performance,
+and (2) PAG-Lite, for faster indexing and smaller memory
+footprint.
+5.2. Experimental Results
+We set the default retrieval size K = 100.
+D1. QPS-Recall. Fig. 3 plots the QPS-recall performance.
+PAG-Baseperformsthebestonallthemoderndatasetsexcept
+for high recall settings on WoltFood. Its speedup over HNSW
+can be up to 5 times. For legacy datasets, PAG-Base is the best
+on GloVe and only second to SymQG on DEEP100M. PAG-
+Lite also delivers competitive search performance and is the
+runner-up on DBpedia1536, DBpedia3072, and MajorTOM.
+D2. Indexing Time. Fig. 4 (left) shows the indexing time. Un-
+der the same or larger efC, PAG-Base requires only 20–40%
+of the indexing time of HNSW, and is faster than SymQG in
+most cases. PAG-Lite achieves an indexing time compara-
+ble to quantization-based methods, which is further reduced
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+40 60
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+2
+10
+3
+QPS
+DBpedia1536
+0
+40 60
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+2
+10
+3
+DBpedia3072
+40
+60
+80
+90
+95
+98
+Recall (%)
+10
+1
+10
+2
+10
+3
+WoltFood
+0
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+DataCompDr
+40
+60
+80
+90
+95
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+QPS
+AmazonBooks
+40
+60
+80
+90
+95
+98
+Recall (%)
+10
+1
+10
+2
+10
+3
+MajorTOM
+0
+40
+60
+80
+90
+95
+98
+99
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+GloVe
+0
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+2
+10
+3
+10
+4
+DEEP100M
+PAG-Base
+PAG-Lite
+HNSW
+IVFPQFS
+RaBitQ+
+ScaNN
+SymQG (32)
+SymQG (64)
+Vamana
+Figure 3. QPS-recall, K = 100. SymQG runs out of memory on MajorTOM. Recall is plotted in logarithmic scale to highlight large values.
+DBpedia1536
+DBpedia3072
+GloVe
+WoltFood
+10
+1
+10
+2
+10
+3
+10
+4
+Indexing Time (s)
+DBpedia1536
+DBpedia3072
+GloVe
+WoltFood
+10
+0
+10
+1
+10
+2
+Peak Memory Usage (Indexing) (GB)
+DBpedia1536
+DBpedia3072
+GloVe
+WoltFood
+10
+0
+10
+1
+10
+2
+Peak Memory Usage (Searching) (GB)
+DataCompDr
+AmazonBooks
+MajorTOM
+DEEP100M
+10
+2
+10
+3
+10
+4
+10
+5
+DataCompDr
+AmazonBooks
+MajorTOM
+DEEP100M
+10
+1
+10
+2
+10
+3
+DataCompDr
+AmazonBooks
+MajorTOM
+DEEP100M
+10
+1
+10
+2
+PAG-Base
+PAG-Lite
+HNSW
+IVFPQFS
+RaBitQ+
+ScaNN
+SymQG (32)
+SymQG (64)
+Vamana
+Figure 4. Indexing time and peak memory usage. SymQG runs out of memory on MajorTOM.
+to 0.5× on high-dimensional datasets, where it attains the
+lowest indexing time.
+D3. Memory Footprint. Fig. 4 shows the memory usage in in-
+dexing (middle) and searching (right) phases. PAG-Base uses
+more memory than HNSW on lower-dimensional datasets,
+but the difference is negligible on higher-dimensional
+datasets. PAG-Base consistently uses much less memory
+than SymQG. PAG-Lite achieves the smallest memory foot-
+print in 4 out of 8 cases for both indexing and searching.
+D4. High-dimensional Scalability. The competitiveness of
+PAG-Base and PAG-Lite over d ∈[96, 3072], as shown
+in Figs. 3 and 4, is consistent, showcasing its insensitivity
+to dimensionality. In addition, the advantage of PAG in
+QPS-recall becomes more pronounced on high-dimensional
+datasets. In contrast, SymQG reports very low recall on
+high-dimensional datasets DBpedia1536, DBpedia3072, and
+DataCompDr, where d ∈{1536, 3072}.
+D5. Retrieval Size Robustness. Besides the QPS-recall for
+K = 100 in Fig. 3, we report the results for K = 10 in
+Fig. 16 and K = 1000 in Fig. 18. PAG methods are highly
+competitive across the three K values. When K = 10,
+PAG-Base achieves comparable performance and even out-
+performs SymQG in the high-recall (≥95%) region on all
+datasets except DEEP100M. When K = 1000, PAG-Base
+remains the best, while the performance of SymQG degrades
+significantly. To highlight the performance comparison, we
+also plot in Fig. 7 the QPS-recall by varying K from 200
+to 800. It can be seen that the gap between PAG-Base and
+SymQG grows when K moves towards larger values. This
+observation showcases the robustness of PAG in various ap-
+plications that differ in retrieval size.
+D6. Online Insertion Support. To evaluate the query process-
+ing performance with online insertions, we consider the fol-
+lowing workload. We randomly sample from the corpus
+10,000 vectors as insertion queries and another 10,000 vec-
+tors as search queries. The 20,000 vectors are divided into
+20 batches, each with 1,000 vectors. The insertion batches
+and the search batches are interleaved as a workload, with
+insertion as the first batch. The rest of the corpus is used to
+build the initial index. Note that DataCompDr is not OOD
+in this setting because its original query set (in Table 2) is
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+QPS
+DBpedia1536
+0
+40 60
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+DBpedia3072
+40
+60
+80
+90
+95
+Recall (%)
+10
+2
+10
+3
+10
+4
+WoltFood
+0
+40
+60
+80
+90
+95
+98
+99
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+DataCompDr
+40
+60
+80
+90
+95
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+QPS
+AmazonBooks
+40
+60
+80
+90
+95
+98
+Recall (%)
+10
+2
+10
+3
+10
+4
+MajorTOM
+40
+60
+80
+90
+95
+98
+99
+Recall (%)
+10
+2
+10
+4
+GloVe
+0
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+3
+10
+4
+DEEP100M
+PAG-Base
+PAG-Lite
+HNSW
+IVFPQFS
+RaBitQ+
+ScaNN
+SymQG (32)
+SymQG (64)
+Vamana
+Figure 5. QPS-recall, K = 10.
+40 60
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+2
+10
+3
+QPS
+DBpedia1536
+0
+40 60
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+2
+DBpedia3072
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+WoltFood
+0
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+DataCompDr
+40
+60
+80
+90
+95
+Recall (%)
+10
+1
+10
+2
+10
+3
+QPS
+AmazonBooks
+40
+60
+80
+90
+95
+98
+Recall (%)
+10
+1
+10
+2
+MajorTOM
+0
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+2
+10
+3
+GloVe
+0
+40 60
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+DEEP100M
+PAG-Base
+PAG-Lite
+HNSW
+IVFPQFS
+RaBitQ+
+ScaNN
+SymQG (32)
+SymQG (64)
+Vamana
+Figure 6. QPS-recall, K = 1000.
+not used. To make the processing times of insertion queries
+and search queries on the same scale, we set efS = efC
+and tune these two parameters to control the recall. Fig. 8
+compares PAG-Base and HNSW, plotting their QPS-recall
+performances of insertion and search. Insertion queries are
+slightly slower to process than search queries for both meth-
+ods. PAG-Base are much faster than HNSW in both insertion
+and search speeds, and PAG-Base’s insertion is even faster
+than HNSW’s search. Similar to PAG-Base’s advantage in
+search, its speedup over HNSW in insertion can be up to
+5 times, demonstrating its efficiency in processing online
+insertions.
+Ablation Study. We choose four datasets, DBpedia3072,
+WoltFood, AmazonBooks, and DataCompDr, for ablation
+study. Among the six modern datasets, they cover the lowest
+and highest dimensionality, text and images, as well as OOD.
+Figs. 9 and 10 show the effectiveness of PAG’s components.
+We observe that TFB consistently reduces indexing time and
+improves search performance. PES further enhances search
+performance with negligible additional indexing time. The
+additional memory usage introduced by TFB and PES is very
+minor and thus not shown here, because TFB does not affect
+the index size and PES barely increases the number of edges.
+6. Conclusion
+In this paper, we motivated six critical demands of modern
+AI applications for ANNS, covering search performance,
+indexing speed, memory footprint, scalability to dimension-
+ality, robustness against retrieval size, and support of online
+insertion. To meet these demands, we proposed PAG as a new
+framework for ANNS. PAG reduces unnecessary distance
+computations by employing the comparison of exact and
+approximate distances. The components of PAG are derived
+from a unified statistical relationship, making its mechanism
+theoretically explainable. Experiments on modern datasets
+showcased the superiority of PAG over widely-used ANNS
+methods as well as state-of-the art solutions, and confirmed
+the effectiveness of PAG’s components.
+References
+Aguerrebere, C., Bhati, I., Hildebrand, M., Tepper, M., and
+Willke, T. L. Similarity search in the blink of an eye with
+compressed indices. PVLDB, 16(11):3433–3446, 2023.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+50
+80
+90
+95
+98
+99
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+QPS
+WoltFood (K=200)
+50
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+WoltFood (K=400)
+50
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+WoltFood (K=800)
+50
+80
+90
+95
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+QPS
+AmazonBooks (K=200)
+50
+80
+90
+95
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+AmazonBooks (K=400)
+50
+80
+90
+95
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+AmazonBooks (K=800)
+50
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+10
+4
+QPS
+DEEP100M (K=200)
+50
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+DEEP100M (K=400)
+50
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+DEEP100M (K=800)
+PAG-Base
+SymQG (32)
+SymQG (64)
+Figure 7. QPS-recall comparison of PAG-Base and SymQG under varying retrieval size K.
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+0
+QPS
+DBpedia1536
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+0
+QPS
+DBpedia3072
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+0
+QPS
+DataCompDr
+80
+90
+95
+Recall (%)
+10
+1
+10
+0
+QPS
+AmazonBooks
+HNSW (Search)
+HNSW (Insertion)
+PAG-Base (Search)
+PAG-Base (Insertion)
+Figure 8. QPS-recall of query workloads with online insertions.
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+QPS
+DBpedia3072
+80
+90
+95
+98
+Recall (%)
+10
+2
+10
+3
+WoltFood
+80
+90
+95
+Recall (%)
+10
+2
+10
+3
+AmazonBooks
+80
+90
+95
+98
+Recall (%)
+10
+2
+10
+3
+DataCompDr
+PAG (PRT+TFB+PES)
+PRT+TFB
+PRT only
+Figure 9. Ablation study, QPS-recall. PRT only is the re-implementation of KS2 in PAG.
+Andoni, A. and Indyk, P. E2lsh manual. http://web.
+mit.edu/andoni/www/LSH, 2005.
+Andoni, A. and Indyk, P. Near-optimal hashing algorithms
+for approximate nearest neighbor in high dimensions.
+Commun. ACM, 51(1):117–122, 2008.
+Andoni, A., Indyk, P., Laarhoven, T., Razenshteyn, I. P.,
+and Schmidt, L. Practical and optimal LSH for angular
+distance. In NeurIPS, pp. 1225–1233, 2015.
+Apple.
+Datacompdr-12m.
+https://huggingface.
+co/datasets/apple/DataCompDR-12M, 2025.
+Babenko, A. and Lempitsky, V. S. Efficient indexing of
+billion-scale datasets of deep descriptors. In CVPR, pp.
+2055–2063, 2016.
+Bentley, J. L. K-d trees for semidynamic point sets. In SoCG,
+pp. 187–197, 1990.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+DBpedia3072
+WoltFood
+DataCompDr
+AmazonBooks
+10
+2
+10
+3
+10
+4
+Indexing Time (s)
+PAG (PRT+TFB+PES)
+PRT+TFB
+PRT only
+Figure 10. Ablation study, indexing time. PRT only is the re-
+implementation of KS2 in PAG.
+Bernhardsson, E.
+Annoy.
+https://github.com/
+spotify/annoy, 2013.
+Bernhardsson, E., Aum¨uller, M., and Faithfull, A. Ann
+benchmarks. https://github.com/erikbern/
+ann-benchmarks/, 2015.
+Beygelzimer, A., Kakade, S. M., and Langford, J. Cover trees
+for nearest neighbor. In ICML, volume 148, pp. 97–104,
+2006.
+Charikar, M. Similarity estimation techniques from rounding
+algorithms. In STOC, pp. 380–388, 2002.
+Chen, P. H., Chang, W., Jiang, J., Yu, H., Dhillon, I. S.,
+and Hsieh, C. FINGER: fast inference for graph-based
+approximate nearest neighbor search. In WWW, pp. 3225–
+3235, 2023.
+Chen, T., Fu, C., Wu, J., Wu, H., Fan, H., Ke, X., Gao, Y., Ni,
+Y., and Zeng, A. Reveal hidden pitfalls and navigate next
+generation of vector similarity search from task-centric
+views. arXiv preprint arXiv:2512.12980, 2025. URL
+https://arxiv.org/abs/2512.12980.
+Cheng, R., Peng, Y., Wei, X., Xie, H., Chen, R., Shen,
+S., and Chen, H.
+Characterizing the dilemma of per-
+formance and index size in billion-scale vector search
+and breaking it with second-tier memory. arXiv preprint
+arXiv:2405.03267, 2024.
+URL https://arxiv.
+org/abs/2405.03267.
+Fensore, C., Dhole, K. D., Ho, J. C., and Agichtein,
+E.
+Evaluating hybrid retrieval augmented generation
+using dynamic test sets: Liverag challenge.
+CoRR,
+abs/2506.22644, 2025. URL https://arxiv.org/
+abs/2506.22644.
+Fu, C., Xiang, C., Wang, C., and Cai, D. Fast approximate
+nearest neighbor search with the navigating spreading-out
+graph. PVLDB, 12(5):461–474, 2019.
+Fu, C., Wang, C., and Cai, D. High dimensional similarity
+search with satellite system graph: Efficiency, scalability,
+and unindexed query compatibility. IEEE Trans. Pattern
+Anal. Mach. Intell., 44(8):4139–4150, 2022.
+Gao, J. and Long, C. High-dimensional approximate near-
+est neighbor search: with reliable and efficient distance
+comparison operations. Proc. ACM Manag. Data, 1(2):
+137:1–137:27, 2023.
+Gao, J. and Long, C. Rabitq: Quantizing high-dimensional
+vectors with a theoretical error bound for approximate
+nearest neighbor search. Proc. ACM Manag. Data, 2(3):
+167, 2024.
+Gao, J., Gou, Y., Xu, Y., Yang, Y., Long, C., and Wong, R. C.
+Practical and asymptotically optimal quantization of high-
+dimensional vectors in euclidean space for approximate
+nearest neighbor search. Proc. ACM Manag. Data, 3(3):
+202:1–202:26, 2025.
+Ge, T., He, K., Ke, Q., and Sun, J. Optimized product quan-
+tization. IEEE Trans. Pattern Anal. Mach. Intell, 36(4):
+744–755, 2014.
+Gou, Y., Gao, J., Xu, Y., and Long, C. Symphonyqg: Towards
+symphonious integration of quantization and graph for
+approximate nearest neighbor search. Proc. ACM Manag.
+Data, 3(1):80:1–80:26, 2025.
+Guo, R., Sun, P., Lindgren, E., Geng, Q., Simcha, D., Chern,
+F., and Kumar, S. Accelerating large-scale inference with
+anisotropic vector quantization. In ICML, pp. 3887–3896,
+2020a.
+Guo, R., Sun, P., Lindgren, E., Geng, Q., Simcha, D.,
+Chern, F., and Kumar, S.
+ScaNN algorithms and
+configuration.
+https://github.com/google-
+research/google-research/blob/master/
+scann/docs/algorithms.md, 2020b.
+Indyk, P. and Motwani, R. Approximate nearest neighbors:
+Towards removing the curse of dimensionality. In STOC,
+pp. 604–613, 1998.
+J´egou, H., Douze, M., and Schmid, C. Product quantization
+for nearest neighbor search. IEEE Trans. Pattern Anal.
+Mach. Intell, 33(1):117–128, 2011.
+Kang, G., Ge, Z., Hu, J., Zhang, X., Wang, L., and
+Zhan, J. Bigvectorbench. https://github.com/
+BenchCouncil/BigVectorBench, 2024.
+Ke, Y. et al. Retrieval augmented generation for 10 large lan-
+guage models and its generalizability in assessing medical
+fitness. npj Digit. Medicine, 8(1), 2025.
+Lazebnik, S., Schmid, C., and Ponce, J. Beyond bags of
+features: Spatial pyramid matching for recognizing natural
+scene categories. In CVPR, volume 2, pp. 2169–2178,
+2006.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+Li, A. and Papakonstantinou, Y.
+ScaNN for Al-
+loyDB: The first PostgreSQL vector search index
+that works well from millions to billion of vec-
+tors.
+https://cloud.google.com/blog/
+products/databases/how-scann-for-
+alloydb-vector-search-compares-to-
+pgvector-hnsw, 2025.
+Lin, J. Operational advice for dense and sparse retrievers:
+Hnsw, flat, or inverted indexes? In Proceedings of the 63rd
+Annual Meeting of the Association for Computational Lin-
+guistics (Volume 6: Industry Track), pp. 865–872, 2025.
+Lowe, D. G. Distinctive image features from scale-invariant
+keypoints. International Journal of Computer Vision, 60
+(2):91–110, 2004.
+Lu, K., Kudo, M., Xiao, C., and Ishikawa, Y. Hvs: Hier-
+archical graph structure based on voronoi diagrams for
+solving approximate nearest neighbor search. PVLDB, 15
+(2):246–258, 2021.
+Lu, K., Xiao, C., and Ishikawa, Y. Probabilistic routing
+for graph-based approximate nearest neighbor search. In
+ICML, pp. 33177–33195, 2024.
+Lu, K., Xiao, C., and Ishikawa, Y.
+Probabilistic ker-
+nel function for fast angle testing.
+arXiv preprint
+arXiv:2505.20274, 2025.
+URL https://arxiv.
+org/abs/2505.20274.
+Major
+TOM.
+Core-s2rgb-dinov2.
+https:
+//huggingface.co/datasets/Major-
+TOM/Core-S2RGB-DINOv2, 2024.
+Malkov, Y. A. and Yashunin, D. A. Efficient and robust
+approximate nearest neighbor search using hierarchical
+navigable small world graphs. IEEE Trans. Pattern Anal.
+Mach. Intell, 42(4):824–836, 2020.
+Mikolov, T., Sutskever, I., Chen, K., Corrado, G. S., and
+Dean, J. Distributed representations of words and phrases
+and their compositionality. In NeurIPS, pp. 3111–3119,
+2013.
+Oliva, A. and Torralba, A. Modeling the shape of the scene:
+A holistic representation of the spatial envelope. Interna-
+tional Journal of Computer Vision, 42(3):145–175, 2001.
+OpenAI.
+text-embedding-3-large.
+https://
+platform.openai.com/docs/models/text-
+embedding-3-large, 2024.
+Oquab, M., Darcet, T., Moutakanni, T., Vo, H., Szafraniec,
+M., Khalidov, V., Fernandez, P., Haziza, D., Massa, F., El-
+Nouby, A., et al. Dinov2: Learning robust visual features
+without supervision. Trans. Mach. Learn. Res., 2024.
+Ouyang, S. et al.
+ReasoningBank: Scaling agent self-
+evolving with reasoning memory.
+arXiv preprint
+arXiv:2509.25140, 2025.
+URL https://arxiv.
+org/abs/2509.25140v1.
+Pennington, J., Socher, R., andManning, C.D. Glove: Global
+vectors for word representation. In Proceedings of the
+2014conferenceonempiricalmethodsinnaturallanguage
+processing (EMNLP), pp. 1532–1543, 2014.
+Pham, N. Simple yet efficient algorithms for maximum inner
+product search via extreme order statistics. In KDD, pp.
+1339–1347, 2021.
+Pham, N.andLiu, T. Falconn++: Alocality-sensitivefiltering
+approach for approximate nearest neighbor search. In
+NeurIPS, pp. 31186–31198, 2022.
+Qdrant.
+dbpedia-entities-openai3-text-embedding-3-
+large-1536-1m.
+https://huggingface.co/
+datasets/Qdrant/dbpedia-entities-
+openai3-text-embedding-3-large-1536-
+1M, 2024a.
+Qdrant.
+dbpedia-entities-openai3-text-embedding-3-
+large-3072-1m.
+https://huggingface.co/
+datasets/Qdrant/dbpedia-entities-
+openai3-text-embedding-3-large-3072-
+1M, 2024b.
+Qdrant. wolt-food-clip-vit-b-32-embeddings. https://
+huggingface.co/datasets/Qdrant/wolt-
+food-clip-ViT-B-32-embeddings, 2024c.
+Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G.,
+Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J.,
+et al. Learning transferable visual models from natural
+language supervision. In ICML, pp. 8748–8763, 2021.
+Simhadri, H. V., Williams, G., Aum¨uller, M., Douze, M.,
+Babenko, A., Baranchuk, D., Chen, Q., Hosseini, L., Kr-
+ishnaswamny, R., Srinivasa, G., et al. Billion-scale approx-
+imate nearest neighbor search challenge: Neurips’21 com-
+petition track.
+https://big-ann-benchmarks.
+com/neurips21.html, 2021.
+Subramanya, S. J., Devvrit, F., Simhadri, H. V., Krish-
+naswamy, R., and Kadekodi, R. Rand-nsg: Fast accurate
+billion-point nearest neighbor search on a single node. In
+NeurIPS, pp. 13748–13758, 2019.
+Szegedy, C., Liu, W., Jia, Y., Sermanet, P., Reed, S.,
+Anguelov, D., Erhan, D., Vanhoucke, V., and Rabinovich,
+A. Going deeper with convolutions. In CVPR, pp. 1–9,
+2015.
+The Similarity Search Team, CUHK.
+FVECS datasets.
+https://www.cse.cuhk.edu.hk/systems/
+hash/gqr/datasets.html, 2018.
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+Vendrow, E., Pantazis, O., Shepard, A., Brostow, G., Jones,
+K., Mac Aodha, O., Beery, S., and Van Horn, G. Inquire: A
+natural world text-to-image retrieval benchmark. NeurIPS,
+37:126500–126514, 2024.
+Wallace, J. A.
+How hierarchical navigable small
+world
+(HNSW)
+algorithms
+can
+improve
+search.
+https://redis.io/blog/how-hnsw-
+algorithms-can-improve-search/?utm_
+source=chatgpt.com, 2025.
+Wang, H., Wu, W., Luo, C., Bian, A., Meng, C., Wu, Y.,
+and Sun, J. Boosting accuracy and efficiency for vector
+retrieval with local scaling graph. In ICDE, pp. 336–348,
+2025a.
+Wang, J., Zhang, T., Song, J., Sebe, N., and Shen, H. T. A
+survey on learning to hash. IEEE Trans. Pattern Anal.
+Mach. Intell., 40(4):769–790, 2018.
+Wang, M., Wu, H., Ke, X., Gao, Y., Zhu, Y., and Zhou, W.
+Accelerating graph indexing for ANNS on modern cpus.
+Proc. ACM Manag. Data, 3(3):123:1–123:29, 2025b.
+Wang, W., Wei, F., Dong, L., Bao, H., Yang, N., and Zhou, M.
+MiniLM: Deep self-attention distillation for task-agnostic
+compression of pre-trained transformers. In NeurIPS, pp.
+5776–5788, 2020.
+Weller, O., Boratko, M., Naim, I., and Lee, J. On the theo-
+retical limitations of embedding-based retrieval. CoRR,
+abs/2508.21038, 2025. URL https://arxiv.org/
+abs/2508.21038.
+Xie, J., Yu, J. X., and Liu, Y. Graph based k-nearest neighbor
+search revisited. ACM Trans. Database Syst., 50(4):14:1–
+14:30, 2025.
+Xu, H. and Pham, N. Scalable DBSCAN with random pro-
+jections. In NeurIPS, 2024.
+Yahoo! Japan. Neighborhood graph and tree for index-
+ing high-dimensional data. https://github.com/
+yahoojapan/NGT, 2023.
+Yu, J., Wang, Z., Vasudevan, V., Yeung, L., Seyedhosseini,
+M., and Wu, Y. Coca: Contrastive captioners are image-
+text foundation models. Trans. Mach. Learn. Res., 2022,
+2022.
+Zhai, Y., Tao, S., Chen, C., Zou, A., Chen, Z., Fu, Q.,
+Mai, S., Yu, L., Deng, J., Cao, Z., et al.
+AgentE-
+volver: Towards efficient self-evolving agent system.
+arXiv preprint arXiv:2511.10395, 2025. URL https:
+//arxiv.org/abs/2511.10395.
+Zhang, J. et al. Optimizing recall or relevance? A multi-task
+multi-head approach for item-to-item retrieval in recom-
+mendation. In KDD, pp. 5194–5204, 2025.
+Zhang, S., Wang, J., Zhou, R., Liao, J., Feng, Y., Zhang, W.,
+Wen, Y., Li, Z., Xiong, F., Qi, Y., et al. MemRL: Self-
+evolving agents via runtime reinforcement learning on
+episodic memory. arXiv preprint arXiv:2601.03192, 2026.
+URL https://arxiv.org/abs/2601.03192.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+A. Frequently Used Notations
+Table 3 shows the notations frequently used in this paper.
+Table 3. Frequently used notations.
+Symbol
+Description
+D
+Dataset of vectors
+d
+Dimension of vectors
+n
+Dataset size
+q
+Query vector
+K
+Retrieval size
+v
+Node to be inserted to a graph index
+Nout(v)
+Out-neighbors of v
+Nin(v)
+In-neighbors of v
+u
+Candidate neighbor of v to be evaluated
+L
+Space partition size
+{wi}t
+i=1
+t neighbors of u
+{ei}t
+i=1
+Edges between u and {wi}t
+i=1
+τi
+Threshold w.r.t. wi in PRT
+δi
+Threshold w.r.t. wi in PES
+RL
+Result list
+W
+Working set
+RF , RT
+Dual rings of false positives and ejected nodes
+m
+Number of projection vectors in each subspace
+F
+Set of concatenated projection vectors
+{ri}mL
+i=1
+Individual projection vectors
+r∗
+i ∈F
+Vector having the smallest angle with wi −u
+cos αi
+Cosine of the angle between wi −u and v −u
+cos βi
+Cosine of the angle between wi −u and r∗
+i
+cos θi
+Cosine of the angle between v −u and r∗
+i
+Cand(v)
+All nodes visited during the insertion of v
+H(v)
+Nodes in Cand(v) rejected by PES
+B. Proof of Theorem 3.1
+In the proof, with slight abuse of notation, we treat u as the
+origin, and directly use v and each wi to denote v −u and
+wi −u, respectively.
+As such, we have w1, . . . , wt, v ∈Sd−1, and ⟨wi, v⟩=
+cos αi, i = 1, . . . , t. Suppose that d is divisible by L. Let
+wi = [wi1, . . . , wiL]⊤and v = [v1, . . . , vL]⊤be the
+equal-dimension partition ofwi andv, respectively. Suppose
+that in the l-th subspace, we generate m random projection
+vectors {rjl}m
+j=1 with the norm 1/
+√
+L. We use r∗
+il to denote
+the nearest projection vector to wil, i.e.,
+r∗
+il = arg max
+1≤j≤m
+⟨rjl, wil⟩.
+(7)
+Then, we have r∗
+i = [r∗
+i1, . . . , r∗
+iL]⊤∈Sd−1. We introduce
+Cil := ⟨wil, r∗
+il⟩
+√
+L
+∥wil∥
+∈[−1, 1].
+(8)
+Let E[Cil] = µm and Var(Cil) = σ2
+m, where µm and σ2
+m
+depend only on m. Note that they implicitly depend on the
+subspace dimension d/L. When m grows at a sufficiently
+high rate compared to d/L, µm →1 and σm →0. Moreover,
+we have
+Cov(Cil, Cjl) = ρm(ϕijl)σ2
+m
+(9)
+where ϕijl denotes the angle between wil and wjl, and
+ρm := [0, π] →[−1, 1] denotes the correlation coefficient
+function depending on ϕijl. Then, we have
+Yi := ΣL
+l=1⟨r∗
+il, wil⟩= ΣL
+l=1
+∥wil∥
+√
+L
+Cil.
+(10)
+By the assumption that ∥wil∥= (1 + o(1))/
+√
+L, we have
+E[Yi] = µm(1 + o(1)).
+(11)
+Var(Yi) = σ2
+m
+L (1 + o(1)).
+(12)
+Cov(Yi, Yj) = σ2
+m
+L2
+L
+X
+l=1
+ρm(ϕijl)(1 + o(1)).
+(13)
+Then, vl can be decomposed as vl = v∥
+il + v⊥
+il , where v∥
+il
+and v⊥
+il are defined as follows.
+v∥
+il = ⟨vl, wil⟩
+∥wil∥2 wil,
+v⊥
+il ⊥wil.
+(14)
+Then, we can define Zi as follows.
+Zi := ⟨r∗
+i , v⟩= Z(1)
+i
++ Z(2)
+i
+(15)
+where Z(1)
+i
+and Z(2)
+i
+are defined as follows.
+Z(1)
+i
+:=
+L
+X
+l=1
+⟨vl, wil⟩
+∥wil∥
+√
+L
+Cil.
+(16)
+Z(2)
+i
+:=
+L
+X
+l=1
+⟨r∗
+il, v⊥
+il ⟩.
+(17)
+E[Z(1)
+i
+] = µm
+√
+L
+L
+X
+l=1
+⟨vl, wil⟩
+∥wil∥
+= µm cos αi + o(1).
+(18)
+By symmetry, we have E[Z(2)
+i
+|{Cil}L
+l=1] = 0. Then, by the
+independence of subspaces, we have
+E[Zi] = µm cos(αi) + o(1).
+(19)
+Var(Z(1)
+i
+) = σ2
+m
+L
+L
+X
+l=1
+⟨vl, wil⟩2
+∥wil∥2 .
+(20)
+We take the orthogonal decomposition of r∗
+il as r∗
+il = r∥
+il +
+r⊥
+il , where r∥
+il has the same direction with wil. Let r⊥
+il =
+∥r⊥
+il ∥ζ, where ∥ζ∥= 1 is a random vector in a (d/L −1)-
+dimensional subspace. We have
+Eζ[⟨ζ, v⊥
+il ⟩2] = ∥v⊥
+il ∥2L
+d −L .
+(21)
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+By symmetry, E[⟨r⊥
+il , v⊥
+il ⟩| Cil] = 0. Then, we have
+Var(⟨r∗
+il, v⊥
+il ⟩) = ECil
+
+E[⟨r⊥
+il , v⊥
+il ⟩2 | Cil]
+
+.
+(22)
+Using E[∥r⊥
+il ∥2] = 1
+L(1 −E[C2
+il]), we have
+Var(Z(2)
+i
+) = 1 −(σ2
+m + µ2
+m)
+d −L
+L
+X
+l=1
+∥v⊥
+il ∥2.
+(23)
+Because Cov(Z(1)
+i
+, Z(2)
+i
+) = 0, we have
+Var(Zi) = Var(Z(1)
+i
+) + Var(Z(2)
+i
+).
+(24)
+We define ϵm :=
+p
+1 −E[C2
+il]. From Eq. (23), we can see
+that Var(Z(2)
+i
+) = O(ϵ2
+m/L).
+We now analyze the covariance structure. We cannot assume
+Z(1) and Z(2) are uncorrelated across different indices i ̸= j.
+Instead, we decompose the covariance matrix as
+Cov(Zi, Zj) = Cov(Z(1)
+i
+, Z(1)
+j
+) + Rij
+(25)
+where the residual term Rij contains the noise auto-
+covariance and cross-terms:
+Rij = Cov(Z(2)
+i
+, Z(2)
+j
+)+Cov(Z(1)
+i
+, Z(2)
+j
+)+Cov(Z(2)
+i
+, Z(1)
+j
+).
+(26)
+Because Var(Z(1)) = O(1/L) and Var(Z(2)) = O(ϵ2
+m/L),
+by the Cauchy-Schwarz inequality, we have
+|Cov(Z(1)
+i
+, Z(2)
+j
+)| ≤
+q
+Var(Z(1)
+i
+)Var(Z(2)
+j
+) = O
+ϵm
+L
+
+.
+(27)
+Thus, the entire residual term satisfies Rij = O(ϵm/L).
+Now, let us turn to Cov(Yi, Zj). When i = j, by conditional
+expectation, Cov(Yi, Z(2)
+j
+) = 0. When i ̸= j, if m →∞,
+σ2
+m + µ2
+m →1 and Var(Z(2)
+i
+) →0. Thus, Cov(Yi, Z(2)
+j
+) →
+0. Then, as m →∞, we have
+Cov(Yi, Zj) →σ2
+m
+L
+L
+X
+l=1
+ρm(ϕijl)⟨vl, wjl⟩(1 + o(1)).
+(28)
+Based on the above analysis, we consider
+ξl =
+∥w1l∥
+√
+L
+C1l, . . . , ∥wtl∥
+√
+L
+Ctl, ⟨r∗
+1l, vl⟩, . . . , ⟨r∗
+tl, vl⟩
+
+.
+(29)
+By the assumptions that ∥vil∥and ∥wil∥equal (1 +
+o(1))/
+√
+L, it can be seen that ξl satisfies the Lyapunov con-
+dition. By the independence of difference subspaces, we use
+the Lindeberg-Feller CLT and obtain the following result.
+√
+L([Y1, . . . , Yt, Z1, . . . , Zt]⊤−¯µ)
+d
+−−−−→
+L→∞N(0, ¯Σm,L)
+(30)
+where ¯µ = [µm, . . . , µm, µm cos α1, . . . , µm cos αt]⊤, and
+¯Σ is represented by block sub-matrices
+¯Σ =
+ΣY Y
+ΣY Z
+ΣZY
+ΣZZ
+
+(31)
+where the elements of ΣY Y , ΣY Z and ΣZZ are L times the
+covariance computed in Eqs. (13), (28), and (25), respec-
+tively.
+Based on this result, Z|Y is still a multivariate normal distri-
+bution. We have
+E[Z|Y] = µZ + ΣZY Σ−1
+Y Y (Y −µY ).
+(32)
+Cov(Z|Y) = (ΣZZ −ΣZY Σ−1
+Y Y ΣY Z)/L.
+(33)
+Let D be the diagonal matrix defined as follows
+D = diag[cos α1, . . . , cos αt].
+(34)
+Because ΣZY →DΣY Y , when Y = [cos β1, . . . , cos βt]⊤,
+we have
+E[Z|Y] →[cos α1 cos β1, . . . , cos αt cos βt]⊤.
+(35)
+Cov(Z|Y) →(ΣZZ −DΣYYD)/L = R/L
+(36)
+where R represents the scaled residual matrix with entries
+L · Rij = O(ϵm). Then, we conclude.
+Remarks. For each fixed i, if we apply a random rotation ma-
+trix to wi−u and v−u in Rd, by the spherical concentration
+inequality, we can derive the following inequalities.
+P
+∥(wi −u)l∥2 −1
+L
+ ≥˜ϵ
+
+≤2e−c1d˜ϵ2
+(37)
+P
+⟨(v −u)l, (wi −u)l⟩−cos αi
+L
+ ≥˜ϵ
+
+≤2e−c2d˜ϵ2
+(38)
+where c1 and c2 are constants. As L →∞and d/(L2) →∞,
+we have the following results:
+∥(wi −u)l∥= (1 + op(1))/
+√
+L.
+(39)
+⟨(v −u)l, (wi −u)l⟩= cos α
+L
++ op( 1
+L).
+(40)
+This implies that L =
+√
+d is a balanced choice, which is
+consistent with the setting in our experiments.
+C. Related Work
+We first supplement Sec. 1.1 with more discussions, and then
+introduce the preliminaries on probabilistic routing.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+C.1. Discussions on ANNS Solvers
+C.1.1. VECTOR QUANTIZATION
+Quantization-based methods for ANNS have a long history.
+Representative approaches can be found in (J´egou et al.,
+2011; Ge et al., 2014; Babenko & Lempitsky, 2016; Guo
+et al., 2020a; Gao & Long, 2024; Gao et al., 2025). Here,
+we briefly introduce the basic idea of the most widely-used
+method, Product Quantization (PQ) (J´egou et al., 2011).
+Let D ⊂Rd be a d-dimensional dataset and let q ∈Rd be
+a query vector. PQ divides each data vector x ∈D into L
+sub-vectors, i.e., x = (x1, x2, . . . , xL), where each sub-
+vector xj ∈Rd′ has dimension d′ = d/L. In this way, PQ
+constructs L subspaces of dimension d′, each containing the
+corresponding sub-vectors of all data points.
+In each subspace, every sub-vector is assigned to one of
+2k quantized sub-vectors. Equivalently, each sub-vector is
+represented by a sub-codeword of length k bits. The set
+of all sub-codewords in the j-th subspace is referred to as
+a codebook and is denoted by Cj. By concatenating the
+sub-codewords across all subspaces, each original vector is
+represented by a codeword of length kL, taking values in the
+Cartesian product C1 × · · · × CL.
+During the query phase, PQ first computes the distances
+between the query q and all quantized sub-vectors in each
+subspace. For each data vector x, PQ then sums the cor-
+responding L subspace distances to obtain an approximate
+distance between x and q. After computing the approximate
+distances for all data vectors, PQ ranks them accordingly and
+returns the most promising candidates.
+C.1.2. SIMILARITY GRAPH
+The workflow of graph-based methods is roughly as follows.
+In the indexing phase, a similarity graph is constructed as the
+index structure, where data points serve as nodes and edges
+connect pairs of nearby nodes. A search can move directly
+from one node to another only if an edge exists between them.
+In the query phase, the node with the highest priority in a
+priority queue is selected, and all of its connected neighbors
+are visited. During this process, the priority queue is updated
+whenever a node closer to the query is discovered. The search
+ends when all nodes in the priority queue have been visited.
+Finally, the top-K points in the priority queue are returned.
+Among various graph-based methods, HNSW (Malkov &
+Yashunin, 2020) is a notable one that employs a multi-layer
+hierarchical structure to achieve rapid routing. NSG (Fu et al.,
+2019) optimizes the graph topology to ensure the existence
+of monotonic paths towards a central entry point, thereby
+enhancing search efficiency. Vamana, which was introduced
+along with DiskANN (Subramanya et al., 2019), iteratively
+refines a random graph into a high-performance graph struc-
+ture. Despite their structural differences, these methods
+converge on a similar edge selection criterion, namely Ro-
+bustPrune, which prioritizes directional diversity over sim-
+ple proximity to ensure efficient navigation through high-
+dimensional space.
+In addition to the three graphs mentioned above, many graph-
+based methods have been proposed recently (Lu et al., 2021;
+Gao & Long, 2023; Xie et al., 2025; Wang et al., 2025b). De-
+spite different designs, most of them rely on existing graphs,
+such as HNSW.
+C.1.3. QUANTIZED GRAPH
+As stated in the main body of this paper, QG can achieve high
+performance on some datasets for small values of K, and in
+certain cases can be 4× – 10× faster than HNSW. However,
+such improvement is often not robust and suffers from sev-
+eral limitations: (1) Sensitivity to data distribution. The
+effectiveness of QG relies on the assumption that the rank-
+ing induced by quantized distances is sufficiently close to
+the ranking under the original distances. Unfortunately, this
+assumption often does not hold, especially for many modern
+real-world datasets where semantic embeddings are increas-
+ingly complex. (2) Sensitivity to K. As K increases, the
+performance of QG degrades significantly. When K reaches
+the thousand scale, QG generally has no significant advan-
+tage over HNSW. (3) Very large space cost. To improve
+the accuracy of QG, more bits are required to represent the
+quantized vectors. As a result, the memory consumption of
+QG is typically at least 2× larger than HNSW, compromising
+the use of QG for large datasets.
+C.2. Preliminaries of Routing Test
+C.2.1. RANDOM PROJECTION FOR ANGLE ESTIMATION
+Because the norms can be pre-computed, estimating the ℓ2
+distance is equivalent to estimating the cosine of the angle be-
+tween vectors. In high-dimensional Euclidean spaces, angle
+estimation via random-projection techniques has been exten-
+sively studied, with Locality Sensitive Hashing (LSH) (Indyk
+& Motwani, 1998; Andoni & Indyk, 2005; 2008) being one
+of the most influential approaches. Among various LSH
+methods, SimHash (Charikar, 2002) is a representative one.
+Its core idea is to generate multiple random hyperplanes that
+partition the space into cells, so that vectors falling into the
+same cell are likely to form a small angle with each other.
+Subsequent studies have proposed more refined strategies
+for angular distance estimation. In particular, Andoni et al.
+(2015) introduced Falconn, an LSH method that identifies the
+projection vector yielding the largest or smallest projection
+value for a given data vector and uses the corresponding pro-
+jection index as the hash value. This design leads to substan-
+tially improved search performance compared to SimHash.
+Building on this idea, Pham (2021) further incorporated Con-
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+100
+75
+50
+25
+0
+25
+50
+75
+75
+50
+25
+0
+25
+50
+75
+Data: Image, Query: Text
+Data
+Query
+Figure 11. DataCompDr data (sampled 50,000 vectors) and query
+(1,000 vectors) distributions.
+comitants of Extreme Order Statistics (CEOs) to explicitly
+identify the projection achieving the maximum or minimum
+inner product with the data vector, and to record the associ-
+ated extreme projected value. By exploiting this additional
+information beyond a discrete hash value, a more accurate
+estimation of angular distance can be achieved (Pham & Liu,
+2022).
+C.2.2. ROUTING TEST IN SIMILARITY GRAPHS
+Due to its simplicity and ease of implementation, CEOs has
+been adopted in a variety of similarity search tasks (Pham,
+2021; Andoni et al., 2015; Xu & Pham, 2024). Beyond stan-
+dalone similarity estimation, CEOs has also been leveraged
+to accelerate similarity graphs, which constitute one of the
+most effective structures for ANNS. By swapping the roles of
+the query and data vectors in the original CEOs formulation,
+Lu et al. (2024) developed a space-partitioning technique and
+proposed the PEOs test. This test enables probabilistic com-
+parisons between the objective angle and a fixed threshold,
+and has been integrated into the routing procedures of simi-
+larity graphs. Specifically, for every visited node u, we send
+all the out-neighbors of u to PEOs. Only the exact distances
+between q and the nodes that pass the PEOs test are com-
+puted. In the experiments of (Lu et al., 2024), only around
+25% nodes can pass the PEOs test. As a result, substantial
+improvements in search performance brought by PEOs were
+reported over similarity graphs such as HNSW (Malkov &
+Yashunin, 2020) and NSSG (Fu et al., 2022). More recently,
+Lu et al. (2025) proposed a new test function, KS2, which
+achieves higher test accuracy while maintaining a shorter
+test time compared with PEOs. KS2 employs a projection
+structure similar to that of PEOs, but additionally incorpo-
+rates the reference angle into the testing procedure. Lu et al.
+(2025) further showed that, without introducing additional
+assumptions, the test guarantees a success probability of at
+least 0.5 when deciding whether the exact distance between
+the objective node and q should be evaluated.
+Table 4. PAG parameter settings.
+Dataset
+PAG-Base (efC, M, L)
+PAG-Lite (efC, M, L)
+Modern Datasets
+DBpedia1536
+(1000, 32, 128)
+(100, 32, 128)
+DBpedia3072
+(1000, 32, 64)
+(100, 32, 64)
+WoltFood
+(2000, 128, 64)
+(100, 64, 32)
+DataCompDr
+(1000, 32, 64)
+(100, 32, 64)
+AmazonBooks
+(2000, 64, 64)
+(100, 64, 32)
+MajorTOM
+(1000, 32, 64)
+(100, 16, 64)
+Legacy Datasets
+Word2Vec
+(8000, 64, 32)
+(200, 64, 32)
+GIST
+(1000, 64, 96)
+(64, 32, 96)
+GloVe
+(2000, 64, 32)
+(100, 32, 32)
+ImageNet
+(2000, 64, 16)
+(200, 16, 16)
+SIFT10M
+(1000, 32, 16)
+(100, 16, 16)
+DEEP100M
+(1000, 32, 16)
+(100, 16, 16)
+D. Experimental Setup Details
+D.1. Environment
+All experiments were conducted on a machine equipped with
+an Intel Xeon Platinum 8276L CPU, which supports AVX-
+512 instructions and provides 112 hardware threads. The
+system was configured with 754 GB of DDR4 ECC memory
+and runs Ubuntu 22.04. For indexing, all 112 threads were
+used, while search was performed using a single CPU thread,
+in line with the standard setting in ANN-Benchmarks (Bern-
+hardsson et al., 2015).
+D.2. Baselines
+D.2.1. SELECTION OF BASELINES
+For
+quantization-based
+methods,
+we
+choose
+IVF-
+PQFS (J´egou et al., 2011), ScaNN (Guo et al., 2020a), and
+RabitQ+ (Gao et al., 2025) as baselines, where RabitQ+ (Gao
+et al., 2025) is an improved version of RabitQ (Gao & Long,
+2024). For graph-based methods, we choose HNSW (Malkov
+& Yashunin, 2020), Vamana (Subramanya et al., 2019), and
+SymphonyQG (Gou et al., 2025), where SymphonyQG has
+shown its superiority over LVQ (Aguerrebere et al., 2023)
+and NGT-QG (Yahoo! Japan, 2023). On the other hand,
+HNSW+KS2 (Lu et al., 2025) has been shown to perform
+better than HNSW+PEOs (Lu et al., 2024), and KS2 can be
+approximately viewed as our PRT without TFB, modulo
+threshold-setting differences. Thus, for a fair comparison,
+we re-implement the KS2 component within our framework
+and report results for PAG versus PRT only in our ablation
+study.
+D.2.2. PARAMETER SETTING
+For graph-based methods, we used large graph construction
+parameterstoensuretheirbestsearchperformance. Toensure
+a fair comparison of indexing time, the efC parameter in
+PAG-Base was set to a similar or even larger value than
+HNSW.
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+QPS (Queries/s)
+DBpedia1536
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+DBpedia3072
+80
+90
+95
+98
+Recall (%)
+10
+2
+10
+3
+DataCompDr
+80
+90
+95
+Recall (%)
+10
+2
+10
+3
+AmazonBooks
+L=8
+L=16
+L=32
+L=64
+Figure 12. QPS-recall of PAG-Base under varying space partition size L, K = 100. M and efC values are given in Table 4, PAG-Base.
+DBpedia1536
+DBpedia3072
+DataCompDr
+AmazonBooks
+10
+2
+10
+3
+10
+4
+Indexing Time (s)
+DBpedia1536
+DBpedia3072
+DataCompDr
+AmazonBooks
+10
+0
+10
+1
+10
+2
+Peak Memory Usage (Indexing) (GB)
+DBpedia1536
+DBpedia3072
+DataCompDr
+AmazonBooks
+10
+1
+10
+2
+Peak Memory Usage (Searching) (GB)
+L=8
+L=16
+L=32
+L=64
+Figure 13. Indexing time and peak memory usage of PAG-Base under varying space partition size L. M and efC values are given in Table 4,
+PAG-Base.
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+QPS
+DBpedia1536
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+DBpedia3072
+60
+80
+90
+95
+98
+Recall (%)
+10
+2
+10
+3
+DataCompDr
+60
+80
+90
+95
+Recall (%)
+10
+2
+10
+3
+AmazonBooks
+(16, 200)
+(16, 400)
+(16, 800)
+(32, 200)
+(32, 400)
+(32, 800)
+(64, 200)
+(64, 400)
+(64, 800)
+Figure 14. QPS-recall of PAG-Base under varying (M, efC), K = 100. L values are given in Table 4, PAG-Base.
+DBpedia1536
+DBpedia3072
+DataCompDr
+AmazonBooks
+10
+1
+10
+2
+10
+3
+Indexing Time (s)
+DBpedia1536
+DBpedia3072
+DataCompDr
+AmazonBooks
+10
+0
+10
+1
+10
+2
+Peak Memory Usage (Indexing) (GB)
+DBpedia1536
+DBpedia3072
+DataCompDr
+AmazonBooks
+10
+1
+10
+2
+Peak Memory Usage (Searching) (GB)
+(16, 200)
+(16, 400)
+(16, 800)
+(32, 200)
+(32, 400)
+(32, 800)
+(64, 200)
+(64, 400)
+(64, 800)
+Figure 15. Indexing time and peak memory usage of PAG-Base under varying (M, efC). L values are given in Table 4, PAG-Base.
+(1) HNSW: efC = 1024. M = 32. The only exception
+is MajorTOM, where efC = 512 due to the long indexing
+time on this dataset.
+(2) Vamana: By default, R = 64. L = 1024. α =
+1.2. For better QPS-recall performance on MajorTOM and
+DEEP100M, we choose R = 100 and L = 250 on Major-
+TOM, and R = 110 and L = 200 on DEEP100M.
+(3) SymQG: efC = 1024. There are two options for the
+degree, 32 and 64, resulting in two baselines, SymQG (32)
+and SymQG (64).
+(4) ScaNN: We adopt the recommended settings from its
+GitHub repository (Guo et al., 2020b).
+(5) RabitQ+: Following the same setting as in (Gao et al.,
+2025), b = 8. k = 16, 384 for DataCompDr and 4096 for
+the other datasets.
+(6) IVFPQFS: We test combinations of nlist
+∈
+{1024, 4096, 16384}, k factor
+∈
+{64, 128, 256}, and
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+M candidates ∈[48, 384]. A combination is chosen for
+good QPS-recall performance on each dataset.
+(7) PAG: PAG has two versions, PAG-Base and PAG-Lite.
+Their parameter settings are listed in Table 4. Users can
+adjust the values of efC, M, and L by taking into account
+the indexing time, memory footprint, and search efficiency.
+E. Additional Experimental Results
+E.1. Effect of Space Partition Size L
+From the QPS-recall results in Fig. 12, we can see that, within
+a moderate range, increasing L leads to better search perfor-
+mance, at the cost of a higher memory footprint. As shown in
+Fig. 13 (left), larger L values also results in longer indexing
+time, due to the faster search speed for each inserted vector.
+On the other hand, this causes a moderately larger index size,
+which is reflected in the memory footprint reported in Fig. 13
+(middle and right). As analyzed in Appendix B, L =
+√
+d is
+an appropriate choice.
+E.2. Effect of M and efC
+We vary parameters M and efC and plot the QPS-recall
+in Fig. 14. Larger M and efC value result in faster query
+processing speed, and the advantage is more remarkable
+when users require high recall values. As shown in Fig. 15,
+increasing M and efC generally leads to more indexing time
+as well as larger memory footprint. This is expected, because
+they control the out-degree and the number of nodes visited
+foreachinsertion. TheonlyexceptionisDataCompDr, where
+alargerM doesnotnecessarilymeanaslowerindexingspeed.
+This is because the search speed for each inserted vector is
+accelerated despite a larger out-degree.
+E.3. Evaluation on Additional Legacy Datasets
+We report the results on four additional legacy datasets,
+Word2Vec, ImageNet, GIST, and SIFT10M, which are com-
+monly used for ANNS evaluation. Figs. 16, 17, and 18
+show the QPS-recall performances when K = 10, 100, and
+1000. Fig. 19 shows the indexing time and memory foot-
+print. From the results in figures, we have the following
+observations. PAG-Base maintains its competitiveness in
+QPS-recall performance, as we have witnessed in the ex-
+periments on other datasets. On Word2Vec and ImageNet,
+where graph-based methods and SymQG struggle to achieve
+high recalls, PAG-Base has a significant advantage in QPS.
+On GIST and SIFT10M, SymQG performs better than PAG-
+Base in QPS when K = 10 and K = 100, because the two
+datasets are sparse and well-suited for vector quantization.
+When K = 1000, PAG-Base outperforms SymQG by a large
+margin. For indexing speed, PAG-Base is slower than graph-
+based methods and SymQG on Word2Vec but is faster on the
+other three datasets. PAG-Base also uses less memory than
+SymQG. The QPS-recall performance of PAG-Lite is gener-
+ally better than HNSW and Vamana. Meanwhile, PAG-Lite
+achieves the smallest indexing time, and is competitive in
+memory footprint.
+20
+1100
+1101
+1102
+1103
+1104
+1105
+1106
+1107
+1108
+1109
+1110
+1111
+1112
+1113
+1114
+1115
+1116
+1117
+1118
+1119
+1120
+1121
+1122
+1123
+1124
+1125
+1126
+1127
+1128
+1129
+1130
+1131
+1132
+1133
+1134
+1135
+1136
+1137
+1138
+1139
+1140
+1141
+1142
+1143
+1144
+1145
+1146
+1147
+1148
+1149
+1150
+1151
+1152
+1153
+1154
+Approximate Nearest Neighbor Search for Modern AI: A Projection-Augmented Graph Approach
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+10
+5
+QPS
+Word2Vec
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+2
+10
+3
+10
+4
+GIST
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+2
+10
+3
+10
+4
+ImageNet
+40
+60
+80
+90
+95
+98
+99
+Recall (%)
+10
+3
+10
+4
+SIFT10M
+PAG-Base
+PAG-Lite
+HNSW
+IVFPQFS
+RaBitQ+
+ScaNN
+SymQG (32)
+SymQG (64)
+Vamana
+Figure 16. QPS-recall on additional legacy datasets, K = 10.
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+QPS
+Word2Vec
+40 60
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+10
+4
+GIST
+0
+4060
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+ImageNet
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+2
+10
+3
+10
+4
+SIFT10M
+PAG-Base
+PAG-Lite
+HNSW
+IVFPQFS
+RaBitQ+
+ScaNN
+SymQG (32)
+SymQG (64)
+Vamana
+Figure 17. QPS-recall on additional legacy datasets, K = 100.
+0
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+QPS
+Word2Vec
+0
+4060
+80
+90
+95
+98
+99
+99.5
+99.9
+Recall (%)
+10
+2
+10
+3
+GIST
+0
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+1
+10
+2
+10
+3
+10
+4
+ImageNet
+40
+60
+80
+90
+95
+98
+99
+99.5
+Recall (%)
+10
+2
+10
+3
+SIFT10M
+PAG-Base
+PAG-Lite
+HNSW
+IVFPQFS
+RaBitQ+
+ScaNN
+SymQG (32)
+SymQG (64)
+Vamana
+Figure 18. QPS-recall on additional legacy datasets, K = 1000.
+Word2Vec
+GIST
+ImageNet
+SIFT10M
+10
+1
+10
+2
+10
+3
+Indexing Time (s)
+Word2Vec
+GIST
+ImageNet
+SIFT10M
+10
+0
+10
+1
+10
+2
+Peak Memory Usage (Indexing) (GB)
+Word2Vec
+GIST
+ImageNet
+SIFT10M
+10
+0
+10
+1
+Peak Memory Usage (Searching) (GB)
+PAG-Base
+PAG-Lite
+HNSW
+IVFPQFS
+RaBitQ+
+ScaNN
+SymQG (32)
+SymQG (64)
+Vamana
+Figure 19. Indexing time and peak memory usage on additional legacy datasets.
+21
