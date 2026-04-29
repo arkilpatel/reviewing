@@ -1,0 +1,20 @@
+### Claimed Contributions
+1. **Identifying the true source of WVI's advantage:** The paper claims that the previously observed theoretical and empirical superiority of Wasserstein Variational Inference (WVI) over Black-Box Variational Inference (BBVI) for Gaussian families does not stem from the use of measure-space geometry (Bures-Wasserstein space). Instead, it stems from the specific gradient estimator used: WVI conventionally uses Price's gradient (which utilizes second-order/Hessian information), whereas BBVI conventionally uses the reparameterization gradient (first-order).
+2. **Unified and tightened theoretical complexity:** The authors provide identical, state-of-the-art non-asymptotic iteration complexity bounds for both WVI and BBVI when utilizing Price's gradient estimator. This entails tightening the previous best bound for WVI (Diao et al., 2023) by a factor of the condition number $\kappa$ and establishing a new bound for BBVI with Price's gradient (improving upon previous BBVI bounds by Domke et al., 2023 and Kim et al., 2023).
+3. **Empirical validation:** The paper demonstrates that applying Price's gradient to BBVI makes its performance match WVI, and applying the standard reparameterization gradient to WVI degrades its performance, confirming that the estimator is the true performance driver.
+
+### Prior Work Assessment
+- **Connection between WVI and BBVI:** Prior works by Yi & Liu (2023) and Hoffman & Ma (2020) have already established deep connections and equivalences between WVI and BBVI in continuous-time gradient flows. The delta here is extending this understanding to the practical, discrete-time stochastic optimization setting, specifically identifying the variance of the stochastic gradient estimator as the missing differentiator that caused discrepancies in previous literature.
+- **Gradient estimators:** The use of Hessian-based estimators (Price's theorem) and the standard reparameterization gradient are well-known in the literature (Rezende et al., 2014; Opper & Archambeau, 2009). The novelty lies not in inventing the estimators, but in their rigorous comparative theoretical analysis within the context of these two specific VI frameworks.
+- **Complexity bounds:** For WVI, Diao et al. (2023) provided a complexity bound. This paper improves it by bounding the expected trace of the Hessian via the Bregman divergence rather than the squared Wasserstein distance. This is a standard but non-trivial trick in optimization literature that effectively saves a factor of $\kappa$. For BBVI, the authors extend existing Lyapunov analysis frameworks to Price's gradient to exactly match the newly tightened WVI bound.
+
+### Novelty Verdict
+Substantial
+
+### Justification
+While the technical proofs heavily build upon standard optimization techniques and the continuous-time equivalence of WVI and BBVI was already known, the paper provides a **Substantial** conceptual insight for the variational inference community. It rigorously debunks the prevailing assumption that the Bures-Wasserstein geometry inherently provides better convergence guarantees and empirical performance than Euclidean parameter-space optimization for Gaussians. By isolating the gradient estimator as the confounding variable and explicitly matching the state-of-the-art theoretical bounds for both methods, the paper resolves a significant gap in the literature. The contribution is a highly valuable "insight novelty" that corrects the field's understanding of *why* certain methods work better, backed by solid discrete-time theoretical evidence. 
+
+### Missing References
+The related work section is appropriately comprehensive. The authors correctly cite the continuous-time equivalences (Yi & Liu, 2023; Hoffman & Ma, 2020) and the original analyses of the respective algorithms (Diao et al., 2023; Domke et al., 2023). No significant missing references were identified.
+
+Score: 7
