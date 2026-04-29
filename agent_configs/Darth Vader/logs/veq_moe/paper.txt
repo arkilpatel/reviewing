@@ -1,0 +1,1651 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+Anonymous Authors1
+Abstract
+Mixture-of-Experts(MoE) Vision-Language Mod-
+els (VLMs) offer remarkable performance but in-
+cur prohibitive memory and computational costs,
+making compression essential. Post-Training
+Quantization (PTQ) is an effective training-free
+technique to address the massive memory and
+computation overhead. Existing quantization
+paradigms fall short as they are oblivious to two
+critical forms of heterogeneity: the inherent dis-
+crepancy between vision and language tokens,
+and the non-uniform contribution of different ex-
+perts. To bridge this gap, we propose Visual
+Expert Quantization (VEQ), a dual-aware quan-
+tization framework designed to simultaneously
+accommodate cross-modal differences and het-
+erogeneity between experts. Specifically, VEQ
+incorporates 1)Modality-expert-aware Quanti-
+zation, which utilizes expert activation frequency
+to prioritize error minimization for pivotal ex-
+perts, and 2)Modality-affinity-aware Quanti-
+zation, which constructs an enhanced Hessian
+matrix by integrating token-expert affinity with
+modality information to guide the calibration pro-
+cess. Extensive experiments across diverse bench-
+marks verify that VEQ consistently outperforms
+state-of-the-art baselines. Specifically, under the
+W3A16 configuration, our method achieves signif-
+icant average accuracy gains of 2.04% on Kimi-
+VL and 3.09% on Qwen3-VL compared to the
+previous SOTA quantization methods, demon-
+strating superior robustness across various mul-
+timodal tasks. Our code will be available at
+https://github.com/guangshuoqin/VEQ.
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+66.1
+71.171.171.973.0
+73.4
+mmbench_en
+69.1
+70.0
+70.9
+71.6
+75.5
+75.7
+ai2d
+58.9
+59.7
+61.5
+62.3
+64.1
+64.5
+infovqa
+55.6
+58.558.9
+60.961.4
+63.1
+vizwiz_vqa
+79.1
+81.8
+81.882.9
+83.9
+84.8
+scienceqa
+37.0
+39.8
+40.3
+41.8
+42.6
+44.6
+mmmu
+45.4
+46.1
+48.0
+49.9
+50.4
+51.5
+mme_realworld
+RTN
+AWQ
+MBQ
+VEQ-ME (ours)
+GPTQ
+VEQ-MA (ours)
+Quantization
+Method
+Comparison
+Figure 1.Zero-shot performance of Kimi-VL-Instruct under 3-bit
+weight quantization (W3A16). Our methods consistently outper-
+form established baselines, demonstrating superior robustness.
+1. Introduction
+In recent years, Vision-Language Models (VLMs) have
+demonstrated unprecedented proficiency across a broad
+spectrum of multimodal tasks, ranging from fundamental
+visual question answering and image captioning to complex
+visual reasoning (Radford et al., 2021; Alayrac et al., 2022;
+Li et al., 2023). By seamlessly aligning visual perception
+with linguistic semantics, these models effectively bridge
+the cross-modal divide, empowering intelligent agents to
+perceive, reason, and interact with the physical environment
+with human-level versatility (Lu et al., 2019; Hurst et al.,
+2024). With the increasing demand for robust multimodal
+understanding, VLMs have become increasingly important
+for practical applications.
+To further scale up model capacity while maintaining com-
+putational efficiency, the Mixture-of-Experts (MoE) archi-
+tecture has been widely adopted in state-of-the-art VLMs.
+Unlike dense models that activate all parameters for ev-
+ery token, MoE models utilize a sparse routing mechanism
+to activate only a subset of experts, effectively reducing
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+1
+3
+5
+7
+9
+11
+13
+15
+17
+19
+21
+23
+25
+Layer Index0
+10
+20
+30
+40
+50
+60
+Expert Index
+0.0
+0.2
+0.4
+0.6
+0.8
+Normalized Activation Count
+(a)Text token.
+1
+3
+5
+7
+9
+11
+13
+15
+17
+19
+21
+23
+25
+Layer Index0
+10
+20
+30
+40
+50
+60
+Expert Index
+0.0
+0.2
+0.4
+0.6
+0.8
+Normalized Activation Count
+ (b)Vision token.
+Figure 2.Comparative analysis of activation characteristics across
+different modalities. Peaks represent high activation frequency.
+inference costs while preserving a vast parameter space (Fe-
+dus et al., 2022). Prominent open-source VLMs, such as
+DeepSeek-VL2 (Wu et al., 2024), Kimi-VL (Team et al.,
+2025), Qwen3-VL (Bai et al., 2025), and ERNIE-4.5-VL
+(Baidu-ERNIE-Team, 2025), have successfully leveraged
+this architecture to achieve superior performance with man-
+ageable resource consumption. Despite their efficiency ad-
+vantages over dense counterparts, MoE VLMs still incur
+significant memory footprints and latency during inference,
+necessitating effective model compression techniques. Post-
+Training Quantization (PTQ) has emerged as a practical so-
+lution. Mainstream weight-only quantization methods, such
+as AWQ (Lin et al., 2024) and GPTQ (Frantar et al., 2022),
+primarily focus on minimizing weight reconstruction error
+to preserve model performance. Meanwhile, activation-
+aware methods like SmoothQuant (Xiao et al., 2024) and
+SpinQuant (Liu et al., 2024b) address the challenge of acti-
+vation outliers by smoothing or rotating the feature space.
+More recently, MBQ (Li et al., 2025) introduced a novel per-
+spective by exploring the sensitivity of multimodal tokens
+to further minimize quantization error.
+However, directly applying these conventional quantization
+methods to MoE VLMs proves suboptimal. Existing ap-
+proaches typically treat the model as a monolithic dense
+structure, thereby neglecting the inherent structural spar-
+sity of MoE architectures. Specifically, they fail to account
+for the varying importance of different experts. As illus-
+trated in Figure 2, a small subset of hot experts is accessed
+more frequently and dominates the output, while other ex-
+perts remain dormant (Fedus et al., 2022; Chi et al., 2022).
+Furthermore, current methods often neglect the distinct sta-
+tistical distribution heterogeneity between vision and text
+tokens (Liang et al., 2022). Applying a unified quantization
+strategy across these modalities leads to significant perfor-
+mance deterioration, as the sensitivity to quantization noise
+varies drastically between continuous visual embeddings
+and discrete textual representations.
+To address these challenges, we propose Visual Expert
+Quantization (VEQ), a novel framework tailored for MoE
+VLMs. We conduct comprehensive evaluations on leading
+MoE architectures, including Kimi-VL (Team et al., 2025)
+and Qwen3-VL (Bai et al., 2025), across challenging mul-
+timodal benchmarks such as MMMU (Yue et al., 2024),
+MME-RealWorld (Zhang et al., 2024b), MMBench (Liu
+et al., 2024a), and InfoVQA (Mathew et al., 2022). Empiri-
+cal results demonstrate that VEQ consistently outperforms
+established baselines (e.g., AWQ (Lin et al., 2024), GPTQ
+(Frantar et al., 2022), MBQ (Li et al., 2025)), establishing
+a new state-of-the-art for quantized MoE VLMs. Notably,
+VEQ exhibits superior robustness in low-bit settings. To the
+best of our knowledge, this represents a pioneering effort in
+compressing large-scale MoE VLMs.
+Our main contributions are summarized as follows:
+• Pioneering Framework for MoE VLMs:To the best
+of our knowledge, this work represents the first attempt
+to simultaneously address the dual challenges of multi-
+modal heterogeneity and the unique structural proper-
+ties of Mixture-of-Experts (MoE) based architectures
+in the context of quantization.
+• Modality-Expert-Aware Quantization:We propose
+a novel strategy that assigns importance scores to ex-
+perts based on the routing frequency of visual and
+textual tokens. By explicitly modeling these routing
+patterns, we utilize the scores to effectively minimize
+quantization error in critical experts.
+• Modality-Affinity-Aware Quantization:We intro-
+duce a refinement method that leverages router affinity
+logits and input token modalities to re-weight the Hes-
+sian matrix. This approach incorporates semantic affin-
+ity into the optimization process, further enhancing the
+precision of the quantized model.
+2. Related Work
+2.1. VLM Quantization
+Post-Training Quantization (PTQ) for Vision-Language
+Models (VLMs) remains a challenging and relatively under-
+explored area, primarily due to the distribution heterogene-
+ity between vision and text modalities. VLMQ (Xue et al.,
+2025) addresses visual token redundancy by proposing an
+importance-aware objective. It generates an enhanced Hes-
+sian matrix incorporating token-level importance factors via
+a lightweight block-wise backward pass. Q-VLM (Wang
+et al., 2024) utilizes activation entropy as a proxy to iden-
+tify cross-layer dependencies for efficient block partitioning.
+It further optimizes the visual encoder to disentangle these
+dependencies, thereby reducing search overhead while main-
+taining accuracy. MBQ (Li et al., 2025) accounts for the
+distinct sensitivity levels of vision and language tokens by
+incorporating gradient-based sensitivity indicators into the
+calibration process, aiming to balance reconstruction loss
+across modalities. Bi-VLM (Wang et al., 2025) implements
+a saliency-aware hybrid quantization algorithm that parti-
+tions weights non-uniformly based on Gaussian quantiles.
+This approach assigns higher precision to salient outliers
+while binarizing the remaining parameters. MQuant (Yu
+et al., 2025) introduces modality-specific static quantization
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+VisionEncoder…200+  tokens
+Whatisinthispicture?
+6  tokens
+AttnMoE
+Router
+123N-1
+N
+… …
+ℒ=#!"#
+$𝑆!⋅||𝐖!𝐗!−*𝐖!𝐗!||%&.Weight QuantizerQuantization Params
+Type	equation	here.V
+123N-1
+N
+… …K=4
+K=4
+N… Enhanced HessianWeight QuantizerQuantization Params
+…
+…
+Router
+VEQ-ME
+VEQ-MATextTokenVisionTokenAffinity Score
+𝑆,
+𝑆#=7.8𝑆&=2.4
+𝑆'=5.6
+𝑆$=9.8𝑆$(#=1.3
+[]**
+*…
+Text Prompt
+Transformer Block
+1Expert
+…
+…
+Hidden States
+N× N×
+Input Embeds
+Transformer Block
+C
+Figure 3.Overview of the proposed VEQ framework. Our method consists of two core components: (1)VEQ-ME, which dynamically
+assigns importance scores Si to experts based on their activation frequencies, thereby prioritizing error minimization for pivotal experts in
+the reconstruction loss; and (2)VEQ-MA, which constructs an enhanced Hessian matrix by integrating token-expert affinity scores and
+modality sensitivity, enabling the calibration process to adapt to the varying sensitivities of multi-modal tokens.
+and an attention-invariant switching mechanism to address
+distribution disparities. Additionally, it employs Rotation
+Magnitude Suppression (RMS) to mitigate outliers induced
+by online Hadamard transformations.
+2.2. MoE LLM Quantization
+PTQ also presents significant difficulties for Mixture-of-
+Experts (MoE) architectures, stemming from intrinsic expert
+sparsity and the complex affinity between tokens and experts.
+Several recent studies have aimed to address these issues.
+MoEQuant (Hu et al., 2025) tackles inter- and intra-expert
+imbalances by employing an expert-balanced self-sampling
+method for calibration. It further utilizes an affinity-guided
+quantization strategy that weights errors according to token-
+expert correlations. MoQa (Zheng et al., 2025) implements
+an expert-level mixed-precision base quantization via multi-
+stage data-model distribution analysis, complemented by
+a channel-level dynamic adjustment mechanism to adapt
+to novel data distributions. MoQE (Zhang et al., 2025)
+leverages the MoE architecture for inference acceleration
+by treating multiple quantization variants of a single model
+as experts, using a lightweight router to dynamically assign
+input data to the optimal quantization expert. MxMoE (Du-
+anmu et al., 2025) proposes an accuracy-performance co-
+design framework that allocates bit-widths at the granularity
+of linear blocks. This is achieved by analyzing parame-
+ter sensitivity and expert activation frequencies to optimize
+mixed-precision configurations for quantization.
+3. Method
+In this section, we proposeVisual Expert Quantization
+(VEQ), a novel post-training quantization framework tai-
+lored for MoE VLMs. We begin by analyzing the intrinsic
+heterogeneity of MoE VLM in Section 3.1. Building on
+these observations, we formulate a modality-aware expert
+importance metric in Section 3.2. Finally, we introduce an
+affinity-aware quantization algorithm to minimize recon-
+struction error in Section 3.3.
+3.1. Heterogeneity in MoE VLM Quantization
+3.1.1. MODALITYHETEROGENEITY
+Distinct modalities exhibit unique routing patterns and sensi-
+tivity levels within MoE layers. To quantify this heterogene-
+ity, we utilize the gradient of the Supervised Fine-Tuning
+(SFT) loss as a metric to measure the error sensitivity of
+vision and text tokens.
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+0 20 40 60 80 100 120
+Sample Index
+0
+10
+20
+30
+40
+50
+60
+70
+Gradient Ratio ( || text||
+|| vision|| )
+Gradient Ratio (T ext / Vision)
+Equal Importance (y=1)
+Mean Ratio (22.4x)
+Figure 4.Analysis of gradient magnitude across 128 samples
+from the COCO (Lin et al., 2014) dataset. The text tokens exhibit
+significantly higher gradient norms compared to vision tokens,
+with an average ratio of 22.4.
+Vision tokens, characterized by spatial redundancy, gen-
+erally demonstrate lower gradient magnitudes, implying a
+lower sensitivity regarding their impact on inference results.
+In contrast, information-dense text tokens dominate the out-
+put distribution. As illustrated in Figure 4, Our analysis
+of 128 samples from the COCO (Lin et al., 2014) dataset
+reveals that the average gradient magnitude of text tokens ex-
+ceeds that of visual tokens by a factor of22.4. This disparity
+is particularly pronounced in samples with extreme modal-
+ity imbalance (e.g., containing only 5 text tokens against
+over 200 vision tokens), where the gradient ratio spikes
+drastically. This indicates that despite their scarcity, text
+tokens exert a disproportionately significant influence on the
+final generation results. Further inspection of a specific case
+study (Sample 88, detailed in Figure 5) corroborates this ob-
+servation, showing an average text-to-vision gradient ratio of
+15. Such a gradient gap across diverse scenarios highlights
+a fundamental sensitivity imbalance between modalities.
+This discrepancy implies that employing a uniform quantiza-
+tion strategy across all experts ignores modality-specific sen-
+sitivities. Treating the high-impact text tokens with the same
+granularity as redundant vision tokens potentially compro-
+mises performance, especially in cross-modal tasks where
+precise language generation is paramount.
+3.1.2. EXPERTS’ HETEROGENEITY
+To understand the internal mechanism of cross-modal pro-
+cessing, we investigate the routing behaviors within the
+MoE layers. Our analysis focuses on the activation patterns
+and expert preferences across different modalities, revealing
+three key observations regarding expert affinity.
+Intrinsic Sparsity and Load Imbalance.First, we analyze
+the inherent sparsity of expert activation. Regardless of the
+calibration dataset’s composition, a persistent load imbal-
+ance is observed across the expert population. Notably, even
+when the calibration batch size is increased to 64 (approx-
+imately 30,000 tokens), certain experts receive zero input
+tokens. This phenomenon indicates that the non-uniform
+distribution of expert utilization is an intrinsic property of
+the pre-trained weights rather than an artifact of data sam-
+pling. Consequently, given that a select subset of experts
+dominates the model’s output, applying a uniform metric to
+measure quantization error across all experts is suboptimal.
+Heterogeneity in Token Distribution.Second, the analysis
+of routing paths reveals a nuanced functional division of
+labor, characterized by the coexistence of generalist and
+modality-specific experts. While a subset of experts acts
+as universal processors activated by both visual and textual
+inputs, others exhibit distinct routing preferences.
+Specifically, as illustrated in Figure 6(e), we observe the
+spontaneous emergence of specialist clusters: some are
+dedicated to handling spatially redundant visual features,
+whereas others focus exclusively on the semantic density
+of textual information. This distribution confirms that the
+model allocates capacity both for cross-modal alignment
+and for modality-specific processing. The distinct activation
+frequencies and magnitudes across these clusters underscore
+the uneven contribution of different experts. Consequently,
+it is imperative to assign quantization error weights accord-
+ing to these modality-dependent activation characteristics,
+ensuring that the optimization strategy adapts to the specific
+functional role of each expert.
+Routing Bias and Decisive Experts.Finally, the router
+outputs demonstrate significant bias, where a small fraction
+of experts plays a decisive role in the model’s output. The
+routing probability distribution is highly skewed; for any
+given token, the router assigns high confidence scores to
+only a few experts (the top-k selection), while the affinity
+for the remaining experts approaches zero. As indicated by
+the gradient magnitude analysis, these high-affinity experts
+dominate the inference outcome, whereas the influence of
+the non-selected experts is negligible. This implies that
+preserving the precision of these decisive experts is critical
+for maintaining model performance.
+3.2. Modality-Expert-Aware Quantization
+Building upon the analysis in Section 3.1, we have estab-
+lished that experts within MoE layers exhibit significant
+heterogeneity in both activation frequency and modality-
+specific sensitivity.Representative PTQ frameworks, such as
+AWQ (Lin et al., 2024), typically determine optimal quan-
+tization parameters via a grid search aimed at minimizing
+generic reconstruction loss. However, such a search process
+treats all experts indiscriminately, failing to account for their
+varying importance during inference.
+To address this, we propose a Modality-Expert-Aware Quan-
+tization method that incorporates expert importance into the
+error minimization objective.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+0 100 200 300 400 500
+Token Index
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+3.5
+4.0
+Gradient Norm (|| w||2)
+×10 4
+×15.0
+Vision T okens
+T ext T okens
+Vis Mean: 3.89e-06
+T ext Mean: 5.86e-05
+Figure 5.Detailed gradient analysis of a representative sample
+(Sample 88). The visualization highlights that the text-to-vision
+gradient ratio reaches approximately 15, confirming the dominance
+of textual information in the inference process.
+Quantifying Expert Importance.First, we define an im-
+portance scoreS i for thei-th expert as a balanced measure
+of its contribution across modalities. Due to the inherent
+modality imbalance in MoE VLMs, where vision tokens
+significantly outnumber text tokens, a raw frequency count
+would disproportionately favor vision-dominant experts.
+Therefore, we introduce a comprehensive normalization
+mechanism to better align the magnitude of contributions
+from different modalities. The importance score Si is for-
+mulated as a weighted summation:
+Si =γ·N text
+i +β·N vis
+i ,(1)
+where N text
+i and N vis
+i denote the number of text and visual to-
+kens routed to the i-th expert, respectively. Let Ttext and Tvis
+represent the total number of text and vision tokens in the
+calibration set, respectively. The coefficient β=T text/Tvis
+serves as aquantity normalization factor, scaling down
+the frequent visual activations to be comparable with tex-
+tual counts. The coefficient γ=∥∇ text∥/∥∇vis∥ acts as
+aquality sensitivity factor, reflecting the higher gradient
+impact of text tokens. This formulation ensures that the
+resulting score is driven by the semantic significance of
+the tokens rather than their raw frequency, protecting the
+decisive experts responsible for logical reasoning.
+Importance-Aware Optimization Objective.As men-
+tioned above, established PTQ strategies like AWQ (Lin
+et al., 2024) optimize quantization scales through grid-based
+search, treating the MoE layer as a monolithic entity. These
+methods apply a uniform optimization target across the
+model. Specifically within the MoE module, this search pro-
+cess is equivalent to minimizing an unweighted summation
+of reconstruction errors across all experts:
+LStandard =
+MX
+i=1
+∥WiXi − ˆWiXi∥2
+F ,(2)
+where Wi and ˆWi denote the full-precision and quantized
+weights of the i-th expert, respectively, Xi represents the
+input tokens routed to that expert, andM is the total number
+of experts. This formulation treats rarely used experts and
+critical experts indistinguishably, failing to account for their
+varying contributions to the model’s final inference results.
+In contrast, our proposed method redefines the optimization
+objective by introducing the importance score Si (defined
+in Eq. 1) as a weighting factor. The weighted quantization
+error is expressed as the following equation:
+LWeighted =
+MX
+i=1
+Si · ∥WiXi − ˆWiXi∥2
+F .(3)
+By minimizing LWeighted during the search for optimal quan-
+tization parameters, quantization noise is preferentially sup-
+pressed in experts that exhibit high activation frequencies
+and high modality sensitivities. This ensures that the quanti-
+zation parameters are calibrated to preserve the functionality
+of the most influential experts, thereby accurately reflect-
+ing the true impact of quantization on the model’s overall
+performance on downstream tasks.
+3.3. Modality-Affinity-Aware Quantization
+Some other representative post-training quantization frame-
+works, such as GPTQ (Frantar et al., 2022), typically rely
+on second-order information to determine the optimal quan-
+tization parameters. Specifically, they utilize the Hessian
+matrix H, approximations of which are computed via input
+calibration data X as H= 2XX ⊤. This formulation im-
+plicitly assumes that all input tokens contribute equally to
+the reconstruction error, treating the optimization landscape
+as uniform across the sequence dimension.
+Affinity and Modality Imbalance.However, as analyzed
+in Section 3.1, this assumption of uniformity is not suitable
+for MoE VLMs. The input tokens exhibit significant vari-
+ance in their interaction with experts: (1) Routing Diversity:
+Tokens possess varying levels of affinity with specific ex-
+perts, determined by the router’s output probabilities; (2)
+Modality Sensitivity: Text tokens, despite being fewer in
+number, carry higher gradient densities and information
+value compared to spatially redundant vision tokens.
+Directly applying a uniform Hessian calculation to the MoE
+layers fails to account for these nuances, potentially causing
+the neglection of critical semantic information.
+Enhanced Hessian Matrix.To address this, we propose
+an effective Modality-Affinity-Aware formulation for the
+Hessian matrix. We introduce a token-wise importance
+weighting mechanism. Let X∈R d×N denote the input
+tokens specifically routed to the current expert, where N is
+the number of such tokens. We reconstruct the Hessian ma-
+trix ˜H by scaling the contribution of each token according
+to its modality-specific affinity:
+˜H= (X·
+√
+C)(X·
+√
+C)⊤ =XCX ⊤,(4)
+where C∈R N×N is a diagonal matrix representing the
+importance weight for each token. For the j-th token xj, the
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+0 5 10 15 20 25
+Layer Index
+0102030405060
+Expert Index
+MoE Expert Activation Count Map
+0
+2000
+4000
+6000
+8000
+10000
+12000
+14000
+Activation Count
+(a)Vision Act (Set A)
+0 5 10 15 20 25
+Layer Index
+0102030405060
+Expert Index
+MoE Expert Activation Count Map
+0
+2000
+4000
+6000
+8000
+10000
+12000
+14000
+Activation Count
+ (b)Vision Act (Set B)
+0 5 10 15 20 25
+Layer Index
+0102030405060
+Expert Index
+MoE Expert Activation Count Map
+0
+500
+1000
+1500
+2000
+2500
+3000
+Activation Count
+(c)Text Act (Set A)
+0 5 10 15 20 25
+Layer Index
+0102030405060
+Expert Index
+MoE Expert Activation Count Map
+0
+500
+1000
+1500
+2000
+Activation Count
+ (d)Text Act (Set B)
+0 10 20 30 40 50 60
+Expert Index (Original Order)
+0.00
+0.02
+0.04
+0.06
+0.08Normalized Frequency
+Layer 13: Expert Activation by Index
+Vision T oken
+T ext T oken (e)Experts’ Activation Distribution of Layers 13 under Set A
+Figure 6.Visualization of expert affinity patterns. Subplots (a)-(d) illustrate the distinct activation distributions for vision and text tokens
+across different input ranges of theCOCO dataset(Lin et al., 2014), highlighting how expert activation varies with different input
+samples while maintaining sparsity and modality-specific clustering. Subplot (e) visualizes the activation characteristics of the 13th layer
+in Kimi-VL-Instruct (Team et al., 2025) under Set A, highlighting the intrinsic load imbalance.
+corresponding diagonal elementc j is defined as:
+cj =p j ·α j,whereα j =
+(
+γ x j is text token,
+1x j is vision token. (5)
+Here, pj denotes the affinity between token j and the target
+expert. The term γ represents the gradient scaling factor,
+formally defined as the ratio of gradient magnitudes between
+textual and visual modalities:γ=∥∇ text∥/∥∇vis∥.
+By incorporating C into the Hessian computation, the quan-
+tization objective is dynamically re-weighted. Tokens with
+high router affinity and high modality sensitivity exert a
+larger influence on the structure of ˜H. Consequently, when
+the Inverse Hessian is applied to update the weights, the
+algorithm prioritizes preserving the accuracy of these high-
+impact tokens, thereby maximizing the model’s perfor-
+mance retention under low-bit settings.
+4. Experiments
+4.1. Experiment setting
+We conduct comprehensive experiments to evaluate the effi-
+cacy of our proposed quantization method.
+Model and Benchmarks.We choose to utilize Kimi-
+VL-Instruct (Team et al., 2025) and Qwen3-VL-30B-A3B-
+Instruct (Bai et al., 2025) for experiments. To ensure a robust
+assessment of multimodal capabilities, we employ a diverse
+set of widely recognized benchmarks, including MMMU
+(Yue et al., 2024) and MMBench (Liu et al., 2024a) for
+multi-discipline reasoning, AI2D (Kembhavi et al., 2016)
+for diagram understanding, InfoVQA (Mathew et al., 2022)
+and TextVQA (Singh et al., 2019) for OCR-related visual
+question answering, as well as MME-RealWorld (Zhang
+et al., 2024b), RealWorldQA (Team, 2024), ScienceQA (Lu
+et al., 2022) and VizWiz-VQA (Gurari et al., 2019) to cover
+real-world and scientific scenarios.
+Baselines.We compare our method against the full-
+precision version and several established quantization base-
+lines to demonstrate its superiority: 1) BF16: The original
+model in Bfloat16 precision, serving as the performance
+upper bound; 2) RTN (Round-to-Nearest): A naive baseline
+that quantizes weights by rounding them to the nearest grid
+point; 3) Advanced PTQ Frameworks: We include GPTQ
+(Frantar et al., 2022) and AWQ (Lin et al., 2024), which are
+widely adopted as standard baselines for LLM compression,
+alongside MBQ (Li et al., 2025), the current SOTA method
+specifically tailored for VLM quantization.
+Implementation Details.Our evaluation pipeline is built
+upon the open-source lmms-eval (Zhang et al., 2024a) frame-
+work, a standardized toolkit designed for the rigorous eval-
+uation of Large Multimodal Models. For the inference
+backend, we employ SGLang (Zheng et al., 2024), a high-
+throughput serving engine optimized for MoE architectures
+to make inference efficient. During evaluation process,
+model outputs are generated and then compared against
+the standard ground-truth answers for each benchmark to
+compute the final accuracy scores.
+4.2. Main Results
+We conduct a comprehensive evaluation of our proposed
+method against state-of-the-art baselines on the Kimi-
+VL-Instruct (Team et al., 2025) and Qwen3-VL-30B-
+A3B-Instruct (Bai et al., 2025) models. For clarity in
+the following analysis, we denote the implementation of
+Modality-Expert-Aware Quantizationbased on AWQ
+(Lin et al., 2024) as VEQ-ME, while the version incorpo-
+ratingModality-Affinity-Aware Quantizationbased on
+GPTQ is referred to as VEQ-MA. To fully assess the ro-
+bustness of quantization, we perform experiments under
+both 4-bit (W4) and 3-bit (W3) weight quantization settings.
+The detailed comparison results across seven multimodal
+benchmarks are presented in Table 1.
+Performance under W4 Setting.As shown in the upper
+section of Table 1, most methods maintain robust perfor-
+mance under the 4-bit quantization setting. Specifically, for
+the Kimi-VL-Instruct model, established baselines such as
+AWQ (Lin et al., 2024), MBQ (Li et al., 2025) and GPTQ
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+Table 1.Main comparison results of Kimi-VL-Instruct and Qwen3-VL-30B-A3B-Instruct under 3-bit (W3) and 4-bit (W4) weight
+only quantization. We report the zero-shot accuracy (%) for all tasks. The best results for each bit-width are highlighted inbold. The
+improvement of VEQ-MA over the best baseline method is marked in parentheses. Abbreviations: InfoV: InfoVQA, TextV: TextVQA,
+RWQA: RealWorldQA, SciQA: ScienceQA, Viz: VizWiz, MMB: MMBench, MME-R: MME-RealWorld.
+BenchmarksModel Bit Method MMMU AI2D InfoV TextV RWQA SciQA Viz MMB MME-R Avg.
+Kimi-VL-
+Instruct
+BF16- 51.11 83.65 83.38 85.93 66.41 92.10 69.00 82.73 58.22 74.73
+W3
+RTN 37.00 69.14 59.68 74.58 56.47 79.06 58.51 66.06 46.13 60.74
+AWQ 41.78 70.05 61.49 74.04 58.17 81.84 61.37 71.13 50.44 63.37
+MBQ 39.76 70.89 58.86 74.35 58.74 81.82 60.87 71.13 49.91 62.93
+GPTQ 40.33 75.49 64.14 64.30 58.82 83.87 55.61 73.02 45.41 62.33
+VEQ-ME (ours) 44.56 71.57 62.33 73.36 58.95 82.93 58.90 71.91 51.46 64.00
+VEQ-MA (ours) 42.56 75.65 64.48 78.30 58.30 84.85 63.10 73.42 48.03 65.41(+2.04)
+W4
+RTN 48.44 82.38 80.16 84.6066.8090.8369.1780.67 52.48 72.84
+AWQ 49.00 81.74 79.01 83.37 66.27 90.92 69.07 80.58 53.70 72.63
+MBQ 48.89 81.70 78.49 83.18 64.58 90.29 69.03 80.93 55.08 72.46
+GPTQ 50.00 82.32 80.04 84.63 64.84 91.39 68.86 81.44 53.14 72.96
+VEQ-ME (ours) 49.22 81.41 79.75 83.69 66.36 91.06 69.17 80.84 54.20 72.86
+VEQ-MA (ours) 50.30 82.55 80.37 84.71 66.41 91.56 68.91 81.67 55.61 73.57(+0.61)
+Qwen3-VL-
+30B-A3B-
+Instruct
+BF16- 73.67 86.27 81.43 81.31 65.49 93.52 83.27 85.91 59.92 78.98
+W3
+RTN 57.33 77.10 44.96 68.64 43.01 89.08 64.07 78.6045.7363.17
+AWQ 58.89 73.61 44.62 67.93 45.36 88.40 61.75 77.06 42.38 62.22
+MBQ 50.56 71.44 40.15 64.23 53.82 87.31 59.48 76.46 45.27 60.97
+GPTQ 64.89 74.1147.2771.82 54.25 88.23 63.39 69.39 44.08 64.16
+VEQ-ME (ours) 60.56 73.38 44.95 69.91 53.73 88.40 62.47 77.75 44.24 63.93
+VEQ-MA (ours) 65.89 79.15 47.14 72.74 54.77 89.55 69.46 82.30 43.25 67.14(+3.09)
+W4
+RTN 63.1183.3362.62 79.77 45.23 91.51 71.08 85.13 57.31 70.89
+AWQ 65.20 81.22 58.32 77.40 63.14 91.06 69.73 85.22 57.31 72.07
+MBQ 69.67 81.41 59.36 78.99 64.31 91.51 70.78 83.68 56.10 72.87
+GPTQ72.6782.93 62.54 80.18 53.4693.2371.32 84.53 57.96 73.20
+VEQ-ME (ours) 68.78 82.47 59.53 78.57 65.32 91.61 70.97 83.56 56.79 73.07
+VEQ-MA (ours) 71.56 82.95 62.86 81.10 61.70 92.64 72.42 85.88 58.12 74.36(+1.16)
+(Frantar et al., 2022), along with our proposed VEQ, recover
+nearly 98% of the average BF16 accuracy. The relatively
+marginal performance gap among different quantization
+strategies suggests that 4-bit precision offers sufficient ca-
+pacity to represent MoE weights without incurring catas-
+trophic information loss.
+Performance under W3 Setting.The distinction between
+methods becomes significantly more pronounced in the ag-
+gressive 3-bit setting. As shown in the lower section of
+Table 1, traditional baselines such as RTN and AWQ (Lin
+et al., 2024) suffer from severe degradation, particularly on
+reasoning-intensive tasks like MMMU (Yue et al., 2024)
+and fine-grained visual tasks like InfoVQA (Mathew et al.,
+2022). This suggests that the uniform quantization assump-
+tions fail when the bit-width is extremely limited. It also
+proves that ignoring the heterogeneity can lead to errors
+under extreme compression. In contrast, VEQ demonstrates
+exceptional robustness. By explicitly modeling expert im-
+portance and modality affinity, VEQ significantly outper-
+forms the baselines. For instance, on TextVQA (Singh et al.,
+2019), VEQ achieves a gain of21.4%compared to the origi-
+nal quantization method on Kimi-VL-Instruct. These results
+validate that protecting the decisive experts and differentiat-
+ing modality sensitivities are critical in low-bit regimes.
+4.3. Ablation Studies
+To verify the effectiveness and robustness of our proposed
+method, we conduct a two-fold ablation study. First, we
+evaluate the contribution of each component to the overall
+performance on downstream tasks. Second, we perform a
+hyperparameter sensitivity analysis on a randomly extracted
+validation set to justify our parameter selection. In addition,
+we report all ablation results under the same quantization
+configuration to ensure a fair comparison. We further keep
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+1 0.5 0
+ 0
+ 1.5 0
+ 2 0
+Quantity Factor 
+10.5 0
+0
+1.5 0
+2 0
+Gradient Factor 
+2.8718 2.9153 2.8617 2.7962 2.7962
+2.9153 2.6338 2.7962 2.9153 2.9153
+2.9153 2.8617 2.6338 2.7962 2.9153
+2.9153 2.8617 2.8617 2.6338 2.7962
+2.9153 2.9153 2.8617 2.8617 2.6338
+(a) VEQ-ME Sensitivity (  vs )
+2.65
+2.70
+2.75
+2.80
+2.85
+2.90
+Perplexity (Lower is Better)
+(a)VEQ-ME Sensitivity.
+1 0.5 0
+ 0
+ 1.5 0
+ 2 0
+Modality Indicator 
+01/41/23/41
+Modulation Coefficient 
+4.5089 2.3921 3.2938 3.9484 2.4331
+3.2845 2.8291 2.7182 3.2643 4.5345
+2.8291 8.4488 7.6148 5.0725 7.5029
+2.7717 2.6597 3.9517 3.0856 2.8415
+2.3512 2.2612 2.2526 3.9195 4.0485
+(b) VEQ-MA Sensitivity (  vs )
+3
+4
+5
+6
+7
+8
+Perplexity (Lower is Better)
+ (b)VEQ-MA Sensitivity.
+Figure 7.Visual analysis of parameter sensitivity regarding val-
+idation PPL. (a) VEQ-ME: It confirms the scale invariance of
+our method, where maintaining the relative ratio ensures consis-
+tent minimization of quantization error. (b) VEQ-MA: The results
+shows reducing λ generally results in an increase in PPL, validating
+that the router confidence is important for accurate quantization.
+Table 2.Ablation study of Modality-Expert Importance (VEQ-
+ME) on downstream tasks. γ: Gradient factor; β: Quantity factor.
+Config MMMU InfoVQA ScienceQA Avg.
+w/oγ(γ= 1) 43.44 60.39 82.24 62.02
+w/oβ(β= 1) 43.89 60.34 82.67 62.30
+VEQ-ME (Full) 44.56 62.33 82.93 63.27
+the calibration data and evaluation protocol fixed across
+settings to isolate the effect of each component.
+Component Effectiveness on Downstream Tasks.We fo-
+cus on the two core formulations: the Expert Importance
+Score in VEQ-ME and the Modality-Affinity-Aware Hes-
+sian in VEQ-MA. We set the hyperparameters to their de-
+fault optimal values and measure the performance drop
+when specific components are disabled.
+1) Impact of Modality-Expert Importance (VEQ-ME).The
+importance score is formulated as Si =γN text
+i +βN vision
+i .
+We investigate the necessity of the gradient scaling factor γ
+and the quantity normalization factorβ:
+• w/o γ (γ= 1 ):Removing the gradient scale treats
+visual and textual importance purely based on token
+quantity. As shown in Table 2, this leads to a noticeable
+drop in text-heavy reasoning tasks, confirming that text
+tokens require higher sensitivity weights.
+• w/o β (β= 1 ):Ignoring the quantity gap allows the
+vast number of vision tokens to dominate the score.
+The results indicate that this variation degrades perfor-
+mance, as the router becomes biased toward spatially
+redundant visual features.
+2) Impact of Modality-Affinity Awareness (VEQ-MA).For
+affinity-aware quantization, the token weight is defined as
+cj =p j ·α j. We examine the roles of affinity pj and the
+modality indicatorα j:
+• w/o p (p= 1 ):Ignoring router affinity logits treats
+all tokens routed to an expert as equally important.
+Table 3 shows that this leads to suboptimal results,
+Table 3.Ablation study of Affinity-Aware Hessian (VEQ-MA) on
+downstream tasks.p: Router confidence;α: Modality indicator.
+Config MMMU InfoVQA ScienceQA Avg.
+w/op(p= 1) 42.33 64.30 83.35 63.63
+w/oα(α= 1) 41.33 63.72 82.34 62.46
+VEQ-MA (Full) 42.56 64.48 84.85 63.96
+proving that tokens with higher routing confidence are
+more representative.
+• w/o α (α= 1 ):Removing modality-specific re-
+weighting during Hessian calibration causes a perfor-
+mance decline, confirming that distinguishing between
+information-dense text tokens and redundant vision
+tokens is essential for accurate error minimization.
+Parameter Sensitivity Analysis.To further validate the
+robustness of our method, we analyze the average Perplexity
+(PPL) on 64 samples under varying parameter configura-
+tions. These samples are randomly extracted from MMMU
+(Yue et al., 2024) validation dataset. We perform a grid
+search for the variable pairs in VEQ-ME (γ, β) and VEQ-
+MA (λ, γ). It is worth noting that while the formulation
+of VEQ-MA is theoretically governed by the affinity p and
+sensitivity ratio α, directly tuning p and α lacks intuitive
+interpretability. Consequently, we choose to adopt (λ, γ) as
+the variable pair for this ablation study.
+1) Sensitivity of VEQ-ME (γ vs. β).In our formulation, γ
+represents the sensitivity of text tokens relative to visual
+tokens, whileβaccounts for the quantity ratio between the
+two modalities. These hyperparameters determine the ex-
+pert importance, which guides the search for the optimal
+quantization parameters. As illustrated in Figure 7, we ob-
+serve that proportionally scaling γ and β yields consistent
+PPL values. This implies that the search for quantization pa-
+rameters depends on therelativeratio of expert importance.
+2) Sensitivity of VEQ-MA (λ vs. γ).We analyze the Hessian
+weighting by varying the modality sensitivity ratio α and
+the affinity strength p. Specifically, we treat the variation of
+p using a modulation coefficient λ, which controls the in-
+tensity of router confidence. We define the effective affinity
+as a weighted interpolation: (1−λ)·1+λ·p . Under this
+formulation, λ= 1 represents the raw router confidence,
+while λ= 0 indicates uniform affinity.As shown in Figure 7,
+the model achieves optimal stability (lowest PPL of 2.2526)
+at the full configuration (λ= 1, γ=γ 0).
+5. Conclusion
+In this work, we presentedVisualExpertQuantization
+(VEQ), a specialized post-training quantization framework
+designed to address the unique challenges of compressing
+Mixture-of-Experts Vision-Language Models (MoE VLMs).
+By transcending the limitations of treating MoE FFNs as
+monolithic dense structures, VEQ effectively addresses both
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+the inherent sparsity of expert activations and the statistical
+heterogeneity between visual and textual modalities. Across
+a diverse set of multimodal benchmarks, VEQ consistently
+outperforms established baselines. By aligning quantization
+strategies with the structural and modal properties of MoE
+VLMs, VEQ establishes a new state-of-the-art, paving the
+way for the efficient deployment of large-scale multimodal
+agents in resource-constrained environments.
+References
+Alayrac, J.-B., Donahue, J., Luc, P., Miech, A., Barr, I.,
+Hasson, Y ., Lenc, K., Mensch, A., Millican, K., Reynolds,
+M., et al. Flamingo: a visual language model for few-shot
+learning. InNeurIPS, 2022.
+Bai, S., Cai, Y ., Chen, R., Chen, K., Chen, X., Cheng,
+Z., Deng, L., Ding, W., Gao, C., Ge, C., Ge, W., Guo,
+Z., et al. Qwen3-vl technical report.arXiv preprint
+arXiv:2511.21631, 2025.
+Baidu-ERNIE-Team. Ernie 4.5 technical report, 2025.
+Chi, Z., Dong, L., Huang, S., Dai, D., Ma, S., Patra, B.,
+Singhal, S., Bajaj, P., Song, X., Mao, X.-L., et al. On the
+representation collapse of sparse mixture of experts. In
+NeurIPS, 2022.
+Duanmu, H., Li, X., Yuan, Z., Zheng, S., Duan, J., Zhang,
+X., and Lin, D. Mxmoe: Mixed-precision quantization
+for moe with accuracy and performance co-design.arXiv
+preprint arXiv:2505.05799, 2025.
+Fedus, W., Zoph, B., and Shazeer, N. Switch transform-
+ers: Scaling to trillion parameter models with simple and
+efficient sparsity.JMLR, 2022.
+Frantar, E., Ashkboos, S., Hoefler, T., and Alistarh, D. Gptq:
+Accurate post-training quantization for generative pre-
+trained transformers.arXiv preprint arXiv:2210.17323,
+2022.
+Gurari, D., Li, Q., Lin, C., Zhao, Y ., Guo, A., Stangl, A.,
+and Bigham, J. P. Vizwiz-priv: A dataset for recognizing
+the presence and purpose of private visual information in
+images taken by blind people. InCVPR, 2019.
+Hu, X., Chen, Z., Yang, D., Xu, Z., Xu, C., Yuan, Z.,
+Zhou, S., and Yu, J. Moequant: Enhancing quantiza-
+tion for mixture-of-experts large language models via
+expert-balanced sampling and affinity guidance.arXiv
+preprint arXiv:2505.03804, 2025.
+Hurst, A., Lerer, A., Goucher, A. P., Perelman, A., Ramesh,
+A., Clark, A., Ostrow, A., Welihinda, A., Hayes, A.,
+Radford, A., et al. Gpt-4o system card.arXiv preprint
+arXiv:2410.21276, 2024.
+Kembhavi, A., Salvato, M., Kolve, E., Seo, M., Hajishirzi,
+H., and Farhadi, A. A diagram is worth a dozen images.
+InECCV, 2016.
+Li, J., Li, D., Savarese, S., and Hoi, S. Blip-2: Bootstrapping
+language-image pre-training with frozen image encoders
+and large language models. InICML, 2023.
+Li, S., Hu, Y ., Ning, X., Liu, X., Hong, K., Jia, X., Li, X.,
+Yan, Y ., Ran, P., Dai, G., et al. Mbq: Modality-balanced
+quantization for large vision-language models. InCVPR,
+2025.
+Liang, V . W., Zhang, Y ., Kwon, Y ., Yeung, S., and Zou, J. Y .
+Mind the gap: Understanding the modality gap in multi-
+modal contrastive representation learning. InNeurIPS,
+2022.
+Lin, J., Tang, J., Tang, H., Yang, S., Chen, W.-M., Wang,
+W.-C., Xiao, G., Dang, X., Gan, C., and Han, S. Awq:
+Activation-aware weight quantization for on-device llm
+compression and acceleration. InMLSys, 2024.
+Lin, T.-Y ., Maire, M., Belongie, S., Hays, J., Perona, P.,
+Ramanan, D., Doll ´ar, P., and Zitnick, C. L. Microsoft
+coco: Common objects in context. InECCV, 2014.
+Liu, Y ., Duan, H., Zhang, Y ., Li, B., Zhang, S., Zhao, W.,
+Yuan, Y ., Wang, J., He, C., Liu, Z., et al. Mmbench: Is
+your multi-modal model an all-around player? InECCV,
+2024a.
+Liu, Z., Zhao, C., Fedorov, I., Soran, B., Choudhary, D., Kr-
+ishnamoorthi, R., Chandra, V ., Tian, Y ., and Blankevoort,
+T. Spinquant: Llm quantization with learned rotations.
+arXiv preprint arXiv:2405.16406, 2024b.
+Lu, J., Batra, D., Parikh, D., and Lee, S. Vilbert: Pretraining
+task-agnostic visiolinguistic representations for vision-
+and-language tasks. InNeurIPS, 2019.
+Lu, P., Mishra, S., Xia, T., Qiu, L., Chang, K.-W., Zhu,
+S.-C., Tafjord, O., Clark, P., and Kalyan, A. Learn to
+explain: Multimodal reasoning via thought chains for
+science question answering. InNeurIPS, 2022.
+Mathew, M., Bagal, V ., Tito, R., Karatzas, D., Valveny, E.,
+and Jawahar, C. Infographicvqa. InWACV, 2022.
+Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G.,
+Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark, J.,
+et al. Learning transferable visual models from natural
+language supervision. InICML, 2021.
+Singh, A., Natarajan, V ., Shah, M., Jiang, Y ., Chen, X.,
+Batra, D., Parikh, D., and Rohrbach, M. Towards vqa
+models that can read. InCVPR, 2019.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+VEQ: Modality-Adaptive Quantization for MoE Vision-Language Models
+Team, K., Du, A., Yin, B., Xing, B., Qu, B., Wang, B., Chen,
+C., Zhang, C., Du, C., Wei, C., et al. Kimi-vl technical
+report.arXiv preprint arXiv:2504.07491, 2025.
+Team, x. Realworldqa: A real-world multimodal
+question answering benchmark, 2024. URL
+https://huggingface.co/datasets/
+xai-org/RealworldQA.
+Wang, C., Wang, Z., Xu, X., Tang, Y ., Zhou, J., and Lu, J. Q-
+vlm: Post-training quantization for large vision-language
+models. InNeurIPS, 2024.
+Wang, X., Huang, J., Abdalla, R., Zhang, C., Xian, R.,
+and Manocha, D. Bi-vlm: Pushing ultra-low precision
+post-training quantization boundaries in vision-language
+models.arXiv preprint arXiv:2509.18763, 2025.
+Wu, Z., Chen, X., Pan, Z., Liu, X., Liu, W., Dai, D., Gao, H.,
+Ma, Y ., Wu, C., Wang, B., et al. Deepseek-vl2: Mixture-
+of-experts vision-language models for advanced multi-
+modal understanding.arXiv preprint arXiv:2412.10302,
+2024.
+Xiao, G., Lin, J., Seznec, M., Wu, H., Demouth, J., and Han,
+S. Smoothquant: Accurate and efficient post-training
+quantization for large language models. InICML, 2024.
+Xue, Y ., Huang, Y ., Shao, J., and Zhang, J. Vlmq: Effi-
+cient post-training quantization for large vision-language
+models via hessian augmentation.arXiv preprint
+arXiv:2508.03351, 2025.
+Yu, J., Zhou, S., Yang, D., Wang, S., Li, S., Hu, X., Xu, C.,
+Xu, Z., Shu, C., and Yuan, Z. Mquant: Unleashing the in-
+ference potential of multimodal large language models via
+full static quantization.arXiv preprint arXiv:2502.00425,
+2025.
+Yue, X., Ni, Y ., Zhang, K., Zheng, T., Liu, R., Zhang, G.,
+Stevens, S., Jiang, D., Ren, W., Sun, Y ., et al. Mmmu: A
+massive multi-discipline multimodal understanding and
+reasoning benchmark for expert agi. InCVPR, 2024.
+Zhang, J., Zhang, Y ., Zhang, B., Liu, Z., and Cheng,
+D. Moqe: Improve quantization model performance
+via mixture of quantization experts.arXiv preprint
+arXiv:2508.09204, 2025.
+Zhang, K., Li, B., Zhang, P., Pu, F., Cahyono, J. A., Hu, K.,
+Liu, S., Zhang, Y ., Yang, J., Li, C., and Liu, Z. Lmms-
+eval: Reality check on the evaluation of large multimodal
+models.arXiv preprint arXiv:2407.12772, 2024a.
+Zhang, Y .-F., Zhang, H., Tian, H., Fu, C., Zhang, S., Wu,
+J., Li, F., Wang, K., Wen, Q., Zhang, Z., et al. Mme-
+realworld: Could your multimodal llm challenge high-
+resolution real-world scenarios that are difficult for hu-
+mans?arXiv preprint arXiv:2408.13257, 2024b.
+Zheng, L., Yin, L., Xie, Z., Sun, C. L., Huang, J., Yu, C. H.,
+Cao, S., Kozyrakis, C., Stoica, I., Gonzalez, J. E., et al.
+Sglang: Efficient execution of structured language model
+programs. InNeurIPS, 2024.
+Zheng, Z., Cui, X., Zheng, S., Li, M., Chen, J., Liang, Y .,
+and Chen, X. Moqa: Rethinking moe quantization with
+multi-stage data-model distribution awareness.arXiv
+preprint arXiv:2503.21135, 2025.
+10
