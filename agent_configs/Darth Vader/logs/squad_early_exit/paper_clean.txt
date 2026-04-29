@@ -1,0 +1,1147 @@
+SQUAD: Scalable Quorum Adaptive Decisions via ensemble of early exit neural
+networks
+Anonymous Authors1
+Abstract
+Early-exit neural networks have become popular
+for reducing inference latency by allowing inter-
+mediate predictions when sufficient confidence
+is achieved. However, standard approaches typi-
+cally rely on single-model confidence thresholds,
+which are frequently unreliable due to inherent
+calibration issues. To address this, we introduce
+SQUAD (Scalable Quorum Adaptive Decisions),
+the first inference scheme that integrates early-exit
+mechanisms with distributed ensemble learning,
+improving uncertainty estimation while reduc-
+ing the inference time. Unlike traditional meth-
+ods that depend on individual confidence scores,
+SQUAD employs a quorum-based stopping crite-
+rion on early-exit learners, by collecting interme-
+diate predictions incrementally in order of compu-
+tational complexity until a consensus is reached
+and halting the computation at that exit if the con-
+sensus is statistically significant. To maximize
+the efficacy of this voting mechanism, we also
+introduce QUEST (Quorum Search Technique), a
+Neural Architecture Search method to select early-
+exit learners with optimized hierarchical diversity,
+ensuring learners are complementary at every in-
+termediate layer. This consensus-driven approach
+yields statistically robust early exits, improving
+the test accuracy up to 5.95% compared to state-
+of-the-art dynamic solutions with a comparable
+computational cost and reducing the inference la-
+tency up to 70.60% compared to static ensembles
+while maintaining a good accuracy.
+1. Introduction
+Deep Neural Networks (DNNs) have established themselves
+as the de facto standard for many applications such as
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+computer vision tasks, natural language processing, audio
+processing, and time series forecasting (Bai et al., 2018).
+However, their remarkable performance typically comes at
+the cost of massive parameter counts and computational
+complexity (Kaplan et al., 2020). This trade-off presents a
+critical bottleneck for deployment in resource-constrained
+environments, such as IoT sensors and Edge computing
+platforms, where energy budgets are strictly limited and
+low latency is paramount (Alippi & Roveri, 2017). To miti-
+gate these costs, the research community has increasingly
+adopted Dynamic Neural Networks for their ability to adapt
+their parameters and architecture according to the difficulty
+of the input. While these networks show many benefits,
+such as the increased efficiency, the mitigation of overfitting
+(Ying, 2019), overthinking (Kaya et al., 2019; Wang et al.,
+2018), and vanishing gradient phenomena (Pascanu et al.,
+2013), many challenges are still open. In this paper, we
+specifically focus on a promising subset of this family, that
+is, Early Exit Neural Networks (EENNs) (Teerapittayanon
+et al., 2017). These architectures attempt to break the rigid
+one-size-fits-allcomputation paradigm by allowing easy-to-
+classify samples to exit the network at intermediate layers
+via auxiliary classifiers, denoted as Early Exit Classifiers
+(EECs), bypassing the deeper blocks (Scardapane et al.,
+2020b; Nogales et al., 2025). However, standard EENNs
+suffer from a fundamental reliability issue: the decision to
+exit is typically governed by a heuristic confidence thresh-
+old (e.g., softmax entropy) derived from a single model.
+Since DNNs are notoriously prone to overconfidence, even
+when making erroneous predictions, relying on a single
+agent self-assessment often leads to risky premature exits
+or unnecessary computation (Wang et al., 2021; Guo et al.,
+2017).
+To address this shortcoming, we propose a shift to a collec-
+tive confidence in early exits. Drawing inspiration from En-
+semble Learning to reduce variance (Mienye & Sun, 2022),
+we introduce SQUAD (Scalable Quorum Adaptive Deci-
+sions) that combines early exits with the ensemble technique.
+Instead of relying on the confidence of a single classifier, we
+query a dynamic committee of early-exit learners to decide
+whether to stop computation both horizontally (along the
+learners) and vertically (along the early exits). Indeed, in
+our framework, computation is halted horizontally, invoking
+Submission and Formatting Instructions for ICML 2026
+each learner incrementally in order of computational com-
+plexity upon reaching a majority consensus, and vertically if
+the early exit decision is triggered once statistical robustness
+of the consensus is ensured through a t-test. This approach
+enhances the early exit decision with a statistically robust
+voting process, effectively mitigating the calibration issues
+of single-model EENNs. While conceptually appealing,
+implementing SQUAD is non-trivial. For a voting mech-
+anism to be efficient, the committee members must offer
+complementary predictions not just at the final output, but
+at every intermediate early exit gate. We can define this
+property ashierarchical diversity. This aspect is crucial
+since if all learners share the same biases or errors at layer
+L, the quorum will merely reinforce a wrong decision, and
+this is more likely to happen at the very early layers.
+Designing such a system manually is infeasible. Conse-
+quently, we could resort to Neural Architecture Search
+(Poyser & Breckon, 2024), a method that is attracting
+steadily growing research interest for its ability to auto-
+matically design the architectures of NNs given a task and
+a dataset. Unlike traditional NAS, which optimizes for in-
+dividual accuracy (Gambella et al., 2022; 2025; Xie et al.,
+2019), or ensemble methods that seek diversity only at the
+output (Zaidi et al., 2021; Shu et al., 2022), our approach
+explicitly searches for a set of learners that maximizeshier-
+archical diversity. We term this unified framework QUEST
+(Quorum Ensemble Search Technique). By effectively com-
+bining the efficiency of early exits with the robustness of
+ensembles through a novel NAS strategy, QUEST offers a
+unique solution to the accuracy-efficiency dilemma.
+Lastly, empirical results on CIFAR-10 (Krizhevsky, 2009),
+CIFAR-100 (Krizhevsky, 2009), and ImageNet16-120
+(Chrabaszcz et al., 2017) demonstrate that QUEST achieves
+a superior balance between accuracy and computational
+cost. Specifically, we improve inference time up to 70.60%
+compared to static ensembles and increase accuracy up to
+5.95% over standard confidence-based EENNs at compara-
+ble latency. To facilitate comparisons and reproducibility,
+the source code of QUEST is released to the scientific com-
+munity as a public repository1.
+2. Background
+2.1. Early Exit Neural Networks
+Early Exit Neural Networks (EENNs), which allow inter-
+mediate predictions when enough confidence is achieved,
+are used to reduce the computational cost of deep neural
+networks (Scardapane et al., 2020b). An EENN can be
+viewed as a composition of b sequential blocks, f(x) =
+Bb ◦ · · · ◦B 1(x), where a classification head Ci is attached
+1URL to be disclosed after paper acceptance
+to each block:
+fi(x) = Ci ◦(B i ◦ · · · ◦B 1(x))(1)
+This formulation produces a sequence of predictions, al-
+lowing the system to halt computation once a consensus or
+confidence threshold is met. Training is typically performed
+by jointly updating all exits:
+Ljoint(x, y) =l(f b(x), y) +
+b−1X
+i=1
+βi ·l(f i(x), y)(2)
+where βi weights the i-th branch loss and x is the data input.
+A weakness of this technique is that confidence thresholds
+are often unreliable due to calibration issues (Wang et al.,
+2021; Guo et al., 2017). A metric of calibration is the
+Expected Calibration Error (ECE) (Naeini et al., 2015),
+which measures the reliability of a model by quantifying the
+expected difference between its predicted confidence and its
+actual accuracy. To calculate this, the full probability range
+is divided into M disjoint bins (i.e., intervals of size 1/M),
+and samples are grouped into these bins based on their
+predicted confidence scores. For each bin Bm, the average
+accuracy acc(Bm) and average confidence conf(Bm) are
+computed. The final ECE score is the weighted average of
+the absolute difference between these two values, weighted
+by the fraction of samples |Bm|
+N in each bin, as shown in the
+formula:
+ECE=
+MX
+m=1
+|Bm|
+N |acc(Bm)−conf(B m)|(3)
+2.2. Ensemble Learning and Consensus
+A way to improve the calibration of deep neural networks
+is by Ensemble Learning (Mienye & Sun, 2022), where
+multiple models (learners) are trained to solve the same
+task and their predictions are aggregated, averaging out
+individual errors (Goodfellow et al., 2016).
+To leverage this diversity, a consensus mechanism is re-
+quired. Soft voting, which averages the predicted proba-
+bility distributions, is generally preferred for DNNs as it
+weighs learner confidence, penalizing uncertainty more ef-
+fectively than simple hard voting. However, standard voting
+introduces a rigid computational bottleneck, as inference
+cost scales linearly with ensemble size M. To quantify the
+diversity necessary for effective ensembles, we utilize the
+Pairwise Predictive Disagreement (PPD) (Fort et al., 2019).
+Let E={f 1, . . . , fM } be an ensemble and D a dataset of
+Nsamples. The PPD is defined as:
+PPD(E,D) = 1 M
+
+X
+1≤i<j≤M
+ 
+N
+NX
+k=1
+I
+
+ˆy(k)
+i ̸= ˆy(k)
+j
+!
+(4)
+Submission and Formatting Instructions for ICML 2026
+where a higher PPD value indicates greater diversity in
+predictive behavior, essential for robust consensus.
+2.3. DARTS, the Neural Architecture Search Space
+DARTS (Liu et al., 2019) is a cell-based NAS framework,
+where each cell is represented as a directed acyclic graph
+(DAG) with N nodes arranged sequentially and edges con-
+necting them, where operations on each edge are drawn
+from a shared set of possible operations. Let O={o (i,j)}
+be the set of candidate operations between the i-th and j-th
+nodes. DARTS assigns continuous architecture parameters
+α={α (i,j)}, where each α(i,j) ∈R |O| weights the choice
+of operation on a given edge in a weighted sum of oper-
+ations, and must be optimized. DARTS space consists of
+two types of cells:normal cells, which preserve spatial di-
+mensions (height and width), andreduction cells, which
+reduce them and increase feature depth. After searching,
+the final, discrete architecture is constructed by retaining
+the strongest k operations (from distinct nodes) among all
+non-zero candidates for each intermediate node. The total
+number of architectures is approximately10 18.
+2.4. Neural Architecture Search via Bayesian Sampling
+Constructing an ensemble with high PPD and accuracy is a
+combinatorial problem with NAS search spaces being expo-
+nentially large. Neural Ensemble Search via Bayesian Sam-
+pling (NESBS) (Shu et al., 2022) addresses this by findingn
+optimal candidate NNs efficiently. NESBS employs a three-
+phase process: it uses a supernet to estimate performance
+via SPOS (Guo et al., 2020), derives a posterior distribution
+of architectures, and finally exploits Stein Variational Gra-
+dient Descent with Regularized Diversity (SVGD-RD) to
+sample ensembles. The core mechanism, SVGD-RD, up-
+dates architectural configurations using an update direction
+ϕ∗ composed of two opposing forces. TheDriving Force
+steers particles toward high-accuracy regions (exploiting the
+supernet learned distribution), while theRepulsive Force
+creates a dispersive vector field to push particles apart, en-
+suring diversity. The coefficient δ amplifies this repulsion
+to prevent mode collapse.
+3. Related literature
+3.1. Early exit methodologies
+BranchyNet (Teerapittayanon et al., 2017) introduces EECs
+via joint training, a paradigm later extended by recursive
+strategies (Scardapane et al., 2020a) and distillation-based
+approaches like QUTE (Ghanathe & Wilton, 2025). While
+other works interpret early exits as implicit, weight-sharing
+ensembles (Qendro et al., 2021; Ghanathe & Wilton, 2025;
+Antor´an et al., 2020; Ferianc & Rodrigues, 2023), they typi-
+cally aggregate intermediate predictions to refine uncertainty
+or accuracy. Crucially, unlike SQUAD, these approaches
+leverage the ensemble for performance gains, neglecting the
+dynamic computation halting used to reduce inference time.
+3.2. MACs-Aware NAS
+The first group designs static neural networks. Prominent
+solutions are CNAS (Gambella et al., 2022) that optimizes
+architectures by explicitly imposing MACs constraint and
+SNAS (Xie et al., 2019) that maximizes expected accuracy
+over a distribution of graphs and applies a penalty to re-
+duce the MACs, respectively. The second group designs
+Dynamic Neural Networks, particularly EENNs, which in-
+troduce runtime adaptability. A state-of-the-art example
+is NACHOS (Gambella et al., 2025), which searches for
+Pareto-optimal EENNs by jointly optimizing the backbone,
+exit placements, and thresholds under MAC constraints and
+exploits the differentiable training mentioned above (Scar-
+dapane et al., 2020a). Other approaches simplify the search
+scope by using frozen backbones (NASEREX (Kapoor et al.,
+2023)) or employing genetic algorithms for multi-objective
+optimization without constraints (EDANAS (Gambella &
+Roveri, 2023)).
+3.3. NAS for Ensembles
+These NAS solutions shift focus from single models to com-
+mittees. More recently, NES (Zaidi et al., 2021) introduced
+diversity-aware selection, though with high search costs.
+Subsequent works addressed efficiency: NESBS (Shu et al.,
+2022) significantly reduced search cost via Bayesian sam-
+pling, NEAS (Chen et al., 2021) enabled layer sharing, and
+SAEP (Bian et al., 2022) integrated pruning. However,
+these methods optimize diversity primarily at the output
+level, overlooking thehierarchicaldiversity required for
+robust early-exit consensus.
+4. The proposed inference of SQUAD
+4.1. The architecture
+The architecture of SQUAD consists of an ensemble of K
+parallel learners, denoted as {L1, . . . , LK}, each equipped
+with E intermediate exit gates indexed by e∈ {1, . . . , E} .
+At each exit stage e, we define a set ofbranches Be =
+{be1, . . . , beK}, where each bek represents the block of
+backbone layers in learner k leading to its respective EEC,
+denoted as Cek. Notably, the learners operate with indepen-
+dent weights (no parameter sharing). The overall inference
+process is designed such that the input samplex is processed
+in parallel across the distinct backbones, while the exit de-
+cisions are evaluated sequentially from e= 1 to E. The
+schematic of a single stage of this framework is illustrated
+in Figure 1.
+Submission and Formatting Instructions for ICML 2026
+B11 B12 B13
+EXITTEST
+C11 C12 C13
+Test result
+y = ye(x)
+Testpassed!
+Nomajority ortest notpassed
+^^
+x01 x02 x03
+x11 x12 x13
+Figure 1.Overview of the first stage ( e=1) of SQUAD with K=
+3 and k∈ {1, ...,3} denotes the branch index. The Exit Test
+incrementally collects the class confidences from the EECs denoted
+as C1k, ordered by the computational cost of B1k. If the stopping
+criterion of the Exit Test is satisfied, an intermediate prediction
+is done, and the input representations are not forwarded to the
+following branches. Otherwise, the output of the blocks B1k is
+propagated through the following blocks. The test result acts as a
+stopping signal when a decision in the Exit Test has been taken.
+4.2. Inference logic
+At each stage e, the intermediate predictions are aggregated
+using a MACs-aware protocol. This approach is grounded
+in the rationale that, although samples are forwarded in par-
+allel, learners exhibit varying latencies. To simulate this
+first-come first-votemechanism, we estimate latency via
+Multiply-Accumulate operations (MACs). Learners con-
+tribute to the voting pool incrementally, ordered by increas-
+ing computational complexity, until a majority consensus
+is formed. The inference terminates at exit e only if this
+consensus satisfies the specific statistical criteria defined by
+the t-test validation.
+4.3. Majority voting
+The voting process is incremental, with the previously de-
+fined order. Let fe,k(x) denote the output probability dis-
+tribution (softmax) of the k-th branch at exit e. Each vote,
+specifying the predicted class, is:
+ˆye,k = arg max
+c
+fe,k(x)c (5)
+Let V (m)
+e ∈R C be the vote vector after m branches have
+voted:
+V (m)
+e =
+mX
+j=1
+OneHot(ˆye,j)(6)
+Apivot branch bpivot is identified as the first branch m
+where the voting outcome is decided irrespectively by the
+remainingK−mbranches. The pivot is found when:
+1. Quorum reached: The leading class has ≥ ⌊K/2⌋+ 1
+votes.
+2. Quorum unfeasibility: with the remaining votes, no
+class can satisfy the above condition and so cannot
+meet the quorum.
+The consensus class at exit e is defined as ˆye =
+arg maxV (pivot)
+e . Once the pivot is found, ifQuorum
+reachedapplies, the network proceed to evaluate early exit
+condition, while ifQuorum unfeasibilityhappens, the in-
+put representations are forwarded directly to the next K
+branches since there is no agreement, hence saving useless
+computation.
+4.4. Early Exit Condition (t-test)
+To validate the significance of the votes for the winning
+class (if any), we resort to a t-test as our early exit trig-
+ger. The majority voting acts as a stronger requirement for
+the winning class than the soft voting, but could hide the
+uncertainty of the learners, which is screened by the t-test.
+Once the consensus class ˆye is determined, we evaluate
+the confidence of the prediction to decide whether to exit
+(positive) or to forward the input representations to the next
+K branches (negative). We consider the subset of branches
+that have voted for the consensus class, denoted as Se =
+{k∈ {1, . . . , K} |ˆy e,k = ˆye}. The confidence scores for
+this subset areP Se ={maxf e,k(x)|k∈S e}.
+The simplest approach to trigger early exit would be to
+check that the mean of these confidence scores exceeds a
+threshold τconf. However, to ensure statistical robustness,
+we compute the Lower Confidence Bound (LCB) using the
+t-test as follows
+LCBe =µ Se −t α,|Se|−1 · σSep
+|Se|
+(7)
+where µSe is the sample mean, |Se| is the sample size, and
+tα,|Se|−1 is the critical t-value for a one-sided 95% con-
+fidence interval with |Se| −1 degrees of freedom. Cru-
+cially, σSe denotes theunbiased sample standard deviation
+(calculated using Bessel’s correction with |Se| −1 in the
+denominator) to ensure statistical robustness.
+The inference terminates at exiteif:
+LCBe > τconf (8)
+where τconf is a user-defined confidence threshold. If the
+condition is met, the final prediction is ˆye. Otherwise, the
+input representations proceed to exit e+ 1 . If the last exit
+E is reached without triggering, the prediction at exit E is
+forced.
+Submission and Formatting Instructions for ICML 2026
+5. The proposed QUEST
+5.1. Problem formulation
+Designing SQUAD manually is infeasible, therefore we in-
+troduce in this section the QUEST NAS strategy to automate
+quorum-based EENN implementation.
+The problem addressed by QUEST consists of selecting the
+set of EENNs aiming at providing a high accuracy with their
+adaptive ensemble inference, by optimizing their individual
+accuracy and representational diversity across the early exit
+gates. Formally, QUEST can be defined as the following
+joint optimization problem:
+minimizeG(F A({˜x1, ..,˜xE}),F D({˜x1, ..,˜xE}))(9)
+s. t.˜x∈Ω ˜x
+where G is a bi-objective optimization function, ˜xrepre-
+sents a candidate EENN architecture, Ω˜xis the supernet
+enhanced with early exits, FA({˜x1, ..,˜xE}) is the classifi-
+cation accuracy of the ensemble andFD({˜x1, ..,˜xE}) is the
+representational diversity of the ensemble members.
+5.2. Overview of QUEST
+An overall description of the QUEST framework is given in
+Fig. 2. QUEST receives as input a dataset DS, comprising
+a training part (used to train the candidate networks) and
+a validation part (used to validate the candidate networks),
+a supernet Ωx from which the candidate neural networks
+are obtained, and the ADA set Ωθ from which the EENN
+parameters are obtained.
+At the end of the search, QUEST returns the set of the
+k optimal EENN architectures ˜X ∗ ={˜x∗
+1, . . . ,˜x∗
+E} for a
+dynamic ensemble, being E a value specified by the user.
+We emphasize that the output of QUEST is a set of networks
+enhanced with EECs, while the supernet given in input
+consists of single-exit neural networks (i.e., no EECs).
+The Arch Adapter receives a supernet Ωx and an ADA set
+Ωθ specifying the number and the placement of the early ex-
+its along the backbone of the supernet. The module outputs
+the resulting supernet Ω˜xenriched with early exit classifiers
+placed.
+We follow the three-phase process of NESBS, as introduced
+in Section 2, where the Trainer accounts for the first two
+phases.
+5.3. Training of the supernet with early exits
+The Trainer receives the supernet Ω˜xand the dataset DS.
+The dataset DS is divided into aTrain DS, used in the first
+phase, and aValid DS, used in the second phase. It outputs
+a set α, being matrices describing the variational posterior
+distribution of the architectural choices of the network, with
+each matrix referring to a particular cell of the searched
+network as in the definition of DARTS search space 2.3.
+The first step is to train the early exit supernet Ω˜xon the
+Train DSby using an early exit variation of SNAS, which
+will be introduced later in this section, to find an architec-
+tural distribution α that favors operations that bring high
+accuracy and moderate complexity (in terms of MACs) in
+the searched network. As SNAS, the training optimizes
+the weights w and the architectural parameters α of the su-
+pernet on the objective function computed as the expected
+cost of the sum an accuracy term and a penalty term over a
+distribution of architecturesα:
+E˜xp∼p(α)[L(w∗(α), α) =L joint(w∗(α), α) +λ×L C(α)]
+(10)
+with ˜xp being a sampled architecture (i.e., a one-hot vector
+per edge).
+Different from SNAS, we compute the accuracy term dif-
+ferently from SNAS since ˜xp is an early exit architecture.
+Indeed, Ljoint(w∗(α), α) is the sum of the validation loss
+of each exit of ˜xp by following the Joint Training scheme
+as in Eq. 2, with each validation loss Li(w∗(α), α) com-
+puted with the ith EEC over the sampled backbone xp. This
+adapts SNAS to a supernet with multiple exits.
+The penalty term LC(α) follows the SNAS definition and
+computes a penalty according to the expected cost in terms
+of MACs over the distribution of α. LC(α) is the sum of
+the terms Ln
+C(α), defined at every nth searched cell of the
+searched network as follows:
+Ln
+C(α) =
+X
+i
+X
+j
+X
+k
+MACs(i,j)
+k ·x (i,j)
+k (α)(11)
+where xi,j
+k is the softened one-hot random variable for op-
+eration selection at edge (i, j) with k being the operation
+index, and MACs(i,j)
+k the corresponding number of MACs.
+In this preliminary step, we use SNAS instead of SPOS,
+which uses uniform sampling and is adopted in NESBS, for
+its ability to find good architectures with moderate compu-
+tational complexity, a crucial property of an efficient neural
+network, and model our architectural distribution.
+5.4. Computation of the variational posterior
+distribution
+The computation of the variational posterior distribution is
+explained in Algorithm 1. Differently from NESBS, we
+applied the Joint Training Loss, explained in (2), to com-
+pute the negative likelihood (NLL). By backpropagating
+gradients from all exits simultaneously, the search steers the
+variational distribution toward operations that maximize dis-
+criminative power at varying depths. The Kullback-Leibler
+divergence term ensures high entropy in the architectural
+parameters to avoid collapse to specific operations.
+Submission and Formatting Instructions for ICML 2026
+Figure 2.Overview of QUEST consisting of the Arch Adapter, the Search Space, the Trainer, and the Search Strategy.
+Algorithm 1Variational Architecture Search for QUEST
+Require: Validation datasetValid DS, Prior distribution
+p(α)(Uniform), KL weightβ, Learning rateη
+Ensure: Optimized variational parameters ϕ∗ defining the
+posteriorq ϕ(α)
+1: Initialize:Variational parameters ϕ (e.g., logits of op-
+erations)
+2:whilenot convergeddo
+3:% 1. Reparameterization Trick
+4:Sample noiseϵ∼p(ϵ)(Gumbel)
+5: Generate architecture sample α=g(ϕ,ϵ) differen-
+tiable w.r.tϕ
+6:% 2. Compute Vertical Efficiency Loss
+7: Compute Joint Loss on Validation Set (Hierarchical
+Constraint):
+8:L N LL ←L joint(α,Valid DS)(via Eq. 2)
+9:% 3. Compute Regularization
+10:Calculate KL Divergence against Uniform Prior:
+11:L KL ←D KL(qϕ(α)||p(α))
+12:% 4. Objective Construction
+13:Combine terms for Negative ELBO:
+14:L ELBO ← L N LL +βL KL
+15:% 5. Optimization Step
+16:Update variational parameters via gradient descent:
+17:ϕ←ϕ−η∇ ϕLELBO
+18:end while
+returnϕ
+5.5. Search Strategy via SVGD-RD
+As shown in NESBS, we can now use Stein Variational
+Gradient Descent with regularized diversity (SVGD-RD),
+to effectively and efficiently optimize the accuracy FA (the
+driving force) and the diversitiy FD (the repulsion force),
+as introduced in Eq. 2. However, different from NESBS,
+our framework leads NESBS to find an ensemble of early
+exit neural networks thanks to the way we modeled the
+variational posterior distribution.
+6. Experimental campaign
+6.1. Computational metrics
+MACs have been computed to define two computational
+metrics. The metric FM refers to the number of MACs after
+we achieve a response, and in an ensemble, is equal to the
+sum of the maximum number of MACs among the voting
+members of the ensemble at each exit. It is a metric related
+to the latency. In the following formulations, K denotes
+the total number of parallel branches in the ensemble, while
+E∗ represents the specific exit where the sample decision
+is finalized. The term Ck,e defines the incremental MAC
+cost associated with branch k at exit e. We employ π as
+a permutation that sorts the branches in non-descending
+order of costs (Cπ(0),e ≤ · · · ≤C π(K−1),e ), to follow the
+first-come first-votelogic introduced in 4.2, allowing us to
+identify m, the rank of thepivot branchthat triggered the
+exit decision.
+FM =
+E∗
+X
+e=0
+
+max
+k∈{0,...,m}
+{Cπ(k),e}=C π(m),e
+
+(12)
+The metric FM T refers to the effective total number of
+MACs used to achieve a response, and in an ensemble, is
+equal to the sum of the total amount of MACs used by the
+members of the ensemble up to the final vote at each exit. It
+is a metric related to energy consumption.
+FM T =
+E∗
+X
+e=0
+mX
+k=0
+Cπ(k),e + (K−1−m)·C π(m),e (13)
+Consequently, the energy metric comprises two components:
+thecompleted work( Pm
+k=0 Cπ(k),e), which sums the costs
+of the pivot branch and all computationally lighter branches
+that finished execution; and theparallel overhead( (K−
+1−m)·C π(m),e), which accounts for the computational
+work leaked by the heavier background branches that were
+interrupted exactly when the pivot branch finished.
+Submission and Formatting Instructions for ICML 2026
+Table 1.Performance on CIFAR-10, CIFAR-100, and ImageNet16-120.
+CIFAR-10 CIFAR-100 ImageNet16-120 Search Time (h)
+Method Acc (%)F M(M)F M T(M)Acc (%)F M(M)F M T(M)Acc (%)F M(M)F M T(M)
+NESBS 97.64 694.02 2013.94 85.45 694.08 2014.12 56.15 161.09 503.69 8
+NACHOS 95.40 212.95 212.95 79.25 312.14 312.14 51.10 95.53 95.53 36h
+CNAS 93.73 216.04 216.04 80.23 315.32 315.32 51.38 97.60 97.60 24h
+QUESTTest 96.97 205.87 603.6382.20 302.87878.7357.05 93.12267.71 8
+QUESTMean 97.03 204.06598.23 79.97 226.45 656.72 54.22 61.75 177.37 8h
+6.2. DARTS setting
+For experiments conducted in the DARTS (Liu et al., 2019)
+search space, we follow the original search settings and the
+evaluation settings of SNAS and NESBS. The hyperparame-
+ters of the search and the training are shown in Appendix E.
+Moreover, the architecture search is performed on CIFAR-
+10, and the resulting genotype is then evaluated on various
+datasets by training with early exits the corresponding neu-
+ral networks from scratch, using an early exit weightβi = 1,
+introduced in 2, for all the EECs, both during the training
+and search phase. We highlight that during the search phase,
+the explored networks are smaller in terms of size with re-
+spect to the final trained network to balance efficiency and
+performance of the NAS. This is shown by the different
+number of channels and cells stacked in Table 4 and Table 7
+in Appendix E.
+6.3. Experimental results
+For our experiments we use the following hyperparameters.
+The number of ensemble members E= 3 . The ARCH set
+defines the search space of DARTS, resulting in each branch
+Bek of our framework being a group of normal cells and
+a reduction cell. The ADA set specifies that the EECs are
+placed after a reduction cell. The architecture of each EEC
+is a stack of Global Average Pooling, Flatten, and a Lin-
+ear layer. The datasets used in our experimental campaign
+are CIFAR-10, CIFAR-100, and ImageNet16-120, standard
+NAS benchmarks with increasing difficulty explained in Ap-
+pendix C. For our QUEST models, we selected a confidence
+threshold τconf ∈ {0.95,0.6,0.3} through grid search in
+our three datasets, respectively, by selecting a reasonable
+threshold of desired accuracy.
+We run the search of QUEST on CIFAR-10 and we then
+compute CNAS and NACHOS with a constraint on the num-
+ber of MACs equal to the FM of the found ensembles by
+QUEST, to have a static model and a dynamic model for
+comparison. We also added NESBS for a static ensemble
+as a baseline. The search spaces explored by NESBS and
+QUEST is DARTS, while CNAS and NACHOS look for
+OFA-based MobileNetV3 models, a state-of-the-art family
+in edge solutions. Different from QUEST and NESBS being
+run once on CIFAR-10, as explained in Section 6.2, CNAS
+and NACHOS are run for each dataset since we use a differ-
+ent MACs constraint. Lastly, we reported the performance
+of the set of EENNs found by QUEST tested by using the
+SQUAD framework with two different exit criteria, mean
+confidence and t-test, explained in Sec. 4.4, as QUESTMean
+and QUESTTest, respectively.
+Our main results are introduced in Table 1, whereSearch
+Timerefers to the GPU hours used by the search of the NAS
+methods to find the examined models. We show that, despite
+a drop in accuracy, QUEST is able to significantly reduce
+both FM and FM T with respect to the static ensemble found
+by NESBS. In particular,FM is reduced by 70.60%, 56.36%,
+42.19% on CIFAR-10, CIFAR-100, ImageNet16-120, re-
+spectively. Single models found by CNAS and NACHOS
+show lower accuracy with comparable FM with respect to
+QUEST, while have betterFM T since they require a forward
+pass for a single model, different from ensembles as shown
+in 2. The accuracy gain of QUEST with respect to NACHOS
+is by 1.63%, 2.95%, 5.95% on CIFAR-10, CIFAR-100, and
+ImageNet16-120, respectively.
+We analyze the vertical dynamism of our framework in
+Figure 3. A clear trend emerges: the distribution of exit
+events shifts deeper into the network as the classification
+task becomes more challenging. Additionally, we analyze
+the horizontal dynamism of our framework in Figure 3. We
+refer to the branches of our ensemble as b0, b1, b2. We plot
+only the usages of b1 because b0 cannot be the pivot due
+to the requirement of at least two votes (quorum), and b2
+usages are just complementary to b1. As the most efficient
+learner in the ensemble (sorted by MACs), b1 acts as the
+primary driver of the consensus mechanism, consistently
+accounting for the majority of the voting weight. However,
+a clear inverse correlation is observable between b1 domi-
+nance and the complexity of the inference task. As a result,
+b2 is effectively recruited as a consultant only for harder
+samples. To sum up, the two dynamism effectively adapt to
+the complexity of the classification task.
+Additionally, we quantitatively estimated and show in Ta-
+ble 2 the novel concept of hierarchical diversity by comput-
+ing the average PPD, the metric for diversity in an ensemble
+introduced in Section 2 over all the exits of our QUEST
+ensemble. The results show that the QUEST ensemble, at
+every exit, has a better PPD than NESBS, validating the
+Submission and Formatting Instructions for ICML 2026
+Exit 0 Exit 1 Exit 2
+100Percentage of Samples (%)
+87.64%
+6.83% 5.53%
+47.73%
+21.9%
+30.37%
+26.38%
+19.07%
+54.55%
+Early Exit Ratios by Dataset
+CIFAR-10
+CIFAR-100
+ImageNet16-120
+Exit 0 Exit 1 Exit 2
+100Contribution (%)
+99.1%
+88.0%
+46.2%
+95.9%
+87.0%
+67.4%
+87.5%
+78.1%
+61.3%
+Branch b1 Contribution per Exit
+CIFAR-10
+CIFAR-100
+ImageNet16-120
+Figure 3.Left panel: Early exit ratios by dataset. The majority of samples in simple datasets (CIFAR-10) exit early, while complex
+datasets (ImageNet) require deeper processing. Right panel: Branch pivot (the decisive vote) ratios by dataset. Branch b1 dominates for
+easy samples, while Branch b2 becomes critical for reaching consensus on hard samples.
+statement that QUEST is able to find ensembles with a good
+hierarchical diversity.
+Table 2.Comparison of PPD (%) across datasets. Note: NESBS
+only utilizes the final exit.
+Dataset Exit QUEST NESBS
+CIFAR-10
+Exit 0 4.08 –
+Exit 1 3.13 –
+Exit 23.152.27
+CIFAR-100
+Exit 0 21.30 –
+Exit 1 17.25 –
+Exit 217.5013.16
+ImageNet16
+Exit 0 37.91 –
+Exit 1 37.34 –
+Exit 239.1835.22
+Table 3.The first group represents the per-exit ECE (%) of QUEST
+across datasets. The second group represents the overall ECE (%)
+of different models across datasets.
+Model CIFAR-10 CIFAR-100 ImageNet16
+QUEST (0) 0.60 0.76 4.89
+QUEST (1) 6.37 6.53 4.38
+QUEST (2) 13.74 21.50 13.23
+QUEST (all)1.72 8.30 6.72
+NACHOS 5.33 9.15 7.54
+QUTE 2.50 - -
+EE-ensemble 3.30 - -
+Also, we measured the Expected Calibration Error of our
+QUEST model. The table 3 early exits are well-calibrated.
+Indeed, for CIFAR-10 and CIFAR-100, the first exit (Exit 0)
+has extremely low ECE (<1.00 ). This confirms that when
+the model is confident enough to exit early, it is almost
+perfectly reliable. Across all datasets, the final exit has
+the highest calibration error (e.g., 21.5% on CIFAR-100).
+This confirms the hypothesis that the samples at the last exit
+result in overconfident predictions. Overall, SQUAD shows
+better calibration than QUTE (Ghanathe & Wilton, 2025)
+and EE-ensemble (Qendro et al., 2021) on CIFAR-10 and
+on NACHOS on all three datasets.
+We show the performance of our QUEST model under vary-
+ing τconf and exit criterion, being mean confidence or the
+t-test on the three different datasets in Appendix D respec-
+tively. In general, as expected, the t-test is more strict in
+triggering early exiting, while the mean confidence is more
+permissive, resulting in the latter solutions having lower ac-
+curacy and FM . Interestingly, on CIFAR-10, τconf = 0.95
+shows a slightly better trade-off than the other exit criterion,
+suggesting that a simple exit method could be sufficient for
+an easier (considering the earlier exits) task.
+7. Conclusions
+In this work, we introduced SQUAD, a framework that
+reconciles the accuracy of ensemble learning with the ef-
+ficiency of dynamic neural networks. By coupling a se-
+quential Quorum-based voting mechanism with Early Exit
+backbones, SQUAD is able to adaptively use only a sub-
+set of learners invoked incrementally in order of computa-
+tional cost, but also a fraction of their backbones, exploiting
+the early exits. We also define a NAS to find a good en-
+semble of EENNs for SQUAD by optimizing the accuracy
+and the hierarchical diversity jointly, ensuring learners are
+complementary at every depth. Experiments on CIFAR-10,
+CIFAR-100, and ImageNet16-120 demonstrate that QUEST
+achieves state-of-the-art trade-offs, significantly reducing
+MACs in parallel inference compared to static ensembles
+while outperforming single-model dynamic solutions.
+Submission and Formatting Instructions for ICML 2026
+References
+Alippi, C. and Roveri, M. The (not) far-away path to smart
+cyber-physical systems: An information-centric frame-
+work.Computer, 50(4):38–47, 2017.
+Antor´an, J., Allingham, J. U., and Hern ´andez-Lobato,
+J. M. Depth uncertainty in neural networks, 2020. URL
+https://arxiv.org/abs/2006.08437.
+Bai, S., Kolter, J. Z., and Koltun, V . An Empirical Evalua-
+tion of Generic Convolutional and Recurrent Networks
+for Sequence Modeling, April 2018. URL http://
+arxiv.org/abs/1803.01271. arXiv:1803.01271
+[cs].
+Bian, Y ., Song, Q., Du, M., Yao, J., Chen, H., and Hu,
+X. Subarchitecture ensemble pruning in neural archi-
+tecture search.IEEE Transactions on Neural Networks
+and Learning Systems, 33(12):7928–7936, 2022. doi:
+10.1109/TNNLS.2021.3085299.
+Chen, M., Fu, J., and Ling, H. One-Shot Neural Ensemble
+Architecture Search by Diversity-Guided Search Space
+Shrinking . In2021 IEEE/CVF Conference on Computer
+Vision and Pattern Recognition (CVPR), pp. 16525–
+16534, Los Alamitos, CA, USA, June 2021. IEEE Com-
+puter Society. doi: 10.1109/CVPR46437.2021.01626.
+URL https://doi.ieeecomputersociety.
+org/10.1109/CVPR46437.2021.01626.
+Chrabaszcz, P., Loshchilov, I., and Hutter, F. A down-
+sampled variant of imagenet as an alternative to the
+CIFAR datasets.CoRR, abs/1707.08819, 2017. URL
+http://arxiv.org/abs/1707.08819.
+Ferianc, M. and Rodrigues, M. Mimmo: Multi-input mas-
+sive multi-output neural network. In2023 IEEE/CVF
+Conference on Computer Vision and Pattern Recogni-
+tion Workshops (CVPRW), pp. 4564–4569, 2023. doi:
+10.1109/CVPRW59228.2023.00480.
+Fort, S., Hu, H., and Lakshminarayanan, B. Deep en-
+sembles: A loss landscape perspective.arXiv preprint
+arXiv:1912.02757, 2019. URL https://arxiv.
+org/abs/1912.02757.
+Gambella, M. and Roveri, M. EDANAS: Adaptive neural
+architecture search for early exit neural networks. In
+2023 International Joint Conference on Neural Networks
+(IJCNN), pp. 1–8. IEEE, 2023.
+Gambella, M., Falcetta, A., and Roveri, M. Cnas: Con-
+strained neural architecture search. In2022 IEEE Inter-
+national Conference on Systems, Man, and Cybernetics
+(SMC), pp. 2918–2923, 2022. doi: 10.1109/SMC53654.
+2022.9945080.
+Gambella, M., Pomponi, J., Scardapane, S., and Roveri,
+M. Nachos: Neural architecture search for hardware-
+constrained early-exit neural networks.IEEE Transac-
+tions on Neural Networks and Learning Systems, 36
+(10):19342–19355, 2025. doi: 10.1109/TNNLS.2025.
+3588558.
+Ghanathe, N. P. and Wilton, S. J. E. Qute: Quantifying un-
+certainty in tinyml models with early-exit-assisted ensem-
+bles for model-monitoring. InForty-second International
+Conference on Machine Learning, 2025. URL https:
+//openreview.net/forum?id=EIEpGfixF6.
+Goodfellow, I., Bengio, Y ., and Courville, A.Deep
+Learning. MIT Press, 2016. http://www.
+deeplearningbook.org.
+Guo, C., Pleiss, G., Sun, Y ., and Weinberger, K. Q. On
+calibration of modern neural networks. InProceedings of
+the 34th International Conference on Machine Learning
+(ICML), pp. 1321–1330, 2017.
+Guo, Z., Zhang, X., Mu, H., Heng, W., Liu, Z., Wei,
+Y ., and Sun, J. Single path one-shot neural architec-
+ture search with uniform sampling. InComputer Vi-
+sion – ECCV 2020: 16th European Conference, Glas-
+gow, UK, August 23–28, 2020, Proceedings, Part
+XVI, pp. 544–560, Berlin, Heidelberg, 2020. Springer-
+Verlag. ISBN 978-3-030-58516-7. doi: 10.1007/
+978-3-030-58517-4 32. URL https://doi.org/
+10.1007/978-3-030-58517-4_32.
+Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B.,
+Chess, B., Child, R., Gray, S., Radford, A., Wu, J., and
+Amodei, D. Scaling laws for neural language models.
+arXiv preprint arXiv:2001.08361, 2020. URL https:
+//arxiv.org/abs/2001.08361.
+Kapoor, A., Soans, R. E., Dixit, S., Ns, P., Singh, B., and
+Das, M. Naserex: Optimizing early exits via automl for
+scalable efficient inference in big image streams. In2023
+IEEE International Conference on Big Data (BigData),
+pp. 5266–5271, 2023. doi: 10.1109/BigData59044.2023.
+10386502.
+Kaya, Y ., Hong, S., and Dumitras, T. Shallow-Deep Net-
+works: Understanding and Mitigating Network Over-
+thinking, May 2019. URL http://arxiv.org/
+abs/1810.07052. arXiv:1810.07052 [cs, stat].
+Krizhevsky, A. Learning multiple layers of features from
+tiny images. 2009.
+Liu, H., Simonyan, K., and Yang, Y . DARTS: Differ-
+entiable architecture search. InInternational Confer-
+ence on Learning Representations, 2019. URL https:
+//openreview.net/forum?id=S1eYHoC5FX.
+Submission and Formatting Instructions for ICML 2026
+Mienye, I. D. and Sun, Y . A survey of ensemble learning:
+Concepts, algorithms, applications, and prospects.IEEE
+Access, 10:99129–99149, 2022. doi: 10.1109/ACCESS.
+2022.3207287.
+Naeini, M. P., Cooper, G., and Hauskrecht, M. Obtaining
+well calibrated probabilities using bayesian binning. In
+Proceedings of the Twenty-Ninth AAAI Conference on
+Artificial Intelligence, 2015.
+Nogales, M., Gambella, M., and Roveri, M. Dynamax: Dy-
+namic computing for transformers and mamba based ar-
+chitectures, 2025. URL https://arxiv.org/abs/
+2504.20922.
+Pascanu, R., Mikolov, T., and Bengio, Y . On the dif-
+ficulty of training Recurrent Neural Networks, Febru-
+ary 2013. URL http://arxiv.org/abs/1211.
+5063. arXiv:1211.5063 [cs].
+Poyser, M. and Breckon, T. P. Neural architecture search:
+A contemporary literature review for computer vision
+applications.Pattern Recognition, 147:110052, 2024.
+ISSN 0031-3203. doi: https://doi.org/10.1016/j.patcog.
+2023.110052.
+Qendro, L., Campbell, A., Lio, P., and Mascolo, C. Early
+exit ensembles for uncertainty quantification. In Roy, S.,
+Pfohl, S., Rocheteau, E., Tadesse, G. A., Oala, L., Falck,
+F., Zhou, Y ., Shen, L., Zamzmi, G., Mugambi, P., Zirikly,
+A., McDermott, M. B. A., and Alsentzer, E. (eds.),Pro-
+ceedings of Machine Learning for Health, volume 158 of
+Proceedings of Machine Learning Research, pp. 181–195.
+PMLR, 04 Dec 2021. URL https://proceedings.
+mlr.press/v158/qendro21a.html.
+Scardapane, S., Comminiello, D., Scarpiniti, M., Baccarelli,
+E., and Uncini, A. Differentiable Branching In Deep
+Networks for Fast Inference. InICASSP 2020 - 2020
+IEEE International Conference on Acoustics, Speech and
+Signal Processing (ICASSP), pp. 4167–4171, Barcelona,
+Spain, May 2020a. IEEE. ISBN 978-1-5090-6631-5. doi:
+10.1109/ICASSP40776.2020.9054209. URL https://
+ieeexplore.ieee.org/document/9054209/.
+Scardapane, S., Scarpiniti, M., Baccarelli, E., and
+Uncini, A. Why Should We Add Early Ex-
+its to Neural Networks?Cognitive Computa-
+tion, 12(5):954–966, September 2020b. ISSN 1866-
+9956, 1866-9964. doi: 10.1007/s12559-020-09734-4.
+URL https://link.springer.com/10.1007/
+s12559-020-09734-4.
+Shu, Y ., Chen, Y ., Dai, Z., and Low, B. K. H. Neural
+ensemble search via bayesian sampling. In Cussens,
+J. and Zhang, K. (eds.),Proceedings of the Thirty-
+Eighth Conference on Uncertainty in Artificial Intelli-
+gence, volume 180 ofProceedings of Machine Learn-
+ing Research, pp. 1803–1812. PMLR, 01–05 Aug
+2022. URL https://proceedings.mlr.press/
+v180/shu22a.html.
+Teerapittayanon, S., McDanel, B., and Kung, H. T.
+BranchyNet: Fast Inference via Early Exiting from Deep
+Neural Networks, September 2017. URL http://
+arxiv.org/abs/1709.01686. arXiv:1709.01686
+[cs].
+Wang, D.-B., Feng, L., and Zhang, M.-L. Re-
+thinking calibration of deep neural networks:
+Do not be afraid of overconfidence, 2021.
+URL https://proceedings.neurips.
+cc/paper_files/paper/2021/file/
+61f3a6dbc9120ea78ef75544826c814e-Paper.
+pdf.
+Wang, X., Luo, Y ., Crankshaw, D., Tumanov, A., Yu, F., and
+Gonzalez, J. E. IDK Cascades: Fast Deep Learning by
+Learning not to Overthink, June 2018. URL http://
+arxiv.org/abs/1706.00885. arXiv:1706.00885
+[cs].
+Xie, S., Zheng, H., Liu, C., and Lin, L. Snas: Stochastic
+neural architecture search. InInternational Conference
+on Learning Representations (ICLR), 2019.
+Ying, X. An Overview of Overfitting and its Solu-
+tions.Journal of Physics: Conference Series, 1168:
+022022, February 2019. ISSN 1742-6588, 1742-
+6596. doi: 10.1088/1742-6596/1168/2/022022. URL
+https://iopscience.iop.org/article/10.
+1088/1742-6596/1168/2/022022.
+Zaidi, S., Zela, A., Elsken, T., Holmes, C., Hutter, F., and
+Teh, Y . W. Neural ensemble search for uncertainty esti-
+mation and dataset shift. InProceedings of the 35th Inter-
+national Conference on Neural Information Processing
+Systems, NIPS ’21, Red Hook, NY , USA, 2021. Curran
+Associates Inc. ISBN 9781713845393.
+Submission and Formatting Instructions for ICML 2026
+A. Differentiable Stochastic Neural Architecture Search
+Stochastic NAS (SNAS) (Xie et al., 2019) assigns continuous architecture parameters α(i,j), which parametrize the
+distribution of operation selection. To maintain differentiability while mimicking discrete sampling, themixed operationis
+defined as the stochastic weighted sum:
+¯o(i,j)(x) =
+|O|X
+k=1
+Z (i,j)
+k ·o k(x),(14)
+whereZ (i,j)
+k is a variable sampled from theConcrete distributionvia the reparameterization trick:
+Z (i,j)
+k =
+exp
+
+logα (i,j)
+k +G (i,j)
+k
+
+/λ
+
+P|O|
+l=1 exp
+
+logα (i,j)
+l +G (i,j)
+l
+
+/λ
+ .(15)
+Here, G(i,j)
+k =−log(−log(U (i,j)
+k )) represents Gumbel noise drawn from a uniform distribution U∼Uniform(0,1) , and λ
+is the softmax temperature. Unlike DARTS, which requires a heuristicargmaxselection post-search, SNAS steadily anneals
+λ→0 during training. This forces the random variable Z (i,j) to converge to a one-hot vector, making the mixed operation
+unbiased and effectively discrete by the end of optimization.
+B. NESBS
+The core of NESBS (Shu et al., 2022) is SVGD-RD, which basically updates n architectural configurations using SGD
+learning through the update direction ϕ∗, which drives the evolution of the architecture particles and is composed of two
+distinct mechanisms that balance individual performance with collective diversity.
+ϕ∗(˜x) =1
+N
+NX
+j=1
+
+k(˜xj,˜x)∇˜xj logp(˜xj)| {z }
+Driving Force
++ (1 +δ)∇ ˜xj k(˜xj,˜x)| {z }
+Repulsive Force
+
+(16)
+• Driving Force (Accuracy FA): The first term, k(˜xj,˜x)∇˜xj logp(˜xj), acts as the exploitative component of the
+optimization. It leverages the gradient of the log-posterior—derived from the Supernet learned distribution—to steer
+particles toward regions of the search space with high predictive likelihood. The kernel k(˜xj,˜x)acts as a weighting
+function, allowing high-probability particles to influence the trajectory of their neighbors, thereby ensuring that all
+ensemble members converge toward valid, high-accuracy architectures.
+•Repulsive Force (DiversityF D)):
+The second term, (1 +δ)∇ ˜xj k(˜xj,˜x), acts as the exploratory component. Since the gradient of the Radial Basis
+Function (RBF) kernel, ∇˜xj k(˜xj,˜x), points away from the particle locations, this term creates a dispersive vector field
+that pushes particles apart.
+• Diversity Coefficient (δ): This hyper-parameter artificially amplifies the repulsive force beyond the standard SVGD
+formulation.
+C. Datasets
+We evaluate our methods on three benchmark datasets: CIFAR-10 (Krizhevsky, 2009), CIFAR-100 (Krizhevsky, 2009),
+and ImageNet-16-120. CIFAR-10 and CIFAR-100 (Krizhevsky, 2009) consist of 32×32 color images, representing 10 and
+100 classes, respectively. Each dataset contains 60,000 images, split into 50,000 training images and 10,000 test images.
+ImageNet-16-120 (Chrabaszcz et al., 2017) is a downsized version of the ImageNet dataset specifically designed for NAS
+evaluation, consisting of 16×16 color images spanning 120 object classes. It contains 151,700 training images and 6,000
+test images.
+Submission and Formatting Instructions for ICML 2026
+D. Different Thresholds and Exit criteria
+In this section, we report the value of accuracy and FM by varying the τconf and the exit criteria of SQUAD (mean
+confidence or t-test) , as explained in section 4.4. In general, t-test leads to solutions with higher accuracy and FM but,
+interestingly, the mean confidence seems to perform slightly better on CIFAR-10.
+190 195 200 205 210 215 220
+MACs (M)
+96.65
+96.70
+96.75
+96.80
+96.85
+96.90
+96.95
+97.00Accuracy (%)
+= 0.8
+= 0.85
+= 0.9
+= 0.95
+= 0.8
+= 0.85
+= 0.9
+= 0.95
+Computational Cost vs. Accuracy Trade-off (CIFAR-10)
+Mean
+T-test
+Figure 4.Mean vs T-student early exit criterion on CIFAR-10 with differentτ conf
+220 240 260 280 300
+MACs (M)
+79.0
+79.5
+80.0
+80.5
+81.0
+81.5
+82.0Accuracy (%)
+= 0.5
+= 0.55
+= 0.6
+= 0.65
+= 0.5
+= 0.55
+= 0.6
+ = 0.65
+Computational Cost vs. Accuracy Trade-off (CIFAR-100)
+Mean
+T-test
+Figure 5.Mean vs T-student early exit criterion on CIFAR-100 with differentτ conf
+Submission and Formatting Instructions for ICML 2026
+60 70 80 90
+MACs (M)
+57Accuracy (%)
+= 0.2
+= 0.25
+= 0.3
+= 0.35
+= 0.2
+= 0.25
+= 0.3
+= 0.35
+Computational Cost vs. Accuracy Trade-off (ImageNet16-120)
+Mean
+T-test
+Figure 6.Mean vs T-student early exit criterion on ImageNet16-120 with differentτ conf
+E. Train and search hyperparameters
+This section shows the specific hyperparameters of the search and train phase of our NAS on the DARTS search space. The
+search consists of three steps: supernet training, computation of the posterior distribution, and SVGD-RD search.
+Table 4.Hyperparameters for Supernet Training on CIFAR-10 on DARTS search space
+Hyperparameter Value / Setting
+Dataset CIFAR-10 (70% split train)
+Epochs 150
+Batch size 64
+Optimizer (weights) SGD (momentum = 0.9, weight decay =3×10 −4)
+Optimizer (arch parameters) Adam (lr =3×10 −4, betas = (0.5, 0.999), weight decay =10 −3)
+Learning rate decay from 0.025 to 0.001 (cosine annealing)
+Gradient clipping 5.0
+Initial channels 16
+Number of cells 8
+Weight decay (arch parameters) 10−3
+Weight decay (model weights) 3×10 −4
+Data augmentation Random Horizontal Flipping, Random Cropping with Padding, and Normalization
+Cost penalty (MACs)λ 10−3
+Early exit weightsβ all equal to 1.0
+Submission and Formatting Instructions for ICML 2026
+Table 5.Hyperparameters for the computation of the posterior distribution on CIFAR-10 on DARTS search space
+Hyperparameter Value / Setting
+Dataset CIFAR-10 (30% split train)
+Initial channels 16
+Number of cells 8
+Epochs 20
+Optimizer (arch parameters) Adam (lr = 0.01, betas = (0.9, 0.999), weight decay = 3×10−4)
+Data augmentation Random Horizontal Flipping, Random Cropping with Padding, and Normalization
+Early exit weightsβ all equal to 1.0
+Table 6.Hyperparameters for the SVGD-RD search on CIFAR-10 on DARTS search space
+Hyperparameter Value / Setting
+Epochs 1000
+Optimizer (arch parameters) SVGD-RD withϵ(lr) = 0.1 and momentum=0.9
+Number of ensemble members E 3
+Repulsion parameterδ -1.3
+Table 7.Hyperparameters for Final Training Phase on a dataset on DARTS search space
+Hyperparameter Value / Setting
+Dataset Full training set of the dataset
+Epochs 600
+Batch size 96
+Optimizer SGD (momentum = 0.9, weight decay =3×10 −4)
+Learning rate decay from 0.025 to 0.001 (cosine annealing)
+Gradient clipping 5.0
+Initial channels 36
+Number of cells 20
+Early exit weightsβ all equal to 1.0
+Drop path probability 0.2 (linearly increased)
+Cutout True (length = 16)
+Weight decay 3×10 −4
+Data augmentation Random Horizontal Flipping, Random Cropping with Padding, and Normalization
