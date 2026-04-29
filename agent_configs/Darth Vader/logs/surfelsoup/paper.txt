@@ -1,0 +1,3478 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+SurfelSoup: Learned Point Cloud Geometry Compression
+With a Probablistic SurfelTree Representation
+Anonymous Authors1
+Abstract
+This paper presents SurfelSoup, an end-to-end
+learned surface-based framework for point cloud
+geometry compression, with surface-structured
+primitives for representation. It proposes a prob-
+abilistic surface representation, pSurfel, which
+models local point occupancies using a bounded
+generalized Gaussian distribution. In addition, the
+pSurfels are organized into an octree-like hierar-
+chy, pSurfelTree, with a Tree Decision module
+that adaptively terminates the tree subdivision for
+rate-distortion optimal Surfel granularity selec-
+tion. This formulation avoids redundant point-
+wise compression in smooth regions and produces
+compact yet smooth surface reconstructions. Ex-
+perimental results under the MPEG common test
+condition show consistent gain on geometry com-
+pression over voxel-based baselines and MPEG
+standard G-PCC-GesTM-TriSoup, while provid-
+ing visually superior reconstructions with smooth
+and coherent surface structures.
+1. Introduction
+Point clouds, which represent the 3D structures using col-
+ored points, have emerged as a crucial 3D data representa-
+tion in the field of immersive media, autonomous driving,
+and virtual/augmented reality (Huang et al., 2025; Jiang
+et al., 2025), where compression is necessary to reduce
+the storage and transmission costs. To this end, the Mov-
+ing Picture Experts Group (MPEG) established two stan-
+dards for point cloud compression (PCC): video-based PCC
+(V-PCC) (Schwarz et al., 2018) and geometry-based PCC
+(G-PCC) (Zhang et al., 2024). Beyond these standards, nu-
+merous learning-based methods have emerged (Quach et al.,
+2020; Wang et al., 2021b;a; 2023; 2024; Que et al., 2021;
+Fan et al., 2022; You et al., 2025). Despite these advance-
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Original
+SurfelSoup Recon
+Coarse pSurfels
+Fine pSurfels
+Ground Truth
+SurfelSoup
+Unicorn
+0.039 bpp
+(geometry)
+0.069 bpp
+(geometry)
+ground truth
+pSurfel
+octant
+Figure 1. An illustration of SurfelSoup. Top Left: a toy 2D
+example for the pSurfelTree structure. Top Right: Example re-
+construction comparison of a 3D Husky. Bottom: Example of
+pSurfelTree’s multi-granularity reconstruction.
+ments, the fact that points are unevenly distributed in the 3D
+space poses significant challenges to the design of efficient
+PCC schemes.
+The main difficulty of point cloud compression lies in es-
+tablishing an expressive and compression-friendly 3D repre-
+sentation. G-PCC-Octree uses the octree structure, which
+transfers the non-uniform points into a tree. To exploit
+the surface prior, G-PCC-TriSoup represents a point cloud
+as a set of triangles, significantly outperforming G-PCC-
+Octree on dense point clouds. Meanwhile, several learned
+point cloud compression methods (Wang et al., 2021b; 2022;
+2024; Wang & Gao, 2025) have been proposed to leverage
+sparse convolution (Choy et al., 2019) on the voxelized
+point clouds. Although these learned approaches improve
+compression efficiency, they remain fundamentally tied to
+voxelized representations and octree-based structures, with
+redundant voxel divisions in smooth regions ignoring the
+underlying surface structure, leading to inherently less effi-
+cient compression. In addition, voxel-based methods often
+struggle to preserve continuous surfaces and tend to produce
+artifacts such as gaps at low bit rates.
+To this end, we break from the voxel-based paradigm and
+introduce SurfelSoup. To the best of our knowledge, this
+is the first end-to-end surface-based framework for point
+cloud compression, with surface primitives for reconstruc-
+tion. SurfelSoup models a point cloud as a composition
+of probabilistic surfaces, termed pSurfels, organized in an
+octree-like structure called pSurfelTree (Fig. 1). Each pSur-
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+fel describes voxel occupancy likelihoods within an octree
+node using a differentiable bounded 3D generalized Gaus-
+sian distribution, enabling end-to-end optimization. A Tree
+Decision module adaptively decides whether to terminate
+a tree node with a pSurfel, or to further split it into chil-
+dren nodes, based on the desired rate-distortion trade-off.
+Experiments show that, compared with voxel baselines, Sur-
+felSoup achieves greater coding efficiency and qualitatively
+superior reconstructions with smooth and coherent surface
+structures. Our main contributions include:
+• The first end-to-end learned surface-based point
+cloud geometry compression framework, Surfel-
+Soup, leveraging a probabilistic surface representation,
+termed pSurfel. This representation models the voxel
+occupancies by a bounded 3D generalized Gaussian
+function, which induces a differentiable likelihood over
+voxel occupancies for end-to-end optimization.
+• A pSurfelTree hierarchy for adaptive surfel granu-
+larity assignment. pSurfelTree makes rate-distortion
+optimal assignment of pSurfels at different granulari-
+ties. This is achieved through the proposed Tree Deci-
+sion module, and a corresponding formulation of the
+expected total rate and distortion.
+• Validations according to the MPEG common test
+condition (CTC) for AI-PCC. Our experimental re-
+sults show that SurfelSoup outperforms the previous
+state-of-the-art voxel-based method Unicorn (Wang
+et al., 2024) and other voxel-based approaches, as well
+as MPEG G-PCC-TriSoup, under the Common Test
+Condition. Models trained using human datasets ac-
+cording to the MPEG CTC further show strong gener-
+alization to object and scene point clouds.
+2. Related Work
+2.1. Rule-based Point Cloud Compression
+The Moving Picture Experts Group (MPEG) specifies video-
+based PCC (V-PCC) and geometry-based PCC (G-PCC).
+V-PCC projects 3D point clouds onto 2D. G-PCC encodes
+the geometry directly in 3D using regularized data structures.
+G-PCC-Octree represents the geometry as an occupancy oc-
+tree, while G-PCC-TriSoup approximates points under each
+octree node with triangles at a chosen octree level. TriSoup
+has been shown to outperform G-PCC-Octree (Quach et al.,
+2020) for dense point clouds, as it encodes surfaces with far
+fewer parameters than the voxel occupancies.
+2.2. Learning-based Point Cloud Compression
+Early learning-based point cloud compression methods bor-
+row the idea of end-to-end entropy models (Ball´e et al.,
+2017; 2018; Minnen et al., 2018) and adopt 3D convolutions
+to process volumetric inputs (Quach et al., 2020; Wang et al.,
+2021b; Nguyen et al., 2021). However, the excessive com-
+putational complexity of dense 3D convolutions requires
+pre-partitioning of the input (Quach et al., 2020; Wang et al.,
+2021b), resulting in long encoding/decoding times and de-
+graded efficiency. To address this, PCGCv2 (Wang et al.,
+2021a) first introduces 3D sparse convolutions (Choy et al.,
+2019) into point cloud compression, greatly reducing com-
+putational cost. Building upon this, SparsePCGC (Wang
+et al., 2022) proposes a unified N-stage Sparse Octree Prob-
+ability Aggregation (SOPA) module for both lossless and
+lossy compression, which auto-regressively models octant
+occupancy distribution in a fixed Morton order.
+View-
+PCGC (Zheng et al., 2024) further introduces view in-
+formation into point cloud compression. More recently,
+UniPCGC (Wang & Gao, 2025) introduces a Variable Rate
+and Complexity Module that enables adaptive rate con-
+trol, further improving over SparsePCGC. Unicorn (Wang
+et al., 2024) proposes a unified architecture for geometry
+and attribute compression, which incorporates a Neighbor-
+hood Point Attention (NPA) module for geometry compres-
+sion. There are also works that focus on LiDAR point
+clouds (Huang et al., 2020; Biswas et al., 2020; Fu et al.,
+2022; You et al., 2025), exploiting sparsity and range-image
+structures. These designs are effective for LiDAR, but do
+not generalize well to non-LiDAR point clouds.
+2.3. 3D Representations
+Representing 3D surfaces for reconstruction, processing,
+and rendering has been a fundamental research problem.
+To this end, both implicit (Park et al., 2019; Fridovich-
+Keil et al., 2022; Mildenhall et al., 2021; Chibane et al.,
+2020) and explicit surface representations (Pfister et al.,
+2000; Dai et al., 2024; Gao et al., 2023; Aliev et al., 2020)
+have been developed. Notably, surfel (Pfister et al., 2000)
+proposes to represent a surface with isolated surface el-
+ements without storing the connectivity, hence achieving
+efficient rendering and processing flexibility. Later works in-
+troduce the surface splatting (Zwicker et al., 2001; Kobbelt
+& Botsch, 2004) techniques and non-square shapes (Botsch
+et al., 2005) to address the visibility issues in rendering. By
+designing the primitives with differentiability, surfels and
+more generally 3D Gaussians have been shown to facilitate
+3D reconstruction from multi-view images and novel view
+rendering (Kerbl et al., 2023; Dai et al., 2024).
+However, the above representations, including neural im-
+plicit surfaces and 3D Gaussian splatting, are primarily
+designed for 3D reconstruction and rendering, where the
+objective is to fit 3D structures to a given scene. In contrast,
+SurfelSoup is explicitly formulated for learned point cloud
+geometry compression under a rate–distortion objective. A
+systematic comparison with these representations is pro-
+vided in Appendix A.4. Our work is inspired by (Pfister
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+Encoder
+Tree
+Decision
+Reconstruct?
+Octree
+Compression
+Surfel
+Reconstruction
+(a) 8-Stage P-SOPA
+Voxelization
+(b) Bounded
+pSurfel
+(c) Voxel
+Occupancy
+(Probability)
+Binarization
+(d) Assembling
+& k-Binarization
+Entropy
+Model
+AE
+AD
+Non-occupied octant
+Surfel node
+Octree node
+Bounded pSurfel
+Voxels
+Figure 2. The overall architecture of SurfelSoup. Encoder and Entropy Model correspond to Sec. 3.2. Surfel Reconstruction, Voxelization
+and Binarization correspond to Sec. 3.3. Decision corresponds to Sec. 3.4. Octree Compression corresponds to Sec. 3.5.
+et al., 2000), but extends the surfel primitives to differen-
+tiable pSurfels for end-to-end point cloud compression.
+Our work is most related to TeSO (Hu et al., 2025), where
+the 3D scene is described by cube-bounded surfels organized
+on an octree, with the geometry of each surfel parameterized
+by a normal vector, an octree bounding box, a center, and
+a radius. However, the TeSO is constructed based on a
+hand-crafted criterion then compressed without the joint
+optimization, thus leading to rate-distortion suboptimality.
+3. Methodology
+3.1. Overview
+The architecture of SurfelSoup is illustrated in Figure 2. We
+provide a notation table in Appendix A.1. The input point
+cloud p is represented as a sparse tensor p = [pC, pA],
+where pC denotes the 3D coordinates and pA the associated
+attributes. For geometry compression, pA = 1 to indicate
+occupancy. The encoder module (Sec. 3.2) maps p into
+latent f L via sparse convolution, where the superscript “L”
+denotes L stages of octree-based downsampling. f L is quan-
+tized, arithmetically coded and decoded (AE/AD) to yield
+ˆf L. For each non-empty node uL
+i with latent ˆf L
+i , the Tree
+Decision module (Sec. 3.4) selects between:
+1. reconstructing a pSurfel via the surfel reconstruction
+module (Sec. 3.3), or
+2. compressing the occupancy information of the eight
+child octants of the current node using the octree com-
+pression module (Sec. 3.5).
+The above process is then recursively applied on non-empty
+octants generated by Decision 2. The recursive process
+yields a tree-structured representation, termed the pSurfel-
+Tree, where a node is a leaf if and only if it reconstructs
+a pSurfel. At octree layer l ∈[0, L], we denote by sl the
+set of nodes following Decision 1 (surfel nodes), and ol the
+set of nodes following Decision 2 (octree nodes). Finally,
+each surfel node sl
+i is converted into a local point set with
+assigned occupancy likelihoods based on the decoded pSur-
+fel parameters via the voxelization module, and all such sets
+are assembled and reconstructed into a point cloud through
+the binarization module.
+3.2. Encoder & Entropy Coding
+The encoder module maps the input point cloud p into a
+latent f L. It consists of L downsampling stages following
+the design of (Wang et al., 2024), implemented via sparse
+convolutions. The latent representation is decomposed as
+f L =
+
+f L
+C, f L
+A
+
+, where the geometric coordinates f L
+C are loss-
+lessly compressed using the G-PCC-Octree, while the at-
+tributes f L
+A (containing the latent features) are quantized and
+entropy coded using the hyperprior entropy model (Ball´e
+et al., 2018). The reconstructed attribute latent ˆf L is then
+upsampled to each octree level l via sparse transposed convo-
+lutions (See Appendix A.3), yielding ˆf l, l = 1, 2, . . . , L −1
+for subsequent pSurfelTree construction.
+3.3. pSurfel Representation
+We model local geometry using a learnable surface primi-
+tive, termed pSurfel, which defines a continuous occupancy
+likelihood field within a spatial cell. Concretely, a pSurfel
+is parameterized as a bounded 3D generalized Gaussian:
+P(x) = exp
+ −1
+2 r(x, Σ)2β
+,
+r(x, Σ) =
+q
+(x −µ)T Σ−1(x −µ).
+(1)
+where x ∈R3 denotes any location in 3D space.
+Following 3D Gaussian splatting (Kerbl et al., 2023), each
+pSurfel associated with node sl
+i is parameterized by 11 learn-
+able variables: mean µl
+i ∈R3, standard deviation σl
+i ∈R3,
+quaternion ql
+i ∈R4 , and shape coefficient βl
+i ∈R.
+Note that the 3D GG function reduces to a 2D function
+describing a planar surfel when one of its rotated axes has
+a very small variance. This axis is the normal vector of
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+4
+3
+2
+1
+4
+3
+2
+1
+Sampling &
+STE Masking 
+4
+3
+2
+1
+4
+3
+2
+1
+4
+3
+2
+1
+4
+3
+2
+1
+4
+3
+2
+1
+Sparse
+Convolution
+?
+Previous stage
+3
+Current stage
+4
+Future stage
+Convolution
+Kernel
+4
+3
+2
+1
+4
+3
+2
+1
+4
+3
+2
+1
+4
+3
+2
+1
+4
+3
+2
+1
+Figure 3. A 2D example to explain P-SOPA. The octants labeled 1 and 2 have been coded, with gray intensities indicating the existence
+probabilities (the darker the higher probability). Octants labeled 3 are being coded, and octants labeled 4 are yet to be coded and unseen.
+In the middle figure, some octants labeled 1 and 2 were randomly masked out (set as white). Real P-SOPA is done on 3D.
+Algorithm 1 pSurfelTree Construction
+Require: Latent feature ˆf l
+i, octants Ol
+i
+1: function CONSTRUCTTREE(ˆf l
+i)
+2:
+˜pl
+i, ˜ql
+i ←DECISIONMODULE(ˆf l
+i)
+3:
+D(sl
+i) ←SURFELRECON(ˆf l
+i)
+4:
+B(ol
+i), ˆf l
+i,[0:7] ←P-SOPA(ˆf l
+i)
+5:
+for j = 0 to 7 do
+6:
+if Ol
+i,j = 1 and (train or ˜ql
+i < ϵ) then
+7:
+CONSTRUCTTREE(ˆf l
+i,j)
+8:
+end if
+9:
+end for
+10: end function
+the surfel, and the other two axes define two orthogonal
+axes on the surfel. The σi along each plane axis defines the
+spread of the surfel. The parameter β controls the sharpness
+of the drop off beyond the respective σ in each axis. The
+GG function reduces to the Gaussian function when β = 2,
+which has slower drop-off.
+Bounding Box.
+We restrict the influence of each pSurfel
+to the bounding box defined by the octree, i.e. the coverage
+region of sl
+i with side length 2l , as shown in Fig. 2 (b). Such
+bounded pSurfels at different granularities can represent
+complex surface geometries.
+Voxelization and Distortion.
+Eq. 1 defines a continuous
+occupancy probability field over 3D space. For each voxel
+vl
+i,k within the bounding box, we evaluate its occupancy
+probability P(vl
+i,k). The distortion incurred by classify-
+ing ul
+i as a surfel node sl
+i is defined as the negative log-
+likelihood of the ground truth occupancies:
+D(ul
+i) = −
+X
+vl
+i,k∈Vl
+i
+h
+Q(vl
+i,k) log P(vl
+i,k)
++ (1 −Q(vl
+i,k)) log
+ 1 −P(vl
+i,k)
+ i
+,
+(2)
+where Q(vl
+i,k) denotes the ground truth occupancy of vl
+i,k,
+Vl
+i denotes the set of voxels within the bounding box.
+Binarization.
+At the inference time, the binarization mod-
+ule converts the occupancy probability into binary occu-
+pancy codes for point cloud reconstruction. Specifically,
+Algorithm 2 P-SOPA
+Require: Latent feature ˆf l
+i, octants Ol
+i
+1: function P-SOPA(ˆf l
+i)
+2:
+for j = 0 to 7 do
+3:
+Pl
+[:j−1] ←{˜pl
+i′,j′ | ∀i′, j′ ∈[0:j −1]}
+4:
+ml
+[:j−1] ∼Bernoulli
+
+Pl
+[:j−1]
+
+5:
+¯ml
+[:j−1] ←STE(ml
+[:j−1])
+6:
+[θ,ˆf]l
+i,j ←SOPA(ˆf l
+i, Ol
+[:j−1], ¯ml
+[:j−1])
+7:
+end for
+8:
+B(ol
+i) ←ARITHMCODER(θl
+i, Ol
+i)
+9:
+return B(ol
+i), ˆf l
+i,[0:7]
+10: end function
+all Vl
+i are assembled into a global set V, among which the
+top ρN voxels with the highest occupancy probabilities are
+selected as the reconstructed point cloud, where N denotes
+the number of points in the original point cloud, and ρ is a
+user-defined scaling factor (set to 1 in our experiment).
+3.4. pSurfelTree Decision
+To adaptively assign pSurfels at different tree levels, the
+Tree Decision module governs whether a tree node ul
+i is
+further subdivided or terminates as a pSurfel. To enable the
+joint training of the Tree Decision with other modules, we
+replace the binary decisions with differentiable probabilistic
+assignments during training. However, directly computing
+the marginal probability that a node ul
+i is an octree node
+(denoted as ˜pl
+i) or a surfel node (˜ql
+i) is intractable, since a
+node exists only if its parent is an octree node requiring
+further splitting. Therefore, the decision module generates
+a conditional probability pl
+i that the node ul
+i is an octree
+node from its latent ˆf l
+i, conditioned on either 1) its parent
+is also an octree node with probability ˜pl+1
+π(i,l); or 2) it is
+a top-level node (l = L). The probabilities ˜pl
+i and ˜ql
+i are
+therefore recursively computed as:
+˜pl
+i = pl
+i ˜pl+1
+π(i,l),
+˜pL
+i = pL
+i ,
+˜ql
+i = (1 −pl
+i) ˜pl+1
+π(i,l),
+˜qL
+i = 1 −pL
+i .
+(3)
+where π(i, l) denotes the index of the parent of ul
+i.
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+0.00
+0.05
+0.10
+0.15
+0.20
+0.25
+Bits per point (bpp)
+72
+74
+76
+78
+80
+82
+84
+PSNR (dB)
+basketball_vox11 — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.00
+0.05
+0.10
+0.15
+0.20
+0.25
+Bits per point (bpp)
+72
+74
+76
+78
+80
+82
+84
+dancer_vox11 — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+model_vox10 — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+exercise_vox10 — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.00
+0.05
+0.10
+0.15
+0.20
+0.25
+Bits per point (bpp)
+75.0
+77.5
+80.0
+82.5
+85.0
+87.5
+PSNR (dB)
+basketball_vox11 — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.00
+0.05
+0.10
+0.15
+0.20
+0.25
+Bits per point (bpp)
+75.0
+77.5
+80.0
+82.5
+85.0
+87.5
+dancer_vox11 — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0
+model_vox10 — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0
+82.5
+exercise_vox10 — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+Figure 4. The comparison between SurfelSoup (ours) and baselines on Owlii.
+To make the decisions differentiable while binary during
+evaluation, we adopt the Gumbel–Sigmoid reparameteriza-
+tion (Jang et al., 2017), providing a continuous sampling
+relaxation.
+During inference, nodes with ˜ql
+i ≥1 −ϵ are classified as
+surfel nodes sl
+i and the recursion terminates. During train-
+ing, however, no hard termination is applied; each node is
+represented in a probabilistic manner, allowing all branches
+to remain active and differentiable. The overall tree con-
+struction procedure is summarized in Alg. 1.
+3.5. Octree Node Occupancy Compression: P-SOPA
+We model an octree node’s octant occupancies using a lo-
+cal autoregressive probability model: 8-stage SOPA (Wang
+et al., 2021a). Define the octants of an octree node ol
+i as
+Ol
+i =
+
+Ol
+i,j | j ∈{0, 1, · · · , 7}
+	
+, where Ol
+i,j ∈{0, 1} de-
+notes the j-th octant in Morton order. For each octree layer
+l, octants with the same index j, i.e. Ol
+[j] =
+
+Ol
+i,j|∀i
+	
+, are
+grouped together and coded in parallel. Specifically, SOPA
+estimates the conditional probability θl
+[j] of Ol
+[j] given the
+already decoded octants Ol
+[:j−1] and latent ˆf l:
+θl
+[j] = Ψl
+j
+
+ˆf l
+[j],ˆf l; ψl
+j
+
+,
+ˆf l
+[j] = Φl
+j
+
+Ol
+[:j−1],ˆf l; ϕl
+j
+
+,
+(4)
+where Ψl
+j/Φl
+j(·) are sparse convolution networks for prob-
+ability estimation/latent reconstruction, parameterized by
+ψl
+j/ϕl
+j. ˆf[j] =
+n
+ˆf l
+i,j|∀i
+o
+is the union of group j’s recon-
+structed latents, which integrates the information of ˆf l and
+already decoded context Ol
+[j].
+When ul
+i is classified as an octree node ol
+i, the bits required
+for compressing the octant occupancy information is the
+negative log-likelihood of octant occupancies:
+B(ul
+i) = −
+7
+X
+j=0
+h
+Ol
+i,j log2 θl
+i,j +(1−Ol
+i,j) log2
+ 1−θl
+i,j
+i
+.
+(5)
+As shown in Alg. 1, during training each node ul
+i,j is al-
+ways divided with probabilities rather than prematurely
+terminated as a surfel node. This creates a mismatch be-
+tween the training and inferencing of the autoregressive
+SOPA model: naive convolutions may access contextual
+octants whose parent nodes would not exist at evaluation
+time, violating the intended conditional structure (See Ap-
+pendix A.2 and Fig. 10 for an example). We therefore
+propose P-SOPA, a probabilistic extension of SOPA that
+explicitly accounts for node existence. As illustrated in
+Fig. 3, when coding Group j, we sample a Bernoulli
+mask ml
+[:j−1] from context Ol
+[:j−1]’s existence probabili-
+ties: Pl
+[:j−1] =
+
+Pl
+i,j′ = ˜pl
+i|∀i; j′ ∈[: j −1]
+	
+, where ˜pl
+i is
+defined in Eq. 3 indicating the probability of a node ter-
+minate. In addition, to preserve gradient flow, we apply a
+straight-through estimator (STE) (Bengio et al., 2013):
+¯ml
+[:j−1] = sg
+ ml
+[:j−1] −Pl
+[:j−1]
+
++ Pl
+[:j−1],
+(6)
+where sg(·) denotes the stop-gradient operator. The STE
+mask ¯ml
+[:j−1] is then applied to SOPA’s context extraction
+network on Ol
+[:j−1]. More information of P-SOPA and its
+implementation is shown in Appendix A.2 and A.3. The
+whole algorithm of P-SOPA is shown in Alg. 2.
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+0.00
+0.10
+0.20
+0.30
+0.40
+Bits per point (bpp)
+64
+66
+68
+70
+72
+74
+76
+PSNR (dB)
+Vishnu — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.10
+0.20
+0.30
+0.40
+Bits per point (bpp)
+55
+60
+65
+70
+75 Megalith_Tomb — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.00
+0.10
+0.20
+0.30
+0.40
+Bits per point (bpp)
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0
+PSNR (dB)
+Vishnu — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.10
+0.20
+0.30
+0.40
+Bits per point (bpp)
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+Megalith_Tomb — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+Figure 5. The comparison between SurfelSoup (ours) and baselines on RWTT dataset.
+Table 1. BD-rate (%) comparison of our method against different baselines. Negative values indicate bitrate savings over the baseline.
+Baseline
+Basketball
+Dancer
+Model
+Exercise
+Megalith Tomb
+Vishnu
+D1
+D2
+D1
+D2
+D1
+D2
+D1
+D2
+D1
+D2
+D1
+D2
+Unicorn
+-35.81
+-38.73
+-34.08
+-36.15
+-24.50
+-28.81
+-24.17
+-28.97
+-13.13
+-13.60
+-28.27
+-32.85
+SparsePCGC
+-28.87
+-34.23
+-26.41
+-31.00
+-28.18
+-33.53
+-28.32
+-34.12
+-24.03
+-14.88
+-26.09
+-33.44
+PCGCv2
+-69.37
+-61.99
+-68.42
+-60.51
+-69.41
+-63.52
+-68.71
+-65.43
+-51.28
+-28.55
+-60.24
+-55.98
+TriSoup
+-74.98
+-73.98
+-73.62
+-72.82
+-68.44
+-69.55
+-74.14
+-71.50
+-62.95
+-29.10
+-57.28
+-63.57
+3.6. Loss Function Formulated as Expectations
+We formulate learning as a rate–distortion optimization:
+L = λ · D + Rf + Ro,
+(7)
+where Rf denotes the bit rate of compressing latent f L
+using the hyperprior entropy model (Ball´e et al., 2018). Due
+to the probabilistic Tree Decision, both the distortion D(ul
+i)
+and the octree bit rate Ro(ul
+i), ∀ul
+i, are random variables.
+We therefore optimize their expectations:
+D = 1
+N
+X
+l,i
+˜ql
+iD(ul
+i),
+Ro = 1
+N
+X
+l,i
+˜pl
+iB(ul
+i),
+(8)
+where D(ul
+i) is the distortion in Eq. 2 when ul
+i is classi-
+fied as a surfel node, B(ul
+i) is the octree coding cost in
+Eq. 5 when ul
+i is classified as an octree node. The marginal
+probabilities ˜pl
+i and ˜ql
+i are determined according to Eq. 3.
+4. Experiments
+4.1. Datasets
+We train our model on the training dataset that the MPEG
+Common Test Condition (CTC) specifies: 8i Voxelized Full
+Bodies (8iVFB) (d’Eon et al., 2017). We use the five se-
+quences in 8iVFB for training, including longdress, redand-
+black, soldier, loot and queen. We evaluate on the CTC-
+specified testing dataset: Owlii (Keming et al., 2018). We
+use the four sequences in Owlii for evaluation. We put the
+MPEG CTC’s 12-bit sequence ThaiDancer in Appendix B.5.
+To evaluate the generalization ability of our model, we also
+evaluate on the object and scene dataset: Real World Texture
+Things (RWTT) (Maggiordomo et al., 2020); and the scene
+dataset: ScanNet (Dai et al., 2017) (See Appendix B.2).
+4.2. Experiment Setup
+Baselines.
+We compare with: Unicorn (Wang et al., 2024),
+SparsePCGC (Wang et al., 2022) and PCGCv2 (Wang et al.,
+2021a) retrained on the same 8iVFB dataset as our method,
+which show better performance under MPEG CTC test
+condition compared with the original version trained on
+ShapeNet (Chang et al., 2015). We retrain the baselines
+with the same training time as our method. We also com-
+pare with MPEG G-PCC-TriSoup (Zhang et al., 2024),
+which outperforms G-PCC-Octree. We did not compare
+with UniPCGC (Wang & Gao, 2025) because its Variable
+Rate and Complexity Module (VRCM) is for fine-grained
+rate control rather than improving geometry modeling.
+4.3. Experimental Results
+Owlii.
+The rate–distortion (RD) curves on Owlii are
+shown in Fig.4. The BD-rate results are summarized in
+Tab.1. Due to the pSurfel representation that compactly
+models smooth point cloud surfaces, our method achieves
+an average BD-rate of −29.64% (D1) and −33.17% (D2)
+over Unicorn, the current state-of-the-art method for dense
+point cloud geometry compression (Xu et al., 2025). Sur-
+felSoup also achieves consistent gain compared with other
+baselines. Notably, the improvements are more significant
+on the two 11-bit (vox11) sequences, which exhibit more
+smooth surfaces that are easily fitted by pSurfels.
+RWTT.
+To further validate the generalization ability of
+our model, we evaluate without finetuning on the RWTT
+dataset, specifically the two sequences Megalith Tomb and
+Vishnu, which are also included in MPEG’s test set. The
+RD-curves are shown in Fig. 5. Note that Vishnu is an
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+SurfelSoup(0.112bpp)
+Unicorn(0.149bpp)
+SparsePCGC(0.140bpp)
+PCGCv2(0.158bpp)
+TriSoup(0.241bpp)
+SurfelSoup(0.082bpp)
+Unicorn(0.086bpp)
+SparsePCGC(0.097bpp)
+PCGCv2(0.098bpp)
+TriSoup(0.083bpp)
+SurfelSoup(0.124bpp)
+Unicorn(0.125bpp)
+PCGCv2(0.128bpp)
+TriSoup(0.106bpp)
+SparsePCGC(0.140bpp)
+Ground Truth
+Ground Truth
+Ground Truth
+Figure 6. Visual comparison of decoded point clouds. The colors are interpolated from the original point cloud.
+0.05
+0.10
+0.15
+0.20
+Bits per point (bpp)
+64
+66
+68
+70
+72
+74
+76
+PSNR (dB)
+Vishnu — D1 PSNR
+SurfelSoup
+l=1 only  (BDR: -14.9%)
+l=2 only  (BDR: -4.3%)
+fixed beta  (BDR: -3.3%)
+w/o P-SOPA  (BDR: -5.2%)
+0.05
+0.10
+0.15
+0.20
+Bits per point (bpp)
+66
+68
+70
+72
+74
+76
+78
+80
+PSNR (dB)
+Vishnu — D2 PSNR
+SurfelSoup
+l=1 only  (BDR: -25.9%)
+l=2 only  (BDR: -4.8%)
+fixed beta  (BDR: -3.4%)
+w/o P-SOPA  (BDR: -5.5%)
+Figure 7. Ablation studies done on RWTT-Vishnu. “l = 1 only”
+and “l = 2 only”: removing the pSurfelTree decision and con-
+structs pSurfels on only one layer. “fixed beta”: fixing the shape
+coefficient β = 2. “w/o P-SOPA”: replacing P-SOPA with SOPA.
+object point cloud and Megalith Tomb is a scene point cloud.
+Our method shows great generalization ability on both non-
+human objects and sparse scenes. The test result on ScanNet
+(Appendix B.2) further validates our model’s performance
+on scene point clouds.
+Visual Comparison.
+We compare the rendered views of
+compressed point clouds in Fig. 6. We color the geometry-
+only reconstruction by interpolation, because human eyes
+are more sensitive to geometry distortion with color. Pure
+geometry visualization is shown in Appendix B.4. Voxel-
+based baselines suffer from the discontinuity of voxel rep-
+resentations. This manifests especially under low bitrates
+due to error propagation: when coarse octree layers are
+lossy coded, dropping a single occupied octant removes all
+the corresponding fine-level voxels, leading to large gaps.
+This issue is especially pronounced on flat surfaces, where
+the resulting holes and cracks become highly visible. In
+contrast, SurfelSoup models the whole node as a continuous
+surface element, which exhibits no error propagation and
+preserves smooth and coherent geometry even under low bit
+rate.
+4.4. Ablation Studies
+Decision Module.
+We test SurfelSoup without the deci-
+sion module. As shown in Fig. 7, forcing the pSurfel Nodes
+to terminate at l = 1 only ( 23 cubes) or at l = 2 only (43
+cubes) leads to inferior performance at low or high bitrates.
+P-SOPA.
+We test SurfelSoup trained without probabilistic
+masking in P-SOPA. As shown in Fig. 7, the model has
+a huge performance drop in middle rate points, where the
+surfel nodes spread in different octree layers. Under that
+case, conducting SOPA on a node during training will face
+serious information leakage (See example in Appendix A.2
+and Fig. 10). Therefore,the information leakage during
+training is not negligible, leading to a mismatch between
+training and evaluation.
+Shape coefficient β.
+We retrain by fixing β = 2. We can
+witness a consistent performance drop when replacing the
+generalized Gaussian function by the Gaussian function.
+4.5. pSurfel Parameter Distribution
+Variance:
+At octree layer l = 2, there are typically two
+axes with large variances (σ0 and σ1) and one with smaller
+variance (σ2). For quantification, we define the planarity
+ratio r = min (σ0, σ1)/σ2, where σ2 corresponds to the
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+Ground Truth
+Normal Map
+ Coarse Layer
+ Fine Layer
+Overall Reconstruction
+Figure 8. Visualization of different layers of decoded point clouds. It is noted that coarse layers capture flat surfaces (base, ground), while
+fine layers capture detailed non-surface structures (Buddha statue, trees).
+0
+5
+10
+15
+Value
+0
+5000
+10000
+Frequency
+ℓ= 1: σ0
+0.0
+2.5
+5.0
+7.5
+Value
+Frequency
+ℓ= 1: σ1
+0.50
+0.75
+1.00
+1.25
+Value
+Frequency
+ℓ= 1: σ2
+5
+10
+Value
+Frequency
+ℓ= 1: r = min(σ0, σ1)/σ2
+0
+5
+10
+Value
+Frequency
+ℓ= 1: β
+0
+10
+20
+30
+Value
+0
+200
+400
+600
+Frequency
+ℓ= 2: σ0
+25
+50
+75
+Value
+Frequency
+ℓ= 2: σ1
+0.5
+0.6
+0.7
+Value
+Frequency
+ℓ= 2: σ2
+20
+40
+Value
+Frequency
+ℓ= 2: r = min(σ0, σ1)/σ2
+0.0
+2.5
+5.0
+7.5
+Value
+Frequency
+ℓ= 2: β
+Figure 9. Distribution of pSurfel Parameters. σi: the i-th dimension of variance, l: layer index. β: shape coefficient.
+smallest variance (surfel thickness along normal). A high r
+indicates that the pSurfel is effectively constrained to a thin
+surface. At l = 2, the ratio r is consistently large, confirm-
+ing that l = 2 pSurfels behave as planar structures bounded
+by the octree box. In contrast, at l = 1, the variances across
+the three dimensions are more balanced, leading to smaller
+values of r. This suggests that the pSurfels at l = 1 tend
+to approximate Gaussian-like blobs rather than thin planes,
+enabling the capture of non-planar local structures.
+Shape coefficient β:
+β exhibits a wider distribution at l =
+1. At this resolution, β plays a stronger role in controlling
+the drop-off sharpness of occupancy distribution, leading
+to greater variability. In contrast, at l = 2, the pSurfels are
+coarser and often extend beyond the bounding box, making
+the influence of β less significant.
+4.6. Visualization of Different Layers
+Fig. 8 visualizes the point cloud reconstructed from pSurfels
+at different layers of pSurfelTree. We pick a middle rate
+point where around half of the surfel nodes terminates at
+l = 2 and the remaining at l = 1. We can observe that
+pSurfels at coarser layers capture the smooth surfaces (e.g.
+the ground). pSurfels at finer layers usually represent high-
+frequency details with uneven surface normals (e.g. trees).
+This indicates that the decision module learns to distinguish
+between different geometry complexities and adaptively
+selects the surfel granularity for rate-distortion trade-off.
+5. Conclusion
+This paper proposes the first end-to-end surface-based point
+cloud geometry compression framework. It proposes a novel
+probabilistic surface representation termed pSurfel, which
+provides a differentiable likelihood over voxel occupan-
+cies. We further introduce a pSurfelTree structure assigning
+pSurfels to different tree levels to reach optimal trade-off be-
+tween rate and distortion. The whole network is end-to-end
+trained under the expected joint rate and distortion loss. Ex-
+periments show significant improvement over voxel-based
+baselines. Our future work will extend this work for color
+compression. In addition, we plan to explore SurfelSoup’s
+extension to LiDAR point clouds without explicit surface
+structures (See Appendix B.8).
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+References
+Aliev, K.-A., Sevastopolsky, A., Kolos, M., Ulyanov, D.,
+and Lempitsky, V. Neural point-based graphics. In ECCV,
+pp. 696–712. Springer, 2020.
+Ball´e, J., Laparra, V., and Simoncelli, E. P. End-to-end
+optimized image compression. In 5th International Con-
+ference on Learning Representations, ICLR 2017, 2017.
+Ball´e, J., Minnen, D., Singh, S., Hwang, S. J., and Johnston,
+N. Variational image compression with a scale hyperprior.
+In International Conference on Learning Representations,
+2018.
+Bengio, Y., L´eonard, N., and Courville, A. Estimating or
+propagating gradients through stochastic neurons for con-
+ditional computation. arXiv preprint arXiv:1308.3432,
+2013.
+Biswas, S., Liu, J., Wong, K., Wang, S., and Urtasun, R.
+Muscle: Multi sweep compression of lidar using deep
+entropy models. Advances in Neural Information Pro-
+cessing Systems, 33:22170–22181, 2020.
+Botsch, M., Hornung, A., Zwicker, M., and Kobbelt, L.
+High-quality surface splatting on today’s gpus. In Pro-
+ceedings Eurographics/IEEE VGTC Symposium Point-
+Based Graphics, 2005., pp. 17–141. IEEE, 2005.
+Chang, A. X., Funkhouser, T., Guibas, L., Hanrahan, P.,
+Huang, Q., Li, Z., Savarese, S., Savva, M., Song, S.,
+Su, H., Xiao, J., Yi, L., and Yu, F.
+Shapenet: An
+information-rich 3d model repository. arXiv preprint
+arXiv:1512.03012, 2015.
+Chao, B., Tseng, H.-Y., Porzi, L., Gao, C., Li, T., Li, Q.,
+Saraf, A., Huang, J.-B., Kopf, J., Wetzstein, G., et al.
+Textured gaussians for enhanced 3d scene appearance
+modeling. In Proceedings of the Computer Vision and
+Pattern Recognition Conference, pp. 8964–8974, 2025.
+Chen, Y., Lyu, Z., He, B., Cao, N., Chen, G., Lu, G., and
+Zhang, W. Knowledge distillation for learned image com-
+pression. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pp. 4996–5006, 2025.
+Chibane, J., Pons-Moll, G., et al. Neural unsigned distance
+fields for implicit function learning. Advances in Neural
+Information Processing Systems, 33:21638–21652, 2020.
+Choy, C., Gwak, J., and Savarese, S. 4d spatio-temporal
+convnets: Minkowski convolutional neural networks. In
+CVPR, pp. 3075–3084, 2019.
+Dai, A., Chang, A. X., Savva, M., Halber, M., Funkhouser,
+T., and Nießner, M. Scannet: Richly-annotated 3d recon-
+structions of indoor scenes. In Proceedings of the IEEE
+conference on computer vision and pattern recognition,
+pp. 5828–5839, 2017.
+Dai, P., Xu, J., Xie, W., Liu, X., Wang, H., and Xu, W.
+High-quality surface reconstruction using gaussian sur-
+fels. In ACM SIGGRAPH 2024 conference papers, pp.
+1–11, 2024.
+d’Eon, E., Harrison, B., Myers, T., and Chou, P. A. 8i
+voxelized full bodies-a voxelized point cloud dataset.
+ISO/IEC JTC1/SC29 Joint WG11/WG1 (MPEG/JPEG)
+input document WG11M40059/WG1M74006, 7:8, 2017.
+Fan, T., Gao, L., Xu, Y., Li, Z., and Wang, D. D-dpcc:
+Deep dynamic point cloud compression via 3d motion
+prediction. In Raedt, L. D. (ed.), Proceedings of the
+Thirty-First International Joint Conference on Artificial
+Intelligence, IJCAI-22, pp. 898–904. International Joint
+Conferences on Artificial Intelligence Organization, 7
+2022.
+doi: 10.24963/ijcai.2022/126.
+URL https:
+//doi.org/10.24963/ijcai.2022/126. Main
+Track.
+Fridovich-Keil, S., Yu, A., Tancik, M., Chen, Q., Recht, B.,
+and Kanazawa, A. Plenoxels: Radiance fields without
+neural networks. In Proceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition, pp.
+5501–5510, 2022.
+Fu, C., Li, G., Song, R., Gao, W., and Liu, S. Octattention:
+Octree-based large-scale contexts model for point cloud
+compression. In Proceedings of the AAAI conference on
+artificial intelligence, volume 36, pp. 625–633, 2022.
+Gao, Y., Cao, Y.-P., and Shan, Y. Surfelnerf: Neural surfel
+radiance fields for online photorealistic reconstruction of
+indoor scenes. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition, pp.
+108–118, 2023.
+Han, S., Mao, H., and Dally, W. J. Deep compression:
+Compressing deep neural network with pruning, trained
+quantization and huffman coding. In ICLR, 2016.
+Hu, Y., Gong, R., Fan, T., and Wang, Y. Teso: Representing
+and compressing 3d point cloud scenes with textured
+surfel octree. arXiv preprint arXiv:2508.07083, 2025.
+Huang, L., Wang, S., Wong, K., Liu, J., and Urtasun, R.
+Octsqueeze: Octree-structured entropy model for lidar
+compression. In Proceedings of the IEEE/CVF confer-
+ence on computer vision and pattern recognition, pp.
+1313–1323, 2020.
+Huang, T., Yan, Z., Zhao, Y., and Lee, G. H.
+Compc:
+Completing a 3d point cloud with 2d diffusion priors. In
+Yue, Y., Garg, A., Peng, N., Sha, F., and Yu, R. (eds.),
+International Conference on Representation Learning,
+volume 2025, pp. 51765–51784, 2025.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+Jang, E., Gu, S., and Poole, B. Categorical reparameteriza-
+tion with gumbel-softmax. In International Conference
+on Learning Representations (ICLR), 2017.
+Jiang, J., Gu, C., Chen, Y., and Zhang, L. Gs-lidar: Generat-
+ing realistic lidar point clouds with panoramic gaussian
+splatting. In Yue, Y., Garg, A., Peng, N., Sha, F., and
+Yu, R. (eds.), International Conference on Representation
+Learning, volume 2025, pp. 56631–56645, 2025.
+Keming, C., Yi, X., Yao, L., and Ziyu, W.
+Owlii dy-
+namic human mesh sequence dataset. Document ISO/IEC
+JTC1/SC29/WG11 m42816, San Diego, 2018.
+Kerbl, B., Kopanas, G., Leimk¨uhler, T., and Drettakis, G. 3d
+gaussian splatting for real-time radiance field rendering.
+ACM Trans. Graph., 42(4):139–1, 2023.
+Kobbelt, L. and Botsch, M. A survey of point-based tech-
+niques in computer graphics. Computers & Graphics, 28
+(6):801–814, 2004.
+Luo, A., Song, L., Nonaka, K., Unno, K., Sun, H., Goto, M.,
+and Katto, J. Scp: Spherical-coordinate-based learned
+point cloud compression. In Proceedings of the AAAI
+Conference on Artificial Intelligence, volume 38, pp.
+3954–3962, 2024.
+Maggiordomo, A., Ponchio, F., Cignoni, P., and Tarini, M.
+Real-world textured things: A repository of textured mod-
+els generated with modern photo-reconstruction tools.
+Computer Aided Geometric Design, 83:101943, 2020.
+Mildenhall, B., Srinivasan, P. P., Tancik, M., Barron, J. T.,
+Ramamoorthi, R., and Ng, R. Nerf: Representing scenes
+as neural radiance fields for view synthesis. Communica-
+tions of the ACM, 65(1):99–106, 2021.
+Minnen, D., Ball´e, J., and Toderici, G. D. Joint autoregres-
+sive and hierarchical priors for learned image compres-
+sion. Advances in neural information processing systems,
+31, 2018.
+Nguyen, D. T., Quach, M., Valenzise, G., and Duhamel, P.
+Learning-based lossless compression of 3d point cloud
+geometry. In ICASSP 2021-2021 IEEE International
+Conference on Acoustics, Speech and Signal Processing
+(ICASSP), pp. 4220–4224. IEEE, 2021.
+Park, J. J., Florence, P., Straub, J., Newcombe, R., and Love-
+grove, S. Deepsdf: Learning continuous signed distance
+functions for shape representation. In Proceedings of the
+IEEE/CVF conference on computer vision and pattern
+recognition, pp. 165–174, 2019.
+Pfister, H., Zwicker, M., Van Baar, J., and Gross, M. Surfels:
+Surface elements as rendering primitives. In Proceedings
+of the 27th annual conference on Computer graphics and
+interactive techniques, pp. 335–342, 2000.
+Quach, M., Valenzise, G., and Dufaux, F. Improved deep
+point cloud geometry compression. In 2020 IEEE 22nd
+International Workshop on Multimedia Signal Processing
+(MMSP), pp. 1–6. IEEE, 2020.
+Que, Z., Lu, G., and Xu, D. Voxelcontext-net: An oc-
+tree based framework for point cloud compression. In
+Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 6042–6051, 2021.
+Schwarz, S., Preda, M., Baroncini, V., Budagavi, M., Cesar,
+P., Chou, P. A., Cohen, R. A., Krivoku´ca, M., Lasserre,
+S., Li, Z., et al. Emerging mpeg standards for point cloud
+compression. IEEE Journal on Emerging and Selected
+Topics in Circuits and Systems, 9(1):133–148, 2018.
+Wang, J., Ding, D., Li, Z., and Ma, Z. Multiscale point
+cloud geometry compression. In 2021 Data Compression
+Conference (DCC), pp. 73–82. IEEE, 2021a.
+Wang, J., Zhu, H., Liu, H., and Ma, Z. Lossy point cloud
+geometry compression via end-to-end learning. IEEE
+Transactions on Circuits and Systems for Video Technol-
+ogy, 31(12):4909–4923, 2021b.
+Wang, J., Ding, D., Li, Z., Feng, X., Cao, C., and Ma, Z.
+Sparse tensor-based multiscale representation for point
+cloud geometry compression. 45(7):9055–9071, 2022.
+Wang, J., Ding, D., Chen, H., and Ma, Z. Dynamic point
+cloud geometry compression using multiscale inter con-
+ditional coding. arXiv preprint arXiv:2301.12165, 2023.
+Wang, J., Xue, R., Li, J., Ding, D., Lin, Y., and Ma, Z. A ver-
+satile point cloud compressor using universal multiscale
+conditional coding–part i: Geometry. IEEE transactions
+on pattern analysis and machine intelligence, 2024.
+Wang, K. and Gao, W. Unipcgc: Towards practical point
+cloud geometry compression via an efficient unified ap-
+proach. In Proceedings of the AAAI Conference on Artifi-
+cial Intelligence, volume 39, pp. 12721–12729, 2025.
+Xu, Y., Zhang, Y., Xia, S., Yang, K., Huang, H., Shan,
+Z., Huang, W., Yang, Q., and Yang, L.
+Point cloud
+compression and objective quality assessment: A survey.
+arXiv preprint arXiv:2506.22902, 2025.
+You, K., Chen, T., Ding, D., Asif, M. S., and Ma, Z. Reno:
+Real-time neural compression for 3d lidar point clouds. In
+Proceedings of the Computer Vision and Pattern Recog-
+nition Conference, pp. 22172–22181, 2025.
+Zhang, W., Yang, F., Xu, Y., and Preda, M. Standardization
+status of mpeg geometry-based point cloud compression
+(g-pcc) edition 2. In 2024 Picture Coding Symposium
+(PCS), pp. 1–5, 2024. doi: 10.1109/PCS60826.2024.
+10566443.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+Zheng, H., Gao, W., Yu, Z., Zhao, T., and Li, G. Viewpcgc:
+view-guided learned point cloud geometry compression.
+In Proceedings of the 32nd ACM International Confer-
+ence on Multimedia, pp. 7152–7161, 2024.
+Zhou, Q.-Y., Park, J., and Koltun, V. Open3d: A mod-
+ern library for 3d data processing.
+arXiv preprint
+arXiv:1801.09847, 2018.
+Zwicker, M., Pfister, H., Van Baar, J., and Gross, M. Surface
+splatting. In Proceedings of the 28th annual conference
+on Computer graphics and interactive techniques, pp.
+371–378, 2001.
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+Table 2. Summary of Notation.
+Symbol
+Description
+L
+Maximum number of downsampling in feature encoding (set as 3)
+l ∈{0, · · · , L}
+Octree level index, 0 denotes the finest level, L the coarsest level.
+ul
+i
+A node i at level l
+ul
+i,j
+The j-th octant of node ul
+i
+ˆf l
+i
+Latent feature of ul
+i
+ˆf l
+i,j
+Latent feature of octant ul
+i,j
+sl
+i
+ul
+i classfied as a surfel node
+ol
+i
+ul
+i classfied as an octree node
+vl
+i,k
+the k-th voxel (point with integer coordinate) in sl
+i
+Vl
+i
+The set of voxels vl
+i,k in the bounding box defined by sl
+i
+µ, σ, q, β
+Mean, variance, quaternion and shape of pSurfels
+D(sl
+i)
+Distortion incurred by representing ul
+i as a surfel
+π(i, l)
+The index of the parent of ul
+i in layer l + 1
+˜pl
+i
+Probability of ul
+i being an octree node estimated by the decision module
+˜ql
+i
+Probability of ul
+i being a surfel node estimated by the decision module
+Ol
+i,j ∈{0, 1}
+Ground truth occupancy of j-th octant under node i, ul
+i,j
+Ol
+i ∈{0, 1}8
+Occupancy of 8 octants under node ul
+i, Ol
+i =
+
+Ol
+i,j|j ∈[: 8]
+	
+Ol
+[j]
+The set of octants in layer l with group index j, Ol
+[j] =
+
+Ol
+i,j|∀i
+	
+Ol
+[:j−1]
+The set of octants in layer l with group index j′ < j, Ol
+[:j−1] = {Oi,j|∀i; j′ ∈[: j −1]}
+θl
+i,j
+P-SOPA-predicted probability that Ol
+i,j = 1
+θl
+[j]
+P-SOPA-predicted probabilities of group j octants, θl
+[j] =
+
+θl
+i,j|∀i
+	
+Pl
+[:j−1]
+Probability of existence of Ol
+[:j−1], Pl
+[:j−1] =
+
+Pl
+i,j′ = ˜pl
+i|∀i; j′ ∈[: j −1]
+	
+ml
+[:j−1]
+Bernoulli sampled mask based on Pl
+[:j−1]
+¯ml
+[:j−1]
+STE version of ml
+[:j−1]
+B(ol
+i)
+Bit rate estimation of coding the occupancy of octants of ol
+i, Ol
+i
+ϵ
+Threshold for surfel termination during evaluation
+Bernoulli(·)
+Bernoulli distribution
+A. Appendix for Methods
+A.1. Notations
+We summarize the main notation used throughout the paper in Tab. 2. For better understanding, we further provide an
+illustration of each notation in Fig. 10 (a).
+A.2. More Information on P-SOPA
+We give a toy example about why we care about the information leakage during training in the middle of Fig. 10, with
+explanations why information leakage occur in the caption. Therefore, to make training more close to real decoding, we
+apply a Bernoulli-STE mask ¯ml
+[:j−1] on the already decoded octants Ol
+[:j−1], to simulate the process during evaluation that
+some octants in Ol
+[:j−1] do not exist, because their parents are classified as surfel nodes (which are no further divided). This
+mask, ¯ml
+[:j−1], is generated by duplicating the parents’ probability of being classified as octree nodes, i.e. ˜pl. Because
+octants exist iff. their parents are octree nodes that need further division.
+A.3. Network Structures
+This section introduces the network architecture of SurfelSoup, including the encoder module (Sec. 3.2), pSurfel Recon-
+struction (Sec. 3.3), decision module (Sec. 3.4) and P-SOPA (Sec. 3.5).
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+Decision
+: octree
+: surfel
+: set of
+voxels
+Training
+Evaluating
+Leakage!
+Bernoulli+STE
+(a)
+(b)
+(c)
+Figure 10. (a) Illustrations of notations. (b) a toy example of information leakage during training. The red dashed box indicates
+convolution, only four octants out of the eight octants are drawn. Black/white/red indicate that an octant is occupied/unoccupied/unknown
+(not decoded yet). The decoding of groups is conducted from left to right. When decoding the last group of ul
+i, we apply a convolution
+(red dashed line) on the nearby already decoded groups for context generation. However, during evaluation, some decoded octants may
+not exist (e.g. ul
+i′’s first node) because its parent is classified as a surfel (sl
+i′), while during training the network can still access it because
+no actual termination is performed.(c) a toy example with only two nodes of P-SOPA. The color of ˜pl and Pl
+[:j−1] indicates the value of
+probability, with darker color indicating higher probability of existence. We sample a Bernoulli-STE mask ¯ml
+[:j−1] from Pl
+[:j−1] to prune
+the already decoded octants, so that the training better simulates the actual decoding.
+A.3.1. ENCODER
+The encoder architecture is shown in Fig. 11 (a). We follow the encoder design in SparsePCGC (Wang et al., 2022) and
+Unicorn (Wang et al., 2024), consisting of two ResNet-3 Modules (Wang et al., 2024) and one stride-two sparse convolution
+layer for downsampling.
+A.3.2. P-SOPA
+The detailed architecture of P-SOPA is shown in Fig. 11 (c). P-SOPA follows the design of the SOPA module in
+SparsePCGC (Wang et al., 2022). However, the ResNet-3 is replaced by P-ResNet-3, where an STE mask in Sec. 4.4 is
+applied to the input of every convolution layer.
+A.3.3. DECISION/PSURFEL RECONSTRUCTOR
+The decision module/pSurfel Reconstructor is shown in Fig. 11 (b), with one ResNet-1 Module and a stride-one sparse
+convolution module that changes the output to the desired dimension. For decision module, there is an additional Gumbel-
+Softmax. Note that we use stride-one instead of stride-three convolutions to avoid the information leakage mentioned in Sec.
+3.5.
+pSurfel parameters.
+A pSurfel is defined by its mean µ ∈R3, variance σ ∈R3, quaternion q ∈R4 and shape coefficient
+β ∈R3. The rotation matrix is derived by q = [w, x, y, z]:
+R(q) =
+
+
+w2 + x2 −y2 −z2
+2(xy −wz)
+2(xz + wy)
+2(xy + wz)
+w2 −x2 + y2 −z2
+2(yz −wx)
+2(xz −wy)
+2(yz + wx)
+w2 −x2 −y2 + z2
+
+.
+(9)
+The covariance matrix is derived by the rotation matrix R(q) and variance σ:
+Σ = R diag(σ2
+0, σ2
+1, σ2
+2) R⊤,
+ε = Σ−1 = R diag
+ σ−2
+0 , σ−2
+1 , σ−2
+2
+
+R⊤.
+(10)
+A.4. Comparison with Other 3D Representation
+It is worth clarifying how SurfelSoup differs from recent 3D representation techniques such as Gaussian splatting, neural
+implicit fields, signed distance functions, and surfels. These methods aim to build continuous or differentiable scene
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+ResNet-3
+ResNet-3
+ResNet-3
+Conv(32,2,2)
+ResNet-3
+ResNet-3
+ResNet-3
+Deconv(32,2,2)
+P-ResNet-3
+P-ResNet-3
+P-ResNet-3
+Prune
+Clasification
+AE/AD
+ResNet-1
+ResNet-1
+ResNet-1
+ResNet-1
+ResNet-1
+ResNet-1
+Conv(2/11,1,1)
+Gumbel-softmax
+(a) Encoder
+(b) Decision/G-Surfel Reconstructor
+(c) P-SOPA
+Figure 11. The architecture for (a) Encoder, (b) Decision Module/pSurfel Reconstructor and (c) P-SOPA. ResNet-x denotes the Sparse
+ResNet structure (Wang et al., 2024) constructed by stride-x convolutions. Conv(C,K,S) denotes convolution with channel size C, kernel
+size K and stride S. The dashed-line box indicates that Gumbel-Softmax is only for decision module. AE/AD denotes the arithmetic
+encoder and arithmetic decoder.
+representations from multi-view supervision and per-scene optimization. These methods often targets at the quality of
+novel-view rendering, and often have huge amount of parameters (>20MB) because no rate constraint is applied. In
+contrast, our setting focuses on point cloud geometry compression, where the goal is to encode the input 3D point cloud
+into a compact bitstream (<0.05MB) under standardized rate–distortion constraints, while ensuring the quality of the 3D
+reconstructed point cloud. For concreteness, we provide a qualitative comparison with 3D Gaussian Splatting in Tab. 3,
+while the same mismatch in assumptions and objectives applies broadly to other 3D representation families.
+Table 3. Comparison between SurfelSoup and 3D Gaussian Splatting (3DGS).
+Property
+SurfelSoup
+3DGS
+Representation primitives
+Probabilistic pSurfels
+3D Gaussians
+Structure
+Hierarchical pSurfelTree
+unstructured set of Gaussians
+Training paradigm
+Dataset-level learning
+Per-scene optimization
+Objective
+Rate–distortion optimization
+Photometric rendering loss
+Representation target
+Geometry only
+Geometry + color + opacity
+Compressibility
+Built-in entropy coding
+External compression required
+Granularity control
+Learned adaptive decision
+Hand-crafted prune/densify
+Scene generalization
+Yes
+Scene-specific optimization
+Primary use-case
+Point cloud geometry compression
+3D reconstruction for rendering
+Speed
+Feed-forward inference
+Per-scene optimization
+B. Appendix for Experiments
+B.1. Surfel Rendering.
+In Fig. 12, we compare rendered images by three methods: OpenGL point cloud rendering for SurfelSoup reconstructed
+points, Our bounded 2D surfel based rendering for surfelSoup directly, and OpenGL point cloud rendering for Unicorn.
+OpenGL Rendering.
+In OpenGL (Zhou et al., 2018) rendering, each point is splatted on to the screen using a fixed n × n
+pixel patch, where n is manually set. To ensure fairness, we determine n by selecting the minimum number that eliminates
+visible gaps in the rendered images from the ground-truth uncompressed point cloud. This chosen point size is then applied
+to both pSurfel (PC) and Unicorn.
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+Original
+G-Surfel, bpp 0.069
+G-Surfel (PC)
+Unicorn, bpp 0.081
+Original
+G-Surfel, bpp 0.105
+G-Surfel (PC)
+Unicorn, bpp 0.144
+Original
+G-Surfel, bpp 0.061
+G-Surfel (PC)
+Unicorn, bpp 0.069
+Original
+G-Surfel, bpp 0.112
+G-Surfel (PC)
+Unicorn, bpp 0.149
+Original
+G-Surfel, bpp 0.081
+G-Surfel (PC)
+Unicorn, bpp 0.086
+Figure 12. Comparison between rendered images from the decoded point clouds using different methods. Column pSurfel denotes
+visualization of decoded surfels by SurfelSoup. Column pSurfel (PC) denotes visualization of decoded points by SurfelSoup using
+OpenGL. Unicorn indicates the rendered images of decoded points by Unicorn using OpenGL. The color of a decoded point is obtained
+by interpolating on the colors of the original point cloud. Row 1, 2 and 3 are three samples from RWTT (Maggiordomo et al., 2020).
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+0.05
+0.10
+0.15
+0.20
+Overall bits per point (bpp)
+0.00
+0.02
+0.04
+0.06
+0.08
+0.10
+0.12
+Bits per point (bpp)
+Vishnu — Bit composition
+Octree bits
+Latent bits
+0.10
+0.20
+0.30
+Overall bits per point (bpp)
+0.00
+0.05
+0.10
+0.15
+0.20
+0.25
+Megalith Tomb — Bit composition
+Octree bits
+Latent bits
+Figure 13. Bit rate composition (octree bits and latent bits).
+Surfel Rendering
+In addition to rendering the decoded point clouds by SurfelSoup using OpenGL, we can also render the
+decoded surfels directly. For each cube decoded to a pSurfel, we identify the direction with the minimal variance and use
+it as the normal direction of the surfel plane. We define the two axes of the surfel by a rotation aligning the global z-axis
+with the normal. We construct an n × n texture map on this tangent plane, where n varies with the octree level, so that it
+covers the largest possible surfel bounded by the cube. All decoded points within the cube and its neighbors are projected to
+this plane, which ensures consistency of texture samples across neighboring cubes. For each pixel in the texture map, we
+query the k-nearest projected points and assign the pixel a color equal to the inverse-distance-weighted average of these k
+neighbors. We use k = 3, n = 7 for l = 1, n = 15 for l = 2.
+For rendering, we perform rasterization from the given camera view. We first sort all potential surfels for a pixel by their
+distances to the camera center. Then, along each camera ray, we compute the intersection point between the ray and the
+surfel surface. If this point lies inside the surfel’s bounding box, we convert this point into the tangent plane coordinate and
+query the corresponding texture map using bilinear interpolation to shade the pixel from the texture patch. Otherwise, we
+proceed to the next surfel until a valid hit is found. This design enables efficient CUDA-based rasterization, follows the
+logic of textured 2D Gaussians(Chao et al., 2025), but leverages a bounded surfel representations(Hu et al., 2025).
+Rendering Result
+We can observe that at similar geometry rates, both pSurfel and pSurfel (PC) significantly outperform
+Unicorn, which suffer from visible gaps in some areas. Compared with the pSurfel renders using OpenGL, surfel rendering
+provides slightly more smooth color and geometry distribution (the readers may need to further zoom in).
+B.2. Test Results on ScanNet
+To validate our model’s generalization ability to scene point clouds, we further provide comparison on ScanNet dataset
+without finetuning. We test on the first four sequences, and the result is shown in Fig. 15. Our model, trained on human
+data, shows great generalization on scene point clouds, and still outperforms other baselines.
+B.3. Bits Composition
+We visualize the bit rate composition (bpp for octree compression and bpp for latent compression) in Fig. 13. Compared
+with voxel baselines (Wang et al., 2021a; 2024; 2022) which codes the entire octree to some level, our method supports
+terminating a portion of the octree as surfels through the decision module. This gives the network great flexibility in
+adaptively selecting data structures (voxels or surfels) for geometric representation.
+We can further observe that: 1) the octree takes more bits as total rate goes higher, indicating that more nodes in coarser
+layers are represented as octree nodes for better quality surfels in higher layers; and 2) compared with Megalith Tomb, the
+percentage of octree bits of Vishnu is lower, indicating that Vishnu has more smooth surface structures. This aligns with the
+fact that Megalith Tomb is an irregular scene point cloud, while Vishnu is a dense object point cloud.
+B.4. Visual Comparison
+We compare the surface normal visualization between SurfelSoup and baselines in Fig. 14. Different from Fig. 6, the
+visualization in this section does not carry color information. Because human eyes are more sensitive to distortion when
+color is rendered, we put the pure geometry visualization in the Appendix.
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+SurfelSoup(0.112bpp)
+Unicorn(0.149bpp)
+SparsePCGC(0.140bpp)
+PCGCv2(0.158bpp)
+TriSoup(0.241bpp)
+Ground Truth
+SurfelSoup(0.082bpp)
+Unicorn(0.086bpp)
+SparsePCGC(0.097bpp)
+PCGCv2(0.098bpp)
+TriSoup(0.083bpp)
+Ground Truth
+SurfelSoup(0.124bpp)
+Unicorn(0.125bpp)
+PCGCv2(0.128bpp)
+TriSoup(0.106bpp)
+SparsePCGC(0.140bpp)
+Ground Truth
+Figure 14. Visual comparison between SurfelSoup and baselines. The point color is visualized by the normal vector.
+0.1
+0.2
+0.3
+0.4
+Bits per point (bpp)
+60.0
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+PSNR (dB)
+ScanNet-0000 — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+60.0
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+ScanNet-0001 — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.0
+0.1
+0.2
+0.3
+0.4
+Bits per point (bpp)
+57.5
+60.0
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+ScanNet-0002 — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+60
+65
+70
+75
+ScanNet-0003 — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+0.4
+Bits per point (bpp)
+60
+65
+70
+75
+80
+PSNR (dB)
+ScanNet-0000 — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0
+ScanNet-0001 — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.0
+0.1
+0.2
+0.3
+0.4
+Bits per point (bpp)
+62.5
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+ScanNet-0002 — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+60
+65
+70
+75
+80
+ScanNet-0003 — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+PCGCv2
+TriSoup
+Figure 15. RD-curves on ScanNet-0001→-0003.
+17
+935
+936
+937
+938
+939
+940
+941
+942
+943
+944
+945
+946
+947
+948
+949
+950
+951
+952
+953
+954
+955
+956
+957
+958
+959
+960
+961
+962
+963
+964
+965
+966
+967
+968
+969
+970
+971
+972
+973
+974
+975
+976
+977
+978
+979
+980
+981
+982
+983
+984
+985
+986
+987
+988
+989
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+B.5. Additional Results
+ThaiDancer:
+To further demonstrate the generalizability of our models trained on the 10-bit 8iVFB dataset, Fig. 16 shows
+the testing result on the 12-bit MPEG CTC test sequence ThaiDancer vox12.
+8iVFB:
+To provide test result on 8iVFB, we retrain our model on another MPEG CTC-specified training set: RWTT (Mag-
+giordomo et al., 2020). The result is provided in Fig. 17. We compare with Unicorn and SparsePCGC by retraining
+SparsePCGC also on RWTT. We do not compare with PCGCv2 because its performance is shown to be worse than
+Unicorn and SparsePCGC in previous studies. In addition, we compare with MPEG standard G-PCC-TriSoup. SurfelSoup
+consistently outperformed both SparsePCGC and G-PCC-TriSoup over the entire rate range.
+B.6. Training Details
+We train five models with λ = 0.1, 0.3, 0.8, 1.0, 1.5. The initial learning rate is set as 0.0001, which is multiplied by 0.85
+after every 15 epochs. Batch size is set as 1. The model for each rate point is trained for one day. The lowest λ (λ = 0.1)
+corresponds to bpp ≈0.05. To obtain even lower rate points, we adopt the super-resolution approach in SparsePCGC (Wang
+et al., 2022) and Unicorn (Wang et al., 2024). Specifically we downsample the original point cloud by a stride-2 pooling
+layer, and compress this down-sampled point cloud by our trained model with λ = 0.1. We then leverage a super-resolution
+network (Wang et al., 2024) to upsample the decoded point cloud to the original scale.
+Model Configuration.
+The number of down-sampling stages L is set to 3. The geometry coordinates up to layer L = 3
+are losslessly coded with G-PCC-Octree. Furthermore, given the excessive complexity and bit rate to code the occupancy
+information at l = 0, nodes at l = 1 are forced to be classified as surfel nodes.
+Due to the different convergence speeds of different octree layer’s pSurfel Reconstruction (finer layer converges faster
+because it has less points inside each surfel node), the network cannot be trained from scratch. Otherwise, the decision
+module converges to a local minimum, which classifies all the nodes in coarser layers as octree nodes. Instead, we first
+pre-train a model by setting ˜ql
+i = 0.5, ∀i, and λ = 2.0 to better support the convergence of different layers’ pSurfel
+Reconstruction. We then fine-tune this pre-trained model with different λ.
+For Gumbel Softmax, the temperature coefficient is set as τ = 1.5 × exp(−0.0002 × step).
+0.00
+0.10
+0.20
+0.30
+0.40
+Bits per point (bpp)
+76
+78
+80
+82
+84
+86
+88
+PSNR (dB)
+ThaiDancer_vox12 — D1 PSNR
+ours
+Unicorn  (BDR: -25.8%)
+SparsePCGC  (BDR: -56.7%)
+PCGCv2  (BDR: -82.0%)
+TriSoup  (BDR: -62.3%)
+0.00
+0.10
+0.20
+0.30
+0.40
+Bits per point (bpp)
+78
+80
+82
+84
+86
+88
+90
+92
+PSNR (dB)
+ThaiDancer_vox12 — D2 PSNR
+ours
+Unicorn  (BDR: -28.6%)
+SparsePCGC  (BDR: -27.6%)
+PCGCv2  (BDR: -69.6%)
+TriSoup  (BDR: -73.1%)
+Figure 16. Comparison of SurfelSoup and baselines on ThaiDancer vox12.
+B.7. Complexity
+Encoding/Decoding Time.
+As shown in Table 4, despite the introduction of pSurfel, our encoding/decoding time is almost
+identical compared with Unicorn and SparsePCGC, because the bulk of time is on SOPA’s auto-regressive coding of octree
+nodes.
+Model Size.
+Our model has larger size compared with Unicorn due to the introduction of pSurfel Reconstruction and
+decision module (Table 4). However, the overall model size is only moderately larger than that of Unicorn. In addition,
+the model size can be further reduced before real applications, with the pruning, distillation and quantization of model
+parameters (See Appendix B.8).
+To better contextualize the model size difference, we additionally evaluate Unicorn with an increased channel width,
+18
+990
+991
+992
+993
+994
+995
+996
+997
+998
+999
+1000
+1001
+1002
+1003
+1004
+1005
+1006
+1007
+1008
+1009
+1010
+1011
+1012
+1013
+1014
+1015
+1016
+1017
+1018
+1019
+1020
+1021
+1022
+1023
+1024
+1025
+1026
+1027
+1028
+1029
+1030
+1031
+1032
+1033
+1034
+1035
+1036
+1037
+1038
+1039
+1040
+1041
+1042
+1043
+1044
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+enlarging the channel number from 32 to 48. This modification increases Unicorn’s model size from 22 MB to 49 MB,
+making it comparable to or even larger than SurfelSoup. However, this larger Unicorn variant does not lead to improved
+rate–distortion performance. Instead, we observe a 0.6% BD-rate degradation compared to the original 32-channel Unicorn.
+This result indicates that simply scaling up the network capacity does not necessarily improve compression efficiency,
+and suggests that the performance gain of SurfelSoup mainly comes from the proposed surface-based representation and
+stochastic structure modeling, rather than from increased model size.
+Table 4. Comparison of Method Complexities.
+Metric
+Method
+SurfelSoup Unicorn Unicorn (large) SparsePCGC PCGCv2 TriSoup
+Enc Time (s)
+1.1
+1.1
+1.1
+1.2
+0.4
+2.8
+Dec Time (s)
+1.4
+1.2
+1.4
+1.3
+0.5
+1.1
+Model Size (MB)
+33
+22
+49
+12
+4
+0
+B.8. Limitations and Future Work
+Scene Point Clouds:
+SurfelSoup shows significant gain against voxel-based baselines on dense point clouds with smooth
+surface structures. However, the gain on structurally complex scenes is limited because most surface areas need to be divided
+to the finest layer l = 1. The potential improvements include:
+• Coordinate system: SCP (Luo et al., 2024) provides one way of preprocessing sparse LiDAR point clouds by
+transfering the xyz coordinate system into spherical coordinate system for more regularized point clouds. Experimental
+result shows around 30% gain by simply changing the coordinate system. SurfelSoup can follow the same pipeline to
+make the scene point cloud denser, and more surface-like.
+• Dataset SurfelSoup actually has the potential of dealing with sparse point clouds due to the flexibility of pSurfels. We
+have mentioned in Sec. 3.3 that when the variance σ ∈R3 is large in two axis and small in the other one, the produced
+pSurfel approximates a surface structure. On the other hand, when σ is small in all the three axis, the produced pSurfel
+can represent tiny and irregular geometry structures, which is widely observed in sparse point clouds. Under extreme
+case when σ →0, pSurfel represents a single point defined by the center µ, which can perfectly depict the isolated
+points in sparse point clouds. Therefore, SurfelSoup may be greatly improved on sparse point clouds, if it can be
+trained on sparse datasets like SemanticKITTI.
+Color:
+Although SurfelSoup can be easily integrated with any point cloud attribute (color) compression codec (by
+recoloring the geometry, as every codec does), SurfelSoup currently does not support attribute (color) compression. However,
+SurfelSoup can be extended to include attribute compression by 1) adding a texture map representation for each surfel
+as shown in Appendix B.1 and compressing the texture maps; or 2) adding a separate color attribute c ∈R3 to pSurfel
+parameters. Note that a flat surface may have a complex texture pattern. Therefore, we may need multiple single-colored
+surfels to represent a flat surface area.
+Model Size:
+SurfelSoup’s model size is 33MB. Although this is substantially smaller than widely-used vision backbones
+such as VGG-16 (∼528 MB) or ResNet-50 (∼98 MB), the model size can be further reduced by model pruning, model
+distillation and model quantization. Classic “Deep Compression” (Han et al., 2016) pipelines have shown up to 49×
+reduction without sacrificing accuracy on vision backbones. Recent learned image compression models demonstrate that
+distillation (Chen et al., 2025) can reduce parameters by about 40%.
+C. Technical Clarification Note
+Intuition behind pSurfel as Primitive:
+A pSurfel models a local point set as a small surface patch parameterized by a
+generalized Gaussian (GG) function. The key intuitions are as follows:
+• Surface (surfel) is a more compact representation than voxels/points, when a scene contains mainly smooth surfaces and
+the points in each local are can be approximated by a small planar surface. This leads to both structural compactness
+and reconstruction smoothness.
+19
+1045
+1046
+1047
+1048
+1049
+1050
+1051
+1052
+1053
+1054
+1055
+1056
+1057
+1058
+1059
+1060
+1061
+1062
+1063
+1064
+1065
+1066
+1067
+1068
+1069
+1070
+1071
+1072
+1073
+1074
+1075
+1076
+1077
+1078
+1079
+1080
+1081
+1082
+1083
+1084
+1085
+1086
+1087
+1088
+1089
+1090
+1091
+1092
+1093
+1094
+1095
+1096
+1097
+1098
+1099
+SurfelSoup: Learned Point Cloud Geometry Compression With a Probablistic SurfelTree Representation
+0.1
+0.2
+0.3
+Bits per point (bpp)
+64
+66
+68
+70
+72
+74
+76
+PSNR (dB)
+longdress — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+64
+66
+68
+70
+72
+74
+76
+78
+loot — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+64
+66
+68
+70
+72
+74
+76
+78
+soldier — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+62
+64
+66
+68
+70
+72
+74
+76
+redandblack — D1-PSNR
+ours
+Unicorn
+SparsePCGC
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0
+PSNR (dB)
+longdress — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0
+loot — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0
+82.5
+soldier — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+TriSoup
+0.1
+0.2
+0.3
+Bits per point (bpp)
+65.0
+67.5
+70.0
+72.5
+75.0
+77.5
+80.0
+redandblack — D2-PSNR
+ours
+Unicorn
+SparsePCGC
+TriSoup
+Figure 17. Comparison of SurfelSoup and baselines on 8iVFB. SurfelSoup and SparsePCGC are retrained on RWTT.
+• An explicit surfel representation (e.g. using a normal vector, a center position, and a radius in the tangent plane) is
+hard to optimize. Naively using the point-to-plane distance (D2) can be ambiguous as it restricts nothing about surfel
+size. Optimizing the surfel parameters using the point-to-plane distance is also complicated and difficult to converge.
+Therefore, we turn to a probabilistic representation, with a continuous 3D GG function depicting the occupancy
+probability of each voxel. This enables us to simply use the binary cross entropy to measure the distortion, facilitating
+gradient backpropagation during training. Recall that when one of the variances in the GG function is very small, it
+effectively represents a thin plane, and the variances in the other two axes describe the size of the plane. The “soft”
+nature of this representation allows more efficient gradient passing during training. It is also more flexible and can
+represent points clustered in a small area.
+D. Reproducibility Statement
+Code Release:
+We plan to publicly release the full implementation, including training and evaluation scripts and model
+weights upon acceptance of this paper.
+Datasets:
+Our experiments use publicly available datasets under MPEG Common Test Condition (CTC). Note that
+RWTT (Maggiordomo et al., 2020) is a mesh dataset, where we use the script from MPEG for point cloud sampling and
+quantization.
+Compute Resource:
+The training is done on single NVIDIA A100 GPU for one day, identical to the training time of
+baselines. The peak memory consumption during training is 23 GB.
+20
