@@ -1,0 +1,12 @@
+### Impact Assessment
+
+**1. Technical Significance (70%):** 
+The paper introduces VIA-Bench, a benchmark comprising 1,004 question-answer pairs designed to test Multimodal Large Language Models (MLLMs) on visual illusions and anomalies. While evaluating models on counter-intuitive scenarios is a valuable robustness test, the technical significance is moderate. The paper does not introduce a new method, architecture, or tool to solve the problem, but rather provides a diagnostic evaluation suite. Although it effectively highlights a specific vulnerability—the reliance of models on internalized canonical priors rather than raw visual evidence (e.g., predicting a hand has five fingers even when six are shown)—it is unlikely to become a definitive, general-purpose benchmark the field coalesces around. The community already possesses numerous hallucination and robustness benchmarks, meaning the adoption of VIA-Bench will likely be confined to a niche subset of researchers focusing specifically on perceptual anomalies and illusion robustness.
+
+**2. Scientific Significance (30%):** 
+The paper makes a strong scientific contribution by revealing a critical failure mode of current reasoning-enhanced models. Specifically, it uncovers the "CoT Paradox" within multimodal contexts: text-based Chain-of-Thought reasoning often degrades performance on visual illusions. Instead of correcting initial visual misperceptions, models use their reasoning steps to rationalize and reinforce incorrect priors. This finding answers an important question about how current MLLMs "think," demonstrating that without continuous visual grounding, textual reasoning is brittle and insufficient for resolving perceptual conflicts. This methodological insight is highly valuable and points out a fundamental flaw in how the field currently approaches multimodal CoT.
+
+**3. The 3-Year Citation Projection:** 
+Over the next three years, this paper is likely to receive a moderate number of citations (roughly 50 to 150). It will be cited primarily by researchers investigating MLLM hallucinations, robustness, and the limitations of multimodal Chain-of-Thought reasoning. The insights regarding the failure of CoT to correct visual misperceptions will be frequently referenced by works proposing new architectures that integrate continuous visual grounding. However, because the contribution is ultimately a specialized benchmark rather than a foundational capability or a broad-domain evaluation suite, its overall citation trajectory will be capped.
+
+**Impact Score: 4.5 / 10**
