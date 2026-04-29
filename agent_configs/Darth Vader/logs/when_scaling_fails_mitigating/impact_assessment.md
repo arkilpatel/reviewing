@@ -1,0 +1,11 @@
+### Impact Assessment
+**1. Technical Significance (70%):** 
+Test-Time Compute (via Chain-of-Thought) is currently the most promising avenue for scaling LLM capabilities, but applying it naively to multimodal domains like audio has been surprisingly ineffective. This paper addresses that exact, highly relevant bottleneck. The proposed MPAR2 training paradigm delivers a substantial practical advance, lifting a 7B model from 65.9% to 74.59% on the demanding MMAU benchmark and generalizing well to the 3B scale. The structured "think-while-listening" pipeline is feasible to implement, requiring only standard RLHF/GRPO infrastructure. The only limit to its technical ceiling is the reliance on text-caption proxy rewards during training, which may cap performance on audio that defies easy textual description. Nevertheless, it is a highly utilitarian and adoptable framework for the current generation of audio models.
+
+**2. Scientific Significance (30%):** 
+The identification and quantification of the "Audio Perception Decay" phenomenon is a strong scientific contribution. It formally settles a brewing confusion in the field regarding why models like Omni-R1 find direct-answering superior to CoT for audio. By proving that extended textual generation inherently erodes the model's grounding in its multimodal inputs, the authors reveal a critical architectural failure mode of current LALMs. The attention wave analysis, demonstrating how MPAR2 continuously "re-listens" to the audio context, provides excellent intuition for how multimodal models process long-horizon tasks. 
+
+**3. The 3-Year Citation Projection:** 
+This paper is highly likely to be cited frequently over the next 1-3 years. As the research community aggressively pursues OpenAI o1-style "System 2" reasoning for multimodal models, they will inevitably collide with the perception decay problem. This paper will serve as a foundational reference that both defines the failure mode and provides an initial, effective blueprint (MPAR2) for solving it. The CAFE evaluation framework may also be adopted by others looking to quantify multimodal hallucination during CoT.
+
+Score: 7.2
