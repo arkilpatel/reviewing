@@ -1,0 +1,1892 @@
+000
+001
+002
+003
+004
+005
+006
+007
+008
+009
+010
+011
+012
+013
+014
+015
+016
+017
+018
+019
+020
+021
+022
+023
+024
+025
+026
+027
+028
+029
+030
+031
+032
+033
+034
+035
+036
+037
+038
+039
+040
+041
+042
+043
+044
+045
+046
+047
+048
+049
+050
+051
+052
+053
+054
+ActionCodec: What Makes for Good Action Tokenizers
+Anonymous Authors1
+Abstract
+Vision-Language-Action (VLA) models leverag-
+ing the native autoregressive paradigm of Vision-
+Language Models (VLMs) have demonstrated
+superior instruction-following and training effi-
+ciency. Central to this paradigm is action tok-
+enization, yet its design has primarily focused on
+reconstruction fidelity, failing to address its di-
+rect impact on VLA optimization. Consequently,
+the fundamental question ofwhat makes for good
+action tokenizersremains unanswered. In this pa-
+per, we bridge this gap by establishing design
+principles specifically from the perspective of
+VLA optimization. We identify a set of best prac-
+tices based on information-theoretic insights, in-
+cluding maximized temporal token overlap, min-
+imized vocabulary redundancy, enhanced multi-
+modal mutual information, and token indepen-
+dence. Guided by these principles, we intro-
+duceActionCodec, a high-performance action
+tokenizer that significantly enhances both training
+efficiency and VLA performance across diverse
+simulation and real-world benchmarks. Notably,
+on LIBERO, a SmolVLM2-2.2B fine-tuned with
+ActionCodec achieves a 95.5% success rate with-
+out any robotics pre-training. With advanced ar-
+chitectural enhancements, this reaches 97.4%, rep-
+resenting a new SOTA for VLA models without
+robotics pre-training. We believe our established
+design principles, alongside the released model,
+will provide a clear roadmap for the community
+to develop more effective action tokenizers.
+1. Introduction
+Vision-Language-Action (VLA) models, which fine-tune
+Vision-Language Models (VLMs) on large-scale robotic
+interaction datasets, have emerged as a cornerstone for
+general-purpose physical intelligence (???). While derived
+1Anonymous Institution, Anonymous City, Anonymous Region,
+Anonymous Country. Correspondence to: Anonymous Author
+<anon.email@domain.com>.
+Preliminary work. Under review by the International Conference
+on Machine Learning (ICML). Do not distribute.
+Figure 1.ActionCodecprovides a comprehensive analysis of the
+VQ action tokenizer design elements that directly impact VLA
+training and summarizes the best practices. When utilized for the
+autoregressive fine-tuning of SmolVLM2-2.2B without additional
+architectural designs, ActionCodec achieves performance on the
+LIBERO benchmark that far exceeds other action tokenizers, par-
+ticularly in terms of training efficiency.
+from VLMs, contemporary VLA architectures often diverge
+from the standard autoregressive paradigm by employing
+specialized action heads (??) or external diffusion-based
+experts (??). Recent evidence suggests that adhering to the
+native VLM generative framework, representing actions as
+discrete tokens, is crucial for preserving pre-trained general
+knowledge and fostering superior instruction-following ca-
+pabilities (?????). This trend is exemplified by state-of-the-
+art (SOTA) models like π0.5 (?), where discretized action
+tokens are central to the fine-tuning task. Consequently,
+the design of an effective action tokenization scheme has
+become a critical bottleneck in VLA research.
+Existing action tokenizers generally fall into three cate-
+gories: (1) Heuristic methods, which directly discretize sig-
+1
+055
+056
+057
+058
+059
+060
+061
+062
+063
+064
+065
+066
+067
+068
+069
+070
+071
+072
+073
+074
+075
+076
+077
+078
+079
+080
+081
+082
+083
+084
+085
+086
+087
+088
+089
+090
+091
+092
+093
+094
+095
+096
+097
+098
+099
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+ActionCodec: What Makes for Good Action Tokenizers
+nals into bins or raw strings (??); (2) Semi-data-driven meth-
+ods, which apply Byte-Pair Encoding (BPE) to frequency-
+domain signals (?); and (3) Data-driven methods, primarily
+based on Vector Quantization (VQ) to learn latent discrete
+representations (?). Although VQ-based approaches are the-
+oretically superior due to their minimal reliance on heuristic
+priors, they have historically lagged behind simpler schemes
+in downstream robotic tasks. We attribute this discrepancy
+to a fundamental research gap: existing literature evalu-
+ates VQ tokenizers through the lens of generative fidelity
+(e.g., reconstruction error), neglecting the complex training
+dynamics of the VLA backbone.
+In this paper, we address the foundational question:What
+makes for good action tokenizersfor VLA optimization?
+Moving beyond standard generative metrics, we analyze
+VLA performance through the prisms of information theory
+and representation learning. We identify four key desiderata
+for high-performance action tokens: (i) maximized temporal
+overlap between adjacent chunks, (ii) minimized vocabulary
+redundancy, (iii) enhanced mutual information between to-
+kens and multimodal contexts, and (iv) token independence.
+Guided by these principles, we introduceActionCodec, a
+robust action tokenizer that integrates the identified optimal
+design choices. Moreover, ActionCodec leverages Residual
+Vector Quantization (RVQ) (?) post-training to refine re-
+construction fidelity and incorporates embodiment-specific
+soft prompts to facilitate knowledge transfer across diverse
+robotic platforms. Our empirical results demonstrate that
+VLA models equipped with ActionCodec, without any ad-
+ditional architectural modifications, achieve unprecedented
+improvements in training efficiency, success rates, and anti-
+overfitting resilience across diverse benchmarks. Action-
+Codec achieves SOTA performance in both simulated and
+real-world environments, providing a systematic roadmap
+for the future of VQ-based action representation. Our con-
+tributions are summarized as follows:
+• We establish a rigorous analytical framework to delin-
+eate the optimal design desiderata for action tokeniza-
+tion from the perspective of VLA training dynamics,
+providing a systematic roadmap for future research in
+general-purpose physical intelligence.
+• We introduceActionCodec, a high-performance action
+tokenizer that instantiates these validated principles.
+ActionCodec substantially enhances the VLA training
+efficiency and mitigates overfitting.
+• We provide a comprehensive suite of ActionCodec-
+powered VLA models across diverse architectural
+paradigms. Our approach achieves SOTA performance
+on multiple simulated and real-world benchmarks,
+demonstrating remarkable efficacy even when initial-
+ized from general VLMs without robotics pre-training.
+2. Related Works
+Vision-Language-Action Models.VLAs leverage the rep-
+resentational power of pre-trained VLMs to map visual
+observations and language instructions into robotic control
+signals (??). Current VLA architectures primarily diverge in
+their action representation, falling into either continuous or
+discrete prediction frameworks. Continuous frameworks of-
+ten necessitate structural deviations from the VLM’s native
+architecture, such as regressing actions from hidden states
+or integrating auxiliary generative experts such as diffu-
+sion or flow-matching models (????). Conversely, discrete
+frameworks discretize action spaces into tokens, enabling
+the model to utilize the standard autoregressive objective
+(??). While discrete methods may introduce higher sequen-
+tial latency, they demonstrate a superior ability to preserve
+the VLM’s world knowledge and instruction-following ca-
+pabilities (?). Notably, even SOTA heterogeneous models
+have recently integrated discrete action tokenization as an
+auxiliary task to improve performance (??). This conver-
+gence underscores the pivotal role of action tokenization in
+the VLA design space.
+Action Tokenization Schemes.The methodology for ac-
+tion discretization varies significantly. Early approaches
+employed uniform quantization (binning) of temporal sig-
+nals (??), which often suffers from low training efficiency
+and ignores the inherent structure of the action space. Sub-
+sequent refinements, such as parallel decoding (?) or string-
+based token representation (?), attempt to mitigate these
+issues but do not address the fundamental inefficiencies of
+heuristic binning. Other studies have attempted to represent
+actions as strings for direct VLM prediction (?); however,
+this approach offers no significant performance benefits
+while greatly increasing the token budget and extending
+latency to several seconds, limiting real-world applicabil-
+ity. FAST (?) introduces Byte-Pair Encoding (BPE) on
+frequency-domain signals; however, its reliance on fixed
+geometric priors limits its capacity for cross-embodiment
+knowledge transfer. Data-driven schemes, particularly those
+based on Vector Quantization (VQ) (????), offer a more
+flexible alternative by learning discrete latent representa-
+tions. Despite their potential, existing VQ-based tokenizers
+are often treated as black-box components. There remains
+a critical lack of understanding regarding the specific VQ
+properties that facilitate or obstruct VLA optimization, a
+gap that this work aims to bridge.
+3. Preliminaries
+We consider learning a policy πθ(A|V, L) that maps vi-
+sual observations V and language instructions L to an ac-
+tion sequence A∈R T×D . To leverage the autoregres-
+sive paradigm of pre-trained VLMs, A is discretized into
+a proxy sequence of tokens C= [c 1, c2, . . . , cn], where
+2
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+162
+163
+164
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 2.Neural Network Architecture of ActionCodec.We employ a Perceiver-like transformer architecture due to its inherent
+flexibility, which facilitates the modeling of diverse token relations and supports the encoding of variable-length action sequences.
+each ck belongs to a vocabulary K={1, . . . , S} . This
+process is facilitated by a Vector Quantized (VQ) (?) tok-
+enizer comprising an encoder F and a decoder G. Specif-
+ically, F maps A to a continuous latent representation
+Z= [z 1, . . . , zn]∈R n×d, which is then quantized against
+a learnable codebook B={e j}S
+j=1 ⊂R d such that
+ck = arg min j∈{1,...,S} ∥zk −e j∥2. The reconstructed ac-
+tion sequence is denoted as ˆA=G(e c1 , . . . , ecn ). The
+tokenizer is optimized via
+LV Q =∥A− ˆA∥2
+2 +∥sg[Z]−e c∥2
+2 +∥Z−sg[e c]∥2
+2,(1)
+where sg[·]is the stop-gradient operator.
+4. A VLA Perspective on Action Tokenization
+We formalize action tokenization as the construction of an
+optimal proxy target for VLA optimization. Since the tok-
+enizer dictates the target distribution, VLA training involves
+both model fitting and the implicit optimization of the super-
+vision signal. The expected negative log-likelihood (NLL)
+loss is decomposed as:
+E[L NLL] =D KL (Pdata ∥P θ) +H(C|V, L),(2)
+where the conditional entropy H(C|V, L) quantifies the
+supervisory ambiguity. High entropy induces conflicting
+gradients, forcing the model to fit stochastic noise rather
+than underlying physics. Minimizing this term is equivalent
+to denoising the training objective. By leveraging the defini-
+tion of mutual information, we decompose this entropy into
+three components:
+H(C|V, L) =H(C|A)| {z }
+Artifact Entropy
++I(C;A)| {z }
+Capacity
+−I(C;V, L)| {z }
+Perceptual Alignment
+(3)
+Guided by Equation (3), we identify three critical metrics for
+an optimal tokenizer:(a) Overlap Rate.Artifact entropy
+H(C|A) measures the topological instability of the tok-
+enizer (Section D), where minor action perturbations (e.g.,
+sensor noise) trigger stochastic jumps in token space. Sta-
+bility is achieved by ensuring C remains consistent across
+temporally overlapping action chunks (At and At+1). We
+quantify this via theoverlap ratebetween adjacent chunks;
+a higher rate implies a more stable supervision signal.(b)
+Capacity and Vocabulary Size.The term I(C;A) rep-
+resents the information bottleneck. Assuming suppressed
+artifact entropy, this term is upper-bounded by the marginal
+entropy: I(C;A)≈H(C)≤ Pn
+k=1 H(c k)≤nlog 2 S.
+This bound is jointly determined by the token budget n and
+vocabulary size S. While sufficient capacity is required for
+reconstruction, excessive capacity encodes high-frequency
+noise. Reducing n and S simplifies the learning manifold for
+the VLA.(c) Perceptual Alignment vs. Residual Gram-
+mar.To understand the information sources utilized for
+prediction, we decouple the total information gain for a
+tokenc k using the chain rule:
+I(c k;V, L, c <k)| {z }
+Total Information
+=I(c k;V, L)| {z }
+Visual-Language Alignment
++I(c k;c <k|V, L)| {z }
+Residual Grammar
+(4)
+Visual-Language alignmentmeasures the direct correlation
+between tokens and multimodal inputs, whileresidual gram-
+marquantifies the dependency on autoregressive history
+given the context. An effective tokenizer must balance these
+pathways to prevent the model from over-relying on tempo-
+ral priors at the expense of environmental grounding.
+Guided by these principles, the subsequent sections show the
+derivation of best practices for VQ-based tokenization, start-
+ing from a vanilla VQ-V AE architecture (Figure 2) trained
+on the LIBERO (?) dataset as an empirical foundation. To
+validate the efficacy of these design choices, we move be-
+yond intrinsic reconstruction metrics and directly fine-tune
+SmolVLM2-256M (?) as a VLA model. The quality of the
+tokenization scheme is thus measured by the resulting pol-
+icy’s performance on the LIBERO-Goal benchmark (refer
+to Section A.2 for comprehensive experimental settings).
+4.1. Impacts of Overlap Rate
+To investigate the effects of the overlap rate (OR) on VLA
+optimization, we synthesize three tokenizer variants with
+controlled OR levels (26%, 40%, and 70%) by augmenting
+the VQ-V AE objective with a contrastive loss to modulate
+the topological stability of the token space. The perfor-
+mance on LIBERO-Goal, summarized in Figure 3 (Block 1
+& 3), demonstrates that a higher OR consistently enhances
+training efficiency, asymptotic convergence, and robustness.
+Notably, the 70% OR tokenizer enables the VLA to achieve
+a 33.4% success rate within a mere 500 training steps, sig-
+3
+165
+166
+167
+168
+169
+170
+171
+172
+173
+174
+175
+176
+177
+178
+179
+180
+181
+182
+183
+184
+185
+186
+187
+188
+189
+190
+191
+192
+193
+194
+195
+196
+197
+198
+199
+200
+201
+202
+203
+204
+205
+206
+207
+208
+209
+210
+211
+212
+213
+214
+215
+216
+217
+218
+219
+ActionCodec: What Makes for Good Action Tokenizers
+nificantly outperforming the naive VQ-V AE (8.2%) and the
+FAST baseline ( 2%). To further explore the underlying
+mechanism, we select data from four distinct tasks and visu-
+alize the last hidden states of the VLA’s action[BOS] token
+using t-SNE, as shown in the first three rows of Figure 4.
+The visualizations reveal that a high OR enables the VLA
+model to form distinct clusters in the latent space signifi-
+cantly earlier in the training process. Furthermore, these
+cluster distributions remain more stable over training time,
+effectively mitigating the risk of overfitting. Consequently,
+we establish maximizing the overlap rate as a primary design
+requirement for the action tokenizer.
+4.2. Impacts of Vocabulary Size and Token Budget
+As established in our theoretical framework, the capac-
+ity of the action proxy is governed by the entropy upper
+bound nlog 2 S. We evaluate various configurations span-
+ning n∈ {8,16,32,64} and S∈ {512,1024,2048,4096}
+under a fixed OR to isolate their influence on optimization.
+Our results in Figure 3 (Blocks 1 & 2) indicate that these
+parameters primarily dictate the VLA’s resilience to overfit-
+ting, with the token budget n exerting a substantially more
+dominant influence than the vocabulary sizeS. A compari-
+son across Rows 1, 4, and 5 of Figure 4 further elucidates
+this phenomenon: while an increased token budget n pre-
+serves sufficient task discriminability, it leads to excessive
+dispersion in the latent clusters. This expanded representa-
+tional capacity makes the model increasingly susceptible to
+capturing high-frequency noise and spurious correlations.
+Conversely, aggressive reduction ofn and S eventually in-
+curs a non-trivial reconstruction penalty, as the tokenizer
+fails to capture the necessary physical nuances of the action
+space. By navigating this trade-off between representational
+fidelity and the complexity of the learning manifold, we
+identify S= 2048 and n= 16 as a practical design choice.
+4.3. Impacts of Vision-Language Alignment and
+Residual Grammar
+Within the autoregressive framework, we decompose the to-
+ken’s perceptual alignment into two competing information
+pathways:visual-language alignment I(c k;V, L) , repre-
+senting environmental grounding, andresidual grammar
+I(c k;c <k|V, L), quantifying autoregressive dependencies.
+To optimize the former, we integrate Time Contrastive
+Learning (TCL) and CLIP-based objectives into the tok-
+enizer training:
+LTCL =−
+X
+i
+log eS(Z i,Zi+)
+eS(Z i,Zi+) +e S(Z i,Zi−) ,(5)
+LCLIP =−
+X
+i
+X
+j
+log 1
+1 +e (lij (−tZ iyj +b)) ,(6)
+where Z i, Zi+, and Z i− denote the continuous embeddings
+of the action chunk, its adjacent neighbor, and other action
+chunks within the batch, respectively; S denotes cosine sim-
+ilarity; yj is the language embedding, lij is an indicator
+variable that equals 1 if i and j are paired and -1 otherwise,
+and t and b are learnable parameters. Additionally, an L1
+penalty regulation loss is applied to ensure training stability.
+Our findings are two-fold:Differential effects of TCL and
+CLIP.Visualizations of the VLA attention maps for the ac-
+tion [BOS] token (Figure 5, left) reveal that CLIP-trained
+tokenizers cause the VLA to focus on instruction-relevant
+objects, whereas TCL-trained tokenizers bias attention to-
+ward dataset-specific demonstration patterns (e.g., specific
+grasp points). (b)Improved Overlap Rate and Structure.
+Both objectives enhance the overlap rate and stability. As
+shown in the t-SNE visualizations of all 40 LIBERO tasks
+(Figure 5, right), TCL and CLIP training produces more
+structured latent clusters than simple action-perturbation
+methods. Thus, we adopt TCL and CLIP as the primary
+practices for improving OR.
+RegardingResidual Grammar, we investigate whether
+inter-token dependencies aid VLA optimization by com-
+paring Perceiver-based (independent tokens), Self-Attention
+(SA), and Causal-SA architectures. Surprisingly, while inter-
+nal attention improves residual grammar, it degrades VLA
+performance by fostering an over-reliance on historical to-
+kens. Perturbation experiments (Figure 6) demonstrate that
+independent tokens are significantly more robust; in contrast,
+Causal and SA structures are sensitive to early-sequence er-
+rors, leading to temporal hallucinations where the model
+ignores real-time visual feedback. As shown in Figure 3
+(Block 4), independent tokenization yields the highest task
+success rates and faster early-stage convergence. Thus, we
+advocate for a decoupled, independent tokenization scheme
+to maximize the VLA’s sensitivity to multimodal inputs.
+5. ActionCodec
+Synthesizing the aforementioned design principles, we in-
+troduceActionCodec, a high-performance action tokenizer
+that instantiates the identified optimal design desiderata
+while incorporating the following practical enhancements.
+Embodiment-specific Soft-prompts.To support multi-
+embodiment data integration and cross-platform knowledge
+transfer, we augment the Perceiver-based backbone with
+learnablesoft-promptembeddings. While global network
+parameters are shared to distill universal robotic priors, dis-
+tinct soft-prompts are assigned to each embodiment to cap-
+ture unique mechanical constraints and control frequencies.
+This hierarchical representational strategy enables Action-
+Codec to undergo effective large-scale pre-training across
+diverse datasets, including LIBERO (?), BridgeData (?),
+and DROID (?). With a unified action latent space, we facil-
+4
+220
+221
+222
+223
+224
+225
+226
+227
+228
+229
+230
+231
+232
+233
+234
+235
+236
+237
+238
+239
+240
+241
+242
+243
+244
+245
+246
+247
+248
+249
+250
+251
+252
+253
+254
+255
+256
+257
+258
+259
+260
+261
+262
+263
+264
+265
+266
+267
+268
+269
+270
+271
+272
+273
+274
+ActionCodec: What Makes for Good Action Tokenizers
+itate zero-shot action re-targeting and accelerate fine-tuning
+on novel robotic platforms. (See soft-prompts details in
+Section B.)
+RVQ Post-training.While our analysis indicates that
+VLA optimization is robust to reconstruction errors below a
+critical threshold, maximizing fidelity is essential for fine-
+grained manipulation. However, standard Residual Vector
+Quantization (RVQ) (?) typically achieves high fidelity at
+the expense of topological stability, often reducing the over-
+lap rate (OR) to below 20%, which severely destabilizes
+VLA training. To resolve this trade-off, we propose anRVQ
+post-trainingphase. We first pre-train a single-layer VQ
+model to maximize OR and perceptual alignment, estab-
+lishing a stable supervision manifold. Subsequently, we
+freeze the encoder and the primary codebook, introducing
+additional residual codebooks to minimize the remaining
+reconstruction error. It allows ActionCodec to refine ac-
+tion precision orthogonally to the token’s topological sta-
+bility, ensuring zero degradation to VLA training efficiency
+while facilitating compatibility with advanced prediction
+paradigms such as Block-wise Autoregression (BAR) (?).
+(See RVQ details in Section C.)
+6. Experiments
+We evaluateActionCodecacross diverse benchmarks to
+address four key research questions: (i) Does ActionCodec
+outperform existing heuristic and data-driven tokenizers in
+efficiency and success rate? (ii) Can ActionCodec effec-
+tively integrate with and enhance prevailing VLA architec-
+tural paradigms? (iii) How does ActionCodec perform on
+real-world robotic platforms? (iv) What is the impact of
+specific design choices on the performance of ActionCodec?
+6.1. Comparison with Mainstream Action Tokenizers
+To facilitate a rigorous comparison, we integrate all eval-
+uated action tokenizers into a unified VLA framework by
+expanding the vocabulary of the SmolVLM2-2.2B (?) back-
+bone and performing full-parameter autoregressive fine-
+tuning on the LIBERO benchmark. The detailed prompts
+utilized for these experiments are provided in Section A.3.
+We compare ActionCodec against several mainstream to-
+kenization schemes: (i)Binning, which discretizes each
+action dimension into 1,000 uniform bins (?); (ii)String,
+representing actions as raw text strings (?); (iii)VQ-based
+baselinesfrom MiniVLA (?) and VQ-VLA (?); and (iv) the
+FAST tokenizer(?). Figure 1 illustrates the learning curves
+for each method, highlighting the exceptional training ef-
+ficiency of our approach. ActionCodec not only achieves
+the highest peak success rate but also significantly outpaces
+all baselines in convergence speed; specifically, it attains an
+89.5% success rate within a mere 5K training steps, while
+the runner-up (FAST) only achieves 38.6% at the same inter-
+Table 1.LIBERO Benchmark Results.Comparison of success
+rates (%).Pt.denotes pre-trained VLA backbones.Avg.
+Rankindicates relative performance across tasks. Best results in
+each block arebolded, second best are underlined .
+Model Pt. Goal Spatial Object Long Avg. Avg.
+Rank
+Octo-Base (?) Y 84.6 78.9 85.7 51.1 75.1 10.5
+SpatialVLA (?) Y 78.6 88.2 89.9 55.5 78.1 9.5
+GR00T-N1 (?) Y 93.0 94.4 97.6 90.6 93.9 6.6
+UniVLA (?) Y 95.6 96.5 96.8 92.0 95.2 5.4
+VQ-VLA (?) Y 75.2 - - 60.0 - -
+OpenVLA (?) Y 79.2 84.7 88.4 53.7 76.5 10.0
+OpenVLA-OFT (?) Y 97.997.6 98.4 94.5 97.1 2.5
+π0(?) Y 95.8 96.8 98.8 85.2 94.2 4.5
+π0.5(?) Y98.0 98.898.2 92.4 96.8 2.5
+π0FAST (?) Y 88.6 96.4 96.8 60.2 85.5 7.4
+ActionCodec (2.2B) N 95.4 96.2 99.6 90.6 95.5 5.1
+ActionCodec-BAR N 97.6 97.299.8 94.8 97.4 2.0
+Diffusion Policy (?) N 68.3 78.3 92.5 50.5 72.4 13.8
+MiniVLA (?) N - - - 77.0 - -
+OpenVLA-OFT (?) N 91.7 94.3 95.2 86.5 91.9 7.8
+SmolVLA 2.2B (?) N 91.0 93.0 94.0 77.0 88.8 10.2
+π0FAST (?) N 89.0 87.0 63.0 48.0 71.8 14.2
+π0.5(?) N 94.6 96.6 97.2 85.8 93.3 6.4
+VLA-0 (?) N 96.2 97.0 97.8 87.6 94.7 3.8
+SmolVLM2-2.2B (256M/500M) + Tokenizers
+Binning N 27.4 64.2 71.0 50.8 53.4 15.5
+String N 30.8 69.6 71.6 26.4 49.6 15.5
+VQVLA’s N 60.5 56.0 69.8 51.4 60.5 15.2
+MiniVLA’s N 82.1 82.8 90.2 75.2 82.6 12.8
+FAST N 89.2 90.2 97.2 85.8 90.6 9.4
+ActionCodec (256M) N 91.2 94.2 97.0 86.8 92.3 7.5
+ActionCodec (500M) N 96.4 91.6 96.0 85.8 92.5 7.8
+ActionCodec (2.2B) N 95.4 96.2 99.6 90.6 95.5 3.8
+Variants
+ActionCodec-PD N 97.0 95.2 98.4 91.6 95.6 3.0
+ActionCodec-KI N 95.0 93.6 97.6 90.8 94.3 5.5
+ActionCodec-BAR N97.6 97.2 99.8 94.8 97.4 1.0
+val. Furthermore, ActionCodec exhibits remarkable scaling
+performance as detailed in theSmolVLM2 (256M/500M)
+section of Table 1: the performance of the 256M and 500M
+variants equipped with ActionCodec exceeds that of other
+tokenizers even when they utilize the much larger 2.2B
+VLM backbone. This suggests that the quality of the action
+representation is as critical as the scale of the VLM itself.
+Finally, we evaluate throughput and latency in Table 3. Our
+analysis reveals that naive tokenization schemes, such as
+Binning and String, suffer from prohibitive latency and
+low throughput, rendering them impractical for real-time
+robotic deployment. In contrast, ActionCodec achieves the
+highest action throughput while maintaining superior task
+performance, establishing it as a robust and efficient solution
+for high-frequency closed-loop control.
+6.2. Integration with Prevailing VLA Paradigms
+To demonstrate the architectural versatility of ActionCodec,
+we evaluate its compatibility with three prevailing VLA
+paradigms: (i)Parallel Decoding (PD), which employs
+an action expert with bidirectional attention to predict to-
+kens in a single forward pass (?); (ii)Knowledge Isolation
+5
+275
+276
+277
+278
+279
+280
+281
+282
+283
+284
+285
+286
+287
+288
+289
+290
+291
+292
+293
+294
+295
+296
+297
+298
+299
+300
+301
+302
+303
+304
+305
+306
+307
+308
+309
+310
+311
+312
+313
+314
+315
+316
+317
+318
+319
+320
+321
+322
+323
+324
+325
+326
+327
+328
+329
+ActionCodec: What Makes for Good Action Tokenizers
+Table 2.SimplerWidowX Benchmark Results.Comparison of
+success rates (%).Pt.denotes pre-trained VLA backbones.Avg.
+Rankindicates relative performance across tasks. Best results in
+each block arebolded, second best are underlined .
+Model Pt. Spoon Carrot Block Eggplant Avg. Avg.
+Rank
+Octo-Base (?) Y 12.5 8.3 0.0 43.1 16.0 7.3
+SpatialVLA (?) Y 16.7 25.0 29.2100.042.7 4.0
+π0(?) Y 66.7 58.358.388.3 67.9 2.0
+OpenVLA-OFT (?) Y 12.5 4.2 8.3 0.0 6.3 8.1
+UniVLA (?) Y 54.266.750.0 4.2 43.8 3.5
+OpenVLA (?) Y 32.0 30.0 18.0 38.0 29.5 4.8
+VQ-VLA (?) Y 12.5 8.0 6.0 0.0 6.6 8.1
+π0FAST (?) Y 29.1 21.9 10.8 66.6 32.1 5.3
+ActionCodec-BAR N71.764.2 55.0 70.0 65.2 2.0
+MiniVLA (?) N 68.0 44.0 70.014.0 49.0 1.8
+ActionCodec-BAR N71.7 64.255.0 70.0 65.2 1.3
+Table 3.Action Tokenization Performance and Efficiency.Com-
+parison of token budget, overlap rate (OR), and inference metrics.
+All models are evaluated on the LIBERO benchmark.
+Tokenizer TokenBudget OR HorizonLatency(s) Throughput(action/s)SR (%)
+Binning (?) 140.0±0.0 39% 20 4.9 4.1 3.5Binning (?) 56.0±0.0 38% 8 2.6 3.1 53.4String (?) 779.2±17.3 28% 20 33.8 0.6 20.4String (?) 311.8±7.8 34% 8 12.7 0.6 49.6VQVLA’s (?) 4.0±0.0 45% 5 0.7 7.7 60.5MiniVLA’s (?) 7.0±0.0 40% 8 0.7 11.1 82.6FAST (?) 24.3±9.1 19% 20 1.5 13.1 90.6ActionCodec 16.0±0.0 72% 20 0.9 22.0 95.5
+(KI), which decouples the VLM’s semantic knowledge from
+action generation by using a diffusion action expert condi-
+tioned on the VLM’s KV cache (?); and (iii)Block-wise
+Autoregression (BAR), a hierarchical approach that utilizes
+RVQ to predict codebook levels in parallel while maintain-
+ing inter-block autoregressive dependencies (?). We provide
+more details in Section A.4.
+As detailed in Table 1, ActionCodec seamlessly integrates
+with all three paradigms, consistently yielding performance
+gains. On the LIBERO benchmark, both PD and BAR
+variants outperform the native autoregressive baseline. No-
+tably,ActionCodec-BARestablishes a new SOTA for VLA
+models without robotics pre-training, achieving a 97.4%
+average success rate. Remarkably, this performance even
+surpasses several competitive models that benefit from ex-
+tensive robotics pre-training. While the KI paradigm ex-
+hibits a slightly lower success rate compared to the au-
+toregressive baseline, it outperforms its FAST-based coun-
+terpart—exemplified by π0.5 without robotics pre-training.
+To further assess the zero-shot generalization and out-of-
+distribution (OOD) robustness of our approach, we conduct
+evaluations on the Simpler-WidowX benchmark (Table 2).
+ActionCodec-BAR maintains its dominant performance in
+this challenging setting, achieving the highest rank among
+all models trained with or without prior robotic data.
+6.3. Real-world Evaluation
+SO100-ShapeSorter.We design the SO100-ShapeSorter 1
+task (Figure 7) to verify the efficacy of ActionCodec on
+low-cost robotic platforms and the advantages of large-scale
+data integration. This task requires the SO100 arm to insert
+blocks of specific numerical shapes into matching slots. Due
+to the high-precision requirements and the narrow tolerance
+of the slots, successful insertion is challenging even for hu-
+man operators, who frequently require multiple corrective
+attempts. Consequently, our task-specific dataset is naturally
+rich inrecovery behaviors, capturing the stochastic process
+of failure and re-adjustment. We evaluate the impact of
+co-training (CT) by comparing ActionCodec trained with
+22.9K episodes of SO100 community data (?) against a task-
+only variant (ActionCodec w/o CT), alongside baselines
+π0 and π0 FAST. As shown in Figure 8, while all models
+demonstrate reasonable picking capabilities, a significant
+performance gap emerges during thePlacephase. Specif-
+ically, although the task-specific demonstrations contain
+recovery trajectories, thew/o CTvariant fails to effectively
+model or reproduce these strategies during inference, of-
+ten stalling after an initial misalignment. In contrast, the
+co-trained ActionCodec successfully leverages the broader
+representational prior to navigate the complex distribution
+of corrective actions. This enables the VLA to exhibit robust
+closed-loop recovery, such as re-aligning the block after a
+failed insertion attempt (Figure 9). These results underscore
+that while recovery data may be present in small-scale task
+datasets, the diverse priors provided by ActionCodec’s co-
+training are essential for the VLA to successfully internalize
+and execute these long-tail behaviors.
+xArm-PickVeg.We design the xArm-PickVeg2 task (Fig-
+ure 7) to verify the efficacy of ActionCodec on high-
+performance robotic platforms and investigate the bene-
+fits of representational pre-training. We assess the transfer
+learning capabilities of ActionCodec under two distinct ini-
+tialization regimes: (i)w/ PT, which utilizes weights pre-
+trained on large-scale heterogeneous datasets, and (ii)w/o
+PT, which employs standard randomized initialization. As
+illustrated by the optimization curves in Figure 13, the pre-
+trained variant (w/ PT) demonstrates superior optimization
+dynamics, exhibiting both lower L2 reconstruction error
+and a higher OR compared to thew/o PTcounterpart. This
+enhanced representational stability directly translates to im-
+proved downstream control performance. As summarized
+in Table 4, ActionCodec (w/ PT) achieves an 82.5% success
+rate (SR). These results underscore ActionCodec’s capacity
+for efficient fine-tuning and robust knowledge transfer when
+adapting to novel, high-performance robotic platforms.
+1SO100 Dataset: https://huggingface.co/
+datasets/ZibinDong/actioncodec-so100-part1
+2xArm Dataset: https://huggingface.co/
+datasets/ZibinDong/xarm_pickplace
+6
+330
+331
+332
+333
+334
+335
+336
+337
+338
+339
+340
+341
+342
+343
+344
+345
+346
+347
+348
+349
+350
+351
+352
+353
+354
+355
+356
+357
+358
+359
+360
+361
+362
+363
+364
+365
+366
+367
+368
+369
+370
+371
+372
+373
+374
+375
+376
+377
+378
+379
+380
+381
+382
+383
+384
+ActionCodec: What Makes for Good Action Tokenizers
+Table 4.Success Rates on xArm-PickVeg.ActionCodec w/ PT
+leverages heterogeneous priors to achieve the highest success rate.
+Model ActionCodec
+w/ PT
+ActionCodec
+w/o PT π0 π0 FAST
+SR (%) 82.574.1 75.0 72.5
+Table 5.Ablations.We ablate various design choices for on
+LIBERO. We report the average success rate over the four suites.
+ID Co-Training Soft Prompt RVQ Post Training VLM LIBERO Avg.
+0 × × ✓
+ 92.0(-3.5%)
+1 ✓ × ✓
+ 92.7(-2.8%)
+2 ✓ ✓ ×
+ 95.2(-0.3%)
+3 ✓ ✓ ✓
+ 95.5
+4 ✓ ✓ ✓
+ 95.1
+5 ✓ ✓ ✓
+ 94.6
+6.4. Ablation Study
+We conduct a series of ablation studies on the LIBERO
+benchmark. Table 5 summarizes these results.
+Soft Prompts.Embodiment-specific soft prompts are vital
+for cross-platform knowledge transfer. Their omission (ID
+1) reduces the benefits of diverse pre-training to marginal lev-
+els. Qualitative tests, transferring Bridge-WidowX actions
+to LIBERO-Franka, DROID-Franka, and xArm (Figure 10),
+reveal congruent motion trends, confirming that soft prompts
+enable a unified, platform-agnostic latent space.RVQ Post-
+training.While RVQ post-training further reduces recon-
+struction error, its impact on success rates is modest (ID 2 vs.
+3). This validates that topological stability (OR) outweighs
+absolute fidelity during VLA optimization.VLM Compati-
+bility.ActionCodec is backbone-agnostic, maintaining ro-
+bust and comparable performance (IDs 3–5) across diverse
+architectures:
+ SmolVLM2-2.2B (?),
+ Qwen2.5VL-
+3B (?), and
+ InternVL3.5-2B (?).
+7. Conclusion
+In this paper, we systematically analyze the critical design
+elements of action tokenization, leading to the introduction
+ofActionCodec. By integrating identified best practices,
+ActionCodec achieves superior performance across diverse
+simulation and real-world benchmarks. While currently pre-
+trained on a limited selection of large-scale robotic datasets,
+future work will focus on scaling these representations to
+achieve robust in-the-wild transfer across a broader vari-
+ety of robotic embodiments. Furthermore, investigating
+optimized neural architectures and refined vision-language
+alignment schemes remains a promising direction. We be-
+lieve both ActionCodec and the design principles estab-
+lished in this work provide a clear roadmap for the commu-
+nity to develop next-generation physical intelligence.
+Impact Statement
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal
+consequences of our work, none which we feel must be
+specifically highlighted here.
+7
+385
+386
+387
+388
+389
+390
+391
+392
+393
+394
+395
+396
+397
+398
+399
+400
+401
+402
+403
+404
+405
+406
+407
+408
+409
+410
+411
+412
+413
+414
+415
+416
+417
+418
+419
+420
+421
+422
+423
+424
+425
+426
+427
+428
+429
+430
+431
+432
+433
+434
+435
+436
+437
+438
+439
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 3.LIBERO-Goal results for different design choices.
+All VLA models are based on the SmolVLM2-256M backbone,
+following vocabulary expansion and full-parameter fine-tuning
+without additional architectural modifications. The suffix nota-
+tions are defined as follows: acc (L1 reconstruction error), tok
+(token budget), cb (vocabulary size), OR (overlap rate), SA (self-
+attention), Causal (SA w/ causal mask), and SP (training w/
+soft-prompt).
+Figure 4.t-SNE visualization of the VLA’s last hidden states for
+the action[BOS]token on four LIBERO-Goal tasks.
+Figure 5.(Left) VLA attention maps for CLIP vs. TCL-trained
+tokenizers. (Right) t-SNE visualization of the structured latent
+space across 40 LIBERO tasks.
+Figure 6.Error propagation under token perturbation.We
+measure the L1 reconstruction error when noise is injected at
+specific positions during generating. VQ-Independent maintains
+a stable, lower error compared to SA and Causal architectures.
+This justifies our design choice to decouple tokens and minimize
+residual grammar for more robust VLA optimization.
+8
+440
+441
+442
+443
+444
+445
+446
+447
+448
+449
+450
+451
+452
+453
+454
+455
+456
+457
+458
+459
+460
+461
+462
+463
+464
+465
+466
+467
+468
+469
+470
+471
+472
+473
+474
+475
+476
+477
+478
+479
+480
+481
+482
+483
+484
+485
+486
+487
+488
+489
+490
+491
+492
+493
+494
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 7.All evaluation benchmarks.We evaluate VLA models
+on 4 LIBERO task suites, Bridge-WidowX tasks on SimplerEnv,
+SO100-ShapeSorter tasks, and xArm tabletop manipulation tasks.
+9
+495
+496
+497
+498
+499
+500
+501
+502
+503
+504
+505
+506
+507
+508
+509
+510
+511
+512
+513
+514
+515
+516
+517
+518
+519
+520
+521
+522
+523
+524
+525
+526
+527
+528
+529
+530
+531
+532
+533
+534
+535
+536
+537
+538
+539
+540
+541
+542
+543
+544
+545
+546
+547
+548
+549
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 8.Success Rates on SO100-ShapeSorter.We report success counts forPick(solid) andPlace(hatched) across 10 tasks. While
+recovery actions are inherently present in our task demonstrations due to the difficulty of slot insertion, onlyActionCodec(with CT)
+successfully learns to reproduce these corrective strategies. The performance gap is most prominent in thePlacephase, where co-training
+facilitates the execution of complex, long-tail recovery behaviors that task-only models fail to capture.
+Figure 9.Comparison of recovery behaviors on SO100.After
+an initial missed shot, ActionCodec with co-training successfully
+executes a corrective adjustment to complete the insertion, whereas
+the variant without co-training stalls after a failure.
+10
+550
+551
+552
+553
+554
+555
+556
+557
+558
+559
+560
+561
+562
+563
+564
+565
+566
+567
+568
+569
+570
+571
+572
+573
+574
+575
+576
+577
+578
+579
+580
+581
+582
+583
+584
+585
+586
+587
+588
+589
+590
+591
+592
+593
+594
+595
+596
+597
+598
+599
+600
+601
+602
+603
+604
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 10.Cross-embodiment action transfer.To evaluate the transferability of ActionCodec, a 1-second WidowX action sequence
+sampled from BridgeData is encoded into action tokens and subsequently decoded into 1-second trajectories for LIBERO-Franka,
+DROID-Franka, and xArm. After deploying these sequences twice (totaling 2 seconds) and recording the resulting motions, all three
+robotic platforms exhibit highly consistent action patterns. This demonstrates that ActionCodec effectively captures hardware-agnostic
+action semantics.
+A. Experimental Setup and Benchmark Details
+A.1. Benchmarks
+LIBERO.The LIBERO benchmark (?) comprises four task suites:Goal,Spatial,Object, andLong. Each suite contains 10
+tasks, with 50 demonstrations provided per task. These suites evaluate the model’s performance in instruction following,
+spatial reasoning, object recognition, and long-horizon task completion. Following the official π0 fine-tuning recipe, we
+fine-tune the VLM under a multi-task joint training setting for 30k steps. Evaluation is conducted over 50 trials per task
+using the predefined initial states.
+SimplerEnv-WidowX.To assess zero-shot generalization, we utilize SimplerEnv-WidowX (?), which provides four out-of-
+domain desktop manipulation tasks not included in the BridgeData set. We fine-tune the VLM on BridgeData for 4 epochs
+before direct evaluation. To mitigate the high variance typical of zero-shot evaluation, we increase the number of trials per
+task from the default 24 to 120.
+SO100-ShapeSorter.We conduct real-world evaluations using the SO100 platform in a shape-sorting task. The robot
+must identify a specific numerical block (1–10) based on language instructions and insert it into the matching slot. The
+SO100 robotic arms were assembled according to the official LeRobot (?) documentation3. Two 480x640 RGB cameras are
+utilized, mounted on the gripper and directly overhead, respectively. Data collection is performed at a frequency of 30Hz.
+Both proprioception and action spaces are defined by absolute joint angles. This benchmark tests both semantic recognition
+and fine-grained manipulation. We collect 50 demonstrations per block and fine-tune the VLM for 30k steps. During testing,
+block positions are randomized, and 20 trials are performed for each number. We record task progress at two checkpoints:
+50% for a successful grasp and 100% for successful insertion. In Section 6.3, we distinguish between two variants:w/
+co-trainingrefers to ActionCodec trained on LIBERO (?), BridgeData (?), DROID (?), the SO100-community dataset (?),
+and the SO100-ShapeSorter dataset;w/o co-trainingexcludes the SO100-community dataset. Detailed repo ids for the
+community dataset are available in?Appendix A.1.
+xArm-PickVeg.This benchmark involves a multi-task vegetable picking task where the xArm robot identifies and grasps
+a target vegetable model based on language instructions. The system uses only RGB images from a third-person Intel
+Realsense L515 camera, with data acquisition at 30Hz. Proprioception utilizes the end-effector (EEF) pose, while the action
+space is defined by delta EEF poses. We collect 30 demonstrations for each vegetable and fine-tune the VLM for 30k steps.
+During testing, object positions are randomized, and 20 trials are performed for each item. We utilize a binary success
+metric, as most failures are concentrated in the recognition or initial grasping phase. In Section 6.3, we denote the variant
+initialized with weights pre-trained on LIBERO, BridgeData, and DROID asw/ PT, whilew/o PTrefers to a randomly
+initialized model trained solely on the xArm dataset.
+3Official SO100 document:https://huggingface.co/docs/lerobot/so100
+11
+605
+606
+607
+608
+609
+610
+611
+612
+613
+614
+615
+616
+617
+618
+619
+620
+621
+622
+623
+624
+625
+626
+627
+628
+629
+630
+631
+632
+633
+634
+635
+636
+637
+638
+639
+640
+641
+642
+643
+644
+645
+646
+647
+648
+649
+650
+651
+652
+653
+654
+655
+656
+657
+658
+659
+ActionCodec: What Makes for Good Action Tokenizers
+A.2. Details of Validation Experiments
+To rigorously evaluate the design desiderata discussed in Section 4, we provide comprehensive details of our validation
+experimental setup.
+VQ Tokenizer Architecture.As illustrated in Figure 2, we implement the encoder and decoder using a Perceiver-based
+Transformer architecture (?). This design provides the structural flexibility required for our ablation studies: utilizing only
+cross-attention layers ensures that action tokens remain mutually independent, while the integration of an auxiliary self-
+attention layer (with either bidirectional or causal masking) allows for the precise modulation of inter-token dependencies.
+This modularity is essential for our analysis ofresidual grammarin Section 4.3. While alternative backbones such as CNNs
+(???) or standard Transformers (?) are prevalent in literature, we treat the specific choice of backbone as an orthogonal
+engineering consideration and focus primarily on the inherent properties of the tokenization scheme.
+VLA Implementation.To isolate the influence of the action tokenizer, we adhere to a native VLM-style autoregressive
+paradigm. We perform full-parameter fine-tuning on SmolVLM2-256M (?) to predict action tokens without any robotics-
+specific architectural modifications (Table 6). This model scale is chosen for its competitive multimodal performance
+and computational tractability for extensive ablation studies. Specifically, we expand the VLM vocabulary withS special
+tokens: <|action 0|>. . .<|action (S-1)|>. During inference, any invalid token sequence produced by the VLM
+is substituted with a zero-action chunk to maintain control stability. For clarity, the[BOS] notation used in our analysis
+refers to the context token immediately preceding the action sequence in the prompt (see Section A.3), serving as a functional
+beginning-of-sentence marker for the action expert.
+Notably, theFAST tokenizer(?) requires a specialized sequence-length alignment heuristic. Since FAST necessitates
+that the BPE-decoded sequence matches a specific length for valid reconstruction—a constraint frequently violated by
+autoregressive VLMs—we implement a soft-decoding approach involving zero-padding or truncation to the required length.
+Without this adjustment, models trained with FAST exhibit negligible success rates throughout the majority of the training
+phase.
+Datasets and Benchmarking.While the action tokenizers are pre-trained on the comprehensive LIBERO dataset (?), VLA
+fine-tuning and evaluation are conducted specifically on the LIBERO-Goal task suite. We monitor performance at 500, 1k,
+5k, 10k, and 20k training steps. We observe that performance below 500 steps is indistinguishable across variants, while
+models typically reach asymptotic convergence by 20k steps, providing a complete window into the training dynamics of
+each tokenization scheme.
+A.2.1. IMPACTS OFOVERLAPRATE
+In Section 4.1, we synthesize three tokenizer variants with controlled OR levels: 26%, 40%, and 70%. This controlled
+variance is achieved by augmenting the standard VQ-V AE objective function with an auxiliary InfoNCE contrastive loss (?):
+LVQ +λ· L InfoNCE, where λ is a weighting hyperparameter that modulates the degree of latent clustering. For a given action
+sample A, we define a positive pair as the latent representation Z=F(A) and the representation of its perturbed version
+Z + =F(A+η), η∼ N(0, σ 2). All other action latents within the same mini-batch serve as negative samples Z −. By
+minimizing the distance between Z and Z + in the latent manifold, we implicitly increase the probability that semantically
+similar actions are mapped to the same discrete code, thereby elevating the OR. Our experiments reveal that a higher overlap
+rate significantly enhances the training efficiency of the VLA model. However, in subsequent validation experiments, we
+observe that incorporating aTime Contrastive Loss(TCL) or aCLIP-stylecross-modal loss (Section 4.3) naturally yields
+higher OR values while providing superior training stability compared to the explicit InfoNCE-based action perturbation.
+Consequently, our final architecture favors these more stable contrastive objectives.
+A.2.2. IMPACTS OFRESIDUALGRAMMAR
+In Section 4.3, we analyze the impact ofresidual grammaron VLA training by comparing three tokenizer variants:
+Independent,SA(Self-Attention), andCausal. These variants are implemented by modifying the internal architecture
+of the Perceiver network. As shown in Figure 11, the network structure using only cross-attention layers (Independent)
+ensures that each learnable embedding interacts exclusively with the input sequence. Consequently, the resulting output
+tokens lack explicit inter-dependencies. By introducing an additional self-attention layer, the learnable embeddings interact
+with each other; specifically, we can employ either bidirectional attention (SA) or causal masking (Causal) to alter the
+dependency relationships between the output tokens.
+12
+660
+661
+662
+663
+664
+665
+666
+667
+668
+669
+670
+671
+672
+673
+674
+675
+676
+677
+678
+679
+680
+681
+682
+683
+684
+685
+686
+687
+688
+689
+690
+691
+692
+693
+694
+695
+696
+697
+698
+699
+700
+701
+702
+703
+704
+705
+706
+707
+708
+709
+710
+711
+712
+713
+714
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 11.Comparison of Perceiver architectures for Residual Grammar:(left) Independent (cross-attention only), (middle) SA
+(with self-attention), and (right) Causal (with causal self-attention)
+Table 6.VLA Training Hyperparameters.Detailed configurations for the validation experiments on LIBERO-Goal.
+Hyperparameters Values
+GPUs 8×NVIDIA RTX 3090 (24 GB VRAM)
+Learning Rate2×10 −4 peak (1k steps linear warmup, 30k steps cosine decay to2×10 −5)
+Global Batch Size 128 (16 per GPU)
+Training Steps 30k (LIBERO-Goal only)
+Input Modalities 1×Third-person camera, 1×Wrist camera (concatenated)
+Input Image Size 224×448
+Use Proprioception True
+Image Augmentation Random crop (87.5%), Brightness/Contrast/Saturation (0.2), Hue (0.05)
+To specifically analyze the impact of these variants on VLA training, we design aperturbation experimentin Figure 6.
+The procedure is as follows: we sample vision-language-action tuples (V, L, A) from the dataset and provide V and L
+as inputs to the trained VLA model to predict action tokens. During the autoregressive prediction process, we randomly
+shuffle the token at a specific position. The model then continues to predict the remaining tokens. Finally, the predicted
+action tokens are decoded into a predicted action ˆA, and we calculate the L1 distance between the ground truth A and the
+predicted ˆA. Our results show that theIndependentvariant maintains a stable and lower error compared to theSAand
+Causalarchitectures. This indicates that VLA performance using SA (full dependency) or Causal (temporal dependency) is
+inferior to the Independent variant. This is attributed to the fact that when predicting action tokens, the VLA model becomes
+overly reliant on preceding tokens, leading to reduced robustness.
+A.3. Details of Tokenizer Comparison Experiments
+Action Tokenizers.We evaluate the ActionCodec models introduced in Section 5, pre-trained on LIBERO (?), BridgeData
+(?), and DROID (?). Training utilized a batch size of 8,192 and a learning rate of 2×10 −4 for 100k steps. Following the
+FAST tokenizer (?), our tokenizer encodes a fixed temporal window of 1 second. To accommodate heterogeneous control
+frequencies across datasets, we employ timestamp-based positional encodings to ensure temporal awareness.
+For baselines, we implement several mainstream schemes: (i)Binning(?): Each action dimension is discretized into 1,000
+bins. Due to its linear token growth relative to action dimensionality and horizon, a 1-second window (20Hz) would result
+in a prohibitive 140 tokens per chunk for 7-DoF LIBERO tasks; thus, we constrain its horizon to T= 8 . (ii)String(?):
+Actions are represented as raw Python list strings. Since this representation incurs an even higher token budget depending
+on precision and BPE encoding, we similarly adopt T= 8 to maintain training tractability. (iii)VQ-baselines: We utilize
+official implementations45 and checkpoints for MiniVLA (?) and VQ-VLA (?) after aligning data statistics. (iv)FAST: We
+utilize the officially released universal version (?)6.
+VLA Implementation.Consistent with our validation experiments, all tokenizers are evaluated using a SmolVLM2-2.2B
+backbone without structural modifications. We perform full-parameter autoregressive fine-tuning; specific hyperparameters
+are summarized in Table 7.
+Datasets and Benchmarking.A single VLA model is trained across all LIBERO task suites simultaneously. We observe
+empirical convergence for all variants by 30k steps, beyond which performance gains become negligible. Following the
+official LIBERO evaluation protocol, we report results based on 50 trials per task, initialized from the 50 predefined
+4MiniVLA:https://github.com/Stanford-ILIAD/openvla-mini
+5VQVLA:https://github.com/xiaoxiao0406/VQ-VLA
+6FAST:https://huggingface.co/physical-intelligence/fast
+13
+715
+716
+717
+718
+719
+720
+721
+722
+723
+724
+725
+726
+727
+728
+729
+730
+731
+732
+733
+734
+735
+736
+737
+738
+739
+740
+741
+742
+743
+744
+745
+746
+747
+748
+749
+750
+751
+752
+753
+754
+755
+756
+757
+758
+759
+760
+761
+762
+763
+764
+765
+766
+767
+768
+769
+ActionCodec: What Makes for Good Action Tokenizers
+Table 7.VLA Training Hyperparameters.Detailed configurations for the tokenizer comparison experiments on LIBERO.
+Hyperparameters Values
+GPUs 4×NVIDIA A100 (80 GB VRAM)
+Learning Rate10 −4 peak (1k steps linear warmup, 30k steps cosine decay to10 −5)
+Global Batch Size 128 (32 per GPU)
+Training Steps 30k (applied to all four LIBERO task suites)
+Input Modalities 1×Third-person camera, 1×Wrist camera (concatenated)
+Input Image Size 224×448
+Use Proprioception True
+Image Augmentation Random crop (87.5%), Brightness/Contrast/Saturation (0.2), Hue (0.05)
+Table 8.VLA Training Hyperparameters.Detailed configurations for the Simpler-WidowX experiments.
+Hyperparameters Values
+GPUs 8×NVIDIA H100 (94 GB VRAM)
+Learning Rate2×10 −5
+Global Batch Size 128 (16 per GPU)
+Training Epochs 4
+Input Modalities 1×Third-person camera
+Input Image Size 224×224
+Use Proprioception True
+Image Augmentation Random crop (90%), Brightness/Contrast/Saturation (0.2), Hue (0.05)
+Table 9.VLA Training Hyperparameters.Detailed configurations for the real-world experiments on SO100 and xArm.
+Hyperparameters Values
+GPUs 4×NVIDIA A100 (80 GB VRAM)
+Learning Rate5×10 −5 peak (1k steps linear warmup, 30k steps cosine decay to5×10 −6)
+Global Batch Size 64 (16 per GPU)
+Training Steps 30k
+Input ModalitiesSO100:1×Third-person camera, 1×Wrist camera (concatenated),xArm:1×Third-person camera
+Input Image Size 224×448 for SO100, 224×224 for xArm
+Use Proprioception True
+Image Augmentation Brightness/Contrast/Saturation (0.2), Hue (0.05)
+14
+770
+771
+772
+773
+774
+775
+776
+777
+778
+779
+780
+781
+782
+783
+784
+785
+786
+787
+788
+789
+790
+791
+792
+793
+794
+795
+796
+797
+798
+799
+800
+801
+802
+803
+804
+805
+806
+807
+808
+809
+810
+811
+812
+813
+814
+815
+816
+817
+818
+819
+820
+821
+822
+823
+824
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 12.VLA paradigm architectures.
+environment states.
+Prompt for VLM
+[
+{
+"role": "system",
+"content": "Analyze the input image and predict robot actions."
+},
+{
+"role": "user",
+"content": [
+{"type": "image"},
+{
+"type": "text",
+"text": " **State**: {state}, **Task**: {task}."
+}
+]
+},
+{
+"role": "assistant",
+"content": [
+{
+"type": "text",
+"text": "{’action’: <|action_n|> ... <|action_m|>}"
+}
+]
+}
+]
+A.4. Details of Paradigm Adaptation Experiments
+In Section 6.2, we explore the compatibility ofActionCodecwith three prevailing VLA paradigms. Since each paradigm
+requires a specialized attention mask design for action tokens, it often prevents the VLM backbone from utilizingFlash
+Attention(?), which significantly degrades training efficiency. To circumvent this, following the architecture of π0 (?),
+we introduce a 300M-parameteraction expertto handle action token prediction. This expert receives the KV cache
+from the VLM backbone and employs independent feed-forward layers. We provide the architecture in Figure 12 and the
+implementation details are as follows:
+Parallel Decoding (PD).The action expert utilizes bidirectional attention and takes n learnable [BOS] tokens as input
+to directly predict the logits of n action tokens in a single forward pass. During inference, we perform a simpleargmax
+on the logits to obtain tokens. We observed thatargmaxyields performance comparable to probabilistic sampling, likely
+because ActionCodec produces highly condensed semantic information with naturally low perplexity. Furthermore, PD
+achieves success rates similar to naive autoregression. This can be attributed to the token independence of ActionCodec,
+which makes modeling inter-token correlations via autoregression redundant. Compared to naive autoregression (requiring
+nforward passes), PD significantly reduces inference latency by requiring only one.
+Knowledge Isolation (KI).The action expert is implemented as a bidirectional attention network within aflow-matching
+15
+825
+826
+827
+828
+829
+830
+831
+832
+833
+834
+835
+836
+837
+838
+839
+840
+841
+842
+843
+844
+845
+846
+847
+848
+849
+850
+851
+852
+853
+854
+855
+856
+857
+858
+859
+860
+861
+862
+863
+864
+865
+866
+867
+868
+869
+870
+871
+872
+873
+874
+875
+876
+877
+878
+879
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 13.Learning curves of ActionCodec with and without pre-training.Compared to random initialization, initializing with
+pre-trained ActionCodec weights and fine-tuning on novel robotic data results in significantly lower L2 loss (higher reconstruction
+accuracy) and a higher Overlap Rate (OR). These results demonstrate that the pre-trained ActionCodec possesses a unified and semantically
+rich latent space, enabling rapid adaptation to new robotic action patterns.
+Figure 14.Illustration of the Soft-Prompt integration within the Perceiver architecture.Learnable embeddings represent embodiment
+IDs, while fourier embeddings provide temporal grounding for varying control frequencies.
+framework. It takes noisy actions, denoising timestamps, and the VLM’s KV cache as input to predict the velocity field.
+During training, both the VLM’s autoregressive loss and the expert’s flow-matching loss are optimized simultaneously,
+though the gradient flow from the expert to the VLM is severed. While the performance of this KI variant is slightly lower
+than the naive autoregressive baseline, it remains superior to KI training using the FAST tokenizer. This suggests that while
+ActionCodec is highly effective, the KI paradigm may be better suited for large-scale VLA pre-training, where the VLM can
+be enriched with broad robotic priors, rather than fine-tuning on specific benchmarks.
+Block-wise Autoregressive (BAR).The action expert utilizes a block-wise causal mask, where tokens within the same
+block are mutually visible, while blocks can only attend to preceding blocks. Each block corresponds to tokens from a
+single level of the RVQ codebooks. Due to the residual nature of RVQ, BAR with a single forward pass is equivalent to PD.
+Additional passes iteratively refine prediction accuracy; even if initial predictions are noisy, the error-damping property of
+the residual structure ensures stability. In our experiments, the BAR variant achieved the highest performance, establishing a
+newSOTAon the LIBERO benchmark for models without robotics-specific pre-training.
+B. Details of Soft-Prompt
+In Section 5, we employ asoft-promptmechanism to facilitate multi-embodiment data integration and cross-platform
+knowledge transfer. This approach is highly compatible with thePerceiverarchitecture, as the Perceiver fundamentally
+requires learnable embeddings to serve as the input for the query side of the Transformer-based network. Specifically, as
+shown in Figure 14, we have configured information for all embodiments included in the pre-training dataset, documenting
+their respective control frequencies, the action durations encoded by the tokenizer, and their unique indices. We assign
+a dedicated learnable embedding to each embodiment index. For the input components involving action timestamps,
+specifically the key/value inputs of the encoder and the query inputs of the decoder, we calculate the timestamp for each
+token based on the control frequency and action duration. These timestamps are then processed via fourier embedding to
+serve as positional encodings. This design ensures that our tokenizer can not only distinguish between different embodiments
+16
+880
+881
+882
+883
+884
+885
+886
+887
+888
+889
+890
+891
+892
+893
+894
+895
+896
+897
+898
+899
+900
+901
+902
+903
+904
+905
+906
+907
+908
+909
+910
+911
+912
+913
+914
+915
+916
+917
+918
+919
+920
+921
+922
+923
+924
+925
+926
+927
+928
+929
+930
+931
+932
+933
+934
+ActionCodec: What Makes for Good Action Tokenizers
+Figure 15.Procedure of RVQ post-training.
+but also maintain a consistent temporal perception of motion across various platforms.
+C. Details of RVQ Post-training
+As discussed in Section 5, we find that RVQ post-training is an effective method for reducing reconstruction error at no
+additional cost while maintaining a high Overlap Rate (OR) and vision-language alignment. In our experimental setup,
+as shown in Figure 15, we first train a VQ-based ActionCodec with n= 16 tokens. We then initialize an RVQ variant
+with n= 16 and a residual depth of L= 3 , inheriting the encoder and primary codebook weights from the VQ model and
+freezing them. Post-training is performed using only reconstruction loss and RVQ objectives. Since the encoder and the first
+codebook are frozen, the output tokens from the first codebook of the RVQ model remain identical to those produced by
+the original VQ version. By simply copying the post-trained RVQ decoder weights back to the VQ model, we enhance
+reconstruction fidelity without altering the action tokenization procedure. In our evaluations, ActionCodec-BAR utilizes the
+full RVQ tokenizer, whereas all other models employ the VQ-version tokenizer enhanced by the post-trained RVQ decoder.
+D. Artifact Entropy on Deterministic Tokenization
+To evaluate the topological stability of the discrete action space, we introduce the concept ofArtifact Entropyin Section 4.
+While the Vector Quantized (VQ) encoder F is mathematically deterministic, thereby implying H(C|A) = 0 for any fixed
+point A in the action manifold, this idealization fails to account for the stochastic nature of real-world robotic control.
+Consequently, we define Artifact Entropy under the assumption of local physical perturbations, formalizing the entropy of
+tokens induced by infinitesimal noise within the action space:
+H(C|A)≜E ϵ∼N(0,σ 2)[H(F(A+ϵ))],(7)
+where ϵ represents high-frequency sensor noise or control jitter. This metric quantifies the sensitivity of the quantization
+boundaries. A high Artifact Entropy suggests that negligible fluctuations in the input signal can cause the tokenizer to
+oscillate between disparate discrete codes. Such behavior introduces significant aleatoric uncertainty into the Vision-
+Language-Action (VLA) model’s supervision signal. In practice, high values ofH(C|A) manifest as inconsistencies within
+the training dataset. To render this phenomenon trackable, we utilize theOverlap Rate(OR) of adjacent action sequences as
+an empirical proxy. Given that temporal neighbors in a trajectory typically correspond to nearly identical visual observations
+and identical language instructions, a high Artifact Entropy results in divergent token sequences for similar contexts.
+17
